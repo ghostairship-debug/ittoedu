@@ -104,10 +104,12 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const latestDisplay = useRef(displayProject); latestDisplay.current = displayProject
   const allTargets = freeSurfaceTargets(displayProject, props.surface.id)
   const globalIds = new Set([...props.project.global.underlay, ...props.project.global.overlay])
-  const controllerTargets = allTargets.filter(target => isGlobalTeacherController(props.project, target.instanceId))
+  const allControllerTargets = allTargets.filter(target => isGlobalTeacherController(props.project, target.instanceId))
+  const controllerTargets = allControllerTargets
     .filter(target => isComponentVisibleAtSurface(props.project.instances[target.instanceId], props.surface.id))
-  const scopeTargets = props.view.scope === 'global' ? allTargets.filter(target => globalIds.has(target.ancestors[0] ?? target.instanceId)) : [...worldTargets, ...controllerTargets]
-  const visibleTargets = scopeTargets.filter(target => props.project.instances[target.instanceId]?.visible !== false && target.ancestors.every(id => props.project.instances[id]?.visible !== false)
+  const scopeTargets = props.view.scope === 'global' ? allTargets.filter(target => globalIds.has(target.ancestors[0] ?? target.instanceId)) : [...worldTargets, ...allControllerTargets]
+  const visibleTargets = scopeTargets.filter(target => isComponentVisibleAtSurface(props.project.instances[target.instanceId], props.surface.id)
+    && target.ancestors.every(id => isComponentVisibleAtSurface(props.project.instances[id], props.surface.id))
     && (props.view.scope === 'global' || isGlobalTeacherController(props.project, target.instanceId) || spatialSemanticVisible(spatial, target.instanceId, props.view.camera.zoom)))
   const locked = (target: FreeObjectTarget) => props.project.instances[target.instanceId]?.locked || target.ancestors.some(id => props.project.instances[id]?.locked)
   const gestureDisplay = useRef<{ original: CourseProjectV10; display: CourseProjectV10; viewport: TeacherControllerHudGeometry; offset: { x: number; y: number } } | null>(null)
@@ -173,7 +175,9 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     const edit = (event: Event) => { const id = (event as CustomEvent<{ itemId: string }>).detail?.itemId; if (id && latest.current.canvasMode === 'edit') { const instance = latest.current.project.instances[id]; const kind = instance && componentDefinitionPresentation(latest.current.project.definitions[instance.definitionId]).builtinKey; if (kind === 'guoling.text' || kind === 'guoling.formula') latest.current.contentEditor?.begin(id); latest.current.onEditContent?.(id); event.preventDefault() } }
     element.addEventListener(OBJECT_EDIT_EVENT, edit); return () => element.removeEventListener(OBJECT_EDIT_EVENT, edit)
   }, [])
-  const hidden = scopeTargets.filter(target => props.project.instances[target.instanceId]?.visible === false)
+  const hidden = scopeTargets.filter(target => props.project.instances[target.instanceId]?.visible === false
+    && isComponentVisibleAtSurface({ ...props.project.instances[target.instanceId], visible: true }, props.surface.id)
+    && target.ancestors.every(id => isComponentVisibleAtSurface(props.project.instances[id], props.surface.id)))
   const hiddenMenu = () => hiddenObjectCommands(hidden.map(target => ({ id: target.instanceId, name: props.project.instances[target.instanceId]?.name ?? target.instanceId })), ids => props.onShowInstances?.(ids))
   const graphAt = (point: GeometryPoint): SpatialGraphSelection => {
     if (props.view.scope === 'global') return null

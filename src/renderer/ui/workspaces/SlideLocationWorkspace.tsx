@@ -378,7 +378,11 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     (viewportBounds?.left ?? 0) + stageTransform.stageRect.x * viewportScale, (viewportBounds?.top ?? 0) + stageTransform.stageRect.y * viewportScale]
   const background = resolveComponentBackground(project, surface)
   const backgroundUrl = background.assetId ? snapshot.assetUrls[background.assetId] : undefined
-  const hidden = freeSurfaceTargets(project, surface.id).filter(target => project.instances[target.instanceId]?.visible === false)
+  const recoverableProject = { ...project, instances: Object.fromEntries(Object.entries(project.instances).map(([id, instance]) =>
+    [id, instance.visible === false ? { ...instance, visible: true } : instance])) }
+  const hidden = listSlideWorkspaceHitTargets({ project: recoverableProject, surfaceId: surface.id, documentId: snapshot.documentId ?? '',
+    selectedInstanceIds: snapshot.selectedInstanceIds, activeStateId: snapshot.activeStateId, editingScope: snapshot.editingScope })
+    .filter(target => project.instances[target.instanceId]?.visible === false && target.ancestors.every(id => project.instances[id]?.visible !== false))
   const hiddenMenu = () => hidden.map(target => ({
     id: 'show.' + target.instanceId, label: project.instances[target.instanceId].name ?? project.definitions[project.instances[target.instanceId].definitionId]?.title ?? '对象',
     run: () => { void ports.edit([{ type: 'instance.patch', instanceId: target.instanceId, patch: { visible: true } }]).catch(error => ports.report(String(error))) },
