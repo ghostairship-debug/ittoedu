@@ -9,8 +9,8 @@ import { OBJECT_EDIT_EVENT, requestObjectContextMenu } from '../../editing/comma
 import { componentPaintStyle } from '../../../player/components/componentPlacementStyle'
 import { componentIsLocked } from '../../composition/crossSurfaceCommands'
 import { componentDefinitionPresentation } from '../properties/componentDefinitionPresentation'
-import { frameContainsPoint, frameToSpaceMatrix, invertMatrix, transformPoint, type AffineMatrix, type GeometryPoint } from '../../../core/components/geometry'
-import { FreeTransformGesture } from '../../componentPlatform/surfaces/slide/freeTransformGesture'
+import { frameContainsPoint, frameToSpaceMatrix, invertMatrix, multiplyMatrices, transformPoint, type AffineMatrix, type GeometryPoint } from '../../../core/components/geometry'
+import { AuthorSpotTransformGesture, FreeTransformGesture } from '../../componentPlatform/surfaces/slide/freeTransformGesture'
 import { componentFrameStyle, freeSurfaceTargets, freeTargetBounds, selectedFreeTargets, hitFreeObject, sameFreeTarget,
   type FreeObjectTarget, type FreeResizeHandle } from '../../componentPlatform/surfaces/slide'
 import { createSlideWorkspaceAuthoringController, listSlideWorkspaceHitTargets, proposeSlideLineHandle, type SlideWorkspaceAuthoringResult } from '../workspaceSlideAuthoring'
@@ -25,7 +25,7 @@ import { useWorkspaceMediaSource } from '../../lessonWorkspace/workspaceMediaSou
 import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../../lessonWorkspace/workspaceMediaDrag'
 import type { ImportedImageAsset } from '../../project/assetManager'
-import { authorSpotEdits, authorSpotImageEdits } from '../../componentPlatform/surfaces/slide/authorSpots'
+import { authorSpotEdits, authorSpotGeometryEdits, authorSpotImageEdits } from '../../componentPlatform/surfaces/slide/authorSpots'
 import { createTeacherControllerHudGeometry, teacherControllerReferenceSize, isGlobalTeacherController, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, type TeacherControllerDisplayPort } from '../../../shared/teacherControllerViewportGeometry'
 
 export type SlideCanvasMode = 'edit' | 'run'
@@ -113,6 +113,7 @@ function SlideInstance({ id, project, surfaceId, preview, ports }: {
 const emptyPreview = (): SlideWorkspaceAuthoringResult => ({ preview: {}, guides: [], marquee: null })
 const controls = '.canvas-mode-switch,.canvas-view-controls,.canvas-label,.live-scene-bar,.command-menu,.selection-quick-bar,.text-edit-overlay,.text-edit-toolbar,[data-component-professional-editor]'
 const outsideStage = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest(controls))
+const spotKey = (spot: ComponentAuthorSpot) => `${spot.instanceId}:${spot.authorKey ?? spot.id}:${JSON.stringify(spot.scope ?? {})}`
 
 
 /** Original workspace chrome and event routes, with V10 replacing the former Phaser/V9 writer. */
@@ -129,6 +130,11 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
   const [spots, setSpots] = useState<readonly ComponentAuthorSpot[]>(() => ports.authorSpots?.() ?? [])
   const [replacingSpot, setReplacingSpot] = useState<string | null>(null)
   const [hoveredSpot, setHoveredSpot] = useState<string | null>(null)
+  const [selectedSpotKey, setSelectedSpotKey] = useState<string | null>(null)
+  const [internalPreview, setInternalPreview] = useState<ComponentFrame | null>(null)
+  const internalGesture = useRef<{ pointerId: number; start: GeometryPoint; value: AuthorSpotTransformGesture; captured: CapturedCourseTarget;
+    instanceToSurface: AffineMatrix; frame?: ComponentFrame; geometry?: ReturnType<AuthorSpotTransformGesture['update']>['geometry']; moved: boolean } | null>(null)
+  const suppressSpotClick = useRef(false)
   const [liveScene, setLiveScene] = useState(false), [resettingScene, setResettingScene] = useState(false)
   const [, refreshNavigation] = useState(0)
   useEffect(() => ports.teacherController?.subscribe(() => refreshNavigation(value => value + 1)), [ports.teacherController])
@@ -209,7 +215,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     return () => observer.disconnect()
   }, [Boolean(project)])
   useEffect(() => {
-    authoring.current?.cancelGesture(); hudGesture.current = null; pointer.current = null; deferredPointer.current = null; pan.current = null; draw.current = null; line.current = null
+    authoring.current?.cancelGesture(); hudGesture.current = null; internalGesture.current = null; setInternalPreview(null); setSelectedSpotKey(null); pointer.current = null; deferredPointer.current = null; pan.current = null; draw.current = null; line.current = null
     setPreview(emptyPreview()); setDrawPreview(null); setLinePreview(null); setPanning(false)
     setView({ zoom: 1, x: 0, y: 0 })
   }, [snapshot.documentId, snapshot.surfaceId, snapshot.activeStateId, snapshot.canvasMode, snapshot.editingScope])
@@ -224,6 +230,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         setPreview(emptyPreview()); setDrawPreview(null); setLinePreview(null)
       }
       if (event.key === 'Escape' && hudGesture.current) { hudGesture.current = null; setPreview(emptyPreview()) }
+      if (event.key === 'Escape' && internalGesture.current) { internalGesture.current = null; setInternalPreview(null); suppressSpotClick.current = true }
     }
     const blur = () => { space.current = false; pan.current = null; setPanning(false) }
     window.addEventListener('keydown', onKey); window.addEventListener('keyup', onKey); window.addEventListener('blur', blur)
@@ -286,9 +293,10 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     return () => root.removeEventListener(OBJECT_EDIT_EVENT, edit)
   }, [Boolean(project)])
   const spotTargets = listSlideWorkspaceHitTargets(state()).flatMap(target => spots.filter(spot => spot.instanceId === target.instanceId).map(spot => ({
-    spot, target, frame: { ...spot.localBounds, transform: [...frameToSpaceMatrix(spot.localBounds,
-      frameToSpaceMatrix(target.frame, target.parentToSurface))] as ComponentFrame['transform'] },
+    spot, target, frame: { ...(spot.geometry?.frame ?? spot.localBounds), transform: [...frameToSpaceMatrix(spot.geometry?.frame ?? spot.localBounds,
+      spot.geometry ? multiplyMatrices(frameToSpaceMatrix(target.frame, target.parentToSurface), spot.geometry.parentToInstance) : frameToSpaceMatrix(target.frame, target.parentToSurface))] as ComponentFrame['transform'] },
   })))
+  const selectedInternal = spotTargets.find(value => spotKey(value.spot) === selectedSpotKey)
   const snapLine = (at: GeometryPoint, disabled = false, exclude?: string) => snapLinePoint(at, collectLineSnapAxes(
     listSlideWorkspaceHitTargets(state()).map(target => {
       const bounds = freeTargetBounds(target)
@@ -356,8 +364,9 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
   const targets = freeSurfaceTargets(effectiveProject, surface.id), selected = selectedFreeTargets(targets, snapshot.selectedInstanceIds)
   const editableSelected = selected.filter(target => !componentIsLocked(project, target.instanceId))
   const selectedContent = editableSelected.filter(target => !isGlobalTeacherController(project, target.instanceId))
-  const hudTargets = targets.filter(target => isGlobalTeacherController(project, target.instanceId))
-  const selectedHud = editableSelected.filter(target => isGlobalTeacherController(project, target.instanceId))
+  const hudTargets = targets.filter(target => isGlobalTeacherController(project, target.instanceId)
+    && isComponentVisibleAtSurface(project.instances[target.instanceId], surface.id))
+  const selectedHud = editableSelected.filter(target => hudTargets.some(value => value.instanceId === target.instanceId))
   const viewportBounds = stageViewportRef.current?.getBoundingClientRect()
   const viewportScale = viewportBounds ? viewportBounds.width / viewport.width : 1
   const hudPointerMatrix: AffineMatrix = [viewportScale, 0, 0, viewportScale, viewportBounds?.left ?? 0, viewportBounds?.top ?? 0]
@@ -394,6 +403,22 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         setPanning(true); event.currentTarget.setPointerCapture(event.pointerId); return
       }
       if (event.button !== 0) return
+      if (!snapshot.contentEdit && !snapshot.drawTool) {
+        const selectedHandle = event.target instanceof Element && event.target.closest('[data-internal-selection]')
+        const at = surfacePoint(event.clientX, event.clientY)
+        const hit = selectedHandle ? selectedInternal : [...spotTargets].reverse().find(value => value.spot.geometry && frameContainsPoint(value.frame, at))
+        if (hit?.spot.geometry && hit.spot.authorKey && hit.spot.binding) {
+          stop(event); suppressSpotClick.current = false
+          if (componentIsLocked(project, hit.spot.instanceId)) return
+          setSelectedSpotKey(spotKey(hit.spot)); ports.select([hit.spot.instanceId]); event.currentTarget.setPointerCapture(event.pointerId)
+          const handle = selectedHandle && event.target instanceof Element ? event.target.closest('[data-handle]')?.getAttribute('data-handle') as FreeResizeHandle | 'rotate' | null : null
+          const instanceToSurface = frameToSpaceMatrix(hit.target.frame, hit.target.parentToSurface), captured = ports.capture()
+          internalGesture.current = { pointerId: event.pointerId, start: { x: event.clientX, y: event.clientY }, moved: false, captured, instanceToSurface,
+            value: new AuthorSpotTransformGesture({ spot: hit.spot, mode: handle === 'rotate' ? 'rotate' : handle ? 'resize' : 'drag',
+              handle: handle === 'rotate' ? undefined : handle ?? undefined, instanceToSurface, surfaceToPointer: mapping(), pointer: { x: event.clientX, y: event.clientY } }) }
+          return
+        }
+      }
       if (!snapshot.contentEdit && !snapshot.drawTool) {
         const atHud = transformPoint(invertMatrix(hudPointerMatrix), { x: event.clientX, y: event.clientY })
         const inHudHandle = event.target instanceof Element && event.target.closest('[data-controller-selection]')
@@ -449,6 +474,12 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       setPreview(authoring.current!.pointerDown({ x: event.clientX, y: event.clientY, additive: event.shiftKey || event.ctrlKey || event.metaKey, altKey: event.altKey }, mapping(), handle ?? undefined))
     }}
     onPointerMoveCapture={event => {
+      if (internalGesture.current?.pointerId === event.pointerId) {
+        stop(event); const gesture = internalGesture.current, update = gesture.value.update({ x: event.clientX, y: event.clientY }, { shift: event.shiftKey, alt: event.altKey })
+        gesture.frame = update.frame; gesture.geometry = update.geometry
+        gesture.moved ||= Math.hypot(event.clientX - gesture.start.x, event.clientY - gesture.start.y) >= 2
+        setInternalPreview({ ...update.frame, transform: [...multiplyMatrices(multiplyMatrices(gesture.instanceToSurface, gesture.value.spot.geometry!.parentToInstance), update.frame.transform)] }); return
+      }
       if (hudGesture.current?.pointerId === event.pointerId) {
         stop(event); const gesture = hudGesture.current, update = gesture.value.update({ x: event.clientX, y: event.clientY }, { shift: event.shiftKey, alt: event.altKey })
         gesture.edits = update.edits; setPreview({ preview: Object.fromEntries(update.edits.flatMap(edit => edit.type === 'frame.set' && edit.frame ? [[edit.instanceId, edit.frame]] : [])), guides: [], marquee: null }); return
@@ -471,6 +502,16 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       setPreview(authoring.current!.pointerMove({ x: event.clientX, y: event.clientY, altKey: event.altKey, shiftKey: event.shiftKey }, mapping()))
     }}
     onPointerUpCapture={event => {
+      if (internalGesture.current?.pointerId === event.pointerId) {
+        stop(event); const gesture = internalGesture.current; internalGesture.current = null; setInternalPreview(null)
+        event.currentTarget.releasePointerCapture(event.pointerId); suppressSpotClick.current = gesture.moved
+        if (gesture.moved && gesture.geometry && Object.keys(gesture.geometry).length) {
+          try { void ports.commit(authorSpotGeometryEdits(gesture.captured.editingProject, gesture.value.spot, gesture.geometry),
+            gesture.captured, crypto.randomUUID()).catch(error => ports.report(String(error))) }
+          catch (error) { ports.report(String(error)) }
+        }
+        return
+      }
       if (hudGesture.current?.pointerId === event.pointerId) {
         stop(event); const gesture = hudGesture.current, frozen = gestureDisplay.current; hudGesture.current = null
         event.currentTarget.releasePointerCapture(event.pointerId); setPreview(emptyPreview())
@@ -514,6 +555,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       setPreview(emptyPreview())
     }}
     onPointerCancelCapture={event => {
+      if (internalGesture.current?.pointerId === event.pointerId) { internalGesture.current = null; setInternalPreview(null); suppressSpotClick.current = true; return }
       if (hudGesture.current?.pointerId === event.pointerId) { hudGesture.current = null; setPreview(emptyPreview()); return }
       if (pointer.current !== event.pointerId) return
       pointer.current = null; deferredPointer.current = null; draw.current = null; line.current = null; authoring.current?.cancelGesture()
@@ -578,8 +620,10 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       <button type="button" className={snapshot.canvasMode === 'edit' ? 'canvas-mode-switch__active' : ''} aria-pressed={snapshot.canvasMode === 'edit'} onClick={() => ports.setCanvasMode('edit')}><MousePointer2 size={13} />编辑状态</button>
       <button type="button" className={snapshot.canvasMode === 'run' ? 'canvas-mode-switch__active' : ''} aria-pressed={snapshot.canvasMode === 'run'} onClick={() => ports.setCanvasMode('run')}><Play size={13} />当前位置试运行</button>
       {snapshot.canvasMode === 'run' && <div role="group" aria-label="试运行翻页" data-testid="course-try-run-chrome" style={{ display: 'flex', gap: 6, marginLeft: 8 }}>
-        <button type="button" data-testid="course-try-run-previous" onClick={() => { const index = project.surfaces.findIndex(value => value.id === surface.id); if (index > 0) ports.selectSurface(project.surfaces[index - 1].id) }}>上一页</button>
-        <button type="button" data-testid="course-try-run-next" onClick={() => { const index = project.surfaces.findIndex(value => value.id === surface.id); if (index < project.surfaces.length - 1) ports.selectSurface(project.surfaces[index + 1].id) }}>下一页</button>
+        <button type="button" data-testid="course-try-run-previous" disabled={!ports.teacherController?.execute || ports.teacherController.canExecute?.({ type: 'scene.previous' }) === false}
+          onClick={() => { void ports.teacherController?.execute?.({ type: 'scene.previous' }).then(accepted => { if (!accepted) ports.report('当前不能切换到上一页') }).catch(error => ports.report(String(error))) }}>上一页</button>
+        <button type="button" data-testid="course-try-run-next" disabled={!ports.teacherController?.execute || ports.teacherController.canExecute?.({ type: 'scene.next' }) === false}
+          onClick={() => { void ports.teacherController?.execute?.({ type: 'scene.next' }).then(accepted => { if (!accepted) ports.report('当前不能切换到下一页') }).catch(error => ports.report(String(error))) }}>下一页</button>
         {ports.resetPlayback && <button type="button" disabled={resettingScene} onClick={() => { void resetScene(true) }}>从初始状态重播</button>}
       </div>}
     </div>
@@ -623,7 +667,8 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         {snapshot.canvasMode === 'edit' && !snapshot.contentEdit && <div className="canvas-authoring-targets" data-testid="runtime-authoring-targets" aria-label="画布可编辑内容" style={{ zIndex: 12 }}>
           {spotTargets.map(({ spot, frame }) => <button key={spot.id} type="button" className={'canvas-authoring-target canvas-authoring-target--' + (spot.kind === 'image' ? 'asset' : 'text') + (hoveredSpot === spot.id ? ' canvas-authoring-target--hovered' : '')}
             aria-label={spot.kind === 'image' ? '双击替换此处图片' : '双击编辑此处文字'} disabled={spot.id === replacingSpot}
-            onFocus={() => setHoveredSpot(spot.id)} onBlur={() => setHoveredSpot(null)} onClick={() => {
+            data-author-spot={spotKey(spot)} onFocus={() => setHoveredSpot(spot.id)} onBlur={() => setHoveredSpot(null)} onClick={() => {
+              if (suppressSpotClick.current) { suppressSpotClick.current = false; return }
               const at = transformPoint(frame.transform, { x: frame.width / 2, y: frame.height / 2 })
               if (spot.kind === 'image') void replaceSpot(spot); else beginSpot(spot, at, transformPoint(mapping(), at))
             }}
@@ -651,6 +696,10 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     </div>
     {snapshot.canvasMode === 'edit' && !snapshot.contentEdit && <><SlideLayerSelectionOverlay targets={selectedContent} scale={scale} surfaceToPointer={chromeMatrix} lineHandles={Boolean(linePoints)} />
       <div data-controller-selection="true"><SlideLayerSelectionOverlay targets={selectedHud} scale={viewportScale} surfaceToPointer={hudPointerMatrix} /></div></>}
+    {snapshot.canvasMode === 'edit' && !snapshot.contentEdit && selectedInternal?.spot.geometry && <div data-internal-selection="true">
+      <SlideLayerSelectionOverlay targets={[{ ...selectedInternal.target, frame: internalPreview ?? selectedInternal.frame,
+        parentToSurface: [1, 0, 0, 1, 0, 0], ancestors: [], preserveAspectRatio: selectedInternal.spot.kind === 'image' }]} scale={scale} surfaceToPointer={chromeMatrix} />
+    </div>}
     {canvasMenu.element}
   </main>
 }

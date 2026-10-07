@@ -9,8 +9,12 @@ export type TeacherControllerHudGeometry = ReturnType<typeof createTeacherContro
 
 /** The global author's reference stays the same when the active surface changes. */
 export function teacherControllerReferenceSize(project: CourseProjectV10): FlowSize {
-  return project.surfaces.find(surface => surface.kind !== 'flow' && surface.designSize)?.designSize
-    ?? { width: STAGE_VIEWPORT_WIDTH, height: STAGE_VIEWPORT_HEIGHT }
+  const id = [...project.global.underlay, ...project.global.overlay].find(id => isGlobalTeacherController(project, id))
+  const data = id && project.instances[id]?.data
+  const value = data && typeof data === 'object' && !Array.isArray(data) ? data.hudReferenceSize : undefined
+  if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.width === 'number' && value.width > 0
+    && typeof value.height === 'number' && value.height > 0) return { width: value.width, height: value.height }
+  return { width: STAGE_VIEWPORT_WIDTH, height: STAGE_VIEWPORT_HEIGHT }
 }
 
 /** Direct HUD projection: no content fit, paper scroll, observation or world camera enters this matrix. */
@@ -24,6 +28,8 @@ function isHudGeometry(viewport: FlowSize | TeacherControllerHudGeometry): viewp
 
 export type TeacherControllerDisplayPort = Pick<TeacherControllerPort, 'read' | 'subscribe' | 'setCollapsed'> & {
   placement?(): { x: number; y: number }
+  canExecute?: TeacherControllerPort['canExecute']
+  execute?: TeacherControllerPort['execute']
 }
 const identity: AffineMatrix = [1, 0, 0, 1, 0, 0]
 

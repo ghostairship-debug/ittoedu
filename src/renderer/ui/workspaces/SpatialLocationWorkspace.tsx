@@ -1,6 +1,7 @@
 import { Hand, Maximize2, Minus, MousePointer2, Play, Plus } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react'
 import type { ComponentEdit, ComponentFrame, ComponentSurface, CourseProjectV10 } from '../../../shared/contracts/component-platform'
+import { isComponentVisibleAtSurface } from '../../../shared/contracts/component-platform'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import type { SpatialSurfaceViewState, SpatialGraphSelection } from '../../store/slices/spatialAuthoringSlice'
 import { componentSpatialCameraMatrix, panComponentSpatialCamera, zoomComponentSpatialCamera } from '../../../player/surfaces/spatial/componentSpatialAdapter'
@@ -104,6 +105,7 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const allTargets = freeSurfaceTargets(displayProject, props.surface.id)
   const globalIds = new Set([...props.project.global.underlay, ...props.project.global.overlay])
   const controllerTargets = allTargets.filter(target => isGlobalTeacherController(props.project, target.instanceId))
+    .filter(target => isComponentVisibleAtSurface(props.project.instances[target.instanceId], props.surface.id))
   const scopeTargets = props.view.scope === 'global' ? allTargets.filter(target => globalIds.has(target.ancestors[0] ?? target.instanceId)) : [...worldTargets, ...controllerTargets]
   const visibleTargets = scopeTargets.filter(target => props.project.instances[target.instanceId]?.visible !== false && target.ancestors.every(id => props.project.instances[id]?.visible !== false)
     && (props.view.scope === 'global' || isGlobalTeacherController(props.project, target.instanceId) || spatialSemanticVisible(spatial, target.instanceId, props.view.camera.zoom)))

@@ -1,4 +1,4 @@
-import type { ComponentAsset, ComponentAuthorSpot, ComponentEdit, CourseProjectV10, JsonValue } from '../../../../shared/contracts/component-platform'
+import type { ComponentAsset, ComponentAuthorGeometry, ComponentAuthorSpot, ComponentEdit, CourseProjectV10, JsonValue } from '../../../../shared/contracts/component-platform'
 import type { DocumentResources } from '../../../../shared/workbench/document'
 import { decodeHtmlEntities, scanHtmlSource } from '../../../../shared/html/htmlSourceScanner'
 import { componentSourceOwnerIsShared } from '../../../runtime/componentSourceAuthoring'
@@ -9,6 +9,10 @@ function usesRecordOwner(project: CourseProjectV10, spot: ComponentAuthorSpot): 
   const property = spot.kind === 'text' ? 'text' : 'src'
   return !spot.sourceRegion && !spot.dataPath || authorSpotValue(project.instances[spot.instanceId]?.data,
     ['authoringRecords', spot.authorKey, 'overrides', property]) !== undefined
+}
+
+export function authorSpotGeometryEdits(project: CourseProjectV10, spot: ComponentAuthorSpot, geometry: ComponentAuthorGeometry): ComponentEdit[] {
+  return Object.keys(geometry).length ? prepareWebAuthoringRecordEdits(project, spot, { geometry }) : []
 }
 
 export function authorSpotValue(data: JsonValue | undefined, path: readonly string[]): JsonValue | undefined {

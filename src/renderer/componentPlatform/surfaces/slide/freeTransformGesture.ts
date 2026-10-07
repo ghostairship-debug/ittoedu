@@ -2,6 +2,7 @@ import { composeMatrices, frameToSpaceMatrix, invertMatrix, matrixAroundPoint, m
   scaleMatrix, transformPoint, translationMatrix, type AffineMatrix, type GeometryPoint } from '../../../../core/components/geometry'
 import type { ComponentEdit } from '../../../../shared/contracts/component-platform/operations'
 import type { ComponentFrame } from '../../../../shared/contracts/component-platform/frame'
+import type { ComponentAuthorGeometry, ComponentAuthorGeometryObservation, ComponentAuthorSpot } from '../../../../shared/contracts/component-platform/runtime'
 import { freeSelectionBounds, freeTargetBounds, type FreeBounds, type FreeObjectTarget } from './targets'
 
 export type FreeResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
@@ -15,6 +16,7 @@ export interface FreeGestureStart {
   handle?: FreeResizeHandle
   /** Text and professional content boxes reflow; ordinary visual scaling keeps local dimensions. */
   resizeMode?: 'scale' | 'box'
+  minimumBoxSize?: { width: number; height: number }
   snapTargets?: readonly FreeObjectTarget[]
   designSize?: { width: number; height: number }
   snapTolerance?: number
@@ -92,7 +94,7 @@ export class FreeTransformGesture {
         const inverse = invertMatrix(frameToSpaceMatrix(frame, target.parentToSurface))
         const factors = resizeFactors(this.start.handle!, frame.width, frame.height, transformPoint(inverse, this.initial), transformPoint(inverse, current), Boolean(modifiers.shift || target.preserveAspectRatio))
         if (this.start.resizeMode === 'box') {
-          const x = Math.max(1 / frame.width, factors.x), y = Math.max(1 / frame.height, factors.y)
+          const x = Math.max((this.start.minimumBoxSize?.width ?? 1) / frame.width, factors.x), y = Math.max((this.start.minimumBoxSize?.height ?? 1) / frame.height, factors.y)
           return { edits: [{ type: 'frame.set', instanceId: target.instanceId, frame: {
             width: frame.width * x, height: frame.height * y,
             transform: [...multiplyMatrices(frame.transform, translationMatrix(factors.anchor.x * (1 - x), factors.anchor.y * (1 - y)))],
@@ -122,3 +124,59 @@ export class FreeTransformGesture {
 }
 
 export const createFreeTransformGesture = (start: FreeGestureStart): FreeTransformGesture => new FreeTransformGesture(start)
+
+/** Convert a frozen parent-local observation back to author increments, excluding every host/runtime matrix. */
+export function authorSpotGeometryFromFrame(observation: ComponentAuthorGeometryObservation, next: ComponentFrame,
+  mode: FreeGestureStart['mode'], kind: ComponentAuthorSpot['kind']): ComponentAuthorGeometry {
+  const { frame: start, author, boxInsets } = observation
+  const result: ComponentAuthorGeometry = {}
+  const changed = (a: number, b: number) => Math.abs(a - b) > 0.000001
+  if (changed(start.transform[4], next.transform[4])) result.translateX = (author.translateX ?? 0) + next.transform[4] - start.transform[4]
+  if (changed(start.transform[5], next.transform[5])) result.translateY = (author.translateY ?? 0) + next.transform[5] - start.transform[5]
+  if (mode === 'resize' && kind === 'text') {
+    if (changed(start.width, next.width)) result.width = Math.max(1, next.width - boxInsets.width)
+    if (changed(start.height, next.height)) result.height = Math.max(1, next.height - boxInsets.height)
+  } else if (mode === 'resize') {
+    const factor = (column: 0 | 2) => (next.transform[column] * start.transform[column] + next.transform[column + 1] * start.transform[column + 1])
+      / (start.transform[column] ** 2 + start.transform[column + 1] ** 2)
+    const x = factor(0), y = factor(2)
+    if (changed(x, 1)) result.scaleX = (author.scaleX ?? 1) * x
+    if (changed(y, 1)) result.scaleY = (author.scaleY ?? 1) * y
+  } else if (mode === 'rotate') {
+    const angle = Math.atan2(next.transform[1], next.transform[0]) - Math.atan2(start.transform[1], start.transform[0])
+    if (changed(angle, 0)) result.rotation = (author.rotation ?? 0) + Math.atan2(Math.sin(angle), Math.cos(angle)) * 180 / Math.PI
+  }
+  return result
+}
+
+/** Uses the existing gesture math but emits a local record patch, never a fake instance frame.set. */
+export class LocalAuthorTransformGesture {
+  readonly mode: FreeGestureStart['mode']
+  private readonly kind: ComponentAuthorSpot['kind']
+  private readonly observation: ComponentAuthorGeometryObservation
+  private readonly gesture: FreeTransformGesture
+  constructor(start: { geometry: ComponentAuthorGeometryObservation; kind: ComponentAuthorSpot['kind']; mode: FreeGestureStart['mode']; handle?: FreeResizeHandle;
+    rootToSurface: AffineMatrix; surfaceToPointer: AffineMatrix; pointer: GeometryPoint }) {
+    this.observation = structuredClone(start.geometry); this.mode = start.mode; this.kind = start.kind
+    this.gesture = new FreeTransformGesture({ ...start, resizeMode: start.kind === 'text' ? 'box' : 'scale',
+      minimumBoxSize: { width: this.observation.boxInsets.width + 1, height: this.observation.boxInsets.height + 1 },
+      targets: [{ instanceId: 'transient-local-geometry', frame: this.observation.frame,
+        parentToSurface: multiplyMatrices(start.rootToSurface, this.observation.parentToInstance),
+        parent: { kind: 'surface', surfaceId: 'transient-local-geometry' }, ancestors: [], preserveAspectRatio: start.kind === 'image' }] })
+  }
+  update(pointer: GeometryPoint, modifiers: { shift?: boolean; alt?: boolean } = {}) {
+    const update = this.gesture.update(pointer, modifiers), edit = update.edits[0]
+    if (edit.type !== 'frame.set' || !edit.frame) throw new Error('内部手势没有返回局部几何')
+    return { frame: edit.frame, geometry: authorSpotGeometryFromFrame(this.observation, edit.frame, this.mode, this.kind), guides: update.guides }
+  }
+}
+
+export class AuthorSpotTransformGesture extends LocalAuthorTransformGesture {
+  readonly spot: ComponentAuthorSpot
+  constructor(start: { spot: ComponentAuthorSpot; mode: FreeGestureStart['mode']; handle?: FreeResizeHandle;
+    instanceToSurface: AffineMatrix; surfaceToPointer: AffineMatrix; pointer: GeometryPoint }) {
+    if (!start.spot.geometry) throw new Error('此对象尚未取得原父布局，不能保存屏幕测量框为作者位置')
+    super({ ...start, geometry: start.spot.geometry, kind: start.spot.kind, rootToSurface: start.instanceToSurface })
+    this.spot = structuredClone(start.spot)
+  }
+}

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { IDENTITY_MATRIX, frameCorners, transformPoint } from '../../src/core/components/geometry'
-import { FreeTransformGesture } from '../../src/renderer/componentPlatform/surfaces/slide/freeTransformGesture'
+import { FreeTransformGesture, LocalAuthorTransformGesture } from '../../src/renderer/componentPlatform/surfaces/slide/freeTransformGesture'
 import type { FreeObjectTarget } from '../../src/renderer/componentPlatform/surfaces/slide/targets'
 
 const target = (image = false): FreeObjectTarget => ({ instanceId: 'local-target', frame: { width: 200, height: 100, transform: [1, 0, 0, 1, 40, 30] },
@@ -26,4 +26,16 @@ it('scales an image uniformly and starts every update from its frozen frame', ()
   expect(edit.frame.width).toBe(200)
   expect(edit.frame.height).toBe(100)
   expect(edit.frame.transform.slice(0, 4)).toEqual([1.5, 0, 0, 1.5])
+})
+
+it('compiles border-box width and parent-scaled movement into existing content-box and author increments', () => {
+  const geometry = { frame: { width: 240, height: 80, transform: [1, 0, 0, 1, 40, 30] as [number, number, number, number, number, number] },
+    parentToInstance: [2, 0, 0, 2, 80, 50] as [number, number, number, number, number, number], author: { translateX: 12, width: 200 }, boxInsets: { width: 40, height: 20 } }
+  const root = [0.5, 0, 0, 0.5, 0, 0] as const, pointer = transformPoint(root, frameCorners(geometry.frame, geometry.parentToInstance)[1])
+  const resize = new LocalAuthorTransformGesture({ geometry, kind: 'text', mode: 'resize', handle: 'e', rootToSurface: root, surfaceToPointer: IDENTITY_MATRIX, pointer })
+  expect(resize.update({ x: pointer.x + 60, y: pointer.y }).geometry).toEqual({ width: 260 })
+  const drag = new LocalAuthorTransformGesture({ geometry, kind: 'text', mode: 'drag', rootToSurface: root, surfaceToPointer: IDENTITY_MATRIX, pointer })
+  drag.update({ x: pointer.x + 10, y: pointer.y })
+  expect(drag.update({ x: pointer.x + 50, y: pointer.y }).geometry).toEqual({ translateX: 62 })
+  expect(geometry.author).toEqual({ translateX: 12, width: 200 })
 })

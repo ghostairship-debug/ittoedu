@@ -39,3 +39,17 @@ it('writes HUD movement and resized handles back to author coordinates once, pre
   expect(resize.type === 'frame.set' && resize.frame?.width).toBe(980)
   expect(transformPoint(hud.viewportToAuthor, { x: moved.transform[4], y: moved.transform[5] })).toEqual({ x: 200, y: 538 })
 })
+
+it('keeps the formal frame reference stable when differently sized surfaces are reordered', () => {
+  const original = project()
+  original.instances.teacher.data = { ...original.instances.teacher.data as Record<string, never>, hudReferenceSize: { width: 960, height: 540 } }
+  const show = (value: CourseProjectV10) => projectTeacherControllerInstances(value, createTeacherControllerHudGeometry({
+    referenceSize: teacherControllerReferenceSize(value), viewportRect: { x: 0, y: 0, width: 1000, height: 500 },
+  })).instances.teacher.frame
+  const before = show(original), reordered = { ...original, surfaces: [...original.surfaces].reverse() }
+  expect(show(reordered)).toEqual(before)
+  const data = JSON.parse(JSON.stringify(original.instances.teacher.data)); delete data.hudReferenceSize
+  original.instances.teacher.data = data
+  expect(teacherControllerReferenceSize(original)).toEqual({ width: 1280, height: 720 })
+  expect(teacherControllerReferenceSize({ ...original, surfaces: reordered.surfaces })).toEqual({ width: 1280, height: 720 })
+})
