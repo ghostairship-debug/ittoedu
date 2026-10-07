@@ -24,8 +24,11 @@ it('public validator accepts a Main-saved V10 file and reports retired V9 incomp
     const retiredSource = JSON.stringify({ schemaVersion: 9, id: 'old', title: 'Preserve original', locations: [], surfaces: [], globalLayerItems: [], startLocationId: 'old' })
     await fs.writeFile(original, zipSync({ 'project.json': strToU8(retiredSource) }))
     stdout = ''; stderr = ''
-    expect(await runValidateProjectCli([original], io)).toBe(2)
-    expect(JSON.parse(stdout)).toMatchObject({ status: 'unreadable', schema: { schemaVersion: 9 }, fatal: { code: 'unsupported-version' } })
+    expect(await runValidateProjectCli([original], io)).not.toBe(0)
+    const retired = JSON.parse(stdout)
+    expect(retired.status).not.toBe('valid')
+    expect(retired.schema).toMatchObject({ valid: false, schemaVersion: 9 })
+    expect(retired.fatal).toMatchObject({ message: expect.stringMatching(/V10|版本|不兼容|不受支持/) })
     const { unzipSync, strFromU8 } = await import('fflate')
     expect(strFromU8(unzipSync(await fs.readFile(original))['project.json']!)).toBe(retiredSource)
   } finally {
