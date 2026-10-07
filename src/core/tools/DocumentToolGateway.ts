@@ -16,6 +16,7 @@ import { documentDigest } from '../documents/documentDigest'
 import { batchInputSchemaFor, canonicalToolRegistration, describeToolFamily, describeTools, familyOfTool, gatewayToolRegistration, mutationCallSchema, mutationNamesIn, selectRunToolNames, toolCatalog, toolEffectTargets, toolFamilies, toolRegistration, visibleRunToolNames, type BatchMutationCall, type RunToolScope, type ToolFamily } from './ToolCatalog'
 import { childTargets, containsTarget, courseInstanceContext, courseInstanceTextTarget, mapMarkdownRange, readTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent } from './ToolTargets'
 import { courseInstancePropertyEdits, courseInstanceConversionEdits } from './courseInstanceEdits'
+import { coursePresentationEdits } from './coursePresentationEdits'
 import { captureComponentOperation, componentValueAt, presentationComponentEdits, componentFieldIdentityPaths, equalComponentValue } from '../drivers/courseV10Operations'
 import { imageDataSchema } from '../../components/image/data'
 import type { ComponentEdit, ComponentExpectation, ComponentOperationBatch } from '../../shared/contracts/component-platform/operations'
@@ -805,7 +806,9 @@ export class DocumentToolGateway implements ToolGateway {
     if (!this.operationLeases.has(operationId)) this.operationLeases.set(operationId, new Map(this.run(runId).documentLeases))
   }
   private operationLease(runId: string, operationId: string, documentId: string): string {
+    const run = this.run(runId)
     const lease = this.operationLeases.get(operationId)?.get(documentId)
+      ?? (!run.detachedDocuments?.has(documentId) ? run.documentLeases.get(documentId) : undefined)
     if (!lease || lease !== this.run(runId).documentLeases.get(documentId))
       throw new ToolError('run-stopped', '此操作原来的文档授权已停止，请在重新打开后发起新操作')
     return lease
@@ -1280,6 +1283,16 @@ export class DocumentToolGateway implements ToolGateway {
       let target = targets[i]
       if (target.kind === 'markdown-range' && isSourceDocumentModel(model) && isSourceDocumentModel(snapshot.model)) target = mapMarkdownRange(snapshot.model.source, model.source, target)
       if (model.kind === 'course-v10') {
+        if (mutation.name === 'presentation.update') {
+          if (target.kind !== 'course-surface') throw new ToolError('invalid-target', '命名状态需要已授权演示页面目标')
+          const edits = coursePresentationEdits(model.project, target, mutation.input, this.createId)
+          const command = captureComponentOperation(model.project, edits)
+          model = await driver.apply(model, command)
+          componentEdits.push(...edits)
+          for (const expected of command.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
+          finalTargets.push(target)
+          continue
+        }
         if (mutation.name === 'media.insert') {
           if (target.kind !== 'course-surface') throw new ToolError('invalid-target', '插入图片需要已授权页面目标')
           if (!this.options.prepareImage) throw new ToolError('unsupported-resource-preparation', '当前宿主未配置图片解码能力')

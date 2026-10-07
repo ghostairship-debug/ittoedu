@@ -14,6 +14,7 @@ import { nativeContentInputSchemaByType } from '../../shared/contracts/native-v1
 import { z } from 'zod'
 import type { ModelToolCall, ToolDefinition, ToolResult } from '../../shared/workbench/tools'
 import { objectUpdateInputSchema, objectConvertInputSchema } from './toolSchemas'
+import { coursePresentationInputSchema } from './coursePresentationEdits'
 import { componentFrameSchema } from '../../shared/contracts/component-platform/schema'
 import { handleToolTarget, hasRunDocument, hasRunWrite, projectToolTarget, registeredEffectNames,
   toolRegistrationFor, type ResolvedToolTarget, type RunToolScope, type ToolFamily, type ToolSupportContext, type ToolTargetResolver } from './ToolRegistration'
@@ -65,11 +66,15 @@ export const canonicalMutationTools = [
   { capability: 'write', effect: 'document-edit', family: 'layout', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'),
     targets: (input, resolver) => 'target' in input ? handleToolTarget(input, resolver) : projectToolTarget(input, resolver),
     handler: (context, input) => context.mutate({ name: 'object.convert', input }) }),
+  registerCanonical({ name: 'presentation.update', description: '修改已授权演示页的命名状态：add、rename、duplicate、delete、set-initial、set-thumbnail、clear-overrides。target为页面句柄；state使用当前读取到的状态名称或身份，初始/缩略图可用null恢复母版。软件生成新状态身份；复制保留覆盖、顺序和背景，清除只作用于指定状态，一次事务可撤销。',
+    inputSchema: coursePresentationInputSchema, manual: { label: '修改演示状态', group: 'edit', targetKinds: ['course-surface'] } },
+  { capability: 'write', effect: 'document-edit', family: 'navigation', supports: context => hasRunWrite(context, ['course-surface'], 'course-v10'), targets: handleToolTarget,
+    handler: (context, input) => context.mutate({ name: 'presentation.update', input }) }),
 ] as const
 export const projectApplyTool = projectFileRegistrations.find(tool => tool.name === 'project.apply')!
 export const canonicalToolRegistrations = [...canonicalMutationTools]
 export function canonicalToolRegistration(name: string) { return canonicalToolRegistrations.find(tool => tool.name === name) }
-const mutationSchemas = [canonicalMutationTools[0].callSchema, canonicalMutationTools[1].callSchema, canonicalMutationTools[2].callSchema, canonicalMutationTools[3].callSchema, canonicalMutationTools[4].callSchema] as const
+const mutationSchemas = [canonicalMutationTools[0].callSchema, canonicalMutationTools[1].callSchema, canonicalMutationTools[2].callSchema, canonicalMutationTools[3].callSchema, canonicalMutationTools[4].callSchema, canonicalMutationTools[5].callSchema] as const
 export const mutationCallSchema = z.discriminatedUnion('name', mutationSchemas)
 export type MutationCall = z.infer<typeof mutationCallSchema>
 export const batchMutationCallSchema = mutationCallSchema
