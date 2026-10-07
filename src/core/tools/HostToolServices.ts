@@ -334,10 +334,20 @@ export class HostToolCoordinator {
       throw new Error('图片作业不属于当前任务工作空间的已完成成果')
     return scope
   }
+  private async recoveredImageScope(runId: string, snapshot: ImageJobSnapshot): Promise<Pick<ImageJob, 'scope' | 'documentId' | 'epoch'>> {
+    if (/^workspace:[a-f0-9]{64}$/.test(snapshot.documentId))
+      return { scope: 'workspace', documentId: this.recoveredWorkspaceImageScope(runId, snapshot), epoch: '' }
+    this.builtInRun(runId)
+    if (snapshot.status !== 'ready' || snapshot.stopped || !this.authority.ownsDocument(runId, snapshot.documentId))
+      throw new Error('图片作业不属于当前已授权文档的已完成成果')
+    const current = await this.registry.get(snapshot.documentId).drain()
+    this.authority.active(runId, snapshot.documentId, current.epoch)
+    return { scope: 'document', documentId: snapshot.documentId, epoch: current.epoch }
+  }
   private async readableJobRef(runId: string, input: Omit<HostJobRef, 'runId'>): Promise<HostJobRef> {
     if (input.kind !== 'image' || !this.services.images) return { runId, ...input }
     const snapshot = await this.services.images.read(input.jobId)
-    if (snapshot.runId !== runId) this.recoveredWorkspaceImageScope(runId, snapshot)
+    if (snapshot.runId !== runId) await this.recoveredImageScope(runId, snapshot)
     // Only completed results admitted by the existing image reader can refer to
     // their durable producer. This does not grant that producer's cancel rights.
     return { runId: snapshot.runId, ...input }
@@ -544,7 +554,7 @@ export class HostToolCoordinator {
     this.rememberResult(runId, operationId, `asset.${kind}`, result)
     return structuredClone(await result)
   }
-  /** The caller proves sourceRunId belongs to its durable continuation lineage. */
+  /** The caller proves durable continuation lineage or current authority over the exact source document. */
   reissueImageForContinuation(currentRunId: string, sourceDocumentId: string, destinationDocumentId: string,
     sourceRunId: string, jobId: string, resourceId: string): Promise<string> {
     if (!this.services.images?.readReadyResourceFromJob || !this.authority.ownsDocument(currentRunId, destinationDocumentId))
@@ -687,6 +697,8 @@ export class HostToolCoordinator {
         if (job.scope === 'workspace') {
           await this.readStandaloneImage(job.runId, job.jobId, resource.resourceId)
           id = this.standaloneReference(job.jobId, resource.resourceId)
+        } else if (job.sourceRunId) {
+          id = await this.reissueImageForContinuation(job.runId, job.documentId, job.documentId, job.sourceRunId, job.jobId, resource.resourceId)
         } else id = await this.authority.provideImage(job.runId, job.documentId, await this.services.images!.readResource(resource.resourceId))
         job.resources.set(resource.resourceId, id)
       }
@@ -721,11 +733,11 @@ export class HostToolCoordinator {
       const jobId = schema[name].parse(input).job
       const known = this.jobs.get(jobId)
       if (known?.runId === runId) return this.imageResult(this.get(runId, jobId, 'image') as ImageJob, await this.services.images!.read(jobId))
-      // A recovered standalone result needs no document target handle to reconstruct.
-      // The durable owner and frozen workspace scope still prove its authority.
-      const snapshot = await this.services.images!.read(jobId), scope = this.recoveredWorkspaceImageScope(runId, snapshot)
-      const recovered: ImageJob = { kind: 'image', scope: 'workspace', jobId, runId, sourceRunId: snapshot.runId,
-        documentId: scope, epoch: '', controller: new AbortController(), resources: new Map() }
+      // A completed result can outlive its SDK session. Current document grants
+      // or the frozen workspace scope prove access; old task handles are not reused.
+      const snapshot = await this.services.images!.read(jobId), scope = await this.recoveredImageScope(runId, snapshot)
+      const recovered: ImageJob = { kind: 'image', ...scope, jobId, runId, sourceRunId: snapshot.runId,
+        controller: new AbortController(), resources: new Map() }
       this.jobs.set(jobId, recovered)
       return this.imageResult(recovered, snapshot)
     }

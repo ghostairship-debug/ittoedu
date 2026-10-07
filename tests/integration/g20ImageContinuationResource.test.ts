@@ -5,7 +5,14 @@ import path from 'node:path'
 import sharp from 'sharp'
 import { afterEach, expect, it } from 'vitest'
 import { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
+import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
+import { HostJobService } from '../../src/main/workbench/jobs/HostJobService'
+import { prepareImageResource } from '../../src/main/workbench/admittedImageResource'
+import { imageProvenance } from '../../src/main/workbench/images/imageRoute'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { IMAGE_DEFINITION, createImageData } from '../../src/components/image'
 import type { ImageGenerationRequest } from '../../src/shared/workbench/images'
+import type { ToolResult } from '../../src/shared/workbench/tools'
 
 const directories: string[] = []
 afterEach(async () => { await Promise.all(directories.splice(0).map(directory => {
@@ -20,6 +27,66 @@ const connection = { id: 'connection', revision: 1, provider: 'openai', protocol
   billing: { kind: 'subscription' }, capabilities: { tools: 'unknown', stream: 'unknown', vision: 'unknown', reasoning: 'unknown' } } as const
 const request = (jobId: string): ImageGenerationRequest => ({ jobId, runId: 'ancestor-run', documentId: 'course',
   operation: 'generate', prompt: '蓝色铃铛', selection: { connection, imageModel: 'fixture-model' } })
+
+it('recovers a ready document image in a new authorized run and applies a fresh handle without another provider call', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-image-continuation-'))
+  directories.push(directory)
+  const original = await sharp({ create: { width: 24, height: 16, channels: 4, background: '#234567' } }).png().toBuffer()
+  const replacement = await sharp({ create: { width: 24, height: 16, channels: 4, background: '#abcdef' } }).png().toBuffer()
+  const asset = await prepareImageResource({ bytes: original, mimeType: 'image/png', filename: 'original.png' }, () => 'original')
+  const project = createBlankCourseProjectV10('Document image continuation')
+  project.assets[asset.meta.id] = asset.meta
+  project.definitions[IMAGE_DEFINITION.id] = IMAGE_DEFINITION
+  const frame = { width: 120, height: 80, transform: [1, 0, 0, 1, 45, 65] as [number, number, number, number, number, number] }
+  project.instances.picture = { id: 'picture', definitionId: IMAGE_DEFINITION.id, data: createImageData(asset.meta.id), frame }
+  project.surfaces[0].childIds = ['picture']
+  const host = new DocumentHostService(path.join(directory, 'documents'))
+  const document = await host.internalAPI.create({ kind: 'course-v10', project,
+    resources: { assets: { [asset.meta.id]: asset.bytes }, components: {} } }, 'document-image.h5lesson')
+  await host.internalAPI.save(document.documentId, path.join(directory, 'document-image.h5lesson'))
+  let calls = 0
+  const images = new ImageGenerationService({ directory: path.join(directory, 'images'), provider: { generate: async (input, references) => {
+    calls++
+    return { status: 'completed', images: [{ bytes: replacement, mimeType: 'image/png', filename: 'replacement.png' }], provenance: imageProvenance(input, references) }
+  } } })
+  host.tools.configureHostServices({ images: { selection: () => request('unused').selection,
+    run: images.run.bind(images), read: images.read.bind(images), stop: images.stop.bind(images),
+    readResource: images.readResource.bind(images), readReadyResourceFromJob: images.readReadyResourceFromJob.bind(images) },
+    jobs: new HostJobService({ images }) })
+  const data = (result: ToolResult): any => { if (result.kind !== 'read') throw new Error(JSON.stringify(result)); return result.data }
+  const begin = (runId: string, authorized = true) => host.tools.beginRun({ runId, actor: 'agent',
+    documents: authorized ? [{ documentId: document.documentId, writable: [{ kind: 'document' }] }] : [],
+    fileAccess: { permission: 'workspace', workspaceRoot: authorized ? directory : path.join(directory, 'other-workspace') } })
+  const target = { kind: 'course-instance' as const, surfaceId: project.surfaces[0].id, instanceId: 'picture' }
+  await begin('original')
+  const originalTarget = await host.tools.issueTarget('original', document.documentId, target)
+  const ready = data(await host.tools.execute('original', 'create-image', { name: 'image.generate', input: { target: originalTarget, prompt: 'Controlled replacement' } }))
+  expect(ready.status).toBe('ready')
+  await host.tools.stop('original')
+  await begin('outside', false)
+  expect(await host.tools.execute('outside', 'denied-recovery', { name: 'image.status', input: { job: ready.job } }))
+    .toMatchObject({ kind: 'error', message: expect.stringContaining('已授权文档') })
+  await begin('continuation')
+  expect(data(await host.tools.execute('continuation', 'job-read', { name: 'job.status', input: { kind: 'image', job: ready.job } })))
+    .toMatchObject({ status: 'ready', terminal: true })
+  const recovered = data(await host.tools.execute('continuation', 'recover-image', { name: 'image.status', input: { job: ready.job } }))
+  expect(recovered).toMatchObject({ job: ready.job, documentId: document.documentId, status: 'ready', stopped: false })
+  expect(recovered.resources[0].resource).not.toBe(ready.resources[0].resource)
+  await expect(host.tools.readImageResource('continuation', document.documentId, ready.resources[0].resource)).rejects.toThrow()
+  const freshTarget = await host.tools.issueTarget('continuation', document.documentId, target)
+  expect(await host.tools.execute('continuation', 'apply-image', { name: 'media.apply', input: { target: freshTarget, resource: recovered.resources[0].resource } }))
+    .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  const current = await host.internalAPI.read(document.documentId)
+  if (current.model.kind !== 'course-v10') throw new Error('Expected course document')
+  const picture = current.model.project.instances.picture
+  expect(picture.frame).toEqual(frame)
+  expect(current.undoDepth).toBe(1)
+  const source = current.model.resources.assets[picture.data.assetId as string]
+  expect(await sharp(source).raw().toBuffer()).toEqual(await sharp(replacement).raw().toBuffer())
+  expect(await images.read(ready.job)).toMatchObject({ runId: 'original', documentId: document.documentId, status: 'ready', stopped: false })
+  expect(calls).toBe(1)
+  await host.tools.stop('outside'); await host.tools.stop('continuation')
+})
 
 it('reopens only a ready resource of the exact durable job without another provider call', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-image-continuation-'))
