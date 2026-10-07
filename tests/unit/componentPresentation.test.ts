@@ -7,6 +7,8 @@ import { resolveFlowPaperBackground } from '../../src/shared/flowBodyPresentatio
 import { InstanceView } from '../../src/renderer/documents/CourseV10DocumentView'
 import { createComponentModelProjection } from '../../src/player/componentPlatform/modelProjection'
 import type { ComponentPlatformRuntime } from '../../src/player/components/ComponentPlatformRuntime'
+import { mountV10Model } from '../../src/player/componentPlatform/ModelPlayer'
+import { createTextComponentData } from '../../src/components/text/data'
 
 function fixture(): CourseProjectV10 {
   return { schemaVersion: 10, id: 'presentation', revision: 0, title: 'Flow presentation',
@@ -80,5 +82,28 @@ describe('shared component outer presentation', () => {
     expect(root.querySelector('[data-component-runtime-root="group"]')).toBe(playerContent)
     expect(runtime.bind).toHaveBeenCalledTimes(4)
     projection.dispose(); react.unmount(); root.remove()
+  })
+
+  it('lets professional text participate in Flow floats and restores fixed-frame vertical alignment through the existing layout port', async () => {
+    const project = fixture(), data = createTextComponentData('Keep the authored text')
+    data.appearance.verticalAlign = 'middle'
+    project.definitions.text = { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } }
+    project.instances.text = { id: 'text', definitionId: 'text', data: JSON.parse(JSON.stringify(data)), frame: { width: 600, height: 300, transform: [1, 0, 0, 1, 0, 0] } }
+    project.surfaces[0].childIds = ['text']
+    project.surfaces.push({ id: 'slide', kind: 'slide', title: 'Slide', designSize: { width: 1280, height: 720 }, childIds: [] })
+    const root = document.createElement('div'); document.body.append(root)
+    const model = { kind: 'course-v10' as const, project, resources: { assets: {}, components: {} } }
+    const player = mountV10Model({ root, model, runScopeId: 'text-flow' })
+    try {
+      await player.ready
+      expect(root.querySelector<HTMLElement>('[data-text-component]')?.style).toMatchObject({ display: 'block', height: 'auto' })
+      project.surfaces[0].childIds = []; project.surfaces[1].childIds = ['text']
+      player.revealSurface('slide'); await player.update(model)
+      const text = root.querySelector<HTMLElement>('[data-text-component]')!
+      expect(text.style.display).toBe('flex')
+      expect(text.style.justifyContent).toBe('center')
+      expect(text.textContent).toBe('Keep the authored text')
+      expect(project.instances.text.data).toEqual(data)
+    } finally { await player.dispose(); root.remove() }
   })
 })
