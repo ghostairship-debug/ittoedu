@@ -8,6 +8,7 @@ import type { ImageJobSnapshot, ImageModelSelection } from '../../../shared/work
 import { imageResultsRequestSchema, type ImageResultEvent, type ImageResultOwner, type ImageResultView } from '../../../shared/workbench/imageResultsDesktop'
 import type { DocumentOperationResult } from '../../../shared/workbench/document'
 import type { ModelToolCall } from '../../../shared/workbench/tools'
+import { documentDigest } from '../../../core/documents/documentDigest'
 
 type Request = ReturnType<typeof imageResultsRequestSchema.parse>
 type ActionRequest = Extract<Request, { type: 'apply' | 'edit' }>
@@ -126,7 +127,10 @@ export class ImageResultsDesktopService {
     if (!conversation) throw new Error('图片所属会话已不存在')
     if (conversation.runIndex.builtinRunIds.includes(job.runId)) {
       const run = await this.options.execution.runs.read(job.runId)
-      if (!run || run.input.conversationId !== owner.conversationId || !run.input.documents.some(value => value.documentId === job.documentId)) throw new Error('图片运行不属于该会话文档')
+      const ownsWorkspace = Boolean(run?.input.workspaceRoot
+        && job.documentId === `workspace:${documentDigest({ root: run.input.workspaceRoot })}`)
+      if (!run || run.input.conversationId !== owner.conversationId
+        || !ownsWorkspace && !run.input.documents.some(value => value.documentId === job.documentId)) throw new Error('图片运行不属于该会话文档')
       return 'builtin'
     }
     if (conversation.runIndex.externalRunIds.includes(job.runId)) return 'external-mcp'
