@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { ComponentEdit } from '../../shared/contracts/component-platform'
 import { tableCellSpan } from '../../shared/tableMerge'
 import { tableEdit } from './adapters'
-import type { TableData } from './data'
+import { tableCellContent, type TableData } from './data'
 import type { TableEdit } from './edit'
 import { layoutTable } from './render'
 import { TextComponentEditor } from '../text/editor'
@@ -66,10 +66,9 @@ export function TableComponentEditor({ instanceId, data, onEdit, onUndo, onRedo 
       </tr>)}</tbody>
     </table>
     {cell && row && column && <div>
-      {formalCell?.content ? <section aria-label="单元格内容"><TextComponentEditor key={formalCell.id} data={createTextComponentData(formalCell.content)} revision={JSON.stringify(formalCell.content)}
+      {formalCell && <section aria-label="单元格内容"><TextComponentEditor key={formalCell.id} data={createTextComponentData(tableCellContent(formalCell))} revision={JSON.stringify(tableCellContent(formalCell))}
         onChange={next=>commit({kind:'cell-content',cellId:formalCell.id,content:next.content})} onUndo={onUndo} onRedo={onRedo} onDiagnostic={setError}/></section>
-        : <label>单元格内容<textarea key={`${instanceId}:${cell.id}:${cell.text}`} defaultValue={cell.text}
-        onBlur={event => { if (event.target.value !== cell.text) void apply({ kind: 'cell-text', cellId: cell.id, text: event.target.value }) }} /></label>}
+      }
       <label>行高<input type="number" min={20} max={2000} value={row.height}
         onChange={event => void apply({ kind: 'row-height', rowId: row.id, height: event.target.valueAsNumber })} /></label>
       <label>列宽<input type="number" min={24} max={2000} value={column.width}
