@@ -14,6 +14,7 @@ import { isMeasuredWebFragmentBox, measuredFragmentExtent } from '../../componen
 import { authoredDocumentBootstrap, installAuthoredDocumentPrograms } from '../../components/web/authoredDocumentBootstrap'
 import { webRuntimeTargetProfile, type RuntimeTargetProfile, type WebRuntimeData } from '../../components/web/moduleGraph'
 import { refreshWebResourceReferences } from '../../components/web/resources'
+import { createDomAuthoring } from '../../components/web/authoringDom'
 
 export interface RuntimeTargetSnapshot { reference: ComponentTarget; instanceId: string; value?: JsonValue }
 export interface ComponentBootstrapTransport {
@@ -23,7 +24,7 @@ export interface ComponentBootstrapTransport {
 interface SnapshotPorts { state(): Record<string, JsonValue>; targets(profile: RuntimeTargetProfile): RuntimeTargetSnapshot[]; instance?(value: ComponentInstance): ComponentInstance<JsonValue | WebRuntimeData> | Promise<ComponentInstance<JsonValue | WebRuntimeData>>; teacherController?: TeacherControllerPort; htmlAuthoring?: boolean; builtinKey?: string; connectOrigins?(): readonly string[]; themeCss?(): string; resources?(): Record<string, string>; resourceBindings?: Readonly<Record<string, string>>; bootstrap?: ComponentBootstrapTransport }
 
 /** Serialized trusted bridge only. Author code arrives through its dedicated port. */
-function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences }, authoredDocument?: { release(): void }) {
+function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences; authoring: typeof createDomAuthoring }, authoredDocument?: { release(): void }) {
   // This fixed loader is created only inside the content realm. Keeping import's
   // syntax in its string prevents Vite from inserting a parent lexical helper.
   const importModule = new Function('url', 'return import(url)') as (url: string) => Promise<Record<string, any>>
@@ -104,6 +105,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
   const interactionListeners = new Map<number, (value?: unknown) => void>()
   let interaction: { surfaceId: string | null; stateId: string | null } | undefined
   let originalHtml: string | undefined, observeHtml = false, collectHtml = () => {}
+  let contentAuthoring: ReturnType<typeof createDomAuthoring> | undefined
   let teacher: { snapshot: TeacherControllerSnapshot; allowed: Record<string, boolean> } | undefined, teacherSequence = 0
   const teacherListeners = new Set<() => void>(), teacherPending = new Map<number, { resolve(value: boolean): void; reject(error: Error): void }>()
   const teacherRequest = (method: string, values: object = {}) => new Promise<boolean>((resolve, reject) => {
@@ -284,7 +286,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
           read: () => teacher!.snapshot,
           subscribe: (listener: () => void) => { teacherListeners.add(listener); return () => { teacherListeners.delete(listener) } },
           canExecute: (action: TeacherControllerAction) => Boolean(teacher?.allowed[action.type]) && (action.type !== 'scene.go'
-            || !action.targetStateId && teacher!.snapshot.scenes.some(scene => scene.id === action.sceneId)),
+            || teacher!.snapshot.scenes.some(scene => scene.id === action.sceneId)),
           execute: (action: TeacherControllerAction) => teacherRequest('execute', { action }),
           setCollapsed: (value: boolean) => { void teacherRequest('setCollapsed', { value }).catch(() => {}) },
           moveBy: (dx: number, dy: number) => { void teacherRequest('moveBy', { dx, dy }).catch(() => {}) },
@@ -325,6 +327,22 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
         if (!active) { await mounted?.dispose(); mounted = undefined; return }
         if (!mounted || typeof mounted.update !== 'function' || typeof mounted.dispose !== 'function') throw new Error('mount 必须返回 update/dispose 生命周期')
         if (documentRoot && !authoredDocument) cleanups.add(() => { document.head.prepend(fragmentDefaults); document.body.append(fragmentRoot) })
+        // Content application is always active, including Published/read-only
+        // consumers. Editor target observation below is a separate concern.
+        if (root && instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data)
+          && typeof instance.data.html === 'string') {
+          contentAuthoring = fragmentBox.authoring(root, {
+            records: () => (instance.data as unknown as WebRuntimeData).authoringRecords ?? {},
+            resolveResource: reference => resourceUrls[(instance.data as unknown as WebRuntimeData).resourceBindings?.[reference] ?? resourceBindings[reference] ?? reference] ?? reference,
+            resourceReference: url => Object.entries((instance.data as unknown as WebRuntimeData).resourceBindings ?? {})
+              .find(([, id]) => resourceUrls[id] === url)?.[0],
+            report: (authorKey, status) => {
+              if (status === 'unresolved') scope.events.emit('component.diagnostic', { instanceId: instance.id, authorKey,
+                message: '内部作者对象当前无法唯一重绑定；原内容与作者修改已保留，尚未应用' })
+            },
+          })
+          cleanups.add(() => { contentAuthoring?.dispose(); contentAuthoring = undefined })
+        }
         if (root && observeHtml && originalHtml !== undefined) {
           const fragmentKey = String(message.fragmentStateKey), hiddenStyles = new WeakMap<HTMLElement, { value: string; priority: string }>()
           const applyFragments = () => {
@@ -363,6 +381,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
             const source = new DOMParser().parseFromString(originalHtml, 'text/html')
             const projected = new DOMParser().parseFromString(String((instance.data as Record<string, JsonValue>).html ?? ''), 'text/html')
             const reports: unknown[] = []
+            const reported = new Set<Node>()
             const origin = documentRoot ? { x: 0, y: 0 } : root.getBoundingClientRect()
             const walk = (live: Element, original: Element, bound: Element) => {
               if (live.localName !== original.localName && live !== root || original.localName !== bound.localName) return
@@ -371,12 +390,14 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
                 const range = document.createRange(); range.selectNodeContents(node)
                 const rect = range.getBoundingClientRect()
                 let handle = handles.get(node); if (!handle) { handle = `html:${++sequence}`; handles.set(node, handle) }
+                reported.add(node)
                 reports.push({ handle, kind: 'text', domPath: pathFor(original), sectionOrder: sectionOrder(original), rawText: node.textContent,
                   attributeName: null, scriptCreated: false, rect: { x: rect.x - origin.x, y: rect.y - origin.y, width: rect.width, height: rect.height } })
               }
               if (live.localName === 'img' && live.getAttribute('src') === bound.getAttribute('src')) {
                 const rect = live.getBoundingClientRect()
                 let handle = handles.get(live); if (!handle) { handle = `html:${++sequence}`; handles.set(live, handle) }
+                reported.add(live)
                 reports.push({ handle, kind: 'image', domPath: pathFor(original), sectionOrder: sectionOrder(original), rawText: original.getAttribute('src') ?? '',
                   attributeName: 'src', scriptCreated: false, rect: { x: rect.x - origin.x, y: rect.y - origin.y, width: rect.width, height: rect.height } })
               }
@@ -385,6 +406,27 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
               Array.from(live.children).filter(element => element.localName !== 'script').forEach((child, index) => { if (originals[index] && bindings[index]) walk(child, originals[index], bindings[index]) })
             }
             walk(root, source.body, projected.body)
+            for (const observed of contentAuthoring?.scan() ?? []) {
+              const { node, authorKey, record, initialValue, geometry, bindingStatus } = observed
+              // Once an object has a formal override that is its effective
+              // owner, even if it also happens to have a static source span.
+              if (reported.has(node) && !(instance.data as unknown as WebRuntimeData).authoringRecords?.[authorKey]) {
+                const report = reports.find(report => (report as { handle: string }).handle === handles.get(node)) as Record<string, unknown> | undefined
+                if (report) { report.authoring = { authorKey, record }; report.bindingStatus = bindingStatus; if (geometry) report.geometry = geometry }
+                continue
+              }
+              const element = node.nodeType === Node.TEXT_NODE ? node.parentElement! : node as HTMLImageElement
+              const rect = node.nodeType === Node.TEXT_NODE ? (() => { const range = document.createRange(); range.selectNodeContents(node); return range.getBoundingClientRect() })() : element.getBoundingClientRect()
+              if (!rect.width || !rect.height) continue
+              let handle = handles.get(node); if (!handle) { handle = `html:${++sequence}`; handles.set(node, handle) }
+              if (reported.has(node)) {
+                const index = reports.findIndex(report => (report as { handle: string }).handle === handle)
+                if (index !== -1) reports.splice(index, 1)
+              }
+              reports.push({ handle, kind: record.kind, domPath: pathFor(element), sectionOrder: sectionOrder(element), rawText: initialValue,
+                attributeName: record.kind === 'image' ? 'src' : null, scriptCreated: !reported.has(node),
+                authoring: { authorKey, record }, bindingStatus, ...(geometry ? { geometry } : {}), rect: { x: rect.x - origin.x, y: rect.y - origin.y, width: rect.width, height: rect.height } })
+            }
             const sourceElement = source.body.firstElementChild as HTMLElement | SVGElement | null
             const liveElement = root.firstElementChild as HTMLElement | SVGElement | null
             const sourceStyle = sourceElement?.style ? Object.fromEntries(Array.from({ length: sourceElement.style.length }, (_unused, index) => {
@@ -422,6 +464,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
         states = message.state as Record<string, JsonValue>
         interaction = message.interaction as typeof interaction
         await mounted?.update(instance)
+        contentAuthoring?.refresh()
         collectHtml()
       } else if (message.type === 'placement') {
         if (!active) return
@@ -514,7 +557,7 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
   // parent's CSP or Blob storage key. Standalone HTML owns this inline document.
   // The author module still arrives over a dedicated port and is loaded by the child.
   const bridge = (programs?: import('../../components/web/authoredDocumentBootstrap').AuthoredDocumentPrograms) =>
-    `(function(){${programs ? `const authored=(${installAuthoredDocumentPrograms.toString()})(${JSON.stringify(programs)});` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),refreshResources:(${refreshWebResourceReferences.toString()})}${programs ? ',authored' : ''})})()`
+    `(function(){${programs ? `const authored=(${installAuthoredDocumentPrograms.toString()})(${JSON.stringify(programs)});` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),refreshResources:(${refreshWebResourceReferences.toString()}),authoring:(${createDomAuthoring.toString()})}${programs ? ',authored' : ''})})()`
   let lease: ComponentBootstrapLease | undefined, htmlUrl: string | undefined
   const channel = new MessageChannel(), port = channel.port1
   let scope: ComponentRuntimeScope | undefined, authoring: ComponentRuntimeContext['authoring'], layoutPort: ComponentLayoutPort | undefined, disposed = false, sequence = 0
@@ -770,10 +813,18 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
         const parsed = htmlPreviewTargetReportSchema.safeParse(report)
         if (!parsed.success) continue
         const resolved = locateHtmlSourceTarget(html, parsed.data, { documentId: scope.runScopeId, epoch: String(scope.generation), revision: 0, bindingVersion: 0 })
-        if (resolved.status !== 'editable' || !resolved.locator.valueSpan) continue
         const { handle, kind, rawText, rect } = parsed.data
+        const observed = parsed.data.authoring
+        const record = observed?.record
+        const stored = observed && data && typeof data === 'object' && !Array.isArray(data)
+          ? data.authoringRecords && typeof data.authoringRecords === 'object' && !Array.isArray(data.authoringRecords) && data.authoringRecords[observed.authorKey] : undefined
+        const source = !stored && resolved.status === 'editable' && resolved.locator.valueSpan ? resolved.locator.valueSpan : undefined
+        if (!source && (!observed || !record || record.kind !== kind || record.binding?.kind !== 'dom')) continue
         const input: ComponentAuthorSpotInput = { kind, initialValue: rawText,
-          sourceRegion: { kind: 'data', path: ['html'], ...resolved.locator.valueSpan, encoding: kind === 'text' ? 'html-text' : 'html-attribute' },
+          ...(observed && record ? { authorKey: observed.authorKey, scope: record.scope, binding: record.binding, bindingStatus: parsed.data.bindingStatus ?? 'bound' as const } : {}),
+          ...(parsed.data.geometry ? { geometry: parsed.data.geometry } : {}),
+          ...(source ? { sourceRegion: { kind: 'data' as const, path: ['html'], ...source, encoding: kind === 'text' ? 'html-text' as const : 'html-attribute' as const } }
+            : { dataPath: ['authoringRecords', observed!.authorKey, 'overrides', kind === 'text' ? 'text' : 'src'] }),
           localBounds: { width: Math.max(1, rect.width), height: Math.max(1, rect.height), transform: [1, 0, 0, 1, rect.x, rect.y] } }
         const signature = JSON.stringify(input), previous = observedSpots.get(handle)
         present.add(handle)
@@ -874,7 +925,7 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
           ? authoredDocumentBootstrap(projected.data as WebRuntimeData, { nonce, instanceId: context.instance.id, bridge, resources, themeCss: snapshots.themeCss?.(), resourceCss: typeof data?.css === 'string' ? data.css : undefined })
           : `<!doctype html><meta charset="utf-8"><style id="component-defaults">html,body,#component-root{width:100%;height:100%;margin:0}</style><div id="component-root"></div><script>${bridge().replace(/<\/script/gi, '<\\/script')}</script>`
         lease = bootstrapApi ? await bootstrapApi.createComponentBootstrap!({ leaseId, html, connectOrigins: [...(snapshots.connectOrigins?.() ?? [])],
-          resourceSources: web && Array.isArray(data?.resourceSources) ? data.resourceSources as ComponentBootstrapInput['resourceSources'] : undefined,
+          resourceSources: web && Array.isArray(data?.resourceSources) ? data.resourceSources as unknown as ComponentBootstrapInput['resourceSources'] : undefined,
           remoteAssetUrls: Object.values(resources).filter(url => /^https?:/i.test(url)) }) : undefined
         if (signal.aborted || !scope.isActive()) {
           if (lease) await bootstrapApi!.releaseComponentBootstrap!({ leaseId })

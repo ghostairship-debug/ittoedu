@@ -1,10 +1,12 @@
-import type { ComponentAuthorBinding, ComponentAuthorRecord, ComponentAuthorScope } from '../../shared/contracts/component-platform/runtime'
+import type { ComponentAuthorBinding, ComponentAuthorRecord, ComponentAuthorScope, ComponentAuthorGeometryObservation } from '../../shared/contracts/component-platform/runtime'
 
 export interface DomAuthorObservation {
   node: Text | HTMLImageElement
   authorKey: string
   record: ComponentAuthorRecord
   initialValue: string
+  bindingStatus: 'bound' | 'unresolved'
+  geometry?: ComponentAuthorGeometryObservation
 }
 
 /**
@@ -15,6 +17,7 @@ export interface DomAuthorObservation {
 export function createDomAuthoring(root: HTMLElement, options: {
   records(): Record<string, ComponentAuthorRecord>
   resolveResource?(reference: string): string | undefined
+  resourceReference?(url: string): string | undefined
   onChange?(): void
   report?(authorKey: string, status: 'bound' | 'unmounted' | 'unresolved'): void
 }) {
@@ -29,6 +32,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
   let reactScopes = new WeakMap<Element, ComponentAuthorScope>()
   const elementOf = (node: Target) => node.nodeType === 3 ? node.parentElement! : node as HTMLImageElement
   const valueOf = (node: Target) => node.nodeType === 3 ? node.nodeValue ?? '' : (node as HTMLImageElement).getAttribute('src') ?? ''
+  const authorValueOf = (node: Target) => node.nodeType === 3 ? valueOf(node) : options.resourceReference?.(valueOf(node)) ?? valueOf(node)
   const eligible = (node: Node): node is Target => node.nodeType === 1 && (node as Element).localName === 'img'
     || node.nodeType === 3 && Boolean(node.nodeValue?.trim()) && Boolean(node.parentElement)
       && !node.parentElement!.closest('script,style,noscript,template,textarea,title,option,[contenteditable],[data-html-preview-edit-markers]')
@@ -124,7 +128,8 @@ export function createDomAuthoring(root: HTMLElement, options: {
       if (!node) return []
       const value = valueOf(node), override = record.kind === 'text' ? record.overrides.text : record.overrides.src
       const resolvedOverride = record.kind === 'image' && override ? options.resolveResource?.(override) ?? override : override
-      if (value !== record.binding.baseline && value !== resolvedOverride
+      const baseline = record.kind === 'image' ? options.resolveResource?.(record.binding.baseline) ?? record.binding.baseline : record.binding.baseline
+      if (value !== baseline && value !== resolvedOverride
         && !(previous?.node === node && value === previous.content?.applied)) return []
       if (record.binding.context?.some(context => {
         const anchors = elementsAt(context.path)
@@ -133,10 +138,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
       return [node]
     })
     if (nodes.length === 1) return { node: nodes[0], status: 'bound' }
-    // During this mount an exact selected node is known, even before its first
-    // record is saved. Ambiguous replacement nodes cannot inherit that fact.
-    const mounted = nodes.filter(node => descriptions.get(node)?.observation.authorKey === key)
-    return mounted.length === 1 ? { node: mounted[0], status: 'bound' } : { status: 'unresolved' }
+    return { status: 'unresolved' }
   }
   const status = (key: string, value: 'bound' | 'unmounted' | 'unresolved') => {
     if (statuses.get(key) !== value) { statuses.set(key, value); options.report?.(key, value) }
@@ -249,7 +251,8 @@ export function createDomAuthoring(root: HTMLElement, options: {
           const state = active.get(key) ?? { node: result.node, attributes: new Map(), styles: new Map() }
           active.set(key, state); apply(record, state)
           descriptions.set(result.node, { scope: ordered(record.scope ?? {}), observation: {
-            node: result.node, authorKey: key, record, initialValue: valueOf(result.node),
+            node: result.node, authorKey: key, record, initialValue: record.kind === 'image' ? record.overrides.src ?? authorValueOf(result.node) : valueOf(result.node),
+            bindingStatus: 'bound',
           } })
         }
         status(key, result.status)
@@ -262,15 +265,79 @@ export function createDomAuthoring(root: HTMLElement, options: {
     const previous = descriptions.get(node)
     if (previous?.scope === scopeKey) {
       const record = options.records()[previous.observation.authorKey]
-      if (record || previous.observation.record.binding.baseline === valueOf(node)) return { ...previous.observation, ...(record ? { record } : {}), initialValue: valueOf(node) }
+      if (record || previous.observation.record.binding.baseline === authorValueOf(node)) return { ...previous.observation, ...(record ? { record } : {}),
+        bindingStatus: resolve(previous.observation.authorKey, record ?? previous.observation.record, active.get(previous.observation.authorKey)).node === node ? 'bound' : 'unresolved',
+        initialValue: record?.kind === 'image' ? record.overrides.src ?? authorValueOf(node) : authorValueOf(node) }
     }
-    const binding: ComponentAuthorBinding = { kind: 'dom', path: pathFor(element), baseline: valueOf(node),
+    const binding: ComponentAuthorBinding = { kind: 'dom', path: pathFor(element), baseline: authorValueOf(node),
       ...(node.nodeType === 3 ? { textIndex: [...element.childNodes].filter(child => child.nodeType === 3).indexOf(node) } : {}) }
     const observation: DomAuthorObservation = { node, authorKey: `dom-${win.crypto.randomUUID()}`,
       record: { kind: node.nodeType === 3 ? 'text' : 'image', binding, ...(Object.keys(scope).length ? { scope } : {}), overrides: {} },
-      initialValue: valueOf(node) }
+      initialValue: authorValueOf(node), bindingStatus: 'bound' }
+    if (resolve(observation.authorKey, observation.record).node !== node) observation.bindingStatus = 'unresolved'
     descriptions.set(node, { scope: scopeKey, observation })
     return observation
+  }
+  const geometry = (node: Node): ComponentAuthorGeometryObservation | undefined => {
+    if (!eligible(node) || !root.contains(node) || !win.DOMMatrix) return undefined
+    const element = elementOf(node)
+    if (!(element instanceof win.HTMLElement) || !element.parentElement) return undefined
+    // A text run with siblings is part of its parent's rich content, not an
+    // independently resizable element. Its content is still directly editable.
+    if (node.nodeType === 3 && [...element.childNodes].filter(child => child.nodeType === 1 || child.textContent?.trim()).length !== 1) return undefined
+    type Matrix = ComponentAuthorGeometryObservation['parentToInstance']
+    const multiply = (a: Matrix, b: Matrix): Matrix => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1],
+      a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]]
+    const invert = (m: Matrix): Matrix | undefined => {
+      const determinant = m[0] * m[3] - m[1] * m[2]
+      return Math.abs(determinant) < 1e-10 ? undefined : [m[3] / determinant, -m[1] / determinant, -m[2] / determinant, m[0] / determinant,
+        (m[2] * m[5] - m[3] * m[4]) / determinant, (m[1] * m[4] - m[0] * m[5]) / determinant]
+    }
+    const number = (value: string) => Number.parseFloat(value) || 0
+    const box = (target: HTMLElement) => {
+      const computed = win.getComputedStyle(target), rect = target.getBoundingClientRect()
+      const horizontal = number(computed.paddingLeft) + number(computed.paddingRight) + number(computed.borderLeftWidth) + number(computed.borderRightWidth)
+      const vertical = number(computed.paddingTop) + number(computed.paddingBottom) + number(computed.borderTopWidth) + number(computed.borderBottomWidth)
+      const width = computed.display === 'inline' || !Number.isFinite(parseFloat(computed.width)) ? target.offsetWidth
+        : number(computed.width) + (computed.boxSizing === 'border-box' ? 0 : horizontal)
+      const height = computed.display === 'inline' || !Number.isFinite(parseFloat(computed.height)) ? target.offsetHeight
+        : number(computed.height) + (computed.boxSizing === 'border-box' ? 0 : vertical)
+      if (!(width > 0 && height > 0 && rect.width > 0 && rect.height > 0)) return undefined
+      let linear: Matrix = [1, 0, 0, 1, 0, 0]
+      for (let current: HTMLElement | null = target; current; current = current.parentElement) {
+        const style = win.getComputedStyle(current)
+        if (style.perspective && style.perspective !== 'none') return undefined
+        const transform = new win.DOMMatrix(style.transform === 'none' ? undefined : style.transform)
+        if (!transform.is2D) return undefined
+        let rotation = 0
+        if (style.rotate && style.rotate !== 'none') {
+          const match = /^(?:z\s+)?(-?[\d.]+)(deg|rad|turn)$/.exec(style.rotate)
+          if (!match) return undefined
+          rotation = Number(match[1]) * (match[2] === 'deg' ? Math.PI / 180 : match[2] === 'turn' ? Math.PI * 2 : 1)
+        }
+        const scale = style.scale && style.scale !== 'none' ? style.scale.split(/\s+/).map(Number) : [1, 1]
+        if (scale.some(value => !Number.isFinite(value)) || scale.length > 2) return undefined
+        const zoom = parseFloat(style.zoom) || 1, x = scale[0]! * zoom, y = (scale[1] ?? scale[0])! * zoom
+        const cosine = Math.cos(rotation), sine = Math.sin(rotation)
+        const local = multiply([cosine * x, sine * x, -sine * y, cosine * y, 0, 0], [transform.a, transform.b, transform.c, transform.d, 0, 0])
+        linear = multiply(local, linear)
+      }
+      const xs = [0, linear[0] * width, linear[2] * height, linear[0] * width + linear[2] * height]
+      const ys = [0, linear[1] * width, linear[3] * height, linear[1] * width + linear[3] * height]
+      const matrix: Matrix = [...linear.slice(0, 4), rect.x - Math.min(...xs), rect.y - Math.min(...ys)] as Matrix
+      return { width, height, matrix, boxInsets: { width: computed.boxSizing === 'border-box' ? 0 : horizontal, height: computed.boxSizing === 'border-box' ? 0 : vertical } }
+    }
+    try {
+      const measured = box(element), parent = box(element.parentElement)
+      if (!measured || !parent) return undefined
+      const inverseParent = invert(parent.matrix)
+      const rootBox = root === doc.body ? undefined : box(root)
+      const toInstance: Matrix | undefined = root === doc.body ? [1, 0, 0, 1, 0, 0] : rootBox && invert(rootBox.matrix)
+      if (!inverseParent || !toInstance) return undefined
+      const observation = describe(node)
+      return { frame: { width: measured.width, height: measured.height, transform: multiply(inverseParent, measured.matrix) },
+        parentToInstance: multiply(toInstance, parent.matrix), author: observation?.record.overrides.geometry ?? {}, boxInsets: measured.boxInsets }
+    } catch { return undefined }
   }
   const enqueue = () => {
     if (queued || disposed) return
@@ -283,7 +350,8 @@ export function createDomAuthoring(root: HTMLElement, options: {
   return {
     refresh,
     describe,
-    scan(): DomAuthorObservation[] { refresh(); return targets().flatMap(node => { const value = describe(node); return value ? [value] : [] }) },
+    geometry,
+    scan(): DomAuthorObservation[] { refresh(); return targets().flatMap(node => { const value = describe(node); return value ? [{ ...value, geometry: geometry(node) }] : [] }) },
     dispose() { if (disposed) return; disposed = true; observer.disconnect(); for (const state of active.values()) restore(state); active.clear() },
   }
 }

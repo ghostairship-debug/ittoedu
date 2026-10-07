@@ -3,6 +3,9 @@ import { mountPagination, type HtmlPreviewPagination } from './htmlPreviewPagina
 import { mountPlaceholders } from './htmlPreviewPlaceholders'
 import { HTML_PREVIEW_TARGET_MAX, htmlPreviewTargetReportSchema } from '../../shared/workbench/htmlPreview'
 import type { z } from 'zod'
+import { createDomAuthoring } from '../../components/web/authoringDom'
+import type { ComponentAuthorRecord } from '../../shared/contracts/component-platform/runtime'
+import { componentAuthorRecordsSchema } from '../../shared/contracts/component-platform/schema'
 
 type HtmlPreviewTargetReport = z.infer<typeof htmlPreviewTargetReportSchema>
 
@@ -15,7 +18,8 @@ type Visibility = { type: 'html-preview.visibility'; loadId: string; active: boo
 type ConfirmTargets = { type: 'html-preview.confirm-targets'; loadId: string; scanId: string; handles: string[] }
 type RefreshTargets = { type: 'html-preview.refresh-targets'; loadId: string }
 type Selection = { type: 'html-preview.selection'; loadId: string; handle: string | null; editable: boolean }
-type Command = Init | Patch | Navigate | Restore | EditMode | Visibility | ConfirmTargets | RefreshTargets | Selection
+type AuthoringRecords = { type: 'html-preview.authoring-records'; loadId: string; records: Record<string, ComponentAuthorRecord> }
+type Command = Init | Patch | Navigate | Restore | EditMode | Visibility | ConfirmTargets | RefreshTargets | Selection | AuthoringRecords
 
 interface RuntimeNodeTracking {
   isRuntimeNode(node: Node): boolean
@@ -148,6 +152,18 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
   const win = doc.defaultView
   if (!win || !doc.body) return () => {}
   const tracking = inheritedTracking ?? trackScriptMutations(doc)
+  const authorWindow = win as Window & { __cwHtmlAuthoringRecords?: Record<string, ComponentAuthorRecord>;
+    __cwHtmlAuthoringConsumer?: ReturnType<typeof createDomAuthoring> }
+  if (!authorWindow.__cwHtmlAuthoringRecords) {
+    try {
+      const value = JSON.parse(doc.getElementById('cw-html-authoring-records')?.textContent ?? '{}')
+      const parsed = componentAuthorRecordsSchema.safeParse(value)
+      authorWindow.__cwHtmlAuthoringRecords = parsed.success ? parsed.data : {}
+    } catch { authorWindow.__cwHtmlAuthoringRecords = {} }
+  }
+  const inheritedConsumer = authorWindow.__cwHtmlAuthoringConsumer
+  const authoring = inheritedConsumer ?? createDomAuthoring(doc.body, { records: () => authorWindow.__cwHtmlAuthoringRecords ?? {} })
+  authorWindow.__cwHtmlAuthoringConsumer = authoring
   const handles = new WeakMap<Node, string>()
   const nodes = new Map<string, Node>()
   const imageOriginals = new WeakMap<HTMLImageElement, {
@@ -185,11 +201,14 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       sources: Array.from(node.parentElement?.localName === 'picture' ? node.parentElement.querySelectorAll('source') : [])
         .map(source => ({ node: source, srcset: source.getAttribute('srcset'), sizes: source.getAttribute('sizes'), type: source.getAttribute('type') })),
     })
+    const observation = authoring.describe(node)
+    const geometry = authoring.geometry(node)
     return { handle: handleOf(node), kind: node instanceof HTMLImageElement ? 'image' : 'text',
       domPath: pathFor(element), sectionOrder: sectionOrder(element),
       rawText: node instanceof HTMLImageElement ? node.getAttribute('src') ?? '' : node.data,
       attributeName: node instanceof HTMLImageElement ? 'src' : null,
-      rect, scriptCreated: tracking.isRuntimeNode(node) }
+      rect, scriptCreated: tracking.isRuntimeNode(node), ...(geometry ? { geometry } : {}),
+      ...(observation ? { bindingStatus: observation.bindingStatus, authoring: { authorKey: observation.authorKey, record: observation.record } } : {}) }
   }
   let visible = true
   let scanSerial = 0
@@ -218,7 +237,7 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       const rect = rectOf(node)
       if (!rect.width || !rect.height || rect.x + rect.width <= 0 || rect.y + rect.height <= 0
         || rect.x >= win.innerWidth || rect.y >= win.innerHeight) continue
-      const editable = confirmed.has(handle) && !tracking.isRuntimeNode(node)
+      const editable = confirmed.has(handle)
       if (!editable && handle !== selected) continue
       const active = handle === selected || handle === hovered
       const mark = doc.createElement('div')
@@ -232,6 +251,7 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
   const discoverTargets = () => {
     discoveryFrame = 0
     if (!editMode || !visible || disposed) return
+    authoring.refresh()
     scanId = `edit-scan-${++scanSerial}`
     candidates.clear()
     const reports: HtmlPreviewTargetReport[] = []
@@ -291,6 +311,7 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
   }
   const onClick = (event: MouseEvent) => {
     if (!visible || !loadId || !editMode || event.button !== 0) return
+    authoring.refresh()
     const target = event.target
     const image = target instanceof HTMLImageElement ? target : null
     const targetReport = image ? report(image) : textReportAt(event)
@@ -327,6 +348,14 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       return
     }
     if (!loadId || message.loadId !== loadId) return
+    if (message.type === 'html-preview.authoring-records') {
+      const parsed = componentAuthorRecordsSchema.safeParse(message.records)
+      if (!parsed.success) return
+      authorWindow.__cwHtmlAuthoringRecords = parsed.data
+      tracking.withoutTracking(() => authoring.refresh())
+      scheduleDiscovery()
+      return
+    }
     if (message.type === 'html-preview.visibility' && typeof message.active === 'boolean') { setVisible(message.active); return }
     if (message.type === 'html-preview.edit-mode' && typeof message.enabled === 'boolean'
       && typeof message.requestId === 'string' && message.requestId.length > 0 && message.requestId.length <= 256) {
@@ -439,6 +468,10 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
     pagination.destroy()
     placeholders.destroy()
     nodes.clear()
+    if (!inheritedConsumer) {
+      authoring.dispose()
+      if (authorWindow.__cwHtmlAuthoringConsumer === authoring) delete authorWindow.__cwHtmlAuthoringConsumer
+    }
     tracking.destroy()
   }
 }

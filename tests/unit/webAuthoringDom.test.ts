@@ -10,6 +10,17 @@ afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 const flush = async () => { await Promise.resolve(); await Promise.resolve() }
 
 describe('persistent local DOM authoring', () => {
+  it('reports indistinguishable dynamic siblings before an edit can appear applied only for one mount', () => {
+    const root = document.createElement('div'); document.body.append(root)
+    root.innerHTML = '<p>same</p><p>same</p>'
+    let records: Record<string, ComponentAuthorRecord> = {}
+    const consumer = createDomAuthoring(root, { records: () => records }); cleanups.push(() => consumer.dispose())
+    const selected = consumer.scan()[1]!
+    expect(selected.bindingStatus).toBe('unresolved')
+    records = { [selected.authorKey]: { ...selected.record, overrides: { text: 'Do not guess' } } }
+    consumer.refresh()
+    expect([...root.querySelectorAll('p')].map(node => node.textContent)).toEqual(['same', 'same'])
+  })
   it('keeps keyed duplicate React text and image edits through state changes, reorder, undo and a cold mount', async () => {
     let records: Record<string, ComponentAuthorRecord> = {}
     const container = document.createElement('div'); document.body.append(container)
