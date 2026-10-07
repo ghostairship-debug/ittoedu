@@ -188,7 +188,9 @@ export function SpatialPathEditor(props: SpatialPathEditorProps): React.JSX.Elem
   }
 
   const layerLabel = (instanceId: string): string => {
-    const data = worldInstances.find(item => item.id === instanceId)?.data
+    const instance = worldInstances.find(item => item.id === instanceId)
+    if (instance?.name?.trim()) return instance.name
+    const data = instance?.data
     return data && typeof data === 'object' && !Array.isArray(data) && typeof data.title === 'string' ? data.title : instanceId
   }
 

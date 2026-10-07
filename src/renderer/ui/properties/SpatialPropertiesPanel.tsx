@@ -29,7 +29,7 @@ export interface SpatialPropertiesCommands {
   readonly setHome: () => void
   readonly updateActiveFromSession: () => void
   readonly activateFrame: (frameId: string) => void
-  readonly fitWorldContent: () => void
+  readonly fitWorldContent: (scope?: 'visible' | 'all') => void
   readonly setPlaybackPathId: (pathId: string | null) => void
   readonly addSemanticZoomRule: (rule: {
     instanceIds: string[]

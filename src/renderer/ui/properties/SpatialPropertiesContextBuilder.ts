@@ -75,7 +75,7 @@ export function buildSpatialPropertiesOwner(input: {
       setHome: () => run(() => actions.setSpatialCameraHomeFromSession(surface.id, input.liveTarget())),
       updateActiveFromSession: () => run(() => actions.updateActiveSpatialCameraFrameFromSession(surface.id, input.liveTarget())),
       activateFrame: frameId => actions.activateSpatialCameraFrame(surface.id, frameId),
-      fitWorldContent: () => actions.fitSpatialSessionToWorldContent(undefined, surface.id),
+      fitWorldContent: scope => actions.fitSpatialSessionToWorldContent(undefined, surface.id, scope),
       setPlaybackPathId: pathId => actions.setSpatialPlaybackPathId(pathId, surface.id),
       addSemanticZoomRule: rule => run(() => actions.addSpatialSemanticZoomRule(surface.id, rule)),
       updateSemanticZoomRule: (ruleId, patch) => run(() => actions.updateSpatialSemanticZoomRule(surface.id, ruleId, patch, input.liveTarget())),

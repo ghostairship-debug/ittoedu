@@ -152,10 +152,10 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
       const frozen = target(captured)
       return apply([updateSpatialCameraFrameTargetEdit(frozen.project, id, frameId, instanceId)], frozen, '镜头跟随对象已更新')
     },
-    fitSpatialSessionToWorldContent(viewport?: { width: number; height: number }, id = surfaceId()) {
-      const project = kernel.readDocument()
-      const size = read(id).viewport ?? viewport ?? project.surfaces.find(surface => surface.id === id)?.designSize ?? { width: 1280, height: 720 }
-      patchView(id, { camera: fitSpatialComponentWorld(project, id, size) })
+    fitSpatialSessionToWorldContent(viewport?: { width: number; height: number }, id = surfaceId(), scope: 'visible' | 'all' = 'visible') {
+      const project = kernel.readEditingDocument(), view = read(id)
+      const size = view.viewport ?? viewport ?? project.surfaces.find(surface => surface.id === id)?.designSize ?? { width: 1280, height: 720 }
+      patchView(id, { camera: fitSpatialComponentWorld(project, id, size, { scope, zoom: view.camera.zoom }) })
     },
     addSpatialPath(id: string, input: Omit<NonNullable<ComponentSpatialAuthoring['paths']>[number], 'id' | 'frameIds'> & { frameIds?: string[] }, captured?: CapturedCourseTarget) {
       return author(id, value => { (value.paths ??= []).push({ ...input, id: crypto.randomUUID(), frameIds: input.frameIds ?? [] }) }, '已添加路径', captured)

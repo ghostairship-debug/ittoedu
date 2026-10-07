@@ -36,7 +36,7 @@ export interface SpatialCameraPanelProps {
   readonly onUpdateActiveFromSession?: () => void
   readonly onUpdateFrameTarget?: (frameId: string, instanceId: string | null) => void
   readonly onActivateFrame: (frameId: string) => void
-  readonly onFitWorldContent?: () => void
+  readonly onFitWorldContent?: (scope?: 'visible' | 'all') => void
   readonly onPlaybackPathIdChange?: (pathId: string | null) => void
   readonly onAddSemanticZoomRule: (rule: {
     instanceIds: string[]
@@ -104,6 +104,7 @@ export function SpatialCameraPanel({
 
   const layerLabel = (instanceId: string): string => {
     const instance = worldInstances.find(candidate => candidate.id === instanceId)
+    if (instance?.name?.trim()) return instance.name
     const data = instance?.data
     return data && typeof data === 'object' && !Array.isArray(data) && typeof data.title === 'string' ? data.title : instanceId
   }
@@ -183,19 +184,27 @@ export function SpatialCameraPanel({
           disabled={disabled || !sessionCamera || !activeCameraFrameId}
           onClick={onUpdateActiveFromSession}
         >
-          从当前画面更新此镜头
+          将当前画面保存为固定镜头
         </button>
       )}
-      {onFitWorldContent && (
+      {onFitWorldContent && <>
         <button
           type="button"
           className="secondary-button"
           disabled={disabled}
-          onClick={onFitWorldContent}
+          onClick={() => onFitWorldContent('visible')}
+        >
+          适配可见内容
+        </button>
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={disabled}
+          onClick={() => onFitWorldContent('all')}
         >
           适配全部内容
         </button>
-      )}
+      </>}
 
       {frames.map((frame) => (
         <div className="form-field" key={frame.id} data-frame-id={frame.id}>
@@ -227,7 +236,7 @@ export function SpatialCameraPanel({
           <p className="property-hint">
             x {Math.round(frame.pose.x)} y {Math.round(frame.pose.y)} · {Math.round(frame.pose.zoom * 100)}%
             {frame.pose.rotation ? ` · 旋转 ${Math.round(frame.pose.rotation)}°` : ''}
-            {frame.targetInstanceId ? ' · 跟随对象' : ''}
+            {frame.targetInstanceId ? ' · 跟随对象' : ' · 固定画面'}
           </p>
           {onUpdateFrameTarget && <label className="form-field">
             <span>跟随对象</span>
