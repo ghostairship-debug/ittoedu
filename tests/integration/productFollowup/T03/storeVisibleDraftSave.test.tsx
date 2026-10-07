@@ -34,6 +34,7 @@ it('one normal Store save drains unblurred source JSON and numeric inputs into t
     const filename = path.join(directory, 'saved.h5lesson')
     const unavailable = async (): Promise<never> => { throw new Error('No fixture dialog') }
     const api: DocumentHostAPI = { ...host.internalAPI, bootstrapCourse: async () => initial,
+      readAuthoringDrafts: id => host.readAuthoringDrafts(id), writeAuthoringDrafts: (id, drafts) => host.writeAuthoringDrafts(id, drafts), clearAuthoringDrafts: id => host.clearAuthoringDrafts(id),
       saveWithDialog: id => host.saveToPath(id, filename), closeWithDialog: unavailable, discardRecovery: unavailable,
       close: async (id, discardDirty) => { await host.operate({ type: 'close', documentId: id, discardDirty }) }, subscribe: listener => host.subscribeEvents(listener) }
     await useEditorStore.getState().connectCourseDocuments(api)

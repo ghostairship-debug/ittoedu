@@ -31,6 +31,7 @@ function project(): CourseProjectV10 {
 function api(host: DocumentHostService, initial: DocumentSnapshot): DocumentHostAPI {
   const unavailable = async (): Promise<never> => { throw new Error('No fixture dialog') }
   return { ...host.internalAPI, bootstrapCourse: async () => initial, saveWithDialog: unavailable, closeWithDialog: unavailable, discardRecovery: unavailable,
+    readAuthoringDrafts: id => host.readAuthoringDrafts(id), writeAuthoringDrafts: (id, drafts) => host.writeAuthoringDrafts(id, drafts), clearAuthoringDrafts: id => host.clearAuthoringDrafts(id),
     close: async (documentId, discardDirty) => { await host.operate({ type: 'close', documentId, discardDirty }) }, subscribe: listener => host.subscribeEvents(listener) }
 }
 async function fixture() {
@@ -98,12 +99,15 @@ it('preserves unfinished IME source as raw recovery input on a fresh Bridge unti
   const recovered = JSON.parse(JSON.stringify(courseDraftLifecycle(h.bridge).preserve(h.initial.documentId)))
   expect(recovered).toHaveLength(1)
   expect(recovered[0]).toMatchObject({ kind: 'source', payload: { composing: true } })
+  await h.host.writeAuthoringDrafts(h.initial.documentId, { advanced: recovered, properties: [] })
   editor.unmount()
-  const coldHost = new DocumentHostService(path.join(h.directory, 'cold-raw'))
-  const coldDoc = await coldHost.internalAPI.create(h.initial.model, 'lesson.h5lesson')
+  const coldHost = new DocumentHostService(path.join(h.directory, 'host'))
+  const coldDoc = await coldHost.internalAPI.restore(h.initial.documentId)
+  const persisted = await coldHost.readAuthoringDrafts(coldDoc.documentId)
+  expect(persisted?.advanced).toEqual(recovered)
   const coldBridge = new CourseV10DocumentBridge(); disposers.push(async () => coldBridge.dispose())
   await coldBridge.connect(api(coldHost, coldDoc)); coldBridge.selectInstances(coldDoc.documentId, ['a'], 'page')
-  expect(courseDraftLifecycle(coldBridge).restore(coldDoc.documentId, recovered)).toMatchObject({ restored: 1, issues: [] })
+  expect(courseDraftLifecycle(coldBridge).restore(coldDoc.documentId, persisted!.advanced)).toMatchObject({ restored: 1, issues: [] })
   h.render(<Source bridge={coldBridge} />)
   expect(h.screen.getByRole('textbox', { name: '组件实现源码' })).toHaveValue('export const value =')
   expect((await coldHost.internalAPI.read(coldDoc.documentId)).undoDepth).toBe(0)
@@ -192,12 +196,15 @@ it('unchanged Developer JSON creates no History and incomplete JSON restores ver
   expect(await courseDraftLifecycle(h.bridge).prepare(h.initial.documentId)).toMatchObject({ ready: false })
   const recovered = JSON.parse(JSON.stringify(courseDraftLifecycle(h.bridge).preserve(h.initial.documentId)))
   expect(recovered).toHaveLength(1)
+  await h.host.writeAuthoringDrafts(h.initial.documentId, { advanced: recovered, properties: [] })
   first.unmount()
-  const coldHost = new DocumentHostService(path.join(h.directory, 'cold-json'))
-  const coldDoc = await coldHost.internalAPI.create(h.initial.model, 'lesson.h5lesson')
+  const coldHost = new DocumentHostService(path.join(h.directory, 'host'))
+  const coldDoc = await coldHost.internalAPI.restore(h.initial.documentId)
+  const persisted = await coldHost.readAuthoringDrafts(coldDoc.documentId)
+  expect(persisted?.advanced).toEqual(recovered)
   const coldBridge = new CourseV10DocumentBridge(); disposers.push(async () => coldBridge.dispose())
   await coldBridge.connect(api(coldHost, coldDoc)); coldBridge.selectInstances(coldDoc.documentId, ['a'], 'page')
-  expect(courseDraftLifecycle(coldBridge).restore(coldDoc.documentId, recovered)).toMatchObject({ restored: 1, issues: [] })
+  expect(courseDraftLifecycle(coldBridge).restore(coldDoc.documentId, persisted!.advanced)).toMatchObject({ restored: 1, issues: [] })
   install(coldBridge)
   h.render(<DeveloperTab />); h.fireEvent.click(h.screen.getByRole('tab', { name: /对象 JSON/ }))
   expect(h.screen.getByRole('textbox', { name: '所选对象 · A' })).toHaveValue(raw)
