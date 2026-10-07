@@ -1742,7 +1742,14 @@ export class ExecutionEngine {
               } }, tool.call.input)
               if (tool.result && ['file.create', 'file.write', 'file.patch'].includes(tool.call.name))
                 await this.options.changeReview?.completeFileMutation({ runId: record.runId, callId: tool.callId, result: tool.result })
-            } else tool.result = await this.options.gateway.execute(record.runId, tool.callId, tool.call)
+            } else {
+              const officeMutation = isOfficeContentTool(tool.call.name) && toolRegistration(tool.call.name)?.effect === 'office-write'
+              if (officeMutation && filePreflight?.paths)
+                await this.options.changeReview?.prepareFileMutation({ runId: record.runId, callId: tool.callId,
+                  name: tool.call.name, paths: filePreflight.paths, toolInput: tool.call.input })
+              tool.result = await this.options.gateway.execute(record.runId, tool.callId, tool.call)
+              if (officeMutation) await this.options.changeReview?.completeFileMutation({ runId: record.runId, callId: tool.callId, result: tool.result })
+            }
           }
           catch (error) {
             if (tool.call.name === 'context.read') {
