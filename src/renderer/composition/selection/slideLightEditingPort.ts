@@ -6,6 +6,7 @@ import { componentIsLocked, componentParentMatrix } from '../crossSurfaceCommand
 import { frameCorners, translateFrame, transformVector, invertMatrix } from '../../../core/components/geometry'
 import type { ComponentFrame } from '../../../shared/contracts/component-platform/frame'
 import { slideLightPageCommands, slideLightObjectCommands, type SlideLightCommand } from '../../editing/commands/slideLightCommands'
+import { componentPropertiesView, componentPropertiesEdits } from '../../ui/properties/componentProperties'
 
 export interface SlideLightPageTarget extends CapturedCourseTarget { readonly kind: 'page' }
 export interface SlideLightObjectTarget extends CapturedCourseTarget { readonly kind: 'object'; readonly instanceId: string; readonly itemId: string }
@@ -45,10 +46,11 @@ export function createSlideLightEditingPort(owner: SlideLightEditingOwner) {
     const data = item.data && typeof item.data === 'object' && !Array.isArray(item.data) ? item.data as JsonObject : {}
     const appearance = data.appearance && typeof data.appearance === 'object' && !Array.isArray(data.appearance) ? data.appearance as JsonObject : {}
     const key = target.editingProject.definitions[item.definitionId]?.implementation
+    const professional = componentPropertiesView(item, target.editingProject.definitions[item.definitionId])
     const commands = slideLightObjectCommands({ isText: key?.kind === 'builtin' && key.key === 'guoling.text', locked: componentIsLocked(target.editingProject,target.instanceId),
       clickBindable: Boolean(owner.runInteraction), sounds: owner.readSounds?.(target) ?? [], locations: target.editingProject.surfaces.map(surface => ({ id: surface.id, label: surface.title })) })
     return { target, commands, fontFamily: typeof appearance.fontFamily === 'string' ? appearance.fontFamily : null,
-      lineSpacing: typeof appearance.lineHeight === 'number' ? Math.round((appearance.lineHeight - 1) * Number(appearance.fontSize ?? 24)) : null,
+      lineSpacing: professional.type === 'text' ? professional.style.lineSpacing : null,
       opacity: typeof item.style?.opacity === 'number' ? item.style.opacity : 1 }
   }
   const commit = (target: CapturedCourseTarget, edits: ComponentEdit[]) => kernel.editCaptured(kernel.capture(edits, target)).then(() => {})
@@ -73,7 +75,7 @@ export function createSlideLightEditingPort(owner: SlideLightEditingOwner) {
     switch (available.kind) {
       case 'opacity': return commit(target, [{ type: 'style.set', instanceId: id, path: ['opacity'], value: Number(value) }])
       case 'font': return commit(target, [{ type: 'data.set', instanceId: id, path: ['appearance','fontFamily'], value: String(value) }])
-      case 'line-spacing': return commit(target, [{ type: 'data.set', instanceId: id, path: ['appearance','lineHeight'], value: 1 + Number(value) / Number((item.data as JsonObject)?.appearance && ((item.data as JsonObject).appearance as JsonObject).fontSize || 24) }])
+      case 'line-spacing': return commit(target, componentPropertiesEdits(item, target.editingProject.definitions[item.definitionId], { style: { lineSpacing: Number(value) } }))
       case 'page-align': {
         const surface = target.editingProject.surfaces.find(value => value.id === target.surfaceId)
         if (!item.frame || !surface?.designSize) throw new Error('当前对象没有可对齐的页面 frame')
