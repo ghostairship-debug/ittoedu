@@ -8,7 +8,7 @@ import { createBlankCourseProjectV10 } from '../../../../src/core/course/createC
 import { connectExplicitMcp, readExplicitMcpConnection } from '../../../../scripts/mcpSdkClient'
 import { residentMcpFixture } from '../../../helpers/residentMcpFixture'
 
-it('same workspace/settings retain a V10 target and SDK detach releases only its session while another client and owner remain usable', async () => {
+it('same workspace/settings retain V10 targets and closing one document or detaching one client preserves the other document client and owner', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'T04-resident-'))
   let fixture: Awaited<ReturnType<typeof residentMcpFixture>> | undefined
   const clients: Awaited<ReturnType<typeof connectExplicitMcp>>[] = []
@@ -17,6 +17,8 @@ it('same workspace/settings retain a V10 target and SDK detach releases only its
     const host = new DocumentHostService(path.join(directory, 'documents'))
     const doc = await host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('Teacher lesson'), resources: { assets: {}, components: {} } }, 'lesson.h5lesson')
     await host.saveToPath(doc.documentId, path.join(workspace, 'lesson.h5lesson'))
+    const second = await host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('Second teacher lesson'), resources: { assets: {}, components: {} } }, 'second.h5lesson')
+    await host.saveToPath(second.documentId, path.join(workspace, 'second.h5lesson'))
     fixture = await residentMcpFixture({ host, directory, workspaceRoot: workspace })
     const connection = readExplicitMcpConnection({ endpoint: (await fixture.service.status()).endpoint, token: fixture.token() })
     const a = await connectExplicitMcp(connection, 'client-a'); clients.push(a)
@@ -29,11 +31,18 @@ it('same workspace/settings retain a V10 target and SDK detach releases only its
     await fixture.service.configure(fixture.settings())
     expect((await b.call('workspace.switch', { workspaceId: 'space' })).isError).toBe(false)
     expect((await b.call('listChildren', { target: result.data.target })).isError).toBe(false)
+    const openedSecond = await b.call('file.open', { path: 'second.h5lesson' })
+    expect(openedSecond.isError).toBe(false)
+    const secondResult = openedSecond.structuredContent?.result as { data: { target: string } }
+    await fixture.service.stopForDocument(doc.documentId)
+    await host.operate({ type: 'close', documentId: doc.documentId })
+    expect((await b.call('listChildren', { target: result.data.target })).isError).toBe(true)
+    expect((await b.call('listChildren', { target: secondResult.data.target })).isError).toBe(false)
     expect(fixture.service.activity()).toEqual([])
     expect((await fixture.service.status()).sessions).toHaveLength(2)
     await Promise.all([a.detach(), a.detach()])
     await expect.poll(async () => (await fixture!.service.status()).sessions.length).toBe(1)
-    expect((await b.call('listChildren', { target: result.data.target })).isError).toBe(false)
+    expect((await b.call('listChildren', { target: secondResult.data.target })).isError).toBe(false)
     expect((await fixture.service.status()).state).toBe('running')
     expect(fixture.service.server.listeningPort).toBeGreaterThan(0)
     await b.detach()
