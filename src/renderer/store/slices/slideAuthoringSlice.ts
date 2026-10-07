@@ -224,7 +224,7 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
       const implementation = instance.implementationOverride ?? target.editingProject.definitions[instance.definitionId]?.implementation
       const changed = !equalComponentValue(instance.data, saved.originalData)
         || saved.frame !== undefined && !equalComponentValue(instance.frame ?? null, saved.originalFrame)
-        || Boolean(saved.implementation || saved.authorSpot?.sourceRegion) && !equalComponentValue(implementation, saved.originalImplementation)
+        || Boolean(saved.implementation || saved.authorSpot?.sourceRegion?.kind === 'implementation') && !equalComponentValue(implementation, saved.originalImplementation)
         || saved.originalSourceText !== undefined && sourceSpotText(target, saved.authorSpot) !== saved.originalSourceText
       ports.patch({ slideContentEdit: { instanceId: saved.instanceId, definitionId: saved.definitionId, target,
         data: structuredClone(saved.data), originalData: structuredClone(saved.originalData),
