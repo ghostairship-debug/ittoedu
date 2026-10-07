@@ -1,5 +1,5 @@
 import type { CompiledComponentModule } from '../../core/components/compilation/types'
-import type { ComponentInstance, ComponentRuntimeScope, ComponentTarget, JsonValue, ComponentRuntimeContext, ComponentAuthorSpotInput, ComponentMediaCommand, ComponentMediaRegistration, ComponentMediaPort, ComponentInteractionPort, ComponentPresentationPort, ComponentMediaState, ComponentMediaRegistrationOptions, ComponentLayoutInput, ComponentLayoutPort } from '../../shared/contracts/component-platform'
+import type { ComponentInstance, ComponentRuntimeScope, ComponentTarget, JsonValue, ComponentRuntimeContext, ComponentAuthorSpotInput, ComponentAuthorPreviewCallbacks, ComponentAuthorGeometry, ComponentMediaCommand, ComponentMediaRegistration, ComponentMediaPort, ComponentInteractionPort, ComponentPresentationPort, ComponentMediaState, ComponentMediaRegistrationOptions, ComponentLayoutInput, ComponentLayoutPort } from '../../shared/contracts/component-platform'
 import type { PreparedComponentRuntime } from '../../player/components/runtime/ComponentRuntimeHost'
 import { componentTargetSchema, jsonValueSchema, componentFrameSchema } from '../../shared/contracts/component-platform'
 import { teacherControllerActionSchema, type TeacherControllerAction, type TeacherControllerPort, type TeacherControllerSnapshot } from '../../shared/contracts/component-platform/teacherController'
@@ -96,6 +96,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
   }
   const cleanups = new Set<() => void>(), listeners = new Map<string, Set<(value: unknown) => void>>()
   let authorSpotSequence = 0
+  const authorPreviewCallbacks = new Map<number, ComponentAuthorPreviewCallbacks>()
   let motionSequence = 0, motionRequestSequence = 0
   const motionTasks = new Map<number, { start(reducedMotion: boolean): void; settle(outcome: ComponentMotionOutcome): void }>()
   const motionRequests = new Map<number, { taskId: number; method: string; resolve(value: unknown): void }>()
@@ -146,6 +147,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
     motionRequests.clear()
     for (const resolve of serviceRequests.values()) resolve(false)
     serviceRequests.clear(); mediaCommands.clear(); interactionListeners.clear()
+    authorPreviewCallbacks.clear()
     authoredDocument?.release()
   }
   const motion = (reference: ComponentTarget) => ({ replace: (channel: string, program: ComponentMotionProgram): ComponentMotionTask => {
@@ -293,10 +295,11 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
           setZoom: (value: number) => { void teacherRequest('setZoom', { value }).catch(() => {}) },
           resetView: () => { void teacherRequest('resetView').catch(() => {}) },
         } : undefined
-        const authoring = { register: (spot: ComponentAuthorSpotInput) => {
+        const authoring = { register: (spot: ComponentAuthorSpotInput, callbacks?: ComponentAuthorPreviewCallbacks) => {
           const spotId = ++authorSpotSequence
-          send({ type: 'authoring.register', spotId, spot })
-          const off = () => send({ type: 'authoring.unregister', spotId })
+          if (callbacks) authorPreviewCallbacks.set(spotId, callbacks)
+          send({ type: 'authoring.register', spotId, spot, preview: Boolean(callbacks) })
+          const off = () => { authorPreviewCallbacks.delete(spotId); send({ type: 'authoring.unregister', spotId }) }
           cleanups.add(off)
           return () => { cleanups.delete(off); off() }
         } }
@@ -331,7 +334,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
         // consumers. Editor target observation below is a separate concern.
         if (root && instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data)
           && typeof instance.data.html === 'string') {
-          contentAuthoring = fragmentBox.authoring(root, {
+          contentAuthoring = fragmentBox.authoring(documentRoot ? document.documentElement : root, {
             records: () => (instance.data as unknown as WebRuntimeData).authoringRecords ?? {},
             resolveResource: reference => resourceUrls[(instance.data as unknown as WebRuntimeData).resourceBindings?.[reference] ?? resourceBindings[reference] ?? reference] ?? reference,
             resourceReference: url => Object.entries((instance.data as unknown as WebRuntimeData).resourceBindings ?? {})
@@ -466,6 +469,13 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
         await mounted?.update(instance)
         contentAuthoring?.refresh()
         collectHtml()
+      } else if (message.type === 'authoring.preview') {
+        if (!active || message.generation !== generation) return
+        const geometry = message.geometry as ComponentAuthorGeometry | null
+        if (typeof message.authorKey === 'string') contentAuthoring?.previewGeometry(message.authorKey, geometry)
+        else if (typeof message.spotId === 'number') authorPreviewCallbacks.get(message.spotId)?.previewGeometry(geometry)
+        if (geometry === null) collectHtml()
+        return
       } else if (message.type === 'placement') {
         if (!active) return
         instance = { ...instance, frame: message.frame as ComponentInstance['frame'] }
@@ -577,6 +587,7 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
   const subscriptions = new Map<string, () => void>()
   const authorSpots = new Map<number, () => void>()
   const observedSpots = new Map<string, { signature: string; off(): void }>()
+  const authorPreviews = new Set<string>()
   const remoteMotions = new Map<number, { context?: ComponentMotionContext; task: ComponentMotionTask; finish(error?: string): void }>()
   let mediaPort: ComponentMediaPort | undefined, interactionPort: ComponentInteractionPort | undefined, mediaRequestSequence = 0
   const remoteMedia = new Map<number, ComponentMediaRegistration>()
@@ -628,6 +639,7 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
     authorSpots.clear()
     for (const value of observedSpots.values()) value.off()
     observedSpots.clear()
+    authorPreviews.clear()
     for (const value of remoteMotions.values()) { value.task.cancel(); value.finish() }
     remoteMotions.clear()
     for (const controller of interactionActions.values()) controller.abort()
@@ -828,8 +840,15 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
           localBounds: { width: Math.max(1, rect.width), height: Math.max(1, rect.height), transform: [1, 0, 0, 1, rect.x, rect.y] } }
         const signature = JSON.stringify(input), previous = observedSpots.get(handle)
         present.add(handle)
-        if (previous?.signature === signature) continue
-        previous?.off(); observedSpots.set(handle, { signature, off: authoring.register(input) })
+        if (previous?.signature === signature || previous && input.authorKey && authorPreviews.has(input.authorKey)) continue
+        previous?.off(); observedSpots.set(handle, { signature, off: authoring.register(input, input.authorKey ? {
+          previewGeometry: geometry => {
+            if (!scope?.isActive() || disposed) return
+            if (geometry === null) authorPreviews.delete(input.authorKey!)
+            else authorPreviews.add(input.authorKey!)
+            port.postMessage({ type: 'authoring.preview', generation: scope.generation, authorKey: input.authorKey, geometry })
+          },
+        } : undefined) })
       }
       for (const [handle, value] of observedSpots) if (!present.has(handle)) { value.off(); observedSpots.delete(handle) }
       return
@@ -843,7 +862,9 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
         || spot.sourceRegion && (!['implementation', 'data'].includes(spot.sourceRegion.kind) || !Number.isInteger(spot.sourceRegion.start)
           || !Number.isInteger(spot.sourceRegion.end) || spot.sourceRegion.start < 0 || spot.sourceRegion.end < spot.sourceRegion.start)) return
       authorSpots.get(message.spotId)?.()
-      authorSpots.set(message.spotId, authoring.register(spot)); return
+      authorSpots.set(message.spotId, authoring.register(spot, message.preview === true ? {
+        previewGeometry: geometry => { if (scope?.isActive() && !disposed) port.postMessage({ type: 'authoring.preview', generation: scope.generation, spotId: message.spotId, geometry }) },
+      } : undefined)); return
     }
     if (message.type === 'teacher.request' && snapshots.teacherController) {
       const currentScope = scope, teacher = snapshots.teacherController

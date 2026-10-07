@@ -4,13 +4,13 @@ import { mountPlaceholders } from './htmlPreviewPlaceholders'
 import { HTML_PREVIEW_TARGET_MAX, htmlPreviewTargetReportSchema } from '../../shared/workbench/htmlPreview'
 import type { z } from 'zod'
 import { createDomAuthoring } from '../../components/web/authoringDom'
-import type { ComponentAuthorRecord } from '../../shared/contracts/component-platform/runtime'
+import type { ComponentAuthorRecord, ComponentAuthorGeometry } from '../../shared/contracts/component-platform/runtime'
 import { componentAuthorRecordsSchema } from '../../shared/contracts/component-platform/schema'
 
 type HtmlPreviewTargetReport = z.infer<typeof htmlPreviewTargetReportSchema>
 
 type Init = { type: 'html-preview.init'; leaseId: string; loadId: string }
-type Patch = { type: 'html-preview.patch'; loadId: string; handle: string; kind: 'text' | 'image'; value: string; expected: string }
+type Patch = { type: 'html-preview.patch'; loadId: string; handle: string; kind: 'text' | 'image'; value: string; expected: string; authoringAnchor?: string }
 type Navigate = { type: 'html-preview.navigate'; loadId: string; index: number }
 type Restore = { type: 'html-preview.restore'; loadId: string; index: number; scroll: number }
 type EditMode = { type: 'html-preview.edit-mode'; loadId: string; requestId: string; enabled: boolean }
@@ -19,7 +19,8 @@ type ConfirmTargets = { type: 'html-preview.confirm-targets'; loadId: string; sc
 type RefreshTargets = { type: 'html-preview.refresh-targets'; loadId: string }
 type Selection = { type: 'html-preview.selection'; loadId: string; handle: string | null; editable: boolean }
 type AuthoringRecords = { type: 'html-preview.authoring-records'; loadId: string; records: Record<string, ComponentAuthorRecord> }
-type Command = Init | Patch | Navigate | Restore | EditMode | Visibility | ConfirmTargets | RefreshTargets | Selection | AuthoringRecords
+type AuthoringPreview = { type: 'html-preview.authoring-preview'; loadId: string; authorKey: string; geometry: ComponentAuthorGeometry | null }
+type Command = Init | Patch | Navigate | Restore | EditMode | Visibility | ConfirmTargets | RefreshTargets | Selection | AuthoringRecords | AuthoringPreview
 
 interface RuntimeNodeTracking {
   isRuntimeNode(node: Node): boolean
@@ -157,12 +158,12 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
   if (!authorWindow.__cwHtmlAuthoringRecords) {
     try {
       const value = JSON.parse(doc.getElementById('cw-html-authoring-records')?.textContent ?? '{}')
-      const parsed = componentAuthorRecordsSchema.safeParse(value)
+      const parsed = componentAuthorRecordsSchema.safeParse(value.records ?? value)
       authorWindow.__cwHtmlAuthoringRecords = parsed.success ? parsed.data : {}
     } catch { authorWindow.__cwHtmlAuthoringRecords = {} }
   }
   const inheritedConsumer = authorWindow.__cwHtmlAuthoringConsumer
-  const authoring = inheritedConsumer ?? createDomAuthoring(doc.body, { records: () => authorWindow.__cwHtmlAuthoringRecords ?? {} })
+  const authoring = inheritedConsumer ?? createDomAuthoring(doc.documentElement, { records: () => authorWindow.__cwHtmlAuthoringRecords ?? {} })
   authorWindow.__cwHtmlAuthoringConsumer = authoring
   const handles = new WeakMap<Node, string>()
   const nodes = new Map<string, Node>()
@@ -348,6 +349,13 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       return
     }
     if (!loadId || message.loadId !== loadId) return
+    if (message.type === 'html-preview.authoring-preview') {
+      if (typeof message.authorKey !== 'string' || message.geometry !== null && (!message.geometry || typeof message.geometry !== 'object'
+        || Object.values(message.geometry).some(value => typeof value !== 'number' || !Number.isFinite(value)))) return
+      tracking.withoutTracking(() => authoring.previewGeometry(message.authorKey, message.geometry))
+      drawMarkers()
+      return
+    }
     if (message.type === 'html-preview.authoring-records') {
       const parsed = componentAuthorRecordsSchema.safeParse(message.records)
       if (!parsed.success) return
@@ -414,6 +422,10 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
         }
       }
       tracking.withoutTracking(() => {
+      if (typeof message.authoringAnchor === 'string' && message.authoringAnchor) {
+        const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node as Element
+        element?.setAttribute('data-cw-author-key', message.authoringAnchor)
+      }
       if (message.kind === 'text' && node.nodeType === Node.TEXT_NODE) (node as Text).data = message.value
       if (message.kind === 'image' && node instanceof HTMLImageElement) {
         let original = imageOriginals.get(node)
@@ -440,6 +452,7 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
         else node.setAttribute('src', message.value)
       }
       })
+      authoring.refresh()
       placeholders.refresh()
     }
   }

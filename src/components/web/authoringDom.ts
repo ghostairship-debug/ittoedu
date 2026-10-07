@@ -1,4 +1,4 @@
-import type { ComponentAuthorBinding, ComponentAuthorRecord, ComponentAuthorScope, ComponentAuthorGeometryObservation } from '../../shared/contracts/component-platform/runtime'
+import type { ComponentAuthorBinding, ComponentAuthorRecord, ComponentAuthorScope, ComponentAuthorGeometryObservation, ComponentAuthorGeometry } from '../../shared/contracts/component-platform/runtime'
 
 export interface DomAuthorObservation {
   node: Text | HTMLImageElement
@@ -27,6 +27,8 @@ export function createDomAuthoring(root: HTMLElement, options: {
   type Applied = { node: Target; content?: Property; attributes: Map<Element, Map<string, Property>>; styles: Map<string, Property> }
   const doc = root.ownerDocument, win = doc.defaultView!
   const descriptions = new WeakMap<Node, { scope: string; observation: DomAuthorObservation }>()
+  const observedNodes = new Map<string, Target>()
+  const previews = new Map<string, { node: Target; record: ComponentAuthorRecord; geometry: ComponentAuthorGeometry }>()
   const active = new Map<string, Applied>(), statuses = new Map<string, string>()
   let disposed = false, queued = false, refreshing = false
   let reactScopes = new WeakMap<Element, ComponentAuthorScope>()
@@ -242,14 +244,22 @@ export function createDomAuthoring(root: HTMLElement, options: {
     refreshing = true
     try {
       readReactScopes()
-      const records = options.records()
+      const records = { ...options.records() }
+      for (const [key, preview] of previews) {
+        const formal = records[key] ?? preview.record
+        records[key] = { ...formal, overrides: { ...formal.overrides, geometry: preview.geometry } }
+      }
+      for (const [key, node] of observedNodes) if (!root.contains(node)) observedNodes.delete(key)
       for (const [key, state] of active) if (!records[key]) { restore(state); active.delete(key); statuses.delete(key) }
       for (const [key, record] of Object.entries(records)) {
-        const previous = active.get(key), result = resolve(key, record, previous)
+        const previous = active.get(key), preview = previews.get(key)
+        const result = preview && root.contains(preview.node) && sameScope(elementOf(preview.node), preview.record.scope)
+          ? { node: preview.node, status: 'bound' as const } : resolve(key, record, previous)
         if (previous && result.node !== previous.node) { restore(previous); active.delete(key) }
         if (result.node) {
           const state = active.get(key) ?? { node: result.node, attributes: new Map(), styles: new Map() }
           active.set(key, state); apply(record, state)
+          observedNodes.set(key, result.node)
           descriptions.set(result.node, { scope: ordered(record.scope ?? {}), observation: {
             node: result.node, authorKey: key, record, initialValue: record.kind === 'image' ? record.overrides.src ?? authorValueOf(result.node) : valueOf(result.node),
             bindingStatus: 'bound',
@@ -276,6 +286,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
       initialValue: authorValueOf(node), bindingStatus: 'bound' }
     if (resolve(observation.authorKey, observation.record).node !== node) observation.bindingStatus = 'unresolved'
     descriptions.set(node, { scope: scopeKey, observation })
+    observedNodes.set(observation.authorKey, node)
     return observation
   }
   const geometry = (node: Node): ComponentAuthorGeometryObservation | undefined => {
@@ -331,8 +342,9 @@ export function createDomAuthoring(root: HTMLElement, options: {
       const measured = box(element), parent = box(element.parentElement)
       if (!measured || !parent) return undefined
       const inverseParent = invert(parent.matrix)
-      const rootBox = root === doc.body ? undefined : box(root)
-      const toInstance: Matrix | undefined = root === doc.body ? [1, 0, 0, 1, 0, 0] : rootBox && invert(rootBox.matrix)
+      const documentRoot = root === doc.body || root === doc.documentElement
+      const rootBox = documentRoot ? undefined : box(root)
+      const toInstance: Matrix | undefined = documentRoot ? [1, 0, 0, 1, 0, 0] : rootBox && invert(rootBox.matrix)
       if (!inverseParent || !toInstance) return undefined
       const observation = describe(node)
       return { frame: { width: measured.width, height: measured.height, transform: multiply(inverseParent, measured.matrix) },
@@ -351,7 +363,17 @@ export function createDomAuthoring(root: HTMLElement, options: {
     refresh,
     describe,
     geometry,
+    previewGeometry(authorKey: string, value: ComponentAuthorGeometry | null) {
+      if (disposed) return
+      if (value === null) previews.delete(authorKey)
+      else {
+        const node = observedNodes.get(authorKey), observation = node && describe(node)
+        if (!node || !observation) return
+        previews.set(authorKey, { node, record: observation.record, geometry: value })
+      }
+      refresh()
+    },
     scan(): DomAuthorObservation[] { refresh(); return targets().flatMap(node => { const value = describe(node); return value ? [{ ...value, geometry: geometry(node) }] : [] }) },
-    dispose() { if (disposed) return; disposed = true; observer.disconnect(); for (const state of active.values()) restore(state); active.clear() },
+    dispose() { if (disposed) return; disposed = true; observer.disconnect(); for (const state of active.values()) restore(state); active.clear(); previews.clear(); observedNodes.clear() },
   }
 }

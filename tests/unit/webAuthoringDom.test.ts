@@ -10,6 +10,23 @@ afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 const flush = async () => { await Promise.resolve(); await Promise.resolve() }
 
 describe('persistent local DOM authoring', () => {
+  it('previews only the selected mount and clears to the latest canonical geometry and content', () => {
+    const root = document.createElement('div'); document.body.append(root); root.innerHTML = '<p id="target">Original</p>'
+    let records: Record<string, ComponentAuthorRecord> = {}
+    const consumer = createDomAuthoring(root, { records: () => records }); cleanups.push(() => consumer.dispose())
+    const selected = consumer.scan()[0]!, target = root.querySelector('p')!
+    records = { [selected.authorKey]: { ...selected.record, overrides: { text: 'Saved', geometry: { translateX: 10 } } } }
+    consumer.refresh(); consumer.previewGeometry(selected.authorKey, { translateX: 30 })
+    expect(target.style.translate).toContain('30px')
+    expect(records[selected.authorKey]!.overrides.geometry!.translateX).toBe(10)
+    records = { [selected.authorKey]: { ...selected.record, overrides: { text: 'New effective text', geometry: { translateX: 20 } } } }
+    consumer.refresh()
+    expect(target.textContent).toBe('New effective text')
+    expect(target.style.translate).toContain('30px')
+    consumer.previewGeometry(selected.authorKey, null)
+    expect(target.style.translate).toContain('20px')
+    expect(target.textContent).toBe('New effective text')
+  })
   it('reports indistinguishable dynamic siblings before an edit can appear applied only for one mount', () => {
     const root = document.createElement('div'); document.body.append(root)
     root.innerHTML = '<p>same</p><p>same</p>'
