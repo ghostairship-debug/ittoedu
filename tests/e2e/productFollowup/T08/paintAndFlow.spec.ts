@@ -25,6 +25,7 @@ async function outerGeometry(iframe: Locator) {
         clientWidth: node.clientWidth, clientHeight: node.clientHeight, offsetWidth: node.offsetWidth, offsetHeight: node.offsetHeight,
         clientLeft: node.clientLeft, clientTop: node.clientTop, scrollLeft: node.scrollLeft, scrollTop: node.scrollTop,
         transform: style.transform, transformOrigin: style.transformOrigin, zoom: style.zoom, width: style.width, height: style.height,
+        pointerEvents: style.pointerEvents, visibility: style.visibility, zIndex: style.zIndex,
         overflowX: style.overflowX, overflowY: style.overflowY, borderLeftWidth: style.borderLeftWidth, borderTopWidth: style.borderTopWidth })
     }
     return { window: { innerWidth, innerHeight, scrollX, scrollY, devicePixelRatio }, ancestors }
@@ -160,15 +161,52 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
     expect(playerFacts.pseudoContent).toEqual(sourceFacts.pseudoContent)
     expect(playerFacts.rgbaColor).toBe('rgba(18, 52, 86, 0.5)')
     expect(sourceFacts.alphaGlyphPixels).toBeGreaterThan(5); expect(playerFacts.alphaGlyphPixels).toBeGreaterThan(5)
+    const installPointerEvidence = () => {
+      const view = window as typeof window & { __t08PointerEvidence?: unknown[] }
+      view.__t08PointerEvidence = []
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'toggle']) {
+        for (const capture of [true, false]) document.addEventListener(type, event => {
+          if (view.__t08PointerEvidence!.length >= 40) return
+          const pointer = event as MouseEvent, target = event.target instanceof Element ? event.target : null
+          view.__t08PointerEvidence!.push({ type: event.type, phase: capture ? 'capture' : 'bubble', trusted: event.isTrusted,
+            defaultPrevented: event.defaultPrevented, clientX: pointer.clientX, clientY: pointer.clientY,
+            path: event.composedPath().filter(node => node instanceof Element).slice(0, 5)
+              .map(node => ({ tag: (node as Element).tagName, id: (node as Element).id, className: (node as Element).getAttribute('class') })),
+            targetText: target?.textContent?.slice(0, 120), answerOpen: (document.querySelector('#answer') as HTMLDetailsElement | null)?.open })
+        }, { capture, passive: true })
+      }
+    }
+    await page.evaluate(installPointerEvidence)
+    await player.locator('#answer summary').evaluate(installPointerEvidence)
     const clickSummary = async (step: string) => {
       const summary = player.locator('#answer summary')
       await frames.scrollIntoViewIfNeeded(); await summary.scrollIntoViewIfNeeded()
       const outer = await outerGeometry(frames), inner = await summary.evaluate(element => ({ rect: element.getBoundingClientRect().toJSON(),
         scrollX, scrollY, innerWidth, innerHeight }))
       const mapped = frameRectToScreen(outer, inner.rect), point = { x: mapped.screen.x + mapped.screen.width / 2, y: mapped.screen.y + mapped.screen.height / 2 }
-      facts[`interaction-${step}`] = { outer, inner, mapped, point }
+      const topHits = await page.evaluate(point => document.elementsFromPoint(point.x, point.y).slice(0, 8).map(element => ({
+        tag: element.tagName, id: element.id, className: element.getAttribute('class'), title: element.getAttribute('title'),
+        rect: element.getBoundingClientRect().toJSON(), pointerEvents: getComputedStyle(element).pointerEvents,
+        zIndex: getComputedStyle(element).zIndex, text: element.textContent?.slice(0, 120) })), point)
+      const childHits = await summary.evaluate(element => {
+        const rect = element.getBoundingClientRect(), hits = document.elementsFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+        return { summaryHit: hits[0] === element || !!hits[0] && element.contains(hits[0]),
+          hits: hits.slice(0, 8).map(hit => ({ tag: hit.tagName, id: hit.id, className: hit.getAttribute('class'),
+            rect: hit.getBoundingClientRect().toJSON(), pointerEvents: getComputedStyle(hit).pointerEvents,
+            zIndex: getComputedStyle(hit).zIndex, text: hit.textContent?.slice(0, 120) })),
+          open: (element.parentElement as HTMLDetailsElement).open }
+      })
+      const interaction: Record<string, unknown> = { outer, inner, mapped, point, topHits, childHits }
+      facts[`interaction-${step}`] = interaction
       writeFileSync(join(directory, 'interaction-geometry.json'), JSON.stringify(facts, null, 2))
+      await page.screenshot({ path: join(directory, `interaction-${step}-before.png`), scale: 'css' })
       await page.mouse.click(point.x, point.y)
+      interaction.after = await summary.evaluate(element => ({ rect: element.getBoundingClientRect().toJSON(), scrollX, scrollY,
+        open: (element.parentElement as HTMLDetailsElement).open, activeTag: document.activeElement?.tagName,
+        events: (window as typeof window & { __t08PointerEvidence?: unknown[] }).__t08PointerEvidence }))
+      interaction.topEvents = await page.evaluate(() => (window as typeof window & { __t08PointerEvidence?: unknown[] }).__t08PointerEvidence)
+      writeFileSync(join(directory, 'interaction-geometry.json'), JSON.stringify(facts, null, 2))
+      await page.screenshot({ path: join(directory, `interaction-${step}-after.png`), scale: 'css' })
     }
     await clickSummary('open')
     await expect(player.locator('#answer p')).toBeVisible()
