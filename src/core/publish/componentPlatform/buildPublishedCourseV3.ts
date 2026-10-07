@@ -121,7 +121,7 @@ export async function buildPublishedCourseV3(
 
   const assets: PublishedCourseV3['assets'] = {}
   for (const origin of project.logic?.network?.connectOrigins ?? []) diagnostics.push({
-    code: 'network-dependency', message: `课程网络逻辑依赖 ${origin}；导出保留网络行为，离线时该功能需要网络。`, path: ['logic', 'network', 'connectOrigins'],
+    code: 'network-dependency', message: `课程声明网络地址 ${origin}；导出保留网络行为，相应功能在离线时需要网络。`, path: ['logic', 'network', 'connectOrigins'],
   })
   for (const [id, asset] of Object.entries(project.assets)) {
     check()

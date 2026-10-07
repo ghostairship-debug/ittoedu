@@ -72,9 +72,12 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
         return receipt?.status === 'written' ? { ...file, path: receipt.path, fileVersion: receipt.fileVersion ?? undefined } : file
       }))
       const complete = files.every(file => !!file.path)
-      const receipt: ExportReceipt = { ...prior, status: complete ? 'written' : 'generated', files,
-        warnings: complete ? prior.warnings : [...prior.warnings, '导出在部分文件写盘后中断；回执列出已写文件，其余文件未重放，请按需要另行导出。'] }
-      await this.options.operations.patch(input.runId, input.operationId, { status: complete ? 'completed' : 'generated', receipt })
+      const writtenPaths = files.flatMap(file => file.path ? [file.path] : [])
+      const partial = !complete && writtenPaths.length > 0
+      const reason = partial ? `导出在部分文件写盘后中断；已写文件：${writtenPaths.join('、')}；其余文件未写盘，也未重放。` : undefined
+      const receipt: ExportReceipt = { ...prior, status: complete ? 'written' : partial ? 'failed' : 'generated', files,
+        ...(reason ? { reason } : {}), warnings: prior.warnings }
+      await this.options.operations.patch(input.runId, input.operationId, { status: complete ? 'completed' : partial ? 'failed' : 'generated', receipt })
       return receipt
     }
     if (record.kind === 'save' && record.status !== 'completed' && record.status !== 'failed'
