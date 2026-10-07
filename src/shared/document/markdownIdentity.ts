@@ -3,20 +3,31 @@ import type { MarkdownSourceMap } from './markdownSourceMap'
 export interface MarkdownProjection { source: string; document: MarkdownDocument; sourceMap: MarkdownSourceMap }
 /** Software metadata is not authored text. Compare the same visible source when a caller omits it. */
 function identityView(projection: MarkdownProjection): MarkdownProjection {
-  const removed = [...projection.source.matchAll(/<!--cw:(?:block|item|row|column)\s+[\s\S]*?-->(?:\r?\n)?/g)]
-  if (!removed.length) return projection
-  const position = (offset: number) => offset - removed.reduce((total, match) =>
-    total + Math.max(0, Math.min(offset - match.index!, match[0].length)), 0)
-  return { ...projection, source: projection.source.replace(/<!--cw:(?:block|item|row|column)\s+[\s\S]*?-->(?:\r?\n)?/g, ''),
-    sourceMap: { blocks: projection.sourceMap.blocks.map(block => ({ ...block, from: position(block.from), to: position(block.to),
+  let source = ''
+  // Block boundaries come from the lexer. Omitting a metadata line may leave an extra blank
+  // line; that separator is not a prose edit and must not change the first block's identity.
+  const blocks = projection.sourceMap.blocks.map(block => {
+    const raw = projection.source.slice(block.from, block.to)
+    const removed = [...raw.matchAll(/<!--cw:(?:block|item|row|column)\s+[\s\S]*?-->/g)]
+    const strip = (offset: number) => offset - removed.reduce((total, match) =>
+      total + Math.max(0, Math.min(offset - match.index!, match[0].length)), 0)
+    const plain = raw.replace(/<!--cw:(?:block|item|row|column)\s+[\s\S]*?-->/g, '')
+    const leading = /^\r?\n(?:\r?\n)*/.exec(plain)?.[0].length ?? 0
+    const text = plain.slice(leading)
+    if (source) source += '\n\n'
+    const from = source.length
+    const position = (offset: number) => from + Math.max(0, strip(offset - block.from) - leading)
+    source += text
+    return { ...block, from, to: source.length,
       slots: block.slots.map(slot => ({ ...slot, ...(slot.from !== undefined ? { from: position(slot.from) } : {}),
-        ...(slot.to !== undefined ? { to: position(slot.to) } : {}), units: slot.units.map(unit => ({ ...unit, from: position(unit.from), to: position(unit.to) })) })) })) } }
+        ...(slot.to !== undefined ? { to: position(slot.to) } : {}), units: slot.units.map(unit => ({ ...unit, from: position(unit.from), to: position(unit.to) })) })) }
+  })
+  return { ...projection, source, sourceMap: { blocks } }
 }
 /** Position mapping, never a search for matching prose. A second identical paragraph retains its own identity. */
 export function retainMarkdownIdentities(next: MarkdownProjection, previous: MarkdownProjection): void {
   const nextView = identityView(next), oldView = identityView(previous)
-  let from = 0, oldEnd = previous.source.length, newEnd = next.source.length
-  oldEnd = oldView.source.length; newEnd = nextView.source.length
+  let from = 0, oldEnd = oldView.source.length, newEnd = nextView.source.length
   while (from < oldEnd && from < newEnd && oldView.source[from] === nextView.source[from]) from++
   while (oldEnd > from && newEnd > from && oldView.source[oldEnd - 1] === nextView.source[newEnd - 1]) { oldEnd--; newEnd-- }
   const delta = newEnd - oldEnd, identities = new Map<string, string>(), used = new Set<string>()
