@@ -10,6 +10,7 @@ import { HTML_AUTHORING_CONSUMER_ID, extractHtmlAuthoringRecords, patchHtmlAutho
 import { HtmlTextDrafts } from '../../src/renderer/documentFiles/html/htmlTextDrafts'
 import type { HtmlSelectedTarget } from '../../src/renderer/documentFiles/html/htmlPreviewController'
 import type { HtmlPreviewEditContext } from '../../src/main/workbench/htmlPreview/HtmlPreviewService'
+import { inspectHtmlSource, flattenHtmlSourceNodes } from '../../src/shared/html/htmlSourceStructure'
 
 function observation() {
   const container = document.createElement('div'); document.body.append(container)
@@ -145,4 +146,55 @@ it('keeps manual geometry when an exactly mapped HTML text value changes', async
   if (saved.kind !== 'text') throw new Error('text')
   expect(extractHtmlAuthoringRecords(saved.source).source).toContain('<p data-item-id="b">new value</p>')
   expect(readHtmlAuthoringRecords(saved.source)[value.authorKey]).toMatchObject({ binding: { baseline: 'new value' }, overrides: { geometry: { translateX: 20, translateY: 10 } } })
+})
+
+it('anchors a repeated static object and keeps its geometry through structure text, style and move on a cold consumer', async () => {
+  const original = '<html><body><p>same</p><p>same</p></body></html>'
+  const frame = document.createElement('iframe'); document.body.append(frame)
+  const doc = frame.contentDocument!
+  doc.open(); doc.write(original); doc.close()
+  const consumer = createDomAuthoring(doc.documentElement, { records: () => ({}) })
+  const selected = consumer.describe(doc.querySelectorAll('p')[1]!.firstChild!)!
+  consumer.dispose()
+  const driver = new TextDriver()
+  const session = await DocumentSession.create({ documentId: 'doc', epoch: 'epoch', model: driver.load(new TextEncoder().encode(original)),
+    binding: { kind: 'file', path: 'sample.html', version: null, bindingVersion: 1 } }, driver,
+    { async append() {}, async save(input) { return input.binding as Extract<typeof input.binding, { kind: 'file' }> } })
+  const service = new HtmlSourceEditService({ async readDocument() { return session.read() }, execute: op => session.execute(op), withFileAccess: work => work() })
+  const context = (): HtmlPreviewEditContext => ({ lease: { leaseId: 'lease', documentId: 'doc', epoch: 'epoch', revision: session.read().revision,
+    bindingVersion: 1, loadId: 'load', url: 'https://preview.invalid' }, tabId: 'tab', entryRealPath: 'sample.html',
+    rootRealPath: '.', bindingPath: 'sample.html', snapshot: session.read() })
+  const currentSource = () => { const model = session.read().model; if (model.kind !== 'text') throw new Error('text'); return model.source }
+  const sourceEdit = async (command: Parameters<typeof service.editSource>[0]['command']) => {
+    const revision = session.read().revision
+    expect(await service.editSource({ type: 'html-preview.edit-source', operationId: `source-${revision}`, documentId: 'doc', epoch: 'epoch',
+      baseRevision: revision, bindingVersion: 1, leaseId: 'lease', loadId: 'load', command }, context())).toMatchObject({ status: 'applied' })
+  }
+  const targetNode = () => flattenHtmlSourceNodes(inspectHtmlSource(currentSource()).roots)
+    .find(node => node.attributes['data-cw-author-key'] === selected.authorKey)!
+  try {
+    await service.resolveTarget({ type: 'html-preview.resolve-target', leaseId: 'lease', loadId: 'load', revision: 0,
+      targets: [{ handle: 'static', kind: 'text', domPath: [{ name: 'html', index: 0 }, { name: 'body', index: 1 }, { name: 'p', index: 1 }],
+        sectionOrder: null, rawText: 'same', attributeName: null, rect: { x: 0, y: 0, width: 20, height: 10 }, scriptCreated: false,
+        bindingStatus: selected.bindingStatus, authoring: { authorKey: selected.authorKey, record: selected.record } }] }, context())
+    expect(await service.edit({ type: 'html-preview.edit', operationId: 'geometry', documentId: 'doc', epoch: 'epoch', baseRevision: 0,
+      bindingVersion: 1, leaseId: 'lease', loadId: 'load', target: 'static', change: { kind: 'geometry', geometry: { translateX: 25, width: 180 } } }, context()))
+      .toMatchObject({ status: 'applied' })
+    expect(readHtmlAuthoringRecords(currentSource())[selected.authorKey].binding.path.at(-1)?.attributes)
+      .toMatchObject({ 'data-cw-author-key': selected.authorKey })
+    await sourceEdit({ type: 'text', target: targetNode().children[0].address!, text: 'source changed' })
+    await sourceEdit({ type: 'style', target: targetNode().address!, patch: { width: '140px', 'line-height': '1.6' } })
+    const body = flattenHtmlSourceNodes(inspectHtmlSource(currentSource()).roots).find(node => node.name === 'body')!
+    await sourceEdit({ type: 'move', target: targetNode().address!, parent: body.address!, index: 0 })
+    const records = readHtmlAuthoringRecords(currentSource())
+    expect(records[selected.authorKey]).toMatchObject({ binding: { baseline: 'source changed' }, overrides: { geometry: { translateX: 25 } } })
+    expect(records[selected.authorKey].overrides.geometry?.width).toBeUndefined()
+    doc.open(); doc.write(currentSource()); doc.close()
+    new Function('window', 'document', doc.getElementById(HTML_AUTHORING_CONSUMER_ID)!.textContent!)(doc.defaultView!, doc)
+    expect([...doc.querySelectorAll('p')].map(node => node.textContent)).toEqual(['source changed', 'same'])
+    expect(doc.querySelector('p')!.style.translate).toContain('25px')
+    expect(doc.querySelector('p')!.style.width).toBe('140px')
+    expect(doc.querySelectorAll('p')[1]!.style.translate).toBe('')
+    ;(doc.defaultView as any).__cwHtmlAuthoringConsumer.dispose()
+  } finally { frame.remove() }
 })

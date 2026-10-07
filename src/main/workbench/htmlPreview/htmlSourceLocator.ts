@@ -8,6 +8,7 @@ import type {
 } from '../../../shared/workbench/htmlPreview'
 import { htmlPreviewTargetReportSchema } from '../../../shared/workbench/htmlPreview'
 import type { z } from 'zod'
+import type { ComponentAuthorRecord } from '../../../shared/contracts/component-platform/runtime'
 
 type HtmlPreviewTargetReport = z.infer<typeof htmlPreviewTargetReportSchema>
 
@@ -145,4 +146,72 @@ export function escapeHtmlAttribute(value: string, quote: '"' | "'" | ''): strin
   if (quote === '"') return encoded.replace(/"/g, '&quot;')
   if (quote === "'") return encoded.replace(/'/g, '&#39;')
   return encoded.replace(/\s/g, match => `&#${match.charCodeAt(0)};`).replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
+
+/** Source-owned records can be relocated after an explicit local source operation. Dynamic bindings are untouched. */
+export function locateHtmlAuthorRecordSource(source: string, record: ComponentAuthorRecord, authorKey: string, afterEdit = false) {
+  const scan = scanHtmlSource(source), index = indexHtmlElements(source, scan.tokens)
+  const root = renderedSourceTree(source, scan.tokens, index.elements)
+  if (!root) return null
+  const attrs = (node: RenderedElement) => node.sourceIndex === null ? {} : Object.fromEntries((scan.tokens.find(token =>
+    token.kind === 'start-tag' && token.span.start === index.elements[node.sourceIndex!]!.startTag.start)?.attributes ?? [])
+    .map(attribute => [attribute.name, attribute.decodedValue ?? '']))
+  const all = (node: RenderedElement): RenderedElement[] => [node, ...node.children.flatMap(all)]
+  let target: RenderedElement | null = null
+  if (afterEdit) {
+    const last = record.binding.path.at(-1), id = last?.attributes?.id
+    const anchored = all(root).filter(node => attrs(node)['data-cw-author-key'] === authorKey)
+    if (anchored.length === 1) target = anchored[0]!
+    else if (id) {
+      const identified = all(root).filter(node => node.name === last!.tag && attrs(node).id === id)
+      if (identified.length === 1) target = identified[0]!
+    }
+    if (!target) {
+      const domScope = Object.entries(record.scope ?? {}).filter(([name]) => name.startsWith('dom:'))
+      if (domScope.length) {
+        const scoped = all(root).filter(node => node.name === last?.tag && domScope.every(([name, value]) => {
+          const [, depth, attribute] = name.split(':')
+          let owner: RenderedElement | null = node
+          for (let index = 0; index < Number(depth) && owner; index++) owner = owner.parent
+          return owner && attrs(owner)[attribute!] === value
+        }))
+        if (scoped.length === 1) target = scoped[0]!
+      }
+    }
+  }
+  target ??= pathToSource(root, [{ name: 'html', index: 0 }, ...record.binding.path.map(step => ({ name: step.tag, index: step.index }))])
+  if (!target || target.sourceIndex === null) return null
+  const element = index.elements[target.sourceIndex]!
+  let valueSpan: { start: number; end: number } | null = null
+  let value = ''
+  if (record.kind === 'image') {
+    if (target.name !== 'img') return null
+    const attribute = scan.tokens.find(token => token.kind === 'start-tag' && token.span.start === element.startTag.start)
+      ?.attributes?.find(attribute => attribute.name === 'src')
+    valueSpan = attribute?.valueSpan ?? null; value = attribute?.decodedValue ?? ''
+  } else {
+    const texts = directTextTokens(scan.tokens, element, index.elements.filter(candidate => candidate.parent === target!.sourceIndex))
+    const token = texts[record.binding.textIndex ?? 0]
+    if (!token) return null
+    valueSpan = token.span; value = decodeHtmlEntities(source.slice(token.span.start, token.span.end).replace(/\r\n?/g, '\n'))
+  }
+  if (!afterEdit && value !== record.binding.baseline) return null
+  const path: ComponentAuthorRecord['binding']['path'] = []
+  for (let node: RenderedElement | null = target; node && node !== root; node = node.parent) {
+    const attributes = Object.fromEntries(Object.entries(attrs(node)).filter(([name]) =>
+      ['id', 'role', 'aria-label', 'name', 'class', 'data-cw-author-key'].includes(name)))
+    if (attributes.class) {
+      attributes.class = attributes.class.split(/\s+/).filter(value => !/^(?:(?:is|has)-)?(?:active|selected|playing|paused|hidden|open|closed|focused|hovered|disabled)$/.test(value)).join(' ')
+      if (!attributes.class) delete attributes.class
+    }
+    path.unshift({ tag: node.name, index: node.parent!.children.indexOf(node), ...(Object.keys(attributes).length ? { attributes } : {}) })
+  }
+  const scope = Object.fromEntries(Object.entries(record.scope ?? {}).filter(([name]) => !name.startsWith('dom:')))
+  let depth = 0
+  for (let node: RenderedElement | null = target; node; node = node.parent) {
+    for (const [name, value] of Object.entries(attrs(node))) if (/^data-(?:(?:item|record|entity|author|state|scene|view)-)?(?:id|key|state)$/.test(name))
+      scope[`dom:${depth}:${name}`] = value
+    depth++
+  }
+  return { elementSpan: element.full, valueSpan, value, path, scope }
 }

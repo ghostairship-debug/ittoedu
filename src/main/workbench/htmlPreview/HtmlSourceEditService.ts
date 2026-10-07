@@ -7,7 +7,7 @@ import type { z } from 'zod'
 
 type HtmlPreviewTargetReport = z.infer<typeof htmlPreviewTargetReportSchema>
 import type { HtmlPreviewEditContext, HtmlPreviewEditPort } from './HtmlPreviewService'
-import { escapeHtmlAttribute, escapeHtmlText, locateHtmlSourceTarget } from './htmlSourceLocator'
+import { escapeHtmlAttribute, escapeHtmlText, locateHtmlSourceTarget, locateHtmlAuthorRecordSource } from './htmlSourceLocator'
 import { prepareHtmlImage } from './htmlImagePreparation'
 import { replaceSrcsetUrls } from '../../../shared/html/responsiveImage'
 import type { HtmlSourceEditOutcome } from '../../../shared/html/sourceEditCommands'
@@ -95,12 +95,45 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
       const snapshot = await this.dependencies.readDocument(request.documentId)
       if (!matchingSnapshot(snapshot, request, context)) return { status: 'rejected', reason: 'stale-revision' }
       if (snapshot.model.kind !== 'text') return { status: 'rejected', reason: 'not-editable' }
-      const edit = applyHtmlSourceEdit(snapshot.model.source, request.command)
+      const source = snapshot.model.source
+      const edit = applyHtmlSourceEdit(source, request.command)
       if (!edit.ok) return { status: 'rejected', reason: edit.reason, message: edit.message }
       if (!edit.changed) return { status: 'unchanged', revision: snapshot.revision }
+      const records = readHtmlAuthoringRecords(source)
+      const commands = request.command.type === 'batch' ? request.command.commands : [request.command]
+      let changedRecords = false
+      for (const [key, record] of Object.entries(records)) {
+        const before = locateHtmlAuthorRecordSource(source, record, key)
+        if (!before) continue
+        const content = commands.find(command => command.type === 'text' && before.valueSpan
+          && command.target.from === before.valueSpan.start && command.target.to === before.valueSpan.end)
+        const styles = commands.filter(command => (command.type === 'style' || command.type === 'attributes')
+          && command.target.from === before.elementSpan.start && command.target.to === before.elementSpan.end)
+        const after = locateHtmlAuthorRecordSource(edit.source, record, key, true)
+        if (!after) continue
+        const overrides = { ...record.overrides, ...(record.overrides.style ? { style: { ...record.overrides.style } } : {}),
+          ...(record.overrides.geometry ? { geometry: { ...record.overrides.geometry } } : {}) }
+        if (content?.type === 'text') delete overrides.text
+        for (const style of styles) if (style.type === 'style') {
+          for (const name of Object.keys(style.patch)) {
+            if (overrides.style) delete overrides.style[name]
+            if (overrides.geometry) {
+              if (name === 'width') delete overrides.geometry.width
+              if (name === 'height') delete overrides.geometry.height
+              if (name === 'translate') { delete overrides.geometry.translateX; delete overrides.geometry.translateY }
+              if (name === 'scale') { delete overrides.geometry.scaleX; delete overrides.geometry.scaleY }
+              if (name === 'rotate') delete overrides.geometry.rotation
+            }
+          }
+        } else if (style.type === 'attributes' && Object.hasOwn(style.patch, 'src')) delete overrides.src
+        records[key] = { ...record, ...(Object.keys(after.scope).length ? { scope: after.scope } : { scope: undefined }),
+          binding: { ...record.binding, path: after.path, baseline: after.value }, overrides }
+        changedRecords = true
+      }
+      const updated = changedRecords ? patchHtmlAuthoringRecords(edit.source, records) : edit.source
       const result = await this.dependencies.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch,
         operationId: request.operationId, baseRevision: snapshot.revision, actor: 'human',
-        mutation: { type: 'command', command: { type: 'markdown.replace', source: edit.source } } })
+        mutation: { type: 'command', command: { type: 'markdown.replace', source: updated } } })
       if (result.status === 'unchanged') return { status: 'unchanged', revision: result.revision }
       if (result.status !== 'applied') return { status: 'rejected', reason: 'conflict' }
       return { status: 'applied', revision: result.revision, savedRevision: null, dirty: true, reload: true }
@@ -114,7 +147,8 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
       revision: context.snapshot.revision, bindingVersion: context.lease.bindingVersion }
     const targets = request.targets.map(report => {
       let resolved = locateHtmlSourceTarget(model.source, report, identity)
-      if (resolved.status !== 'editable' && report.authoring?.record.kind === report.kind) {
+      if (resolved.status !== 'editable' && report.authoring?.record.kind === report.kind
+        && report.bindingStatus !== 'unresolved' && report.bindingStatus !== 'source-required') {
         resolved = { handle: report.handle, status: 'editable', locator: { ...identity, targetKind: report.kind,
           elementSpan: { start: 0, end: 0 }, valueSpan: null, attributeName: report.attributeName,
           expectedRaw: report.rawText, authoring: report.authoring } }
@@ -141,10 +175,24 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
       const ownsValue = existing && (request.change.kind === 'text' ? existing.overrides.text !== undefined
         : request.change.kind === 'image' ? existing.overrides.src !== undefined
           : request.change.kind === 'style' ? Boolean(existing.overrides.style) : true)
-      const authoring = resolvedRecord.locator.authoring ?? ((request.change.kind === 'geometry' || ownsValue) ? described : undefined)
+      let authoring = resolvedRecord.locator.authoring ?? ((request.change.kind === 'geometry' || ownsValue) ? described : undefined)
       if (authoring) {
+        let authorSource = source
+        if (request.change.kind === 'geometry' && !resolvedRecord.locator.authoring) {
+          const path = authoring.record.binding.path.map(step => ({ ...step, ...(step.attributes ? { attributes: { ...step.attributes } } : {}) }))
+          const last = path.at(-1)
+          if (!last) return { status: 'rejected', reason: 'not-editable' }
+          last.attributes = { ...last.attributes, 'data-cw-author-key': authoring.authorKey }
+          const locator = resolvedRecord.locator
+          const patch = applyHtmlSourceEdit(source, { type: 'attributes', target: { kind: 'element', from: locator.elementSpan.start,
+            to: locator.elementSpan.end }, patch: { 'data-cw-author-key': authoring.authorKey } })
+          if (!patch.ok) return { status: 'rejected', reason: patch.reason }
+          authorSource = patch.source
+          authoring = { ...authoring, record: { ...authoring.record, binding: { ...authoring.record.binding, path } } }
+        }
         const records = readHtmlAuthoringRecords(source)
-        const current = records[authoring.authorKey] ?? authoring.record
+        const previous = records[authoring.authorKey]
+        const current = previous ? { ...previous, ...(authorSource !== source ? { binding: authoring.record.binding } : {}) } : authoring.record
         const overrides = { ...current.overrides }
         let patchValue = record.report.rawText
         if (request.change.kind === 'text') { overrides.text = request.change.value; patchValue = request.change.value }
@@ -161,7 +209,7 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
           overrides.style = style
         }
         records[authoring.authorKey] = { ...current, overrides }
-        const updated = patchHtmlAuthoringRecords(source, records)
+        const updated = patchHtmlAuthoringRecords(authorSource, records)
         if (updated === source) return { status: 'unchanged', revision: snapshot.revision }
         const result = await this.dependencies.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch,
           operationId: request.operationId, baseRevision: snapshot.revision, actor: 'human',
