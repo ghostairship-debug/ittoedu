@@ -5,6 +5,7 @@ import { CourseV10Driver } from '../../../../src/core/drivers/CourseV10Driver'
 import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
 import { createTextComponentData, type TextComponentData } from '../../../../src/components/text/data'
 import { mountPublishedCourseV3 } from '../../../../src/player/componentPlatform/publishedPlayer'
+import { buildPublishedCourseV3 } from '../../../../src/core/publish/componentPlatform/buildPublishedCourseV3'
 
 afterEach(() => { document.body.replaceChildren() })
 it('half-transparent authored HTML text keeps alpha through V10 archive and the actual professional Player renderer', async () => {
@@ -22,8 +23,8 @@ it('half-transparent authored HTML text keeps alpha through V10 archive and the 
   css.style.color = (reopened.project.instances.text.data as TextComponentData).content.inlines[0].style?.color ?? ''
   expect(css.style.color).toBe('rgba(18, 52, 86, 0.5)')
   const root = document.createElement('section'); document.body.append(root)
-  const player = await mountPublishedCourseV3({ schemaVersion: 3, id: project.id, title: project.title,
-    definitions: reopened.project.definitions, instances: reopened.project.instances, surfaces: reopened.project.surfaces, global: reopened.project.global, assets: {} }, root)
+  const publication = await buildPublishedCourseV3({ project: reopened.project, assetBytes: reopened.resources.assets, componentFiles: reopened.resources.components })
+  const player = await mountPublishedCourseV3(publication.payload, root)
   try {
     const run = [...root.querySelectorAll('span')].find(element => element.textContent === '半透明正文')
     expect(run).toBeTruthy()
