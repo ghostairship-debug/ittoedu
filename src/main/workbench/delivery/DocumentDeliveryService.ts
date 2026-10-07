@@ -1,8 +1,9 @@
 import { DocumentSaveFailure, type DocumentSaveIdentity } from '../../../shared/workbench/documentSave'
 import { createHash, randomUUID } from 'node:crypto'
+import path from 'node:path'
 import { documentDigest } from '../../../core/documents/documentDigest'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
-import { exportSuggestedName, validateExportBuildReply, validateExportDestination } from '../../../shared/workbench/documentDelivery'
+import { exportSuggestedName, validateExportBuildFiles, validateExportBuildIdentity, validateExportDestination } from '../../../shared/workbench/documentDelivery'
 import type { DocumentDeliveryServicePort, ExportBuildReply, ExportBuildRequest, ExportFormat, ExportReceipt, SaveReceipt } from '../../../shared/workbench/toolPorts'
 import { DocumentDeliveryOperationStore, type DeliveryOperationRecord } from './DocumentDeliveryOperationStore'
 
@@ -31,6 +32,7 @@ export interface DocumentDeliveryServiceOptions {
   withFileOperation?<T>(work: () => Promise<T>): Promise<T>
   assertExportTarget?(filename: string): Promise<void>
   signalForRun?(runId: string): AbortSignal | undefined
+  renderPdf?(html: string, signal?: AbortSignal): Promise<Uint8Array>
   taskRunIds?(runId: string): Promise<readonly string[]>
 }
 
@@ -59,6 +61,22 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
     const record = await this.options.operations.lookup(input.runId, input.operationId)
     if (!record) return null
     if (record.requestDigest !== input.requestDigest) throw new Error('同一保存/导出操作编号不能改变请求')
+    if (record.kind === 'export' && record.status === 'writing' && (record.receipt as ExportReceipt | undefined)?.files?.length) {
+      const prior = record.receipt as ExportReceipt
+      const files = await Promise.all(prior.files!.map(async (file, index) => {
+        if (file.path) return file
+        const child = await this.options.operations.lookup(input.runId, `${input.operationId}/file/${index}`)
+        if (!child) return file // This destination was never attempted; query does not write it.
+        if (child.status === 'started' || child.status === 'generated' && !child.receipt) return file
+        const receipt = await this.lookup({ ...input, operationId: `${input.operationId}/file/${index}` }) as ExportReceipt | null
+        return receipt?.status === 'written' ? { ...file, path: receipt.path, fileVersion: receipt.fileVersion ?? undefined } : file
+      }))
+      const complete = files.every(file => !!file.path)
+      const receipt: ExportReceipt = { ...prior, status: complete ? 'written' : 'generated', files,
+        warnings: complete ? prior.warnings : [...prior.warnings, '导出在部分文件写盘后中断；回执列出已写文件，其余文件未重放，请按需要另行导出。'] }
+      await this.options.operations.patch(input.runId, input.operationId, { status: complete ? 'completed' : 'generated', receipt })
+      return receipt
+    }
     if (record.kind === 'save' && record.status !== 'completed' && record.status !== 'failed'
       && record.documentId && this.options.documents.lookupSave) {
       const receipt = await this.options.documents.lookupSave(record.documentId, { runId: input.runId, operationId: input.operationId, requestDigest: input.requestDigest })
@@ -122,7 +140,7 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
     const known = await this.options.operations.lookup(input.runId, input.operationId)
     if (known) return (await this.lookup(input)) as ExportReceipt
     await this.started({ runId: input.runId, operationId: input.operationId, requestDigest: input.requestDigest, kind: 'export', status: 'started' })
-    let writing = false
+    let writing = false, generated: ExportReceipt | undefined
     try {
       const signal = this.options.signalForRun?.(input.runId)
       signal?.throwIfAborted()
@@ -135,44 +153,83 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
       const request: ExportBuildRequest = { requestId: randomUUID(),
         identity: { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, projectId: snapshot.model.project.id },
         format: input.format, snapshot: structuredClone(snapshot) }
-      const reply = await this.options.build.build(request, signal)
+      let reply = await this.options.build.build(request, signal)
       signal?.throwIfAborted()
-      const bytes = validateExportBuildReply(request, reply)
+      validateExportBuildIdentity(request, reply)
+      if (input.format === 'pdf' && reply.printHtml !== undefined) {
+        if (!this.options.renderPdf) throw new Error('PDF 打印服务尚未连接；尚未写盘，当前工程保留')
+        const bytes = await this.options.renderPdf(reply.printHtml, signal)
+        signal?.throwIfAborted()
+        reply = { ...reply, files: [{ relativePath: 'course.pdf', mimeType: 'application/pdf', bytes }] }
+      }
+      const files = validateExportBuildFiles(request, reply)
       const current = await this.options.documents.read(input.documentId)
       if (current.epoch !== snapshot.epoch || documentDigest(current.binding) !== documentDigest(snapshot.binding))
         throw new Error('文档身份或文件绑定在导出期间已变化')
-      const generated: ExportReceipt = { status: 'generated', documentId: snapshot.documentId, epoch: snapshot.epoch, format: input.format,
-        exportedRevision: snapshot.revision, currentRevision: current.revision, warnings: reply.warnings }
+      generated = { status: 'generated', documentId: snapshot.documentId, epoch: snapshot.epoch, format: input.format,
+        exportedRevision: snapshot.revision, currentRevision: current.revision, warnings: reply.warnings,
+        ...(files.length > 1 ? { files: files.map(file => ({ suggestedName: file.relativePath, byteLength: file.bytes.byteLength })) } : {}) }
       await this.options.operations.patch(input.runId, input.operationId, { status: 'generated', receipt: generated })
-      const filename = await this.options.resolveExportDestination({ runId: input.runId, snapshot, requested: input.destination,
-        format: input.format, suggestedName: exportSuggestedName(snapshot, input.format) })
-      if (!filename) return generated
-      validateExportDestination(filename, input.format)
+      const destinations: string[] = []
+      for (const [index, file] of files.entries()) {
+        let suggestedName = files.length > 1 ? file.relativePath : exportSuggestedName(snapshot, input.format)
+        let requested = index === 0 || !input.destination ? input.destination : path.join(path.dirname(input.destination), suggestedName)
+        if (index > 0 && requested) {
+          const stem = path.basename(suggestedName, '.docx')
+          let suffix = 2
+          while (destinations.some(value => path.resolve(value).toLowerCase() === path.resolve(requested!).toLowerCase())) {
+            suggestedName = `${stem} (${suffix++}).docx`
+            requested = path.join(path.dirname(input.destination!), suggestedName)
+          }
+        }
+        const filename = await this.options.resolveExportDestination({ runId: input.runId, snapshot, requested,
+          format: input.format, suggestedName })
+        if (!filename) return generated
+        validateExportDestination(filename, input.format)
+        if (destinations.some(value => path.resolve(value).toLowerCase() === path.resolve(filename).toLowerCase())) throw new Error('多个讲义的导出目标重名，请选择不同目标；尚未写盘')
+        destinations.push(filename)
+      }
       signal?.throwIfAborted()
       const write = () => this.options.documents.withFileLease(input.documentId, async read => {
         const final = read()
         if (final.epoch !== snapshot.epoch || documentDigest(final.binding) !== documentDigest(snapshot.binding))
           throw new Error('导出写盘前文档身份或文件绑定已变化')
-        signal?.throwIfAborted()
-        await this.options.assertExportTarget?.(filename)
-        const existing = await this.options.writer.inspect(filename)
-        if (existing && (!this.options.writer.replaceExisting || !await this.options.operations.ownsExportVersion({
-          runId: input.runId, documentId: input.documentId, epoch: input.epoch, path: filename, format: input.format, fileVersion: existing.fileVersion,
-          taskRunIds: await this.options.taskRunIds?.(input.runId),
-        }))) throw new Error('导出目标已有其他内容或已被修改，请选择新文件名；原文件未变更')
-        const sha256 = createHash('sha256').update(bytes).digest('hex')
-        const prepared = async (publicationIdentity: string | null) => {
-          await this.options.operations.patch(input.runId, input.operationId,
-            { status: 'writing', path: filename, contentSha256: sha256, publicationIdentity, receipt: generated })
+        for (const [index, file] of files.entries()) {
+          const filename = destinations[index]!, bytes = file.bytes
+          signal?.throwIfAborted()
+          await this.options.assertExportTarget?.(filename)
+          const existing = await this.options.writer.inspect(filename)
+          if (existing && (!this.options.writer.replaceExisting || !await this.options.operations.ownsExportVersion({
+            runId: input.runId, documentId: input.documentId, epoch: input.epoch, path: filename, format: input.format, fileVersion: existing.fileVersion,
+            taskRunIds: await this.options.taskRunIds?.(input.runId),
+          }))) throw new Error('导出目标已有其他内容或已被修改，请选择新文件名；原文件未变更')
+          const operationId = files.length > 1 ? `${input.operationId}/file/${index}` : input.operationId
+          const childReceipt: ExportReceipt = { ...generated!, files: undefined }
+          if (files.length > 1) {
+            await this.started({ runId: input.runId, operationId, requestDigest: input.requestDigest, kind: 'export', status: 'generated' })
+            await this.options.operations.patch(input.runId, input.operationId, { status: 'writing', receipt: generated })
+          }
+          const sha256 = createHash('sha256').update(bytes).digest('hex')
+          const prepared = async (publicationIdentity: string | null) => {
+            await this.options.operations.patch(input.runId, operationId,
+              { status: 'writing', path: filename, contentSha256: sha256, publicationIdentity, receipt: childReceipt })
+          }
+          signal?.throwIfAborted()
+          await prepared(null) // Without publication proof, a lost acknowledgement remains queryable as unknown.
+          writing = true
+          const result = existing
+            ? await this.options.writer.replaceExisting!(filename, bytes, existing.fileVersion, signal, prepared)
+            : await this.options.writer.writeNew(filename, bytes, signal, prepared)
+          writing = false
+          const written: ExportReceipt = { ...childReceipt, status: 'written', path: filename, fileVersion: result.fileVersion, currentRevision: read().revision }
+          if (files.length === 1) return written
+          try { await this.options.operations.patch(input.runId, operationId, { status: 'completed', receipt: written, fileVersion: result.fileVersion }) }
+          catch (error) { throw new DocumentDeliveryOutcomeUnknown(error) }
+          generated = { ...generated!, files: generated!.files!.map((value, at) => at === index ? { ...value, path: filename, fileVersion: result.fileVersion } : value) }
+          try { await this.options.operations.patch(input.runId, input.operationId, { status: 'writing', receipt: generated }) }
+          catch (error) { throw new DocumentDeliveryOutcomeUnknown(error) }
         }
-        signal?.throwIfAborted()
-        await prepared(null) // Older/custom writers without a candidate proof must remain queryable as unknown.
-        // Only the byte writer can report a definite pre-publication rejection.
-        writing = true
-        const result = existing
-          ? await this.options.writer.replaceExisting!(filename, bytes, existing.fileVersion, signal, prepared)
-          : await this.options.writer.writeNew(filename, bytes, signal, prepared)
-        return { ...generated, status: 'written' as const, path: filename, fileVersion: result.fileVersion, currentRevision: read().revision }
+        return { ...generated!, status: 'written' as const, currentRevision: read().revision }
       })
       const receipt = this.options.withFileOperation ? await this.options.withFileOperation(write) : await write()
       try { await this.options.operations.patch(input.runId, input.operationId, { status: 'completed', receipt, fileVersion: receipt.fileVersion }) }
@@ -181,7 +238,9 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
     } catch (error) {
       if (error instanceof DocumentDeliveryOutcomeUnknown || writing && !(error instanceof DocumentSaveFailure && error.publication === 'not-published'))
         throw error instanceof DocumentDeliveryOutcomeUnknown ? error : new DocumentDeliveryOutcomeUnknown(error)
-      const receipt = failedExport(input, error instanceof Error ? error.message : String(error))
+      const partial = generated?.files?.filter(file => file.path).map(file => file.path)
+      const reason = (error instanceof Error ? error.message : String(error)) + (partial?.length ? `；已写出的文件保留：${partial.join('、')}，其余未写盘` : '')
+      const receipt = { ...failedExport(input, reason), ...(generated?.files ? { files: generated.files } : {}) }
       await this.options.operations.patch(input.runId, input.operationId, { status: 'failed', receipt })
       return receipt
     }

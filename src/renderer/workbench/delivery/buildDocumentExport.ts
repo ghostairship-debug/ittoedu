@@ -1,6 +1,8 @@
 import type { ExportBuildReply, ExportBuildRequest, ExportBuildProgress } from '../../../shared/workbench/toolPorts'
 import { courseDeliverySnapshot } from '../../app/courseDeliverySnapshot'
-import { buildComponentHtml, buildComponentWebPackage, type ComponentCompilePort } from '../../export/componentPlatform/buildHtml'
+import type { ComponentCompilePort } from '../../export/componentPlatform/buildHtml'
+import { buildComponentDelivery, type ComponentOutputCapture } from '../../export/componentPlatform/delivery'
+import type { PublishedCourseV3 } from '../../../shared/contracts/component-platform/published'
 
 export type PrepareDocumentExportDrafts = (documentId: string, epoch: string) => Promise<void>
 
@@ -22,7 +24,8 @@ function cancellable<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T
 /** Build only from Main's frozen snapshot and the supplied ports; no editor state is loaded. */
 export async function buildDocumentExport(request: ExportBuildRequest, signal: AbortSignal | undefined,
   compile: ComponentCompilePort, prepareDrafts: PrepareDocumentExportDrafts,
-  onProgress?: (progress: ExportBuildProgress) => void): Promise<ExportBuildReply> {
+  onProgress?: (progress: ExportBuildProgress) => void,
+  options: { createCapture?: (payload: PublishedCourseV3) => Promise<ComponentOutputCapture> } = {}): Promise<ExportBuildReply> {
   const base = { requestId: request.requestId, identity: request.identity }
   let sequence = 0, stage: ExportBuildProgress['stage'] = 'preparing'
   const progress = (next = stage) => {
@@ -48,24 +51,33 @@ export async function buildDocumentExport(request: ExportBuildRequest, signal: A
     if (!snapshot || snapshot.documentId !== request.identity.documentId || snapshot.epoch !== request.identity.epoch
       || snapshot.revision !== request.identity.revision || snapshot.project.id !== request.identity.projectId)
       throw new Error('导出请求中的 V10 快照身份不一致')
-    const compilation: ComponentCompilePort = async input => {
+    const compilation: ComponentCompilePort = async (input, compilationSignal, compilationProgress) => {
       signal?.throwIfAborted()
       progress('compiling')
-      const result = await cancellable(() => compile(input), signal)
+      const result = await cancellable(() => compile(input, compilationSignal ?? signal, () => { compilationProgress?.(); progress('compiling') }), signal)
       signal?.throwIfAborted()
       progress('building')
       return result
     }
     progress('building')
-    const built = await cancellable(() => request.format === 'web-package'
-      ? buildComponentWebPackage(request.snapshot, compilation, signal)
-      : buildComponentHtml(request.snapshot, compilation, request.format === 'html-online' ? 'online-lightweight' : 'offline-portable', signal), signal)
+    const format = request.format === 'html-online' || request.format === 'html-offline' ? 'single-html' : request.format
+    const built = await cancellable(() => buildComponentDelivery(snapshot, format, {
+      compile: compilation, signal, createCapture: options.createCapture,
+      singleHtmlMode: request.format === 'html-online' ? 'online-lightweight' : 'offline-portable',
+      onProgress: () => progress('building'),
+    }), signal)
     signal?.throwIfAborted()
-    const file = 'html' in built
-      ? { relativePath: 'index.html', mimeType: 'text/html', bytes: new TextEncoder().encode(built.html) }
-      : { relativePath: 'course.zip', mimeType: 'application/zip', bytes: built.bytes }
+    const warnings = built.report.items.map(item => item.message)
+    const mimeTypes = { html: 'text/html', zip: 'application/zip', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pdf: 'application/pdf' }
+    const files = built.artifacts.filter(artifact => artifact.extension !== 'pdf').map(artifact => ({
+      relativePath: artifact.extension === 'html' ? 'index.html' : artifact.extension === 'zip' ? 'course.zip'
+        : artifact.extension === 'pptx' ? 'course.pptx' : artifact.suggestedName,
+      mimeType: mimeTypes[artifact.extension], bytes: artifact.bytes ?? new TextEncoder().encode(artifact.html!),
+    }))
+    const printHtml = built.artifacts.find(artifact => artifact.extension === 'pdf')?.html
     progress('complete')
-    return { ...base, status: 'generated', files: [file], warnings: built.warnings }
+    return { ...base, status: 'generated', files, ...(printHtml ? { printHtml } : {}), warnings }
   } catch (error) {
     return { ...base, status: signal?.aborted ? 'cancelled' : 'failed', warnings: [], reason: error instanceof Error ? error.message : String(error) }
   } finally { if (heartbeat !== undefined) clearInterval(heartbeat) }
