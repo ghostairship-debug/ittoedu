@@ -1,4 +1,12 @@
 import { BUNDLED_TEXT_FONT_FAMILY } from './fonts/bundledFontFamilies'
+import { resolveComponentBackground, type ComponentSurface, type CourseProjectV10 } from './contracts/component-platform'
+
+/** Explicit page/course paint belongs on the paper; the legacy paper color is its fallback. */
+export function resolveFlowPaperBackground(project: Pick<CourseProjectV10, 'background'>, surface: ComponentSurface) {
+  const background = resolveComponentBackground(project, surface)
+  return !project.background && surface.background?.mode !== 'own'
+    ? { ...background, color: surface.flow?.layout.paperBackgroundColor ?? background.color } : background
+}
 
 /** The authoring paper and every Published carrier share these content metrics. */
 export const FLOW_BODY_FONT_FAMILY = `"${BUNDLED_TEXT_FONT_FAMILY}","Microsoft YaHei","PingFang SC",sans-serif`

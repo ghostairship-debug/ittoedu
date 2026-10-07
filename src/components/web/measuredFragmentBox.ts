@@ -140,7 +140,8 @@ export function componentLayoutInput(instance: ComponentInstance, host: {
   const key = declared?.kind === 'builtin' ? declared.key : instance.definitionId
   const data = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data : null
   const web = ['guoling.web', 'guoling.html-program'].includes(key)
-  const viewport = fixedViewport ?? (key !== 'guoling.document-block' && Boolean(instance.childIds?.length) || (web && typeof data?.html === 'string' ? instanceWebUsesFixedViewport(instance, data.html, typeof data.css === 'string' ? data.css : '')
+  const viewport = fixedViewport ?? (Boolean(instance.frame) && ['guoling.image', 'guoling.video', 'guoling.audio'].includes(key)
+    || key !== 'guoling.document-block' && Boolean(instance.childIds?.length) || (web && typeof data?.html === 'string' ? instanceWebUsesFixedViewport(instance, data.html, typeof data.css === 'string' ? data.css : '')
     : key !== 'guoling.document-block' && (instance.implementationOverride ?? declared)?.kind === 'source' && Boolean(instance.frame)))
   return viewport ? { mode: 'flow-viewport', inlineSize: width, blockSize: height } : { mode: 'flow-content', inlineSize: host.inlineSize }
 }
