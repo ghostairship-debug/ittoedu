@@ -118,6 +118,10 @@ export interface ComponentAuthorSpot extends ComponentAuthorSpotInput {
   instanceId: string
   mountGeneration: number
 }
+/** A live registration may preview one gesture; callbacks never enter author data or cloned observations. */
+export interface ComponentAuthorPreviewCallbacks {
+  previewGeometry(geometry: ComponentAuthorGeometry | null): void
+}
 
 /** Host-derived layout, not author metadata. Only Flow owns the natural height of a reading block. */
 export type ComponentLayoutInput =
@@ -147,7 +151,7 @@ export interface ComponentRuntimeContext<Data = JsonValue> {
   readonly resources?: { url(assetId: string): string | undefined }
   readonly media?: ComponentMediaPort
   readonly interactions?: ComponentInteractionPort
-  readonly authoring?: { register(spot: ComponentAuthorSpotInput): () => void }
+  readonly authoring?: { register(spot: ComponentAuthorSpotInput, callbacks?: ComponentAuthorPreviewCallbacks): () => void }
   readonly layout?: ComponentLayoutPort
 }
 
