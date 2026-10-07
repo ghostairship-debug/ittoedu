@@ -124,6 +124,7 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
   try {
     const resources = emptyDocumentResources()
     const diagnostics: DocumentDiagnostic[] = []
+    const recoverOpaque = new Set<string>()
     const extensions: TokenizerExtension[] = [
       {
         name: 'cwMeta', level: 'block', start: src => src.indexOf('<!--cw:block'),
@@ -379,6 +380,7 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
           } catch { /* The source fragment below remains available for repair. */ }
         }
         const block: DocumentBlock = prior ?? { id: options.createId('block'), type: 'code', language: 'markdown', code: source.slice(blockStart, cursor).replace(/\n+$/, '') }
+        if (token.type === 'code' && t.lang === 'cw-object-v1' && !prior) recoverOpaque.add(block.id)
         if (prior && options.previous) mergeResources(resourcesForBlock(prior, options.previous.document.resources))
         blocks.push(block)
         sourceMap.blocks.push({ blockId: block.id, from: blockStart, to: cursor, keys: [], slots: [] })
@@ -407,7 +409,7 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
     }
     for (const issue of diagnostics) { issue.offset = offsets[issue.offset]!; issue.endOffset = offsets[issue.endOffset]! }
     const result = { status: 'valid' as const, source: originalSource, document: { content, resources }, sourceMap, diagnostics }
-    if (options.previous) retainMarkdownIdentities(result, options.previous)
+    if (options.previous) retainMarkdownIdentities(result, options.previous, recoverOpaque)
     return result
   } catch (e) {
     const found = e instanceof SourceError ? source.indexOf(e.fragment, Math.min(location, source.length)) : -1

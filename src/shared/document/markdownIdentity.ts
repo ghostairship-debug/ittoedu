@@ -25,7 +25,7 @@ function identityView(projection: MarkdownProjection): MarkdownProjection {
   return { ...projection, source, sourceMap: { blocks } }
 }
 /** Position mapping, never a search for matching prose. A second identical paragraph retains its own identity. */
-export function retainMarkdownIdentities(next: MarkdownProjection, previous: MarkdownProjection): void {
+export function retainMarkdownIdentities(next: MarkdownProjection, previous: MarkdownProjection, recoverOpaque?: ReadonlySet<string>): void {
   const nextView = identityView(next), oldView = identityView(previous)
   let from = 0, oldEnd = oldView.source.length, newEnd = nextView.source.length
   while (from < oldEnd && from < newEnd && oldView.source[from] === nextView.source[from]) from++
@@ -37,12 +37,19 @@ export function retainMarkdownIdentities(next: MarkdownProjection, previous: Mar
   const maps = [...nextView.sourceMap.blocks].sort((a, b) => Number(!explicit.has(a.blockId)) - Number(!explicit.has(b.blockId))
     || Number(a.from < newEnd && a.to > from) - Number(b.from < newEnd && b.to > from))
   for (const map of maps) {
-    const block = next.document.content.blocks.find(value => value.id === map.blockId)!
+    let block = next.document.content.blocks.find(value => value.id === map.blockId)!
     const old = oldView.sourceMap.blocks.find(value => !used.has(value.blockId) && explicit.has(map.blockId) && value.blockId === map.blockId)
       ?? oldView.sourceMap.blocks.find(value => !used.has(value.blockId) && !explicit.has(value.blockId) && value.from === oldAt(map.from))
       ?? oldView.sourceMap.blocks.find(value => !used.has(value.blockId) && !explicit.has(value.blockId) && value.from <= from && value.to >= oldEnd && map.from <= from && map.to >= newEnd)
     const prior = old && previous.document.content.blocks.find(value => value.id === old.blockId)
-    if (!old || !prior || prior.type !== block.type) continue
+    if (!old || !prior) continue
+    if (prior.type !== block.type) {
+      if (!recoverOpaque?.has(block.id) || prior.type !== 'course-instance') continue
+      // A damaged software object fence remains its original live object, with the draft in diagnostics.
+      const index = next.document.content.blocks.indexOf(block)
+      block = { ...prior, id: block.id }
+      next.document.content.blocks[index] = block
+    }
     used.add(old.blockId); identities.set(block.id, old.blockId)
     if (block.type === 'list' && prior.type === 'list') {
       const taken = new Set<string>()
