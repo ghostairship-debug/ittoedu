@@ -69,7 +69,7 @@ export function componentInputDataPropertyEdits(project: CourseProjectV10, surfa
   const next = inputDataSchema.parse(nextData), inspection = inspectComponentInputRules(project, surfaceId, instanceId)
   if (!inspection.managed) return null
   const unchanged = equalComponentValue(inputDataSchema.parse(project.instances[instanceId].data).acceptedAnswers, next.acceptedAnswers)
-  if (unchanged && (inspection.conflict || inspection.config?.answerType !== 'text')) return null
+  if (unchanged) return null
   if (inspection.conflict || !inspection.config) throw new Error('判题规则已经手改，请保留手改或明确选择重建。')
   if (inspection.config.answerType !== 'text') throw new Error('此填空使用托管数值范围，请通过判题配置修改数值答案。')
   if (equalComponentValue(inspection.config.answers, next.acceptedAnswers.map(normalizeShortAnswer))) return null
