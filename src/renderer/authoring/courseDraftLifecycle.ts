@@ -41,8 +41,10 @@ export function courseDraftLifecycle(bridge: CourseV10DocumentBridge) {
       return { ready: !issues.length, issues }
     },
     preserve(documentId: string): AdvancedDraftRecovery[] {
+      const target = bridge.captureTarget(documentId)
       return [...value.providers.values()].flatMap(provider => provider.preserve(documentId))
         .concat([...value.pending.values()].filter(record => record.documentId === documentId))
+        .map(record => ({ ...record, documentId, epoch: target.epoch, projectId: target.project.id }))
     },
     restore(documentId: string, records: readonly AdvancedDraftRecovery[]): { restored: number; issues: AdvancedDraftIssue[] } {
       const target = bridge.captureTarget(documentId), issues: AdvancedDraftIssue[] = []

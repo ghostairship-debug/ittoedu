@@ -77,21 +77,27 @@ function codeLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, CodeD
         const apply = draft.binding?.apply, target = apply?.target
         if (!apply?.context || !target || target.documentId !== documentId || !codeDraftDirty(draft)) return []
         return [{ kind: 'json', documentId, epoch: target.epoch, projectId: target.project.id, key: JSON.stringify([apply.context, target.surfaceId, target.activeStateId]),
-          payload: { context: apply.context, raw: draft.value, baseline: draft.baseline ?? apply.baseline ?? '',
+          payload: { projectId: target.project.id, context: apply.context, raw: draft.value, baseline: draft.baseline ?? apply.baseline ?? '',
             surfaceId: target.surfaceId, activeStateId: target.activeStateId, message: draft.message, composing: draft.composing || Boolean(draft.resumeRequired) } } satisfies AdvancedDraftRecovery]
       })
     },
     restore(documentId, record) {
-      const saved = record.payload as unknown as { context: JsonDraftContext; raw: string; baseline: string; surfaceId: string | null; activeStateId: string | null; composing: boolean }
+      const saved = record.payload as unknown as { projectId?: string; context: JsonDraftContext; raw: string; baseline: string; surfaceId: string | null; activeStateId: string | null; composing: boolean }
       const fresh = bridge.captureTarget(documentId), target = { ...fresh, surfaceId: saved.surfaceId, activeStateId: saved.activeStateId,
         editingProject: resolveComponentPresentation(fresh.project, saved.surfaceId, saved.activeStateId) }
+      if (saved.projectId && saved.projectId !== target.project.id) throw new Error('JSON 恢复稿属于原工程，原输入已保留。')
       const apply = captureDeveloperJsonSession(bridge, target, saved.context)
       const key = developerJsonKey(target, saved.context)
-      if (cache.get(key)?.binding) return
+      const existing = cache.get(key)
+      if (existing?.binding || existing?.busy || existing?.composing) return
       const blocked = jsonEqual(saved.baseline, apply.baseline ?? '') ? undefined : 'JSON 基线已改变；原输入已恢复，请检查当前内容或放弃草稿后继续。'
-      cache.set(key, { key, value: saved.raw, binding: { apply, version: 1 }, busy: false, composing: false, listeners: new Set(),
+      // Restore in place so an already-mounted textarea keeps observing the same owner.
+      const draft: CodeDraft = existing ?? { key, value: '', binding: null, busy: false, composing: false, message: null, listeners: new Set() }
+      Object.assign(draft, { value: saved.raw, binding: { apply, version: 1 }, busy: false, composing: false,
         baseline: saved.baseline, blocked, resumeRequired: saved.composing,
         message: blocked ?? (saved.composing ? '上次输入尚未结束；原输入已恢复，请继续编辑后保存。' : '已恢复 JSON 原输入；尚未自动应用。') })
+      cache.set(key, draft)
+      for (const notify of draft.listeners) notify()
     },
     release(documentId) {
       for (const [key, draft] of cache) if (draft.binding?.apply.target?.documentId === documentId || JSON.parse(key)[0] === documentId) {

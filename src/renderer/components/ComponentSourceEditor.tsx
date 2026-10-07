@@ -181,18 +181,22 @@ function sourceLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, Sou
         const session = draft.session!
         return { kind: 'source', documentId, epoch: session.target.epoch, projectId: session.target.project.id,
           key: JSON.stringify([session.scope.kind, session.scope.kind === 'definition' ? session.scope.definition.id : session.instanceId]),
-          payload: { instanceId: session.instanceId, scope: session.scope.kind, definitionId: session.scope.kind === 'definition' ? session.scope.definition.id : null,
+          payload: { projectId: session.target.project.id, instanceId: session.instanceId, scope: session.scope.kind, definitionId: session.scope.kind === 'definition' ? session.scope.definition.id : null,
             name: draft.name, value: sourceRecoveryValue(draft.value), baseline: sourceRecoveryValue(draft.recoveryBaseline ?? readSource(session.implementation, session.target.resources)),
             newPath: draft.newPath, message: draft.message, composing: draft.composing || Boolean(draft.resumeRequired) } } satisfies AdvancedDraftRecovery
       })
     },
     restore(documentId, record) {
-      const saved = record.payload as unknown as { instanceId: string; scope: 'instance' | 'definition'; definitionId: string | null; name: string;
+      const saved = record.payload as unknown as { projectId?: string; instanceId: string; scope: 'instance' | 'definition'; definitionId: string | null; name: string;
         value: ReturnType<typeof sourceRecoveryValue>; baseline: ReturnType<typeof sourceRecoveryValue>; newPath: string; message: string | null; composing: boolean }
       const session = captureComponentSourceSession(bridge, documentId, saved.instanceId, saved.scope, saved.definitionId ?? undefined)
+      if (saved.projectId && saved.projectId !== session.target.project.id) throw new Error('源码恢复稿属于原工程，原输入已保留。')
       const key = JSON.stringify([documentId, session.target.epoch, saved.scope, saved.scope === 'definition' ? saved.definitionId : saved.instanceId])
-      if (cache.get(key)?.session) return
-      const draft = freshDraft(key, saved.name, restoreSourceValue(saved.value))
+      const existing = cache.get(key)
+      if (existing?.session || existing?.busy || existing?.composing) return
+      // Preserve the object observed by mounted controls, including their subscriptions.
+      const draft = existing ?? freshDraft(key, saved.name, restoreSourceValue(saved.value))
+      resetDraft(draft, restoreSourceValue(saved.value), false); draft.name = saved.name
       // Recovered text remains input until the user resumes editing or explicitly saves it.
       draft.session = session; draft.newPath = saved.newPath; draft.version++; draft.resumeRequired = saved.composing
       draft.message = sourceValuesEqual(restoreSourceValue(saved.baseline), readSource(session.implementation, session.target.resources))
@@ -203,6 +207,7 @@ function sourceLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, Sou
         draft.blocked = draft.message
       }
       cache.set(key, draft)
+      for (const notify of draft.listeners) notify()
     },
     release(documentId) {
       for (const [key, draft] of cache) if (draft.session?.target.documentId === documentId || JSON.parse(key)[0] === documentId) {
