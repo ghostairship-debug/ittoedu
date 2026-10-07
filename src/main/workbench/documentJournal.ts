@@ -606,10 +606,13 @@ export function createDocumentJournal(options: { directory: string }): DocumentJ
     },
     listBindings,
     get recoveryIssues() { return [...unavailable.values()].map(issue => issue.message) },
-    async assertAvailable(paths = [], documentIds = [], readOnly = false) {
+    async assertAvailable(paths = [], documentIds = [], _readOnly = false) {
       await listBindings()
       const contains = (parent: string, child: string) => { const rel = path.relative(fileKey(parent), fileKey(child)); return !rel || rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel) }
-      for (const issue of unavailable.values()) if (!readOnly && !issue.documentId && !issue.path
+      // Unknown ownership is a diagnostic, not a reservation of every workspace path.
+      // A supplied document ID can still identify its exact journal without trusting a
+      // damaged payload or a missing binding index.
+      for (const [target, issue] of unavailable) if (documentIds.some(id => filename(id) === target)
         || issue.documentId && documentIds.includes(issue.documentId)
         || issue.path && paths.some(filename => contains(issue.path!, filename) || contains(filename, issue.path!))) throw new Error(issue.message)
     },
