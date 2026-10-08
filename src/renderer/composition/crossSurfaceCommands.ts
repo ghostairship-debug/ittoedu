@@ -325,14 +325,24 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
   for (const sourceSurface of source.project.surfaces) for (const state of sourceSurface.presentation?.states ?? []) {
     const owned = copiedIds.filter(id => Object.hasOwn(state.overrides, id))
     const ordered = state.order?.filter(id => idMap.has(id)) ?? []
-    const ownsRuleState = copiedBehaviorId && (externalBehaviors.some(id => state.overrides[id]?.data !== undefined
+    const changesCopiedRules = externalBehaviors.some(id => state.overrides[id]?.data !== undefined
       && !equalComponentValue(selectRules(rulesAt(id, state.overrides[id].data!)), selectRules(rulesAt(id))))
+    const ownsRuleState = copiedBehaviorId && (changesCopiedRules
       || copiedIds.some(id => { const owner = topOwner(source.project, owningContainer(source.project, id)); return owner?.kind === 'surface' && owner.surfaceId === sourceSurface.id }))
     if (!owned.length && !ordered.length && !ownsRuleState) continue
     const surfaceId = destination.keepOwner && sameDocument ? sourceSurface.id : destinationSurfaceId
     if (!surfaceId) continue
     const destinationSurface = project.surfaces.find(surface => surface.id === surfaceId)
     if (!destinationSurface) continue
+    if (destinationSurface.kind !== 'slide') {
+      const baseOrder = sourceSurface.childIds.filter(id => copied.has(id))
+      const stateOrder = [...ordered, ...baseOrder.filter(id => !ordered.includes(id))]
+      if (owned.length || changesCopiedRules || !equalComponentValue(stateOrder, baseOrder)) {
+        throw new Error(`当前${destinationSurface.kind === 'flow' ? '连续文档' : '空间画布'}不支持展示状态，无法完整粘贴这些对象。请粘贴到幻灯片页面。`)
+      }
+      // Unrelated page states do not belong to these copied objects.
+      continue
+    }
     const presentation = presentations.get(surfaceId) ?? structuredClone(destinationSurface.presentation ?? { states: [] })
     let copiedState = presentation.states.find(value => value.id === state.id)
     if (!copiedState) {

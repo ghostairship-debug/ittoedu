@@ -212,6 +212,67 @@ it('copies base values, all named states and local records in one undoable saved
   if (restored.kind !== 'course-v10') throw new Error('Expected V10')
   expect(restored.project.instances).toEqual(project.instances)
 })
+it('rejects stateful Slide object paste into Flow or Spatial before a canonical write', async () => {
+  const source = fixture(), resources = { assets: {}, components: {} }
+  source.surfaces[0].presentation = { states: [{ id: 'answer', title: '答案', overrides: { a: { data: { html: 'Answer' } } } }] }
+  const beforeSource = structuredClone(source)
+  for (const kind of ['flow', 'spatial'] as const) {
+    const project = createBlankCourseProjectV10('目标'), surface = project.surfaces[0]
+    surface.kind = kind
+    const target: CapturedCourseTarget = { documentId: 'target', epoch: 'epoch', project, editingProject: project, resources,
+      activeStateId: null, surfaceId: surface.id, instanceIds: [], instanceId: null }
+    const session = await DocumentSession.create({ documentId: 'target', epoch: 'epoch', model: { kind: 'course-v10', project, resources },
+      binding: { kind: 'untitled', suggestedName: 'target.h5lesson' } }, new CourseV10Driver(),
+    { async append() {}, async save() { throw new Error('Unused save') } })
+    const before = session.read()
+    const paste = async () => {
+      const plan = prepareCourseObjectPaste({ documentId: 'source', project: source, roots: ['a'], resources },
+        { capturedTarget: target, container: { kind: 'surface', surfaceId: surface.id }, index: 0 })
+      return session.execute({ documentId: 'target', epoch: 'epoch', operationId: 'paste', baseRevision: before.revision, actor: 'human',
+        mutation: { type: 'command', command: captureComponentOperation(project, plan.edits) } })
+    }
+    await expect(paste()).rejects.toThrow('不支持展示状态，无法完整粘贴这些对象')
+    expect(session.read()).toEqual(before)
+    expect(project).toEqual(before.model.kind === 'course-v10' && before.model.project)
+  }
+  expect(source).toEqual(beforeSource)
+})
+it('canonically pastes an ordinary object into Flow or Spatial despite unrelated page states and an order entry', async () => {
+  const source = fixture(), resources = { assets: {}, components: {} }, sourceSurface = source.surfaces[0]
+  source.instances.other = { ...source.instances.a, id: 'other' }
+  source.definitions.interactions = { id: 'interactions', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.interactions' } }
+  const rule = (nodeId: string): InteractionRule => ({ id: `rule-${nodeId}`, enabled: true, trigger: { type: 'node.click', nodeId }, conditions: [],
+    actions: [{ id: `action-${nodeId}`, start: 'after-previous', delayMs: 0, action: { type: 'scene.next' } }] })
+  const copiedRule = rule('a'), otherRule = rule('other')
+  source.instances.behavior = { id: 'behavior', definitionId: 'interactions', data: { rules: [copiedRule, otherRule] } as unknown as JsonValue,
+    attachments: [{ instanceId: 'behavior', target: { kind: 'surface', surfaceId: sourceSurface.id } }] }
+  sourceSurface.childIds.push('other', 'behavior')
+  sourceSurface.presentation = { states: [{ id: 'unrelated', title: '其他对象状态', order: ['other', 'a', 'behavior'], overrides: {
+    other: { visible: false }, behavior: { data: { rules: [copiedRule, { ...otherRule, enabled: false }] } as unknown as JsonValue },
+  } }] }
+  const beforeSource = structuredClone(source)
+  for (const kind of ['flow', 'spatial'] as const) {
+    const project = createBlankCourseProjectV10('目标'), surface = project.surfaces[0]
+    surface.kind = kind
+    const target: CapturedCourseTarget = { documentId: 'target', epoch: 'epoch', project, editingProject: project, resources,
+      activeStateId: null, surfaceId: surface.id, instanceIds: [], instanceId: null }
+    const plan = prepareCourseObjectPaste({ documentId: 'source', project: source, roots: ['a'], resources },
+      { capturedTarget: target, container: { kind: 'surface', surfaceId: surface.id }, index: 0 })
+    expect(plan.edits.some(edit => edit.type === 'surface.presentation.set')).toBe(false)
+    const session = await DocumentSession.create({ documentId: 'target', epoch: 'epoch', model: { kind: 'course-v10', project, resources },
+      binding: { kind: 'untitled', suggestedName: 'target.h5lesson' } }, new CourseV10Driver(),
+    { async append() {}, async save() { throw new Error('Unused save') } })
+    expect(await session.execute({ documentId: 'target', epoch: 'epoch', operationId: 'paste', baseRevision: 0, actor: 'human',
+      mutation: { type: 'command', command: captureComponentOperation(project, plan.edits) } })).toMatchObject({ status: 'applied' })
+    const after = session.read()
+    if (after.model.kind !== 'course-v10') throw new Error('Expected V10')
+    expect(after.model.project.instances[plan.idMap.get('a')!].data).toEqual(source.instances.a.data)
+    expect(after.model.project.surfaces[0].presentation).toBeUndefined()
+    expect(interactionRules(interactionBehavior(after.model.project, { kind: 'surface', surfaceId: surface.id }))).toHaveLength(1)
+    expect(after.undoDepth).toBe(1)
+  }
+  expect(source).toEqual(beforeSource)
+})
 it('keeps professional presentation and field metadata for source-customized definitions', () => {
   const definition = { ...WEB_DEFINITION, implementation: { kind: 'source' as const, language: 'javascript' as const, source: 'export default {}' }, professionalBuiltinKey: 'guoling.web', dataSchema: {} as JsonObject }
   expect(componentDefinitionPresentation(definition).builtinKey).toBe('guoling.web')
