@@ -843,7 +843,13 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
       })().catch(error => { record?.task.cancel(); record?.finish(String(error)); if (!disposed) port.postMessage({ type: 'motion.reply', requestId: message.requestId, generation: currentScope.generation, value: false }) })
       return
     }
-    if (message.type === 'authoring.observe' && snapshots.htmlAuthoring && authoring && Array.isArray(message.reports)) {
+    if (message.type === 'authoring.observe') {
+      // The formal frame and the fragment's layout root retain their authored
+      // dimensions. Only the iframe's paint viewport includes visible overflow.
+      const extent = message.contentExtent
+      iframe.style.width = extent && Number.isFinite(extent.width) && extent.width > 0 ? `${extent.width}px` : '100%'
+      iframe.style.height = extent && Number.isFinite(extent.height) && extent.height > 0 ? `${extent.height}px` : '100%'
+      if (!snapshots.htmlAuthoring || !authoring || !Array.isArray(message.reports)) return
       const data = authorInstance?.data, html = data && typeof data === 'object' && !Array.isArray(data) ? data.html : undefined
       if (typeof html !== 'string') return
       const present = new Set<string>()
