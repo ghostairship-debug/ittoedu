@@ -449,7 +449,8 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
               && fragmentBox.isMeasured(instance, documentRoot ? 'document' : 'fragment', sourceStyle,
                 typeof message.builtinKey === 'string' ? { implementation: { kind: 'builtin', key: message.builtinKey } } : undefined)
               && liveElement.style.margin === '0px' && liveElement.style.boxSizing === 'border-box'
-              ? fragmentBox.extent(liveElement, instance.frame) : null
+              ? fragmentBox.extent(liveElement, layoutInput ? { width: layoutInput.inlineSize,
+                height: layoutInput.mode === 'flow-content' ? 0 : layoutInput.blockSize } : instance.frame, layoutInput?.mode) : null
             send({ type: 'authoring.observe', reports, contentExtent })
           }
           const enqueue = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; collectHtml() }) } }
