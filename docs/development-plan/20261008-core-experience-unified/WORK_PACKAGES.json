@@ -1,0 +1,201 @@
+{
+  "kind": "static-executable-plan-not-runtime-platform",
+  "date": "2026-10-08",
+  "analysis_baseline": "423a96dcceb1cdef16791ecd668e0abe391e2fb1",
+  "this_turn": "documents-only",
+  "solution": "../20261007-content-revision/CORE_EXPERIENCE_UNIFIED_SOLUTION.md",
+  "policy": "../20261007-content-revision/CORE_EXPERIENCE_EXECUTION_PROMPT.md",
+  "execution": "EXECUTION_PLAN.md",
+  "status": "planned-not-dispatched",
+  "roles": {
+    "Root": "当前主会话设置；协调/集成/交付，不代写Luna作品",
+    "I/A": "gpt-6-astra/xhigh；公共语义/结构和高难实现",
+    "G": "gpt-6.1-sol/xhigh；Agent内容请求/上下文/结果接线",
+    "implementation/exploration/T": "gpt-6.1-sol/high；T独立先审题，不参与对应实现",
+    "E": "gpt-6-luna/max；只机械执行，不设计或改断言",
+    "review-structural": "另一位gpt-6-astra/xhigh，未参与该候选实现",
+    "review-leaf": "另一位gpt-6.1-sol/high，未参与该候选实现",
+    "authors": "三路各自gpt-6-luna/medium；实际正常入口与同任务真实生图"
+  },
+  "writers": {
+    "I-core": { "role": "I/A", "files": ["src/shared/contracts/component-platform/runtime.ts", "src/shared/contracts/component-platform/schema.ts", "src/components/web/data.ts", "src/core/tools/ToolTargets.ts", "src/core/tools/DocumentToolGateway.ts", "src/core/drivers/courseV10Operations.ts", "src/core/documents/DocumentSession.ts", "src/renderer/composition/crossSurfaceCommands.ts", "src/renderer/ui/properties/componentDefinitionPresentation.ts"] },
+    "U-lifecycle": { "role": "implementation/exploration/T", "files": ["src/renderer/App.tsx", "src/renderer/store/editorStore.ts", "src/renderer/documents/DocumentProjection.ts", "src/renderer/documents/CourseV10DocumentBridge.ts", "src/renderer/authoring/courseDraftLifecycle.ts", "src/renderer/documentFiles/documentFileSession.ts", "src/main/workbench/DocumentHostService.ts", "src/main/workbench/documentJournal.ts", "src/main/workbench/documentCloseCoordinator.ts"] },
+    "G-agent": { "role": "G", "files": ["src/renderer/workbench/ExecutionAssistant.tsx", "src/main/workbench/execution/ExecutionEngine.ts", "src/main/workbench/execution/ExecutionDesktopService.ts", "src/main/workbench/execution/ExecutionContextProjection.ts"] },
+    "A-realm": { "role": "I/A", "files": ["src/renderer/components/SandboxComponentImplementation.ts", "src/components/web/contentRealmImplementation.ts", "src/player/htmlPreview/htmlPreviewAgent.ts"] },
+    "H-html": { "role": "implementation/exploration/T", "files": ["src/main/workbench/htmlPreview/HtmlSourceEditService.ts", "src/main/workbench/htmlPreview/htmlSourceEdits.ts", "src/main/workbench/htmlPreview/htmlSourceLocator.ts", "src/main/workbench/htmlPreview/htmlImagePreparation.ts", "src/core/drivers/TextDriver.ts", "src/renderer/documentFiles/html/HtmlLightEditOverlay.tsx", "src/renderer/documentFiles/html/htmlPreviewController.ts"] },
+    "V-geometry": { "role": "implementation/exploration/T", "files": ["src/shared/stageViewport.ts", "src/shared/flowViewportGeometry.ts", "src/shared/teacherControllerViewportGeometry.ts", "src/renderer/authoring/stageViewportTransform.ts", "src/renderer/authoring/controllerDisplayBounds.ts", "src/renderer/componentPlatform/surfaces/slide/freeTransformGesture.ts", "src/renderer/ui/TeacherControllerAuthoringChrome.tsx"] },
+    "F-flow": { "role": "implementation/exploration/T", "files": ["src/renderer/ui/FlowWorkspace.tsx", "src/renderer/ui/workspaces/FlowLocationWorkspace.tsx", "src/renderer/ui/flow/flowInsertCommands.ts", "src/renderer/ui/flow/flowMenuPaperPlacement.ts", "src/renderer/ui/flow/flowParagraphLayout.ts"] },
+    "D-document": { "role": "implementation/exploration/T", "files": ["src/renderer/document/documentBlockCommands.ts", "src/renderer/document/SharedDocumentEditor.tsx", "src/renderer/document/editorSession.ts", "src/renderer/documentFiles/LessonDocumentEditor.tsx"] },
+    "P-presentation": { "role": "I/A", "files": ["src/components/web/measuredFragmentBox.ts", "src/shared/flowBodyPresentation.ts", "src/shared/flowMediaLayout.ts", "src/shared/flowRuntimePaperLayout.ts", "src/renderer/documents/CourseV10DocumentView.tsx", "src/player/componentPlatform/modelProjection.ts"] },
+    "R-host": { "role": "I/A", "files": ["src/player/componentPlatform/ModelPlayer.ts", "src/renderer/components/CourseV10RuntimeView.tsx", "src/renderer/components/ComponentNavigationOwner.ts", "src/player/componentPlatform/publishedPlayer.ts", "src/player/components/ComponentPlatformRuntime.ts"] },
+    "R-interactions": { "role": "implementation/exploration/T", "files": ["src/player/components/runtime/ComponentWorldInteractions.ts", "src/renderer/interactions/componentInteractionAuthoring.ts", "src/renderer/ui/AutomationTab.tsx", "src/components/teacher-controller/defaultController.ts"] },
+    "C-import": { "role": "implementation/exploration/T", "files": ["src/main/workbench/htmlImport/CreateCourseFromHtml.ts", "src/main/workbench/htmlImport/readHtmlClosure.ts", "src/main/workbench/componentCompilerRuntime.ts"] },
+    "X-delivery": { "role": "implementation/exploration/T", "files": ["src/renderer/export/componentPlatform/delivery.ts", "src/main/workbench/delivery/componentProjectDelivery.ts", "src/main/workbench/delivery/DocumentDeliveryService.ts", "src/main/workbench/delivery/HeadlessDocumentExportWorker.ts", "src/renderer/export/bundledFontEmbedding.ts", "src/renderer/export/course/buildCoursePptx.ts"] },
+    "E-maintenance": { "role": "implementation/exploration/T", "files": ["scripts/prepare-source-launch.mjs", "scripts/verify-component-catalog.ts", "src/core/tools/OfficeContentTools.ts", "src/core/tools/ToolCatalog.ts"] },
+    "Root-config": { "role": "Root", "files": ["package.json", "package-lock.json", "vitest.config.ts", "playwright.config.ts"] }
+  },
+  "coverage_expected": { "R": 48, "N": ["N01", "N02", "N03", "N04"], "M": ["M01", "M02", "M03"], "original": ["F01", "F02", "F03", "F04", "F05", "F06", "F07", "F08", "F09"] },
+  "packages": [
+    {
+      "id": "U00", "batch": "coordination", "title": "保全与必要小合同", "scope": [], "start_after": [], "complete_with": [], "writers": ["I-core", "A-realm", "V-geometry", "R-host"], "review": "structural",
+      "outcome": "以当前直接链和已定方案确定capture/scope/ACK、持久地址/绑定/有效作者owner、两保存adapter及实际commit端口；现有可用接口先释放，不造总planner。",
+      "read_first": ["src/shared/contracts/component-platform/runtime.ts", "src/core/tools/ToolTargets.ts", "src/components/web/data.ts"],
+      "preserve_exit": "保全HEAD/用户修改/隔离样本；一DocumentSession/History；API5既有身份授权边界。无必要变更则引用既有端口，不创建接口门。",
+      "minimum_evidence": "相关schema/目标解析的最便宜检查与一条直接consumer可消费证据；本轮计划不执行。"
+    },
+    {
+      "id": "U01", "batch": "B1", "title": "输入ACK与文档视图生命周期", "scope": ["R02", "R09", "R35", "F01", "F07", "F09"], "start_after": [], "complete_with": ["U00", "U13", "U15"], "writers": ["U-lifecycle", "I-core", "D-document", "F-flow", "R-host"], "review": "structural",
+      "outcome": "drain失败不继续History/关闭，ACK前不清洁；保存捕获revision且新输入仍dirty。文档级准备、Main关闭决策，切标签不泄浮层，释放投影前按docId/epoch保全输入。",
+      "read_first": ["src/renderer/documents/CourseV10DocumentBridge.ts", "src/renderer/document/SharedDocumentEditor.tsx", "src/main/workbench/documentCloseCoordinator.ts", "tests/unit/f0DocumentDraftAck.test.tsx", "tests/unit/windowCloseV10.test.ts"],
+      "preserve_exit": "默认autoSave:false及现行恢复诊断/四种关闭结果保留；取消回同输入owner；App按格式猜提交/关闭业务退出，正式close/deactivate/release不混同。复用计算/图像原证据，补既有Windows工作区GUI续接与退出的实际缺口。",
+      "minimum_evidence": "一次拒绝提交仍保稿且History未动、一次保存后新输入仍dirty、真实保存后标签/整窗关闭重开与隐藏浮层；按变更选最少代表操作。"
+    },
+    {
+      "id": "U02", "batch": "B1", "title": "完整复制、锁与状态语义", "scope": ["R03", "R04", "R05", "R06", "R30", "R39", "R44", "R45"], "start_after": ["U00"], "complete_with": ["U04", "U13", "U20"], "writers": ["I-core", "F-flow"], "review": "structural",
+      "outcome": "同一语义owner复制base/命名状态/层序/规则及所属反馈依赖，新ID后重映射；B2内部作者记录进入完整复制/复用，authorKey按实际局部namespace处理，副本归属/引用正确且不写原件；作者锁覆盖canvas/properties/AI，状态显隐/删除引用/隐藏找回作用域一致。",
+      "read_first": ["src/renderer/composition/crossSurfaceCommands.ts", "src/core/drivers/courseV10Operations.ts", "src/core/tools/ToolTargets.ts", "tests/unit/timedR1CopyReferences.test.ts"],
+      "preserve_exit": "声明外部引用不误复制；模型局部grant不扩任意兄弟写；运行互动不受作者锁；Flow块副本不保留原身份，不另建图谱。",
+      "minimum_evidence": "一个含命名状态/互动/所属反馈的副本独立运行与撤销；内部替图+移动→复制或复用→改副本→保存重开证原件不变/引用图片保全，共用U20样本；锁/状态最近层合并检查。"
+    },
+    {
+      "id": "U03", "batch": "B1", "title": "AI目标续接与软件机械应用", "scope": ["R01", "R32", "creation-follow-up"], "start_after": ["U00"], "complete_with": ["U04", "U05"], "writers": ["G-agent", "I-core", "U-lifecycle"], "review": "structural",
+      "outcome": "恢复/继续保留V10冻结对象与grant；局部答案更新由托管语义owner同步实际判题。受控延迟回包时按实际字段基线保人工新几何和非目标新内容，同正文冲突明确保稿/诊断，准备后最终CAS不取消。修当前首次partial相关空页content装配/ready图片公开消费软件断点，模型只负责内容。",
+      "read_first": ["src/renderer/workbench/ExecutionAssistant.tsx", "src/main/workbench/execution/ExecutionDesktopService.ts", "src/core/tools/DocumentToolGateway.ts"],
+      "preserve_exit": "过滤后空范围不补整文档写权；无关revision不全量拒绝、同正文不静默覆盖，不新协作平台/全局锁；正确目录拒绝保留；成功图片作业不重生；不把作者没完成都归于软件、不由Root代写。",
+      "minimum_evidence": "局部任务恢复同范围/答案真实判题；受控AI改A正文期间人移动A/改B后回包保人工结果，同正文冲突不覆盖；公开ready图/空页软件断点直接证，不新增付费矩阵。"
+    },
+    {
+      "id": "U04", "batch": "B2", "title": "React内部作者内容与常态应用", "scope": ["React-P0", "internal-object-core"], "start_after": ["U00"], "complete_with": ["U02", "U03", "U05", "U06", "U20"], "writers": ["I-core", "A-realm", "R-host"], "review": "structural",
+      "outcome": "恢复动态React普通图文发现和局部内容编辑，持久authorKey+scope+可重挂载记录；真实源/数据或局部覆盖唯一有效owner，人工覆盖后AI续改不被旧值遮住。",
+      "read_first": ["src/renderer/components/SandboxComponentImplementation.ts", "src/components/web/contentRealmImplementation.ts", "src/components/web/data.ts", "src/shared/contracts/component-platform/runtime.ts"],
+      "preserve_exit": "运行应用独立编辑扫描，覆盖变化不被signature/early return吞；重绘幂等重绑定、不整段重执行/innerHTML重建；当前未挂载不等删除，重复图文不按值批改。无sourceRegion不得排除V9已有普通图文。记录类型小闭环即接U02复制及U05/U20保存资源consumer，覆盖图片不遗漏，不等整批尾大合并。",
+      "minimum_evidence": "真实课例两同类对象仅改所选，Conversation切回/相关重绘与撤销保持；H5保存重开、非编辑Player消费由U22纵向证据完成，静态扫描不算。"
+    },
+    {
+      "id": "U05", "batch": "B2", "title": "原HTML同核心保存adapter", "scope": ["original-html-parity", "F05"], "start_after": ["U00"], "complete_with": ["U04", "U18", "U20"], "writers": ["H-html", "U-lifecycle", "A-realm", "I-core"], "review": "structural",
+      "outcome": "静态精确局部源patch，动态作者记录随原HTML Session与正常文件保存；共享内部地址/应用器，不转隐藏H5。软件维护自携数据区/局部consumer与实际资源SaveAs闭包。",
+      "read_first": ["src/main/workbench/htmlPreview/HtmlSourceEditService.ts", "src/core/drivers/TextDriver.ts", "src/renderer/documentFiles/documentFileSession.ts", "src/main/workbench/documentJournal.ts"],
+      "preserve_exit": "显式保存、原件/未改内容保全；导入包装HTML迁到H5只有一个active consumer；不新增文件/登录权限。强制旁文件/单文件便携性或格式变化先披露Owner，不阻塞无关叶。",
+      "minimum_evidence": "原HTML真实图文修改undo/redo、保存/另存冷重开并在普通浏览器运行；同样本原HTML作者修改保存→H5导入→普通HTML导出→重开，绑定/资源/几何保留且只应用一次，共用U18/U20证据。"
+    },
+    {
+      "id": "U06", "batch": "B2", "title": "内部自由手势与同目标AI", "scope": ["runtime-free-edit", "human-ai-parity"], "start_after": ["U04", "U10"], "complete_with": ["U03", "U05"], "writers": ["V-geometry", "I-core", "A-realm", "H-html", "G-agent"], "review": "structural",
+      "outcome": "FreeTransformGesture复用冻结/父矩阵/吸附，内部对象提交其真实作者位置；默认自由移动，文字box resize与整体scale区分，AI用同目标和应用器。",
+      "read_first": ["src/renderer/componentPlatform/surfaces/slide/freeTransformGesture.ts", "src/renderer/authoring/stageViewportTransform.ts", "src/shared/contracts/component-platform/runtime.ts"],
+      "preserve_exit": "一手势一History；运行变换与作者增量组合；局部自由容器在原父一次测量再装配、不边拆边测、不冻结整页/默认重排；保留邻项和人工几何。",
+      "minimum_evidence": "真实React文字改宽换行、图片正确缩放、拖动邻项不重排；同对象人工覆盖→AI内容续改→冷重开，两adapter纵向收口。"
+    },
+    {
+      "id": "U07", "batch": "B2", "title": "轻界面复用成熟编辑能力", "scope": ["R07", "R46", "R47", "F03", "F04", "html-click-follow-up", "spatial-properties-follow-up"], "start_after": ["U00"], "complete_with": ["U04", "U05", "U11", "U13"], "writers": ["U-lifecycle", "H-html", "D-document", "F-flow"], "review": "leaf",
+      "outcome": "light/deep/原HTML同能力工具与可按需展开属性；行距同字段，文字点击光标/IME/确认退出、Escape、公式模板及状态/镜头入口复用成熟UI。",
+      "read_first": ["src/renderer/documentFiles/html/HtmlLightEditOverlay.tsx", "src/renderer/documentFiles/LessonDocumentEditor.tsx", "src/renderer/document/SharedDocumentEditor.tsx"],
+      "preserve_exit": "不强迫deep才编辑；页面编辑反馈不吞普通单击/退出后互动；属性只绑定当前文档/所选对象，公式用现有LaTeX不新AST。原已证操作不重新开缺陷。",
+      "minimum_evidence": "从轻快捷栏实际改同专业行距/属性，中文中段输入与确认/取消；公式或状态入口仅对当前变更补一项，不全控件矩阵。"
+    },
+    {
+      "id": "U08", "batch": "B2", "title": "专业图表富表格与非DOM适配", "scope": ["R40", "R42", "N01", "N02"], "start_after": ["U00"], "complete_with": ["U04", "U07", "U13"], "writers": ["I-core", "A-realm", "F-flow", "D-document"], "review": "structural",
+      "outcome": "按专业key/data/edit contract识别兼容源码定制，保留属性/导出与图表/预置组件画面文字直编辑；富单元格复用cell-content与rich editor；一个非DOM样例注册真实对象。",
+      "read_first": ["src/renderer/ui/properties/componentProperties.ts", "src/renderer/ui/properties/componentDefinitionPresentation.ts", "src/shared/contracts/component-platform/runtime.ts", "tests/unit/k0ProfessionalIdentity.test.ts", "tests/unit/componentPlatformRichTableDocx.test.ts"],
+      "preserve_exit": "非仅implementation.kind；任意破坏合同源码只局部诊断，不保证旧专业面板适用；不以cell-text降级rich marks、不自动反解Canvas。",
+      "minimum_evidence": "兼容源码定制专业面板仍改真实数据并真实输出；一富单元格编辑保marks；一非DOM注册对象修改持久消费。"
+    },
+    {
+      "id": "U09", "batch": "B2", "title": "普通HTML的GrapesJS局部投影", "scope": ["grapesjs-route"], "start_after": ["U00"], "complete_with": ["U05", "U06"], "writers": ["H-html", "I-core", "Root-config"], "review": "structural",
+      "outcome": "在产品正式普通HTML入口实施GJS内部结构移动与样式编辑，接共同目标/局部语义应用和ACK重投影；add/remove按真实关系与手势识别move，不机械新增/删除；区分用户命令与ACK/AI回显、undo/redo、运行重绑定来源，不把库接入当React深编辑完成。",
+      "read_first": ["src/renderer/documentFiles/html/HtmlLightEditOverlay.tsx", "src/main/workbench/htmlPreview/HtmlSourceEditService.ts", "package.json"],
+      "preserve_exit": "关闭GJS独立storage/autosave/正式Undo，不用project JSON或整页getHtml覆盖作者真相；一手势一正式History，非用户回显/重绑定只投影不重提交，无事件循环，复用既有操作/版本机制。Moveable可选薄输入，不另做选型比较门。拟取消/替换/延后路线须交Owner。",
+      "minimum_evidence": "正式HTML入口一个结构移动/样式修改实际内部操作→共同事务→undo/redo→save/reopen，move不误删/换身份，ACK/AI回显/undo/重绑定不产生第二事务或循环；不以初始化/隔离原型或React切片替代。"
+    },
+    {
+      "id": "U10", "batch": "B3", "title": "共同几何与独立HUD控制台", "scope": ["F08", "viewport-hud-follow-up", "controller-gesture-follow-up"], "start_after": [], "complete_with": ["U12", "U15", "U17"], "writers": ["V-geometry", "P-presentation", "F-flow", "U-lifecycle", "R-host"], "review": "structural",
+      "outcome": "同作品所有入口同设计空间和统一geometry输出，实际host rect可不同；HUD不依赖内容fit/scroll/camera，一套绘制/hit/clip/clamp/手柄逆矩阵。三表面默认收起、快捷栏收展，Flow同手柄调尺寸。",
+      "read_first": ["src/shared/stageViewport.ts", "src/shared/teacherControllerViewportGeometry.ts", "src/shared/flowViewportGeometry.ts", "src/renderer/ui/TeacherControllerAuthoringChrome.tsx"],
+      "preserve_exit": "保留控制台正式frame/身份及各surface内容语义，不强改所有内容比例、不新dock store；不在大viewport夹限后塞小page clip，不逐表面逆父矩阵补丁。",
+      "minimum_evidence": "一个作品工作台/编辑/试运行/整课预览及三表面实际控制台可见与正确命中；Flow手柄保存回写；不跑比例/设备矩阵。"
+    },
+    {
+      "id": "U11", "batch": "B3", "title": "尺寸、镜头与可见取景", "scope": ["R08", "R21", "R22", "R23", "R24", "R34"], "start_after": [], "complete_with": ["U02", "U10", "U12", "U17"], "writers": ["I-core", "V-geometry", "R-host", "P-presentation"], "review": "structural",
+      "outcome": "当前/选中/全页设计尺寸默认保坐标，显式等比refit一次变换；固定pose/跟随明确模式，可见/all不同集合同算法，独立Spatial pan/zoom接camera端口、选项显示名称。",
+      "read_first": ["src/renderer/components/ComponentNavigationOwner.ts", "src/shared/stageViewport.ts", "src/renderer/componentPlatform/surfaces/spatial/cameraCommands.ts"],
+      "preserve_exit": "不拉伸/裁切；父子/共享层不双缩；有效可见包含屏幕外对象且fit不改显隐；固定画布reveal保占位，Flow按阅读展开；不把follow-offset新模式作前置。",
+      "minimum_evidence": "一显式多页refit保父子/状态关系，一固定/跟随与可见fit操作，一独立Spatial浏览实际consumer。"
+    },
+    {
+      "id": "U12", "batch": "B3/B4", "title": "共享外层呈现决策", "scope": ["R10", "R37", "R38"], "start_after": [], "complete_with": ["U10", "U13", "U15"], "writers": ["P-presentation", "F-flow", "D-document", "A-realm", "R-host"], "review": "structural",
+      "outcome": "componentLayoutInput/Flow extent-media共同frame/naturalFlow/localAssembly/extent/children/section决定供React、PM、Player消费；环绕/宽幅实际内容和真正纸面背景生效。",
+      "read_first": ["src/components/web/measuredFragmentBox.ts", "src/shared/flowBodyPresentation.ts", "src/shared/flowMediaLayout.ts", "src/renderer/documents/CourseV10DocumentView.tsx", "src/renderer/document/editorSession.ts", "src/renderer/ui/FlowWorkspace.tsx", "src/player/componentPlatform/modelProjection.ts"],
+      "preserve_exit": "旧入口重复呈现规则退出，各DOM/lifetime/bind保留；PM经editorSession NodeView→Flow renderObject消费共同决定，contentDOM/选择/事件/destroy及projection mutation端口保留，不机械替换PM壳；作者展开/播放折叠section策略显式，复用已证原rev15 section真实行为。",
+      "minimum_evidence": "一个真实Flow章节环绕/通栏/背景结果，React/PM/Player消费相同决定；旧业务退役及已有section证明受变化影响才补。"
+    },
+    {
+      "id": "U13", "batch": "B4", "title": "共同正文命令与选区AI用例", "scope": ["F02", "shared-document-use-cases"], "start_after": [], "complete_with": ["U01", "U03", "U07", "U08"], "writers": ["D-document", "F-flow", "G-agent", "I-core"], "review": "structural",
+      "outcome": "Flow和文件正文入口消费已有documentBlockCommands/menu工厂及共同selection/draft/AI回显；表格/源码共同可达，减少真实重复创建与能力目录。",
+      "read_first": ["src/renderer/document/documentBlockCommands.ts", "src/renderer/ui/flow/flowInsertCommands.ts", "src/renderer/document/SharedDocumentEditor.tsx", "src/renderer/documentFiles/LessonDocumentEditor.tsx"],
+      "preserve_exit": "当前共同菜单已有table不重新假设缺失；Flow专业table与DocumentBlock不同，留真正adapter，MD源码/资源保存保留；重复业务退出，不重造正文编辑器。",
+      "minimum_evidence": "加号/斜杠/顶栏择实际改动入口插表格并保存，选区AI回显原目标；专业表格不降级，文件与Flow共同consumer实接。"
+    },
+    {
+      "id": "U14", "batch": "B4", "title": "阅读顺序、落点、锚定与替换", "scope": ["R11", "R12", "R13", "R14", "R41"], "start_after": [], "complete_with": ["U10", "U13"], "writers": ["F-flow", "I-core", "U-lifecycle"], "review": "leaf",
+      "outcome": "正文移动排除浮层/behavior，章节拖入和纸面插入捕获真实container/index/段落；固定/随文/viewport明确且拖动不改模式，资源替换保同实例与互动。",
+      "read_first": ["src/renderer/ui/FlowWorkspace.tsx", "src/renderer/ui/flow/flowMenuPaperPlacement.ts", "src/shared/flowParagraphAnchors.ts", "tests/unit/k0AssetReplace.test.ts"],
+      "preserve_exit": "切模式保当前画面、清anchor冻结当前几何；不按旧选区或(0,0)落点，不插新对象冒充替换。",
+      "minimum_evidence": "一个长章节含正文/浮层样本实际上下移、章内拖入、固定/随文切换和媒体替换；最近层覆盖数据，不每组合冷开。"
+    },
+    {
+      "id": "U15", "batch": "B5", "title": "作者与Published共同运行宿主", "scope": ["F06", "flow-run-follow-up", "runtime-host-consolidation"], "start_after": [], "complete_with": ["U01", "U04", "U10", "U12"], "writers": ["R-host", "A-realm", "P-presentation", "F-flow"], "review": "structural",
+      "outcome": "现有ModelPlayer统一prepare→实际projection commit→sync→端口→ready/dispose；退役CourseV10RuntimeView重复运行编排，编辑/暂停/当前位置继续保同程序现场。",
+      "read_first": ["src/player/componentPlatform/ModelPlayer.ts", "src/renderer/components/CourseV10RuntimeView.tsx", "src/player/componentPlatform/publishedPlayer.ts"],
+      "preserve_exit": "React actual commit/StrictMode、ProjectionMutationBoundary与light/deep祖先保护、Bridge/IME保留；独立窗口独立runtime，导航/作者writer不迁ModelPlayer。当前Flow已setPlaying不按旧缺口重写。",
+      "minimum_evidence": "真实源iframe light/deep切换/暂停继续不重挂，投影commit后正确sync，ready/dispose在途不泄；作者和Published共同行为最近真实consumer。"
+    },
+    {
+      "id": "U16", "batch": "B5", "title": "媒体事件和互动作者装配", "scope": ["R15", "R16", "R17", "R43"], "start_after": [], "complete_with": ["U02", "U15"], "writers": ["R-interactions", "R-host", "I-core"], "review": "leaf",
+      "outcome": "soundId ended桥接，视频按subscription越阈值一次/倒退重布防/scope清理；依次出现初始hidden+rule同事务，快捷点击按动作类型修改并保其他动作和顺序。",
+      "read_first": ["src/player/components/runtime/ComponentWorldInteractions.ts", "src/player/components/ComponentPlatformRuntime.ts", "src/renderer/interactions/componentInteractionAuthoring.ts", "src/renderer/ui/AutomationTab.tsx"],
+      "preserve_exit": "普通播放保留，不每timeupdate重启动作；完整规则与快捷栏同owner，不静默替换整个click，受作者锁同约束。",
+      "minimum_evidence": "真实sound结束、视频阈值/倒退和模板初始不可见/快捷两动作同存，各在直接consumer；可在一互动作品合并证据。"
+    },
+    {
+      "id": "U17", "batch": "B5", "title": "当前页初态、导航与控制台配置", "scope": ["R18", "R19", "R20", "R31", "R33", "R48", "return-initial-follow-up"], "start_after": ["U15"], "complete_with": ["U10", "U11", "U16"], "writers": ["R-host", "R-interactions", "V-geometry", "F-flow"], "review": "structural",
+      "outcome": "返回初态/页内重播复位本页临时显隐/actions/leases/steps/fragment/camera-scroll/观察与控制台偏移；同导航键与teacher能力，配置真实消费，accepted反馈按实际执行。",
+      "read_first": ["src/renderer/components/ComponentNavigationOwner.ts", "src/player/components/ComponentPlatformRuntime.ts", "src/components/teacher-controller/defaultController.ts"],
+      "preserve_exit": "保当前surface/页与已提交内容，不跳整课首页/回滚作者内容，不用world.reset遮缺口；暂停继续保现场，教师bypass保留、学生guard保留；只涉及现有nav leaf可在宿主迁移前开始。",
+      "minimum_evidence": "运行改变显隐/步骤后返回当前页初始画面，暂停继续不reset；teacher源码targetStateId、拒绝翻页反馈及当前位置键真实执行。"
+    },
+    {
+      "id": "U18", "batch": "B6", "title": "当前HTML、分页与递归编译闭包", "scope": ["R25", "R26", "R27", "N03"], "start_after": [], "complete_with": ["U05", "U20"], "writers": ["C-import", "I-core", "A-realm", "H-html"], "review": "structural",
+      "outcome": "创建从当前Session捕获非磁盘旧稿；独立页宿主化/耦合程序保真；iframe/srcdoc base/assets/CSS/modules递归真实供应，siblingFiles进入编译adapter/cache。",
+      "read_first": ["src/main/workbench/htmlImport/CreateCourseFromHtml.ts", "src/main/workbench/htmlImport/readHtmlClosure.ts", "src/main/workbench/componentCompilerRuntime.ts", "tests/unit/htmlModuleClosure.test.ts", "tests/unit/componentCompilerQ1.test.ts"],
+      "preserve_exit": "不重复复制全程序脚本强拆；能运行先承载，局部诊断不整份拒绝/静态化；origin/授权根不扩权，读到依赖不冒充实际consumer已供应。",
+      "minimum_evidence": "当前未落盘文字用于创建、一独立多页与原耦合React保互动；一个含子iframe/srcdoc与CSS sibling依赖的明确失败样本真实运行/保存。"
+    },
+    {
+      "id": "U19", "batch": "B6", "title": "字体、GIF与真实PPTX捕获", "scope": ["R28", "R29", "N04"], "start_after": [], "complete_with": ["U20"], "writers": ["X-delivery"], "review": "leaf",
+      "outcome": "现有bundledFontEmbedding接单HTML/ZIP，GIF复用解码/捕获PNG静态帧进PPTX；headless worker修实际CSP资源捕获，叶可分不重叠writer并行。",
+      "read_first": ["src/renderer/export/bundledFontEmbedding.ts", "src/renderer/export/course/buildCoursePptx.ts", "src/main/workbench/delivery/HeadlessDocumentExportWorker.ts", "tests/unit/bundledFontExportEmbedding.test.ts"],
+      "preserve_exit": "GIF不承诺PPTX动画、不继续缺图称完整；headless证据不外推GUI，不关闭全部CSP；保持原资源捕获/输出能力。",
+      "minimum_evidence": "实际单HTML/ZIP带字体并离线消费，GIF在PPTX静态图片可见，headless原缺图样本真实产物；不同消费者分证不跑全格式矩阵。"
+    },
+    {
+      "id": "U20", "batch": "B6", "title": "统一交付snapshot与作者正常出口", "scope": ["R36", "authored-content-delivery"], "start_after": ["U00"], "complete_with": ["U04", "U05", "U18", "U19"], "writers": ["X-delivery", "I-core", "R-host", "A-realm", "P-presentation", "U-lifecycle"], "review": "structural",
+      "outcome": "drained buildComponentDelivery snapshot携带页选择/顺序/纸型到真实consumer；B2作者记录、覆盖引用资源进入现有收集/保存/提炼复用/格式转换，和同consumer随H5 Published/普通HTML/原HTML输出，不只序列化，不另建资源writer。",
+      "read_first": ["src/renderer/export/componentPlatform/delivery.ts", "src/main/workbench/delivery/componentProjectDelivery.ts", "src/player/componentPlatform/publishedPlayer.ts"],
+      "preserve_exit": "一个正式来源无磁盘旧稿，published htmlAuthoring:true当前事实不误报关闭；渲染consumer常态应用，原HTML/H5无双覆盖；格式能力不静默退出。",
+      "minimum_evidence": "指定页顺序/纸型实际产物；React改文换图非编辑Player/普通HTML仍生效；共用内部替图移动→副本独立改→保存重开，以及原HTML→H5→普通HTML→重开单次应用样本，覆盖资源不遗漏，无全格式矩阵。"
+    },
+    {
+      "id": "U21", "batch": "B7", "title": "开发入口与能力注册维护", "scope": ["M01", "M02", "M03"], "start_after": [], "complete_with": [], "writers": ["E-maintenance", "Root-config"], "review": "leaf",
+      "outcome": "quick launcher清单覆盖实际component/generator/worker HTML；旧catalog验证接API5 reader；Office发现用唯一注册源去重。",
+      "read_first": ["scripts/prepare-source-launch.mjs", "scripts/verify-component-catalog.ts", "src/core/tools/OfficeContentTools.ts", "tests/unit/windowsSourceLaunchContract.test.ts"],
+      "preserve_exit": "维护维度不冒充用户P0，不恢复全V9门、不阻挡独立用户修复；相关生成结果由单writer，E只机械不设计。",
+      "minimum_evidence": "最低成本真实脚本/结构检查；不为维护启动GUI/付费/完整build，已生成不紧接同义check。"
+    },
+    {
+      "id": "U22", "batch": "integration", "title": "真实纵向切片、三路续作与全范围收口", "scope": ["real-journey", "three-route-authoring", "final-closure"], "start_after": [], "complete_with": ["U01", "U02", "U03", "U04", "U05", "U06", "U07", "U08", "U09", "U10", "U11", "U12", "U13", "U14", "U15", "U16", "U17", "U18", "U19", "U20", "U21"], "writers": [], "review": "structural",
+      "outcome": "Root持续统合正常旅程与有信息增益的探索；T独立先审题/直接证据。先React图文→手势→人AI连续改/受控在途共编→内部副本→两adapter往返→正常consumer，GJS正式入口另有实际结构/样式交付；每实际能力小闭环尽早集成和退役重复职责，相关路径就绪后续三路原任务；所有已纳入问题最终有依据处置。",
+      "read_first": ["docs/development-plan/20261007-content-revision/evidence/core-experience-20261007/FIRST_DELIVERY_REVIEW.md", "output/html-import-p0-20261007/VERIFICATION.md"],
+      "preserve_exit": "同材料三Luna/medium正常MCP/内置/裸HTML独立作者，真实图成功作业复用；首次记录不覆盖，Root不代写，不新收费/强模型掩错；原section/计算等有效证据复用，发行暂停。",
+      "minimum_evidence": "复用真实React纵向样本含复制与HTML/H5往返、受控回包共编，一非DOM及GJS正式入口证据；GUI顺带观察卡顿/重复同步/无必要重挂载不新时限或benchmark；三路首次/续作质量、互动、时间记录，未达目标沿软件原因继续，不全矩阵。"
+    }
+  ]
+}

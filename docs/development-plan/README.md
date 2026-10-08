@@ -7,8 +7,10 @@
 | 用途 | 入口 |
 |---|---|
 | 当前基线、阶段与剩余 | [CURRENT_STATUS](CURRENT_STATUS.md) |
-| 本轮目标、模型与创作对照 | [核心体验执行提示词](20261007-content-revision/CORE_EXPERIENCE_EXECUTION_PROMPT.md) |
+| 当前实施唯一入口 | [核心体验统一实施包](20261008-core-experience-unified/README.md)，Owner 10月8日已明确启动；含执行计划/23工作包/启动提示词，实际派发与候选见任务板/当前状态 |
+| 原人员、费用与三路创作约束 | [核心体验原执行指令](20261007-content-revision/CORE_EXPERIENCE_EXECUTION_PROMPT.md)，新包完整继承 |
 | 问题选择与直接定位 | [问题概览](20261007-content-revision/CORE_EXPERIENCE_ISSUES.md#startup-overview)，只展开本批 |
+| 核心体验统一解决方案 | [统一方案](20261007-content-revision/CORE_EXPERIENCE_UNIFIED_SOLUTION.md)，含 Owner 决定、七批职责与原 HTML/Runtime 编辑闭环；决策依据，不是第二执行入口 |
 | 实际任务与写域 | [TASK_BOARD](TASK_BOARD.md)，按需读对应卡 |
 | 执行规则 | [WORKING_PROTOCOL](WORKING_PROTOCOL.md)，按动作读相应章节 |
 | 技术边界 | [ARCHITECTURE_CONTRACT](ARCHITECTURE_CONTRACT.md)，按改动读相关条目 |

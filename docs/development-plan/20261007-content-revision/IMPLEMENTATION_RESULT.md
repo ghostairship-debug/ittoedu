@@ -1,18 +1,57 @@
 # 教师首发与统一内容协作：实施结果
 
-更新：2026-10-07。Owner 已授权持续实施；发行暂停。本轮38工作包的实施与确认优化、20补充候选处置已随 a8cea6c1 合入 main。后续原 S09 冷 PPTX 创建回执尾项也已完成，随本次实质合并交付，见下文精确源码与测试 cut。工程候选按对应范围最小验证及独立审查交付；不声明全软件矩阵、art candidate 或 Owner accepted。实际协调只见[任务板](../TASK_BOARD.md)。
+当前摘要更新：2026-10-08。Owner 已全文启动 [START_PROMPT](../20261008-core-experience-unified/START_PROMPT.md)，覆盖讨论／暂不开发状态。本轮已完成分批源码集成、相应独立 review、普通教师旅程与原三路续作；仅多状态跨表面粘贴的产品选择待 Owner，发行继续暂停。接手源码 `423a96dc` 和用户未提交方案文档保全；下述历史首稿失败、旧 source cut 与有效证据均保留。当前入口见 [CURRENT_STATUS](../CURRENT_STATUS.md)、[执行包](../20261008-core-experience-unified/README.md)、[首次交付审查](evidence/core-experience-20261007/FIRST_DELIVERY_REVIEW.md)。
+
+## 10 月 8 日实际实施结果
+
+本轮产品源码集成至 `ccc06748`。共同作者记录／锁／冻结目标、HTML 局部 source 与正式 GJS 投影、输入 ACK／Main 关闭、共同正文工厂／选区／完整资源复制、ModelPlayer 宿主／实际异步导航、共同呈现与 HUD、Flow 专业字段、递归 HTML 导入和正常离线交付已分批进入正式 main。接手 `423a96dc`、Owner 未提交文档及原作品保全，无 reset/stash/clean。没有第二 writer／History／工程，没有新平台、兼容层或全局锁；发行继续暂停。
+
+四项职责迁移按真实 producer/consumer 与旧业务退出独立审查。U01 的输入生命周期、Main 决策及外层 Host 桥接，U12 的共同外层呈现与 PM section，U13 的共同工厂／选区与专业 adapter 均有指定范围的独立结论；完整 GUI 另列。U15/B5 补审发现旧组件 prepare 占住 shared queue，导致新源码 commit 到不了原 supersede/abort；`ac14c88c` 修复后 React/DOM 两个目标红→绿，独立替代 resolver 确认旧准备取消、最新内容挂载与 ready/dispose，完整 B5 结构限定 PASS。U16 两个声音／进度／动作叶由未参与实施的 T 补齐独立组合 PASS；JSDOM 事件链不扩大为自然媒体解码或 GUI。具体候选、组合、保留行为及限度见[本包实际 review](../20261008-core-experience-unified/REVIEW_RESULT.md)，各 reviewer 不替他人或未审后继签收。
+
+实际消费者已证：React 内部文字／换图／切回／保存新 Host 重开；非 DOM Canvas 正式登记和编辑；真实源父缩放与旋转下五步图文手势误差小于0.005px，第二次改宽、邻项、字号及撤销保持；固定片段保位、Flow 阅读收起；递归 srcdoc 模块／CSS／图片运行；file:// HTML/ZIP 实际切页、改后图文及离线资源。受控 Gateway 在途回包保人工几何及兄弟正文、同正文冲突保稿已有直接证据，不冒充付费共编。
+
+独立 T 在 frozen `f9198859` 的普通 UI 完成正式 GJS 结构移动／样式颜色、Undo/Redo／显式保存，原 HTML 精确文字与切页，H5 Hello/H2 首记录／编辑 ACK／拖动／命名状态／保存文件冷重开，以及 HTML→H5→普通 HTML 单次应用往返。原栏遮挡与首次记录断点由 V/U 修后实际通过；H5 源／状态／资源／几何无重复应用，普通导出中的翻译互动可点击。见[实际 GUI 记录](../../../output/core-experience-20261008/t-journey/EVIDENCE.md)。这是选定纵向切片，不称三表面完整矩阵或 Owner accepted。
+
+真实整窗关闭暴露外层 LessonWorkspaceHost 漏转发 hasDirtyInputs，另丢 documentIds；两次输入 prepare／草稿保全成功后，包装抛错令 ACK=false。U 修复独立通过（`f9198859`）。Root Main24596、50620 及 T Main40044 后来均正常选择退出、自然 exit0；T 在实际 preload ACK 点记录 ready=true、dirty=false。旧 Main33824/T16040 forced stop，以及 Main41012/T34224 原生恢复稿兜底仍保留为失败层，不能回填正常 PASS。MCP 最终 rev19 在 Root50620 正常退出后，由新 Main49388 从原正式文件冷开，新 Session/epoch、两页 view.observe19/diagnostics=[]、图片与已修端子均有效。见[关闭与冷开记录](../../../output/core-experience-20261008/CLOSE_CARRIER_RECORD.md)。
+
+Main／Player／Renderer `0bb9f454` 实际构建 exit0；最后裁切叶 `ccc06748` 仅影响Player/Renderer，相关构建exit0、Player先于Renderer，未变Main构建复用。新Main55560实际公共导出和原GUI只读首页均有效，随后正常Exit/natural0。Main 原 TS6142 通过把纯互动值完整迁至既有 shared owner 消除（`b88914e4`），无放宽编译配置或复制规则。四个 API5 专业包实际 catalog 已生成；M01/M02 已实施，M03 唯一注册源稳定后生成74正式工具无重复、Office三项同源，图像预览合同一次更新（`61e46496`）。全仓旧类型红灯未冒绿，没有机械全测试／全格式／全模型矩阵或生成后同义 --check。
+
+### 原三路 Luna/medium 续作
+
+共同规模、原首次任务和成功生图作业保持；作品只由原作者修改，Root／reviewer 不代写。三路首次失败见[FIRST_DELIVERY_REVIEW](evidence/core-experience-20261007/FIRST_DELIVERY_REVIEW.md)，修后结果不会改成首次成功。
+
+| 路线 | 首次冻结结果 | 本轮真实续作结果 | 当前边界 |
+| --- | --- | --- | --- |
+| 裸 HTML | 4分34秒，有教学/互动但原照片灯态矛盾，电池/灯端点缺线，返回与预测泄露问题 | 原 Luna 局部修；同 OAuth 仅原图编辑一次，修后单电池／开关打开／两灯暗。预测延后显示照片，导线端点由原作者再修；独立实际开闭／复位／判断／三段往返、file冷开及画面 PASS | HTML+PNG 交付，不冒称专业 History／宿主冷开；Owner接受另定 |
+| 公开 MCP | 首次约6分钟 rev7缺图；后续rev12补图仍事实矛盾，不能计首次共同目标完成 | rev13–17正式修；成功 f13 原图编辑 Ready 复用。新的公开 status→正式 asset.replace 保 assetId/HTML绑定/布局，17→18；原作者仅端子接盒边窄修→saved19/clean/export19。独立课堂操作／照片／端点及正常Main重启原文件冷开 PASS | 原失败、恢复/句柄断点与首次结果保留，无再生成成功作业 |
+| 内置 AI | 首次1分58秒为rev3 partial，仅首页两段文字、后两页空，无图/互动 | 原会话 Luna/medium 修后saved5；实际preview识别原图灯态矛盾，同OAuth仅原图edit一次→正式插图6。原作者修SVG接线6→9，再修旧灯ID脚本→saved10/clean；独立正确照片／端点／真实开闭／复位／判断、原GUI同路径新Main38944冷开PASS | 最终课堂核心和原文件进程冷开PASS；正常普通HTML正文裁切经软件修复后实际PASS；辅助checkpoint与正式保存分列，不扩大为Owneraccepted |
+
+[三路独立评审](../../../output/core-experience-20261008/FINAL_CREATION_REVIEW.md)列最终文件、实际截图、关键点击和冷开范围。裸HTML成功图片编辑 provider 约26.5秒，MCP约29.3秒；内置实际 efe 原图edit至Ready约24.3秒，实际1254×1254、1,838,124 bytes、输入1623／输出515，不误称纯供应商耗时。两个早期 preparing/stopped 作业实际未进入 fetch，不记付费请求。订阅路线未披露金额，不推断单次价格。内置[RUN_RECEIPTS](../../../output/core-experience-20261008/authors/builtin-continuation/RUN_RECEIPTS.md)按整个终态run汇总每次实际model及用量，medium按作者UI／冻结配置记录，不替缺少字段的provider签收；checkpoint创建→更新跨度不是作者活跃时间或run.end，两次修补跨度交叠不能累加。工程修补／等待、模型请求、图片等待、机械应用各自保留，尚不能给可靠端到端速度排名，也不能声称“无明显软件额外拖延”已通过。
+
+### 实载体触发的修复与剩余叶
+
+- 原 Ready 同授权工作空间续用、正式精确 documentId restore、新epoch/旧绑定恢复已有真实链；MCP素材图片应用原误走专业组件入口，经观察到的 file.kind=asset 交回原 Coordinator（`cf3b340b`），正确像素／UndoRedo／保存新Host／CAS独立通过，实际asset2298已正式消费。
+- 图片 pending 不再误报 MCP isError；opaque/offline randomUUID 复用现有 nanoid；SVG有限条件stroke不再假资源红灯。Win32 checkpoint EPERM只完整TMP重发布一次，不重放tool/provider，正式内容保存与辅助checkpoint partial不混记。
+- 生成图 image.preview（`6364fe86`）复用原图片 owner、权限及当前run Map，受控实际PNG→下一模型 image_url 独立通过。真实99bcf3b7初次失败已由持久化参数证明为模型漏抄引用中139：status146字符正确、实际preview143字符，旧口述“完整引用仍失败”已更正；正确输入后的真实视觉与原图edit／正式应用成立，不需要放宽身份或新缓存。
+- 指定A/V/X ignored实载体、格式产物已保全至 preserved-worktree-evidence，原件保留；附属opaque测试profile不作为交付。私有token不入工程，旧误输出token已轮换且401；作者close --all误断其他自动化session的失败保留，后续只作作用域清理。
+- 混合专业图片页面的 view.observe 不再依赖瞬时整页HTML投影（`0e39d982`），H独立PASS；新Main公共页面原语义路径actualcapture10/diagnostics=[]。只读副本观察与原GUI同路径冷开分别记录，不扩大HTML编辑授权。
+- CSS字体采集和内容realm主题传递由原X/R owner修复、H/L分别独审PASS。实际正常HTML/ZIP两段中文返回9/8个loaded Noto字体，公共Player主题更新后仍有效、原课程JSON未变；字体加载不再仅是CSS声明存在。真实字体验证与裁切各自分列在[实载体结果](../../../output/core-experience-20261008/font-overflow-real-carrier/verification.json)。
+- 普通HTML裁切已闭合。A `b658ee3e+25a3e3f9` 投影/Flow640候选的P probe PASS后，Root正常0bb导出仍iframe23/双scrollbar可视8。实际payload走builtin且曾测23px，反证Root最初resolveSource假设；实测字体loading时Range21/extent23、loaded后Range24无后续测量。A `7609d6a1`→main`ccc06748`仅3行复用现队列监听font loadingdone/销毁移除，P增量独审PASS。新公共MCP正常export rev10/clean/warnings=[]，X actual file://经典scrollbar两p client/scroll1280×24、formalFrame/root/p1280×23、文字完整、诊断和错误空，实际PASS。[新普通载体证据](../../../output/core-experience-20261008/font-overflow-real-carrier/crop-ccc06748/verification.json)和旧失败分列；未重跑未变字体/theme/ZIP/课堂矩阵。
+- 多状态Slide对象向无状态Flow/Spatial粘贴仍仅该产品取舍待Owner：保留基础态并提示不能带入的状态，或拒绝不兼容粘贴。既有same-Slide完整副本/资源/History已通过，不擅自静默丢状态。本批其他源码、独立审查、三路续作与真实修补收口，当前卡仅承接此选择、释放产品实体写锁。没有Owneraccepted、全仓类型通过、全软件GUI矩阵或可靠端到端速度结论；发行须Owner解除暂停。
+
+下文保全原 10 月 7 日及此前实施时间线、source cut 与失败，不将各段当时“未提交/候选”等描述作为现行 Git 状态。本轮38工作包的实施与确认优化、20补充候选处置已随 a8cea6c1 合入 main；后续原 S09 冷 PPTX 创建回执尾项也已完成。工程候选按对应范围最小验证及独立审查交付；不声明全软件矩阵、art candidate 或 Owner accepted。实际协调只见[任务板](../TASK_BOARD.md)。
 
 ## 核心体验本轮进展
 
 Owner 已于 2026-10-07 明确启动产品实施。B0 启动期间其他会话提交既有成果为 `f65767c2`；本轮以最新源码创建 `D:/果铃并行/20261007-core-experience-01a115f1/baseline` 及六个隔离源码副本，保留用户改动，不改 Git 元数据。主树仅 Root 集成。T 已先审普通目标操作，保存/关闭及三表面控制台的必要职责调整已获另一位 Astra 实施前范围审查；候选 diff 审查和真实窗口结果仍待完成。
 
-当前各包候选已独立审查并由 Root 组合到 main，Git 未提交：save 处理文件显式保存/History、旧 Flow 稿及整窗放弃；document 处理共同正文表格/公式/块属性及隐藏浮层；editing 处理光标落点、状态/镜头与快捷属性；workspace 处理控制台显示/手势/导航并持有 Player 投影单 writer；html 处理准确编辑范围和单击反馈；player 独立核原分节作品并写定向测试。新增 media 包修复真实创作触发的 project.apply ACK 句柄失效，以及同授权工作空间 ready 图片在新 MCP 会话中的查询/保存续用。正式 Session、History、最终 CAS 与未知副作用边界保留，无新生成或跨 run image.edit 承诺。
+各包当时经独立审查、Root 组合，现已随 `423a96dc` 提交：save 处理文件显式保存/History、旧 Flow 稿及整窗放弃；document 处理共同正文表格/公式/块属性及隐藏浮层；editing 处理光标落点、状态/镜头与快捷属性；workspace 处理控制台显示/手势/导航并持有 Player 投影单 writer；html 处理准确编辑范围和单击反馈；player 独立核原分节作品并写定向测试。新增 media 包修复真实创作触发的 project.apply ACK 句柄失效，以及同授权工作空间 ready 图片在新 MCP 会话中的查询/保存续用。正式 Session、History、最终 CAS 与未知副作用边界保留，无新生成或跨 run image.edit 承诺。
 
 最小候选证据及独立审查：HTML 2 文件 23 例；共同正文 2 文件 8 例；自由输入/状态/镜头 1+3 例；控制台 3 文件 8 例及原 ACK/观察 2 例；保存包原 5 文件 31 例，IME 取消问题修正后只重验相关 3 文件 16 例；媒体 ACK 2 例、旧 ready 图片续用 3 例。普通叶由独立 Sol 审查，保存/控制台/媒体生命周期由另一位 Astra 审查；发现的 Spatial 原位编辑切布局、控制台 affine 越界/运行拖动死区及 IME 取消卡住均已修正。未变证据不重跑。组合后的 Player、Renderer、Electron 已一次构建成功，尚不以构建替代当前真实窗口验收。
 
 原 rev15 分节作品已由独立 T 保留相同 Published 数据和资源，用新 Player 真实单击验证：6 个子对象可见数量 0→6→0→6，保持同一 DOM，公式/图像加载及缩放状态正常。无原作品改写或模型/图像/计算重跑。
 
-同账号工程 OAuth 档的公开 MCP 和真实 GUI 已正常接通；连接交接与 token 仅留 ignored output。共同三路材料见 [CREATION_BRIEF](evidence/core-experience-20261007/CREATION_BRIEF.md)。独立 Luna/medium 两路首次任务产出在 `output/core-experience-20261007/authors` 保全：裸 HTML 总约 4 分 34 秒（生图约 28 秒），作者自检修订后图片及关键互动已实际验证；MCP 约 6 分钟的 rev7 首稿已保存和导出（生图约 29 秒），尚未嵌入新图且真实点击证据不足，不记该路完成。Root 未代写/精修；后续软件修复、旧图公开续嵌入及补证另记，内置 AI 路尚未发送首次任务。当前仍缺组合 GUI/保存重开、三路完整质量与耗时比较，不记目标完成或 Owner accepted。
+同账号工程 OAuth 档的公开 MCP 和真实 GUI 已正常接通；连接交接与 token 仅留 ignored output。共同材料见 [CREATION_BRIEF](evidence/core-experience-20261007/CREATION_BRIEF.md)。三路 Luna/medium 首任务结果保全：裸 HTML 约 4 分 34 秒、首稿有图像事实/连线/返回问题；MCP 约 6 分钟的 rev7 首稿缺新图，续作 rev12 已嵌图但独立内容/互动仍有限定；内置 AI 19:57:06→19:59:04 为 rev3 partial，仅首页简化、后两页空，未嵌图/互动。详见 [首次独立审查](evidence/core-experience-20261007/FIRST_DELIVERY_REVIEW.md)。Root 未代写/精修，续作不回填首次；完整 GUI/保存重开、质量和目标完成耗时比较仍缺，不记 Owner accepted。
 
 ## 模型路由更正
 
