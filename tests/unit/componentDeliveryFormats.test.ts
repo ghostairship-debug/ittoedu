@@ -67,7 +67,7 @@ it('diagnoses the observed HTTP-200 HTML font response without embedding it or r
   } finally { warning.mockRestore() }
 })
 
-it('carries an imported Web fragment CSS font declaration into the actual offline HTML product', async () => {
+it('carries an imported Web fragment CSS font declaration into the actual HTML and ZIP realm font carrier', async () => {
   registerBundledFontEmbedSource(resolveEmbeddableBundledFonts)
   const { snapshot } = sample()
   if (snapshot.model.kind !== 'course-v10') throw new Error('course')
@@ -80,6 +80,18 @@ it('carries an imported Web fragment CSS font declaration into the actual offlin
   expect(output.artifacts[0]!.html).toContain('data:font/woff2;base64,')
   expect(output.artifacts[0]!.html).toContain('SIL OPEN FONT LICENSE')
   expect(output.report.items.filter(item => item.code === 'bundled-font-unavailable')).toEqual([])
+  const singleDocument = new DOMParser().parseFromString(output.artifacts[0]!.html!, 'text/html')
+  expect(singleDocument.getElementById('course-fonts')!.textContent).toContain('data:font/woff2;base64,')
+  expect(output.artifacts[0]!.html).toContain('fontFaceCss:document.getElementById("course-fonts")')
+  const packageOutput = await buildComponentDelivery(courseDeliverySnapshot(snapshot)!, 'web-package', { compile })
+  const files = unzipSync(packageOutput.artifacts[0]!.bytes!), html = strFromU8(files['index.html']!)
+  const packageDocument = new DOMParser().parseFromString(html, 'text/html'), transport = packageDocument.getElementById('course-fonts')!
+  expect(transport.getAttribute('media')).toBe('not all')
+  expect(transport.textContent).toContain('data:font/woff2;base64,')
+  expect(html).toContain('fontFaceCss:document.getElementById("course-fonts")')
+  expect(Object.keys(files).some(name => name.startsWith('fonts/') && name.endsWith('.woff2'))).toBe(true)
+  expect([...packageDocument.querySelectorAll('style:not(#course-fonts)')].some(style => style.textContent!.includes('fonts/'))).toBe(true)
+  expect(strFromU8(files['THIRD_PARTY_NOTICES.md']!)).toContain('SIL OPEN FONT LICENSE')
 })
 
 it('carries public ordered page choices through a captured Main request into actual PPTX XML and paper dimensions', async () => {

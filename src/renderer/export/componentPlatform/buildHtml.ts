@@ -31,9 +31,9 @@ export async function buildComponentHtml(snapshot: DocumentSnapshot, compile: Co
   const result = await buildComponentPublished(snapshot, compile, undefined, mode, signal, onProgress)
   signal?.throwIfAborted()
   const fonts = resolveEmbeddedBundledFonts(result.payload)
-  const plainHtml = buildComponentSingleHtml(result.payload, loadPlayerBundle())
+  const plainHtml = buildComponentSingleHtml(result.payload, loadPlayerBundle(), { fontFaceCssElementId: fonts.length ? 'course-fonts' : undefined })
   const html = fonts.length ? plainHtml
-    .replace('</head>', `<style>${bundledFontDataUrlCss(fonts)}</style>${bundledFontNoticeHtmlComment(fonts)}</head>`) : plainHtml
+    .replace('</head>', `<style id="course-fonts">${bundledFontDataUrlCss(fonts)}</style>${bundledFontNoticeHtmlComment(fonts)}</head>`) : plainHtml
   const diagnostics = [...result.diagnostics, ...fontDiagnostics(result.payload, fonts)]
   return { html, payload: result.payload,
     diagnostics, warnings: diagnostics.map(value => value.message), offlinePrepared: result.offlineComplete && !diagnostics.some(value => value.code === 'bundled-font-unavailable') }
@@ -61,9 +61,9 @@ export async function buildComponentWebPackage(snapshot: DocumentSnapshot, compi
   // existing resource preparation; binary entries remain usable by web hosts.
   const preparedAssetScriptUrl = Object.keys(preparedAssets).length ? './course-assets.js' : undefined
   if (preparedAssetScriptUrl) files['course-assets.js'] = strToU8(`window.CoursewarePreparedAssetBytes=Object.fromEntries(Object.entries(${JSON.stringify(preparedAssets).replace(/</g, '\\u003c')}).map(([id,encoded])=>[id,Uint8Array.from(atob(encoded),character=>character.charCodeAt(0))]));`)
-  const html = buildComponentSingleHtml(result.payload, loadPlayerBundle(), { preparedAssetScriptUrl })
+  const html = buildComponentSingleHtml(result.payload, loadPlayerBundle(), { preparedAssetScriptUrl, fontFaceCssElementId: fonts.length ? 'course-fonts' : undefined })
   files['index.html'] = strToU8(fonts.length ? html
-    .replace('</head>', `<style>${bundledFontRelativeUrlCss(fonts, 'fonts')}</style></head>`) : html)
+    .replace('</head>', `<style>${bundledFontRelativeUrlCss(fonts, 'fonts')}</style><style id="course-fonts" media="not all">${bundledFontDataUrlCss(fonts)}</style></head>`) : html)
   const diagnostics = [...result.diagnostics, ...fontDiagnostics(result.payload, fonts)]
   return { bytes: zipSync(files), diagnostics, warnings: diagnostics.map(value => value.message), offlinePrepared: result.offlineComplete && !diagnostics.some(value => value.code === 'bundled-font-unavailable') }
 }
