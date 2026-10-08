@@ -456,12 +456,15 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
           const enqueue = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; collectHtml() }) } }
           const observer = new MutationObserver(enqueue); observer.observe(documentRoot ? document.documentElement : root, { childList: true, characterData: true, attributes: true, subtree: true })
           const resize = new ResizeObserver(enqueue); resize.observe(root)
+          // Font completion can change text ink without resizing a fixed root.
+          document.fonts.addEventListener('loadingdone', enqueue)
           if (documentRoot) {
             resize.observe(document.documentElement)
             window.addEventListener('scroll', enqueue, true); window.addEventListener('resize', enqueue)
           }
           cleanups.add(() => {
             observer.disconnect(); resize.disconnect()
+            document.fonts.removeEventListener('loadingdone', enqueue)
             if (documentRoot) { window.removeEventListener('scroll', enqueue, true); window.removeEventListener('resize', enqueue) }
           })
           collectHtml()
