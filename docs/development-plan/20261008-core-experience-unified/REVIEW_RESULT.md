@@ -31,7 +31,7 @@
 
 ## Owner 启动后的实际产品独立审查
 
-以下是 10 月 8 日产品实施证据，原静态计划审查保持原范围。主树产品集成至 `ccc06748`。候选作者未自审；重要结构由另一位 Astra/xhigh 审真实 diff、直接 producer/consumer 与原保留行为，普通叶由独立 Sol/high 审核。既有有效检查复用，无全仓／全格式／全模型矩阵或发行检查。
+以下是 10 月 8 日产品实施证据，原静态计划审查保持原范围。主树产品集成至 `95ce7eaf`。候选作者未自审；重要结构由另一位 Astra/xhigh 审真实 diff、直接 producer/consumer 与原保留行为，普通叶由独立 Sol/high 审核。既有有效检查复用，无全仓／全格式／全模型矩阵或发行检查。
 
 | 实际职责／候选 | 独立审查及旧职责退出 | 实际证据与边界 |
 | --- | --- | --- |
@@ -39,7 +39,7 @@
 | U15 ModelPlayer 共同运行宿主；R 迁移与 `8c5754a8` → main `ac14c88c` | `structural_review` 完整补审：React 与 Published 共享准备／实际 commit／sync／ready／dispose，CourseV10RuntimeView 原重复 create/sync/dispose 退出；PM 晚绑定、StrictMode、mutation boundary 与 navigation owner 保留 | 初审实际旧 prepare 阻塞新源码，修后独立 alternative resolver 确认 abort old→resolve fast→release old→mount fast，ready/dispose 正确；React/DOM 两个新检查红→绿。最终限定 PASS，不以旧 HUD 切片替签。[§5–6](../../../output/core-experience-20261008/STRUCTURAL_REVIEW_SUMMARY.md) |
 | U12 外层呈现；P `71b3acc3/85834c1c/79cb0516`，PM section `c169d6c6+D6cd1d7c9` | `presentation_import_review`：React InstanceView、Player DOM、PM NodeView 消费共同决定，外层 frame/extent/children/media/section 重复规则退出；各投影 DOM、contentDOM、lifetime 保留 | 指定组合 PASS，PM 作者分节保持展开且不回写播放折叠策略。HUD 整体和其他未指定后继不由本 reviewer 签收。[原汇总](../../../output/core-experience-20261008/PRESENTATION_RUNTIME_REVIEW_SUMMARY.md) |
 | U13 共同正文用例；D `08e1d133/be32a019/b9413c46` 与 F 指定适配 | `structural_review` 审共同工厂、真实 selection/AI 准备与回显，`presentation_import_review` 审 Flow/专业 table 直接接线；加号／斜杠／顶栏旧重复业务退出，Markdown/Flow 及专业 adapter 保留 | 相应直接链限定 PASS，不扩成任意长章节全 GUI。两个汇总分别写实际范围 |
-| 作者记录、目标锁、几何、完整复制、在途共编、GJS/source | `structural_review` 与普通叶独立审查，正式 Session/History/CAS、资源 owner 保留；GJS storage/独立 Undo/整页 writer 退出 | 定点真实消费者与受控延迟 provider 有证据；T 正常 UI GJS 结构/样式、内部编辑/手势、保存冷开和 HTML→H5→普通 HTML 往返另层通过。跨表面多状态粘贴仅产品选择待 Owner |
+| 作者记录、目标锁、几何、完整复制、在途共编、GJS/source | `structural_review` 与普通叶独立审查，正式 Session/History/CAS、资源 owner 保留；GJS storage/独立 Undo/整页 writer 退出 | 定点真实消费者与受控延迟 provider 有证据；T 正常 UI GJS 结构/样式、内部编辑/手势、保存冷开和 HTML→H5→普通 HTML 往返另层通过。当时跨表面多状态粘贴待Owner，后已选择直接拒绝并落实，见最后叶 |
 | 原 Ready 图片恢复、正式素材替换与视觉输入；A `8747dbee/83739ff5/6b961afd`，I `27a390e7` | lifecycle reviewer 审 A，H 独立审 I；复用原 job/授权、当前 run Map、Coordinator asset owner，不建新 cache/writer | 原 MCP Ready 正式应用为 rev18，原作者端点窄修后 saved19/clean，Main 正常重启原文件冷开通过。生成图 preview 的受控 PNG→下一模型 image_url 已审 PASS。真实 builtin 99bcf3b7 失败已由持久化调用证明为模型漏抄引用中的139：status正确146字符、实际preview143字符；新Main能解析正确引用，没有新视觉consumer缺陷。实际原图消费仍由作者继续，不从受控绿推断成功 |
 
 Main、Player、Renderer `0bb9f454` 实际构建 exit0；最后 `ccc06748` 的相关Player→Renderer构建exit0，Main未变复用。新Main55560正常公共导出与原GUI只读首页有效后正常退出0。全仓旧类型红灯未声称通过。[T 的普通 UI 证据](../../../output/core-experience-20261008/t-journey/EVIDENCE.md)、[正常退出记录](../../../output/core-experience-20261008/CLOSE_CARRIER_RECORD.md)、[三路创作独立评审](../../../output/core-experience-20261008/FINAL_CREATION_REVIEW.md)分别承接真实行为、生命周期与内容质量。三路已通过课堂核心操作和画面；内置最终 saved10 原文件新 Main 冷开通过，普通 HTML 裁切已经最后实载体复核闭合。首次 partial/缺图及修补失败保持原记录，不记 Owner accepted，不解除发行暂停。
@@ -54,4 +54,10 @@ Main、Player、Renderer `0bb9f454` 实际构建 exit0；最后 `ccc06748` 的�
 | A `b658ee3e+25a3e3f9` → `0c5ef650+0bb9f454`：可见溢出 | P 独立组合 PASS，首审发现 Flow 1280 覆盖640后修复；PASS仅是指定 probe | probe 中 iframe24、正式 frame23、Flow640及显式clip/scroll/Source边界成立；Root当时正常新导出仍iframe23/双滚动条可视8，不能将该probe记为交付PASS。A/P实际payload走builtin且曾测23px，反证Root的resolveSource假设，后续字体时序修复见下一行。旧失败与假设更正保留 |
 | A `7609d6a1` → `ccc06748`：字体就绪重测 | P 增量独立PASS，读取真实时序／原脚本／截图及3行diff，非作者自审 | 初次fonts loading时Range21/extent23，loaded后Range24而旧无新observe；新loadingdone复用既有enqueue/collect，销毁移除同回调，现active guard保留。正式frame/Flow/Source权限/clip规则无变；新Root正常公共MCP导出实际HTML两p1280×24无bar、正式root/frame23、diag/错误空，X实载体PASS，D实际新首页与原GUI截图窄复核PASS。字体/theme/ZIP旧green复用，不用私有替bundle代替出口。[新载体](../../../output/core-experience-20261008/font-overflow-real-carrier/crop-ccc06748/verification.json) |
 
-当前仅多状态Slide向无状态Flow/Spatial粘贴的产品选择待Owner，合法same-Slide副本/锁/资源/History既有PASS有效。独立结论按已审组合及各自限度复用；未覆盖的自然音频、完整GUI矩阵与可靠端到端速度不写通过，不新增防御门或发布。
+### 最后叶：Owner选择直接拒绝不兼容粘贴
+
+I候选 `32ca1dfd`（base `bca16313`）→main `95ce7eaf`，H独立普通叶 **PASS**。现state-copy planner对无状态Flow/Spatial仅按本次对象override、相关规则变化或复制对象间order变化明确拒绝，返回计划/正式写入之前停止；原caller将错误显示到既有feedback。普通对象的无关页面状态/规则与单对象order提及不连带拒绝，不生成无状态表面的presentation，不建转换模型或新writer。same-Slide分支不变。
+
+定向命令 `npm exec -- vitest run tests/unit/coreExperienceSemanticOperations.test.ts -t 'rejects stateful Slide|canonically pastes an ordinary object'`：2PASS、8未选（非失败/非通过）。两用例各覆盖Flow/Spatial；拒绝的源、目标Session及History不变，普通复制经真实Session canonical applied、仅1History并保相关规则。H已读精确diff/原分支/caller/test及作者回执，复用未变same-Slide/资源/锁证据；Root相关Renderer构建exit0。该叶未重跑GUI、三路课堂或字体/出口矩阵，不冒称新增GUI验收。
+
+本轮计划内开发与适用独立review至此收口，无待选实施叶，完成卡按协议删除并生成任务板。独立结论按已审组合及各自限度复用；未覆盖的自然音频、完整GUI矩阵与可靠端到端速度不写通过，不新增防御门或发布。

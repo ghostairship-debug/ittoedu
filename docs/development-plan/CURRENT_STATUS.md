@@ -1,6 +1,6 @@
 # 当前状态与剩余范围
 
-更新：2026-10-08。正式目录 `D:/果铃工作台`／main，本轮产品源码 cut `ccc06748`，后续文档提交不改此源码cut。Owner 已全文启动 [START_PROMPT](20261008-core-experience-unified/START_PROMPT.md)，覆盖讨论／暂不开发；本轮分批实施、相应独立 review 与原三路续作已收口，仅多状态跨表面粘贴的产品选择待Owner。接手 `423a96dc`、Owner 未提交文档和原作品保全。**发行继续暂停。**
+更新：2026-10-08。正式目录 `D:/果铃工作台`／main，本轮产品源码 cut `95ce7eaf`，后续文档提交不改此源码cut。Owner 已全文启动 [START_PROMPT](20261008-core-experience-unified/START_PROMPT.md)，覆盖讨论／暂不开发；本轮计划内分批开发、相应独立 review 与原三路续作已收口。最后多状态跨表面粘贴已按Owner选择直接拒绝。接手 `423a96dc`、Owner 未提交文档和原作品保全。**发行继续暂停。**
 
 ## 已实施与实际证据
 
@@ -14,7 +14,7 @@
 
 页面观察不再依赖瞬时整页 HTML 投影（`0e39d982`，H独立PASS）。新 Main38944 的公共 view.observe 对混合专业图片首页的原语义路径实际capture成功，rev10／diagnostics=[]；读取／HTML可用性／write授权未扩大。[实际载体](../../output/core-experience-20261008/PAGE_OBSERVATION_REAL_CARRIER.md)与原GUI冷开分列。
 
-相关 Main、Player、Renderer `0bb9f454` 构建exit0；最后裁切叶 `ccc06748` 相关Player→Renderer构建exit0，未变Main构建复用。四个API5专业包与74个无重复正式工具索引已生成；全仓旧类型红灯未冒绿，没有机械全测试／格式／模型矩阵或同义生成检查。
+相关 Main、Player、Renderer `0bb9f454` 构建exit0；裁切叶 `ccc06748` 的Player→Renderer构建exit0，最后粘贴叶 `95ce7eaf` 的Renderer构建exit0，未变Main/Player证据复用。四个API5专业包与74个无重复正式工具索引已生成；全仓旧类型红灯未冒绿，没有机械全测试／格式／模型矩阵或同义生成检查。
 
 ## 三路真实续作
 
@@ -30,7 +30,7 @@
 
 R28 CSS字体采集／内容realm主题通道已集成，H/L独审PASS；正常HTML/ZIP两段中文实测9/8个loaded Noto字体，公共Player主题更新后仍有效，原课程JSON未变。其后实际普通出口裁切经字体就绪时序证实：初测Range21/extent23，loaded后Range24但固定root不触发重测。A7609d6a1→ccc06748仅复用原队列监听font loadingdone/销毁移除，P增量独审PASS；新公共MCP正常导出、X实际file://经典scrollbar复核通过，iframe/client/scroll24、正式frame/root/p23，两句完整、诊断/浏览器错误空。D实际新首页与原GUI只读截图窄复核PASS。[新出口证据](../../output/core-experience-20261008/font-overflow-real-carrier/crop-ccc06748/verification.json)与旧0bb失败、Root被真实builtin payload反证的resolveSource假设分别保留；不重跑未变字体/theme/ZIP/课堂矩阵。
 
-**唯一待Owner叶：** 多状态Slide对象粘到无状态Flow/Spatial时，选择保留基础态并提示不能带入的状态，或拒绝不兼容粘贴。合法same-Slide完整副本/资源/锁/History已通过；不擅自静默丢状态。任务卡仅保留该选择为blocked、释放产品写锁，没有逐阶段继续确认。
+**最后产品选择已落实：** Owner选择多状态Slide对象粘到无状态Flow/Spatial时直接拒绝。I32ca1dfd→95ce7eaf复用现粘贴planner，在正式写入前明确报错，不做降级或状态转换；普通对象不因页面无关状态或单对象order提及而被拒绝。定向真实Session检查2/2通过，拒绝时源/目标/History不变，普通复制实际applied；H独立叶审PASS，未变same-Slide/资源/锁证据复用。本轮卡按协议删除并生成任务板，没有剩余产品写锁或待Owner实施选择。
 
 未覆盖的自然媒体、完整GUI/安装矩阵、可靠端到端耗时和Owner接受按原证据边界报告，不写全通过，也不据此新增矩阵或发布。
 

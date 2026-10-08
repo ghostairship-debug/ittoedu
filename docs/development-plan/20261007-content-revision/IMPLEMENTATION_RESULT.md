@@ -1,10 +1,10 @@
 # 教师首发与统一内容协作：实施结果
 
-当前摘要更新：2026-10-08。Owner 已全文启动 [START_PROMPT](../20261008-core-experience-unified/START_PROMPT.md)，覆盖讨论／暂不开发状态。本轮已完成分批源码集成、相应独立 review、普通教师旅程与原三路续作；仅多状态跨表面粘贴的产品选择待 Owner，发行继续暂停。接手源码 `423a96dc` 和用户未提交方案文档保全；下述历史首稿失败、旧 source cut 与有效证据均保留。当前入口见 [CURRENT_STATUS](../CURRENT_STATUS.md)、[执行包](../20261008-core-experience-unified/README.md)、[首次交付审查](evidence/core-experience-20261007/FIRST_DELIVERY_REVIEW.md)。
+当前摘要更新：2026-10-08。Owner 已全文启动 [START_PROMPT](../20261008-core-experience-unified/START_PROMPT.md)，覆盖讨论／暂不开发状态。本轮计划内开发、分批源码集成、相应独立 review、普通教师旅程与原三路续作已收口；最后多状态跨表面粘贴按Owner选择直接拒绝，没有待选实施叶，发行继续暂停。接手源码 `423a96dc` 和用户未提交方案文档保全；下述历史首稿失败、旧 source cut 与有效证据均保留。当前入口见 [CURRENT_STATUS](../CURRENT_STATUS.md)、[执行包](../20261008-core-experience-unified/README.md)、[首次交付审查](evidence/core-experience-20261007/FIRST_DELIVERY_REVIEW.md)。
 
 ## 10 月 8 日实际实施结果
 
-本轮产品源码集成至 `ccc06748`。共同作者记录／锁／冻结目标、HTML 局部 source 与正式 GJS 投影、输入 ACK／Main 关闭、共同正文工厂／选区／完整资源复制、ModelPlayer 宿主／实际异步导航、共同呈现与 HUD、Flow 专业字段、递归 HTML 导入和正常离线交付已分批进入正式 main。接手 `423a96dc`、Owner 未提交文档及原作品保全，无 reset/stash/clean。没有第二 writer／History／工程，没有新平台、兼容层或全局锁；发行继续暂停。
+本轮产品源码集成至 `95ce7eaf`。共同作者记录／锁／冻结目标、HTML 局部 source 与正式 GJS 投影、输入 ACK／Main 关闭、共同正文工厂／选区／完整资源复制、ModelPlayer 宿主／实际异步导航、共同呈现与 HUD、Flow 专业字段、递归 HTML 导入和正常离线交付已分批进入正式 main。接手 `423a96dc`、Owner 未提交文档及原作品保全，无 reset/stash/clean。没有第二 writer／History／工程，没有新平台、兼容层或全局锁；发行继续暂停。
 
 四项职责迁移按真实 producer/consumer 与旧业务退出独立审查。U01 的输入生命周期、Main 决策及外层 Host 桥接，U12 的共同外层呈现与 PM section，U13 的共同工厂／选区与专业 adapter 均有指定范围的独立结论；完整 GUI 另列。U15/B5 补审发现旧组件 prepare 占住 shared queue，导致新源码 commit 到不了原 supersede/abort；`ac14c88c` 修复后 React/DOM 两个目标红→绿，独立替代 resolver 确认旧准备取消、最新内容挂载与 ready/dispose，完整 B5 结构限定 PASS。U16 两个声音／进度／动作叶由未参与实施的 T 补齐独立组合 PASS；JSDOM 事件链不扩大为自然媒体解码或 GUI。具体候选、组合、保留行为及限度见[本包实际 review](../20261008-core-experience-unified/REVIEW_RESULT.md)，各 reviewer 不替他人或未审后继签收。
 
@@ -37,7 +37,7 @@ Main／Player／Renderer `0bb9f454` 实际构建 exit0；最后裁切叶 `ccc067
 - 混合专业图片页面的 view.observe 不再依赖瞬时整页HTML投影（`0e39d982`），H独立PASS；新Main公共页面原语义路径actualcapture10/diagnostics=[]。只读副本观察与原GUI同路径冷开分别记录，不扩大HTML编辑授权。
 - CSS字体采集和内容realm主题传递由原X/R owner修复、H/L分别独审PASS。实际正常HTML/ZIP两段中文返回9/8个loaded Noto字体，公共Player主题更新后仍有效、原课程JSON未变；字体加载不再仅是CSS声明存在。真实字体验证与裁切各自分列在[实载体结果](../../../output/core-experience-20261008/font-overflow-real-carrier/verification.json)。
 - 普通HTML裁切已闭合。A `b658ee3e+25a3e3f9` 投影/Flow640候选的P probe PASS后，Root正常0bb导出仍iframe23/双scrollbar可视8。实际payload走builtin且曾测23px，反证Root最初resolveSource假设；实测字体loading时Range21/extent23、loaded后Range24无后续测量。A `7609d6a1`→main`ccc06748`仅3行复用现队列监听font loadingdone/销毁移除，P增量独审PASS。新公共MCP正常export rev10/clean/warnings=[]，X actual file://经典scrollbar两p client/scroll1280×24、formalFrame/root/p1280×23、文字完整、诊断和错误空，实际PASS。[新普通载体证据](../../../output/core-experience-20261008/font-overflow-real-carrier/crop-ccc06748/verification.json)和旧失败分列；未重跑未变字体/theme/ZIP/课堂矩阵。
-- 多状态Slide对象向无状态Flow/Spatial粘贴仍仅该产品取舍待Owner：保留基础态并提示不能带入的状态，或拒绝不兼容粘贴。既有same-Slide完整副本/资源/History已通过，不擅自静默丢状态。本批其他源码、独立审查、三路续作与真实修补收口，当前卡仅承接此选择、释放产品实体写锁。没有Owneraccepted、全仓类型通过、全软件GUI矩阵或可靠端到端速度结论；发行须Owner解除暂停。
+- Owner已选择多状态Slide对象粘到无状态Flow/Spatial直接拒绝，I `32ca1dfd`→main `95ce7eaf`仅复用现state-copy分支，写入前明确报错，不做降级/转换。普通对象带无关页面状态、单对象order及无关规则变化仍可正常跨表面复制。真实Session定向2/2通过：拒绝时源/目标/History不变，普通复制applied/History1；H独立普通叶PASS，Renderer实际构建exit0，旧same-Slide/资源/锁及三路/字体/出口证据未变复用，不再跑GUI矩阵。至此本轮计划内开发与适用review收口，任务卡删除、写锁释放。没有Owneraccepted、全仓类型通过、全软件GUI矩阵或可靠端到端速度结论；发行须Owner解除暂停。
 
 下文保全原 10 月 7 日及此前实施时间线、source cut 与失败，不将各段当时“未提交/候选”等描述作为现行 Git 状态。本轮38工作包的实施与确认优化、20补充候选处置已随 a8cea6c1 合入 main；后续原 S09 冷 PPTX 创建回执尾项也已完成。工程候选按对应范围最小验证及独立审查交付；不声明全软件矩阵、art candidate 或 Owner accepted。实际协调只见[任务板](../TASK_BOARD.md)。
 

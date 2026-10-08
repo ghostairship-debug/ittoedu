@@ -8,7 +8,7 @@
 
 后续实施的唯一入口为[可执行计划包](../20261008-core-experience-unified/README.md)，七批拆包、写域/依赖和最新GPT Pro六项补充均在其中；本文保留问题来源，不成为第二排程。
 
-原 9 项及本轮统一包已分批实施并独立审查，当前产品源码 `ccc06748`。独立 T 的正式 GJS 结构／样式、HTML/H5 编辑及保存冷开、HTML→H5→普通 HTML 单次应用往返已通过；三路原 Luna/medium 续作课堂核心操作与相应冷开通过，内置最终 saved10。真实 HTML/ZIP 字体加载和主题更新通过；后续普通 HTML 正文裁切已修并实载体通过：字体加载完成后复用现有测量队列，显示视口24px，正式frame仍23px。原 probe 的限制、0bb正常出口失败及Root被反证的resolveSource假设均保留。多状态跨表面粘贴的产品选择仍待 Owner；没有其他当前实施写锁。首次 partial、错误图、缺图和失败不回填，当前结果与证据边界以 [IMPLEMENTATION_RESULT](IMPLEMENTATION_RESULT.md) 及 [CURRENT_STATUS](../CURRENT_STATUS.md) 为准，不记 Owner accepted。下文保留启动历史及问题来源。
+原 9 项及本轮统一包已分批实施并独立审查，当前产品源码 `95ce7eaf`。独立 T 的正式 GJS 结构／样式、HTML/H5 编辑及保存冷开、HTML→H5→普通 HTML 单次应用往返已通过；三路原 Luna/medium 续作课堂核心操作与相应冷开通过，内置最终 saved10。真实 HTML/ZIP 字体加载和主题更新通过；后续普通 HTML 正文裁切已修并实载体通过：字体加载完成后复用现有测量队列，显示视口24px，正式frame仍23px。原 probe 的限制、0bb正常出口失败及Root被反证的resolveSource假设均保留。最后多状态跨表面粘贴按Owner选择直接拒绝，定向2/2及H独立review通过；普通对象不受无关页面状态影响。没有本轮剩余实施叶或产品写锁。首次 partial、错误图、缺图和失败不回填，当前结果与证据边界以 [IMPLEMENTATION_RESULT](IMPLEMENTATION_RESULT.md) 及 [CURRENT_STATUS](../CURRENT_STATUS.md) 为准，不记 Owner accepted。下文保留启动历史及问题来源。
 
 1. [文件关闭、显式保存、History 与悬浮按钮](#issue-01)。
 2. [MD / Flow 表格与共同顶栏](#issue-02)，连同[分节答案互动未闭环](#supp-native-section)。
