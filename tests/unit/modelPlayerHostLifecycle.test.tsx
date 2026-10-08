@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react
 import { afterEach, expect, it, vi } from 'vitest'
 import { createV10ModelPlayer, mountV10Model } from '../../src/player/componentPlatform/ModelPlayer'
 import { ComponentPlatformRuntime } from '../../src/player/components/ComponentPlatformRuntime'
+import { ComponentRuntimeHost } from '../../src/player/components/runtime/ComponentRuntimeHost'
 import { CourseV10RuntimeView, type CourseV10RuntimePorts } from '../../src/renderer/components/CourseV10RuntimeView'
 import { TEXT_DEFINITION } from '../../src/components/text/adapters'
 import { createTextComponentData } from '../../src/components/text/data'
@@ -34,6 +35,32 @@ const project = (): CourseProjectV10 => ({ schemaVersion: 10, id: 'commit', revi
   surfaces: [{ id: 'page', kind: 'slide', title: '本页', childIds: ['text'], designSize: { width: 800, height: 600 } }],
   global: { underlay: [], overlay: [] }, assets: {} })
 const resources = { assets: {}, components: {} }
+
+it('keeps host font faces in Published realm snapshots and later theme events without scoping them into the outer course style', async () => {
+  const root = document.createElement('div'); document.body.append(root)
+  const course = project(); course.theme = { css: '.sample { color: #112233; }' }
+  // Transport is checked here; the export carrier verifies the real bundled WOFF2 faces in its iframe.
+  const fontFaceCss = '@font-face { font-family: "Noto Sans SC"; src: url(data:font/woff2;base64,d09GMg==) format("woff2"); }'
+  const published = await buildPublishedCourseV3({ project: course, assetBytes: {} })
+  const sync = vi.spyOn(ComponentRuntimeHost.prototype, 'sync')
+  const player = await mountPublishedCourseV3(published.payload, root, { fontFaceCss, keyboardNavigation: false })
+  try {
+    expect(player.runtime.themeCss()).toContain(fontFaceCss)
+    expect(player.runtime.themeCss().indexOf(fontFaceCss)).toBeLessThan(player.runtime.themeCss().indexOf('@layer guoling-theme'))
+    const mounted = await sync.mock.results[sync.mock.calls.findIndex(([request]) => request.instance.id === 'text')].value
+    const updates: unknown[] = []
+    const off = mounted!.scope.events.subscribe('__runtime.theme', value => updates.push(value))
+    const changed = structuredClone(course); changed.revision++; changed.theme = { css: '.sample { color: #445566; }' }
+    await player.update({ kind: 'course-v10', project: changed, resources })
+    expect(updates).toEqual([player.runtime.themeCss()])
+    expect(updates[0]).toContain(fontFaceCss); expect(updates[0]).toContain('#445566')
+    const outerTheme = [...document.head.querySelectorAll('style')].find(style => style.textContent?.includes('#445566'))!
+    expect(outerTheme.textContent).toContain('@scope')
+    expect(outerTheme.textContent).not.toContain('@font-face')
+    expect(published.payload.theme).toEqual(course.theme)
+    off()
+  } finally { await player.dispose(); root.remove() }
+})
 
 it('waits for the DOM projection commit before mounting and binding observation, and retires a commit in flight', async () => {
   const root = document.createElement('div'); document.body.append(root)

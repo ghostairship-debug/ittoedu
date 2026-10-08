@@ -49,6 +49,7 @@ export class ComponentPlatformRuntime {
   private readonly isAssetPending?: (id: string) => boolean
   private readonly assetContents = new Map<string, { bytes: Uint8Array; mimeType: string }>()
   private readonly themeMarker = `component-${nanoid()}`
+  private readonly fontFaceCss: string
   private themeStyle?: HTMLStyleElement
   private themeText = ''
   private resourceVersion = 0
@@ -88,6 +89,8 @@ export class ComponentPlatformRuntime {
     /** Published resource owner resolves only actual consumer requests. */
     resolveAssetUrl?(id: string): string | undefined
     isAssetPending?(id: string): boolean
+    /** Host-owned bundled faces for isolated content documents; not author theme data. */
+    fontFaceCss?: string
     mode?: 'edit' | 'play' | 'capture'
     /** ModelPlayer performs synchronization only after an actual projection commit. */
     projectionManaged?: boolean
@@ -99,6 +102,7 @@ export class ComponentPlatformRuntime {
     this.onProjectionCommit = options.onProjectionCommit
     this.resolveAssetUrl = options.resolveAssetUrl
     this.isAssetPending = options.isAssetPending
+    this.fontFaceCss = options.fontFaceCss ?? ''
     this.surfaceId = options.teacherController && (() => options.teacherController!.read().locationId)
     this.report = message => options.report?.(message)
     this.audioEvents.on<AudioPlaybackEvent>('audio:ended', event => {
@@ -444,7 +448,9 @@ export class ComponentPlatformRuntime {
     const owner = this.roots.values().next().value?.ownerDocument ?? this.targetElements.values().next().value?.ownerDocument
     if (owner) {
       if (!this.themeStyle) { this.themeStyle = owner.createElement('style'); owner.head.append(this.themeStyle) }
-      this.themeStyle.textContent = `@scope ([data-component-course-world="${this.themeMarker}"]) {${themeText.replace(/:root\b/g, ':scope')}}`
+      // The outer host already declares its faces. Scope only author theme rules;
+      // isolated content documents receive their own faces through themeCss/events.
+      this.themeStyle.textContent = `@scope ([data-component-course-world="${this.themeMarker}"]) {${this.courseThemeCss().replace(/:root\b/g, ':scope')}}`
     }
     if (themeText !== this.themeText) { this.themeText = themeText; this.emit('__runtime.theme', themeText) }
     if (!this.audioManager) {
@@ -497,7 +503,11 @@ export class ComponentPlatformRuntime {
       this.resourceVersion++
     }
   }
-  themeCss(): string { return this.project ? courseThemeStyleText({ designTokens: this.project.designTokens ?? { fonts: [], colors: [] }, theme: this.project.theme }, id => this.contentAssetUrl(id)) : '' }
+  private courseThemeCss(): string { return this.project ? courseThemeStyleText({ designTokens: this.project.designTokens ?? { fonts: [], colors: [] }, theme: this.project.theme }, id => this.contentAssetUrl(id)) : '' }
+  themeCss(): string {
+    const theme = this.courseThemeCss()
+    return theme && this.fontFaceCss ? `${this.fontFaceCss}\n${theme}` : theme
+  }
   private referencedAssetUrl(id: string): string | undefined {
     if (this.retired) return undefined
     const url = this.resolveAssetUrl?.(id)

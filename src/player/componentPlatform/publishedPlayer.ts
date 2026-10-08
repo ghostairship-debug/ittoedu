@@ -29,6 +29,8 @@ export interface PublishedComponentPlayerOptions {
   keyboardNavigation?: boolean
   /** A package host may supply captured local bytes; the existing runtime owns their URLs and lifetime. */
   preparedAssetBytes?: Readonly<Record<string, Uint8Array>>
+  /** Font rules explicitly supplied by the export host for its isolated content documents. */
+  fontFaceCss?: string
   /** Internal isolated capture transport; no privileged API is installed in its renderer. */
   componentBootstrap?: ComponentBootstrapTransport
 }
@@ -139,7 +141,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
   const teacherController = navigation.teacherPort()
   player = mountV10Model({ model: renderModel(), root, mode: options.capture ? 'capture' : 'play', runScopeId: `published:${payload.id}:${nanoid()}`,
     teacherController, studentNavigation: navigation, report: options.report, initialSurfaceId: surfaceId ?? undefined,
-    resolveAssetUrl, isAssetPending: id => pendingAssets.has(id),
+    resolveAssetUrl, isAssetPending: id => pendingAssets.has(id), fontFaceCss: options.fontFaceCss,
     onObservation: options.capture ? undefined : (id, observation) => {
       const unregister = navigation.registerObservation(id, observation)
       const unsubscribe = observation.subscribe?.(navigation.changed)
