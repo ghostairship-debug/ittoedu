@@ -94,7 +94,12 @@ jobs:
                   product_full=true
                 fi
                 ;;
-              .github/workflows/check-contracts.yml|vendor/fonts/*/LICENSE)
+              .github/workflows/check-contracts.yml)
+                product_tests=true
+                # Runner/install changes affect every product suite, including real browsers and compute.
+                product_full=true
+                ;;
+              vendor/fonts/*/LICENSE)
                 product_tests=true
                 ;;
             esac
@@ -203,6 +208,10 @@ jobs:
       - name: Install browsers for product tests
         if: needs.changes.outputs.product_tests == 'true'
         run: npx playwright install --with-deps chromium msedge
+      # Electron 43 installs its runtime explicitly; npm ci installs only the npm package.
+      - name: Install Electron runtime for product tests
+        if: needs.changes.outputs.product_tests == 'true'
+        run: node node_modules/electron/install.js
       - name: Prepare Electron sandbox for real compute tests
         if: needs.changes.outputs.product_tests == 'true'
         shell: bash
