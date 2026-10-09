@@ -277,7 +277,8 @@ jobs:
 
   # This additional required status must be configured by the independent
   # repository administrator. A mutable PR workflow alone cannot enforce trust.
-  # The first installation has no baseline checker and explicitly stays unverified.
+  # The owner installs an independently reviewed snapshot on validation-baseline
+  # and locks that branch. Missing/unprotected installations fail closed.
   trusted-core-validation:
     needs: changes
     runs-on: ubuntu-latest
@@ -287,9 +288,19 @@ jobs:
           path: candidate
           fetch-depth: 0
           persist-credentials: false
+      - name: Require protected validation baseline
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          protected="$(gh api "repos/$GITHUB_REPOSITORY/branches/validation-baseline" --jq '.protected')"
+          if [[ "$protected" != true ]]; then
+            echo 'NI08 unverified: the owner must protect and lock the independently reviewed validation-baseline branch' >&2
+            exit 1
+          fi
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.changes.outputs.base_sha }}
+          ref: refs/heads/validation-baseline
           path: trusted
           persist-credentials: false
       - uses: actions/setup-node@v4
