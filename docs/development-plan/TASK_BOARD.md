@@ -6,5 +6,5 @@ Tasks: 2 · blocked: 2
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [20261009-ci-repair](tasks/20261009-ci-repair.md) | blocked | Root | none | Owner 已保护 validation-baseline 的 8c3f6e26；同一候选已推 main，实际 37993412843 可信验证、字体和任务板通过。完整产品测试仅一项失败：g20ExecutionSettings 的全局下一次 rename 故障可被真实后台模型缓存刷新消耗，之后设置写入成功；临时受控真实刷新完整复现，限定目标设置文件注入后原 9 项全部通过，全部保存／凭据／撤销断言保留。仅维护原测试故障定位与命中断言，无源码变更。获审候选须由 Owner 更新锁定的可信快照，已给的安装授权继续有效；管理接口不足，准备基线更新 PR 供网页合入并重新锁定，之后再推 main 验证。 |
+| [20261009-ci-repair](tasks/20261009-ci-repair.md) | blocked | Root | none | PR #5 已获独审、产品和类型检查通过，并在 Owner 解锁后合并为 e2260ab541d45f7d6e7db63d51143ada5a02a3cc。合并树与 bf5983bd 获审候选完全一致；同一合并版本已正常推 main。实际 CI 37997357886 success：产品 test、三套 typecheck、可信验证、任务板及 changes 通过；合同与字体因未影响而跳过，复用有效证据。此前完整产品运行唯一剩余故障注入竞争已修复，原 9 项保存／凭据／撤销断言全部保留。代码修复和 CI 推进已完成，当前仅等待 Owner 在网页重新勾选 Lock branch 并保存；管理恢复请求 403，metadata protected=true 不证明 Lock branch 已恢复，不称硬锁保证。 |
 | [现有](tasks/20261008-core-experience-followup.md) | blocked | Root | ai-session | 原目标完整保留；以当前实际源码／Run／交付／冷开判断剩余，不改总方案。v8后共享图片元数据／真实文件与publication结算变化提供一次新完整验证理由，先内置核心、再公开 MCP。正常GUI打开被自动审查拒绝，同一外部步骤连续三目标轮未就绪；第三轮核owned PID51408／句柄51794仍存续、CDP9262无窗口，目标blocked，待Owner手动正常启动，未发模型请求。旧三路同尺寸补证不能替签新一次创作；原失败、模型自身错误及费用边界保留。唯一事实记 REVIEW_RESULT.md 的 resume-20261009 节。 |
