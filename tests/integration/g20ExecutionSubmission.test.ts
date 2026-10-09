@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionDesktopService } from '../../src/main/workbench/execution/ExecutionDesktopService'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
+import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import type { ConversationRecord } from '../../src/shared/workbench/conversations'
 import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
 import type { ExecutionSendResult, ExecutionSubmissionRecord } from '../../src/shared/workbench/executionDesktop'
@@ -76,17 +77,22 @@ describe('durable execution submissions', () => {
     expect(current.messages.find(message => message.role === 'user')?.attachmentIds).toEqual([attachment.id])
   })
 
-  it('M07-T04 keeps queue order, deletes one message and enforces the old Gateway write barrier before real Engine adjustment and continuation', async () => {
+  it('M07-T04 keeps queue order, deletes one message and absorbs same-run steering before unstarted old writes without renewing stopped authority', async () => {
     let calls = 0
     const instructions: string[] = []
-    let onAborted: (() => Promise<void>) | undefined
+    let releaseFirst!: () => void, oldTarget = ''
+    let firstAborted = false
     const fetchMock = vi.fn((_: string | URL | Request, init?: RequestInit) => {
       calls += 1
       const body = JSON.parse(String(init?.body))
       instructions.push(JSON.stringify(body.messages.filter((message: { role: string }) => message.role === 'user').at(-1)?.content))
       if (calls > 1) return Promise.resolve(completed(calls))
-      return new Promise<Response>((_resolve, reject) => {
-        const abort = () => { void (onAborted?.() ?? Promise.resolve()).then(() => reject(new DOMException('stopped', 'AbortError')), reject) }
+      return new Promise<Response>((resolve, reject) => {
+        releaseFirst = () => resolve(new Response(`data: ${JSON.stringify({ id: 'old-operation', model: 'fixture-model', choices: [{ index: 0,
+          delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'old-write', type: 'function', function: {
+            name: modelToolWireName('text.replace'), arguments: JSON.stringify({ target: oldTarget, content: '迟到写入' }),
+          } }] }, finish_reason: 'tool_calls' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } }))
+        const abort = () => { firstAborted = true; reject(new DOMException('stopped', 'AbortError')) }
         if (init?.signal?.aborted) abort(); else init?.signal?.addEventListener('abort', abort, { once: true })
       })
     })
@@ -100,9 +106,7 @@ describe('durable execution submissions', () => {
     }) as Promise<ExecutionSendResult>
     const first = await send('21111111-1111-4111-8111-111111111111', conversation.revision, '原目标')
     await waitUntil(async () => fetchMock.mock.calls.length === 1)
-    const oldTarget = await documents.tools.issueTarget(first.run!.runId, document.documentId, { kind: 'markdown-range', from: 0, to: 4 })
-    let lateResult: unknown
-    onAborted = async () => { lateResult = await documents.tools.execute(first.run!.runId, 'late-after-adjust', { name: 'text.replace', input: { target: oldTarget, content: '迟到写入' } }) }
+    oldTarget = await documents.tools.issueTarget(first.run!.runId, document.documentId, { kind: 'markdown-range', from: 0, to: 4 })
     const queuedA = await send('22222222-2222-4222-8222-222222222222', first.conversation.revision, '稍后继续 A')
     const queuedB = await send('23333333-3333-4333-8333-333333333333', queuedA.conversation.revision, '稍后继续 B')
     expect(queuedA.submission).toMatchObject({ state: 'queued', position: 1 })
@@ -111,13 +115,20 @@ describe('durable execution submissions', () => {
       submissionId: queuedB.submission.submissionId }) as ExecutionSubmissionRecord
     expect(removed.state).toBe('cancelled')
     const adjusted = await send('24444444-4444-4444-8444-444444444444', queuedB.conversation.revision, '先停止，改按新范围继续', 'adjust')
-    expect(adjusted.run).toMatchObject({ input: { instruction: '先停止，改按新范围继续' }, continuedFrom: first.run!.runId })
-    await service.engine.wait(adjusted.run!.runId)
+    expect(adjusted.run).toMatchObject({ runId: first.run!.runId, input: { instruction: '原目标', documents: first.run!.input.documents },
+      steering: [{ submissionId: adjusted.submission.submissionId, text: '先停止，改按新范围继续' }] })
+    expect(adjusted.run!.input.selection).toEqual(first.run!.input.selection)
+    expect(firstAborted).toBe(false)
+    releaseFirst()
+    const settled = await service.engine.wait(adjusted.run!.runId)
+    expect(settled.tools[0]).toMatchObject({ call: { name: 'text.replace' }, state: 'returned', notInvokedReason: 'steering' })
+    const lateResult = await documents.tools.execute(first.run!.runId, 'late-after-terminal', { name: 'text.replace', input: { target: oldTarget, content: '迟到写入' } })
     await waitUntil(async () => (await service.operate({ type: 'submission', workspaceId: conversation.workspaceId, conversationId: conversation.conversationId,
       submissionId: queuedA.submission.submissionId }) as ExecutionSubmissionRecord).state === 'accepted')
     await waitUntil(async () => fetchMock.mock.calls.length === 3)
-    const stopped = await service.operate({ type: 'run', runId: first.run!.runId }) as ExecutionRunRecord
-    expect(stopped.status).toBe('stopped')
+    const original = await service.operate({ type: 'run', runId: first.run!.runId }) as ExecutionRunRecord
+    expect(original.status).toBe('completed')
+    expect(original.steering?.[0].appliedAt).toEqual(expect.any(Number))
     expect(lateResult).toMatchObject({ kind: 'error', code: 'run-stopped' })
     expect(documents.registry.get(document.documentId).read()).toMatchObject({ model: { source: '保持原文' }, revision: document.revision, undoDepth: 0 })
     expect(instructions).toHaveLength(3)

@@ -13,6 +13,62 @@ import { documentSourceEdits } from '../../../shared/document/sourceMerge'
 import { mapAcknowledgedRange } from '../../../core/tools/ToolReadCoverage'
 import { componentDefinitionBuiltinKey } from '../../../shared/contracts/component-platform/project'
 import { documentDigest } from '../../../core/documents/documentDigest'
+import { parse, parseFragment, type DefaultTreeAdapterTypes } from 'parse5'
+import { lightEditTextOverridesSchema, normalizeLightEditText } from '../../../shared/contracts/runtime/lightEdit'
+
+/** Static page copy can prove an override lost its source. Programs require runtime evidence. */
+function staticWebText(html: string, document: boolean): Array<{ original: string; region: string }> | null {
+  const values: Array<{ original: string; region: string }> = []
+  let dynamic = false
+  const visit = (node: DefaultTreeAdapterTypes.Node, ancestors: string[]) => {
+    if (node.nodeName === '#text') {
+      const original = normalizeLightEditText((node as DefaultTreeAdapterTypes.TextNode).value)
+      if (original) values.push({ original, region: ancestors.slice(-4).join('>') || 'root' })
+      return
+    }
+    if ('tagName' in node) {
+      if (node.namespaceURI !== 'http://www.w3.org/1999/xhtml') { dynamic = true; return }
+      if (['iframe', 'frame', 'embed', 'object'].includes(node.tagName)) { dynamic = true; return }
+      if (node.tagName === 'script') {
+        const type = node.attrs.find(attribute => attribute.name === 'type')?.value.trim().toLowerCase()
+        if (!type || type === 'module' || /(?:java|ecma)script/.test(type)) dynamic = true
+      }
+      if (node.attrs.some(attribute => /^on/.test(attribute.name))) dynamic = true
+      if (['script', 'style', 'noscript', 'template', 'textarea', 'option', 'title'].includes(node.tagName)
+        || node.attrs.some(attribute => attribute.name === 'contenteditable' && attribute.value !== 'false')) return
+      ancestors = [...ancestors, node.tagName]
+    }
+    if ('childNodes' in node) for (const child of node.childNodes) visit(child, ancestors)
+  }
+  if (document) {
+    const root = parse(html).childNodes.find(node => 'tagName' in node && node.tagName === 'html')
+    if (root && 'childNodes' in root) for (const child of root.childNodes) visit(child, [])
+  } else visit(parseFragment(html), [])
+  return dynamic ? null : values
+}
+
+function lostWebTexts(before: DocumentModel, after: DocumentModel, instanceId: string, baselineHtml?: unknown): string[] {
+  if (before.kind !== 'course-v10' || after.kind !== 'course-v10') return []
+  const previous = before.project.instances[instanceId], current = after.project.instances[instanceId]
+  if (!previous || !current) return []
+  for (const [project, instance] of [[before.project, previous], [after.project, current]] as const) {
+    const implementation = instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation
+    if (implementation?.kind !== 'builtin' || !['guoling.web', 'guoling.html-program'].includes(implementation.key)) return []
+  }
+  const data = previous.data as { html?: unknown; textOverrides?: unknown; modules?: unknown }
+  const next = current.data as { html?: unknown; modules?: unknown }
+  if (typeof data?.html !== 'string' || typeof next?.html !== 'string' || data.modules || next.modules) return []
+  const rules = lightEditTextOverridesSchema.safeParse(data.textOverrides ?? [])
+  if (!rules.success) return []
+  const document = componentDefinitionBuiltinKey(before.project.definitions[previous.definitionId]) === 'guoling.html-program'
+  const original = staticWebText(typeof baselineHtml === 'string' ? baselineHtml : data.html, document), changed = staticWebText(next.html, document)
+  if (!original || !changed) return []
+  return [...new Set(rules.data.filter(rule => {
+    const matches = (sample: { original: string; region: string }) => sample.original === rule.original
+      && (!rule.region || sample.region === rule.region)
+    return original.some(matches) && !changed.some(matches)
+  }).map(rule => rule.original))]
+}
 
 const componentStringCodec: TextCodec<string> = { length: value => Array.from(value).length,
   slice: (value, from, to) => Array.from(value).slice(from, to).join(''), join: values => values.join(''), equal: (a, b) => a === b }
@@ -73,6 +129,7 @@ export class ElementChangeTracker {
   private readonly richComponentText: boolean = false
   private readonly componentIdentity?: ReturnType<typeof courseInstanceFieldIdentity>
   private fieldAvailable = false
+  private lostTexts: string[] = []
   constructor(readonly conversationId: string, readonly documentId: string,
     private target: ExecutionSelectionTarget, private readonly session: DocumentSession, snapshot: DocumentSnapshot) {
     this.revision = snapshot.revision; this.epoch = snapshot.epoch
@@ -199,6 +256,8 @@ export class ElementChangeTracker {
       if (!a || !b) { this.invalidate(); return }
       this.observeComponentRoots(before, after, own, inverse && reversing?.direction === 'redo')
       if (own) this.recordFields(a, b)
+      if (own || inverse || this.lostTexts.length) this.lostTexts = this.target.stateId ? []
+        : lostWebTexts(before, after, this.target.instanceId, this.before['["data","html"]'])
       return
     }
     this.invalidate()
@@ -253,6 +312,7 @@ export class ElementChangeTracker {
     const fields = [...new Set(elementChangeUnits(this.before, this.after).map(elementUnitLabel))]
     const unsupported = this.target.kind === 'course-instance' && !this.fieldAvailable
     return { submissionId, state: fields.length ? this.undone ? 'undone' : 'applied' : 'none', fields,
+      ...(this.lostTexts.length ? { lostTexts: this.lostTexts } : {}),
       ...(this.missing ? { unavailable: this.missingMessage } : unsupported ? { unavailable: UNSUPPORTED } : {}) }
   }
   private prepareInverse(snapshot: DocumentSnapshot, direction: 'undo' | 'redo', force: boolean): { command: DocumentCommand; textChanges?: import('../../../shared/workbench/document').DocumentTextChanges; accept(): void } | ElementRevertResult {

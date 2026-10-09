@@ -65,6 +65,7 @@ describe('controlled scratch builds', () => {
   })
   it('uses real V9 closure/origin validation, preserves frozen artifacts and invalidates them on further source writes', async () => {
     const f = await fixture()
+    const originalTitle = f.baseline.project.title
     const changed = structuredClone(f.project); changed.title = 'Prepared only'
     changed.network = { connectOrigins: ['https://unapproved.example'] }
     await f.exec({ type: 'write', path: 'project.json', content: JSON.stringify(changed) })
@@ -77,7 +78,7 @@ describe('controlled scratch builds', () => {
     const artifact = await f.service.artifact('run', f.job.jobId, ready.artifactId!)
     expect(artifact.command).toMatchObject({ type: 'course.replace', project: { title: 'Prepared only', revision: f.project.revision } })
     expect(artifact.target).toEqual(f.job.target)
-    expect(f.baseline.project.title).toBe('未命名 H5 演示')
+    expect(f.baseline.project.title).toBe(originalTitle)
     const recovered = new ControlledBuildService({ directory: path.join(f.root, 'scratch'), admission: { run: f.run } })
     expect(await recovered.artifact('run', f.job.jobId, ready.artifactId!)).toEqual(artifact)
     await f.exec({ type: 'write', path: 'notes.txt', content: 'new source' })

@@ -66,7 +66,7 @@ it('updates managed text answers through an object-only Gateway grant with live 
     subscribeTrigger(trigger, listener) { if (trigger.type === 'input.submit' && trigger.nodeId === 'answer') submit = listener; return () => {} },
     executeAction(action) { if (action.type === 'node.enter' || action.type === 'node.exit') visible.set(action.nodeId, action.type === 'node.enter'); return true },
     report(message) { throw new Error(message) } }))
-  const mounted = await runtime.mount({ instance: behavior, scope: { signal: new AbortController().signal, isActive: () => true, cleanup() {} } } as unknown as ComponentRuntimeContext)
+  const mounted = await runtime.mount({ instance: behavior, scope: { signal: new AbortController().signal, isActive: () => true, cleanup() {}, events: { subscribe: () => () => {} } } } as unknown as ComponentRuntimeContext)
   try {
     submit?.(); await new Promise(resolve => setTimeout(resolve, 0))
     expect(visible.get('yes')).toBe(true); expect(visible.get('no')).toBe(false)

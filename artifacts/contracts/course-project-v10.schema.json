@@ -1703,6 +1703,13 @@
                           },
                           "visible": {
                             "type": "boolean"
+                          },
+                          "playbackInitialVisibility": {
+                            "type": "string",
+                            "enum": [
+                              "inherit",
+                              "hidden"
+                            ]
                           }
                         },
                         "additionalProperties": false

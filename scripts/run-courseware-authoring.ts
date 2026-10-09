@@ -16,6 +16,10 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { strFromU8, strToU8, Unzip, UnzipInflate, unzipSync, zipSync } from 'fflate'
 import { createTimezoneStableZipMtime } from '../src/shared/archiveTimestamp'
+import { openCourseProjectV10Archive } from '../src/core/drivers/codecs/courseProjectV10Archive'
+import { componentDefinitionBuiltinKey, isComponentVisibleAtSurface } from '../src/shared/contracts/component-platform/project'
+import { textComponentDataSchema } from '../src/components/text/data'
+import { frameCorners, multiplyMatrices, IDENTITY_MATRIX, type AffineMatrix } from '../src/core/components/geometry'
 
 interface Options {
   caseDir: string
@@ -38,10 +42,10 @@ interface InventoryEntity {
   requiredForAcceptance: boolean
 }
 
-interface NativeTextTarget extends InventoryEntity {
+interface ComponentTextTarget extends InventoryEntity {
   sceneId: string
   nodeId: string
-  field: 'text'
+  field: 'content'
 }
 
 interface ProjectNode {
@@ -62,7 +66,7 @@ interface ProjectScene {
     initialStateId: string
     states: Array<{
       id: string
-      nodeOverrides?: Record<string, { visible?: boolean, text?: string }>
+      nodeOverrides?: Record<string, { visible?: boolean, content?: unknown }>
     }>
   }
 }
@@ -75,13 +79,16 @@ interface AuthoringProjectProjection {
 interface EntityReceipt {
   inventoryEntityId: string
   binding: string
-  carrier: 'native-scene-text'
+  carrier: 'component-surface-text'
   status: 'passed' | 'unsupported' | 'failed'
   probeValue?: string
   selectedNodeId?: string
   canvasSelectionVerified?: boolean
   renderedBounds?: { x: number, y: number, width: number, height: number }
   observationStateId?: string
+  undoVerified?: boolean
+  redoVerified?: boolean
+  resourcesPreserved?: boolean
   saved?: boolean
   reopened?: boolean
   player?: {
@@ -100,6 +107,7 @@ interface EntityReceipt {
 interface AuthoringReceipt {
   schemaVersion: 1
   receiptType: 'editor-authoring-session-v1'
+  protocols: { courseProject: 10; publishedCourse: 3; componentApi: 5 }
   caseId: string
   runnerSha256: string
   inputs: {
@@ -149,7 +157,7 @@ const usage = [
   'Usage: npm run --silent run-courseware-authoring -- --case-dir <dir> [options]',
   '  --editor-root <dir>    editor checkout (default current directory)',
   '  --inventory <path>     case-relative inventory path',
-  '  --project <path>       case-relative Course Project V9 path',
+  '  --project <path>       case-relative Project V10 .glx or .h5lesson path',
   '  --report <path>        case-relative receipt path',
   '  --delivery-html <path> case-relative delivered HTML to byte-compare with a fresh UI export',
   '  --delivery-web-package <path> case-relative delivered web-package ZIP',
@@ -485,91 +493,48 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null
 }
 
-function nativeTextNodeFromLayer(item: unknown): ProjectNode | null {
-  const layer = asRecord(item)
-  const content = asRecord(layer?.content)
-  const data = asRecord(content?.data)
-  const frame = asRecord(layer?.frame)
-  if (
-    !layer ||
-    layer.kind !== 'native' ||
-    content?.nativeType !== 'text' ||
-    typeof layer.layerItemId !== 'string' ||
-    typeof data?.text !== 'string' ||
-    !frame
-  ) {
-    return null
-  }
-  return {
-    id: layer.layerItemId,
-    type: 'text',
-    text: data.text,
-    x: Number(frame.x),
-    y: Number(frame.y),
-    width: Number(frame.width),
-    height: Number(frame.height),
-    visible: layer.visible !== false,
-  }
-}
-
-function presentationFromV9Scene(scene: Record<string, unknown>): ProjectScene['presentation'] {
-  const presentation = asRecord(scene.presentation)
-  if (!presentation || typeof presentation.initialStateId !== 'string' || !Array.isArray(presentation.states)) {
-    return undefined
-  }
-  return {
-    initialStateId: presentation.initialStateId,
-    states: presentation.states.flatMap((candidate) => {
-      const state = asRecord(candidate)
-      if (!state || typeof state.id !== 'string') return []
-      const overrides = asRecord(state.layerItemOverrides) ?? {}
-      const nodeOverrides: NonNullable<NonNullable<ProjectScene['presentation']>['states'][number]['nodeOverrides']> = {}
-      for (const [layerItemId, raw] of Object.entries(overrides)) {
-        const override = asRecord(raw)
-        if (!override) continue
-        const mapped: { visible?: boolean, text?: string } = {}
-        if (typeof override.visible === 'boolean') mapped.visible = override.visible
-        const nativeData = asRecord(override.nativeData)
-        if (typeof nativeData?.text === 'string') mapped.text = nativeData.text
-        if (Object.keys(mapped).length > 0) nodeOverrides[layerItemId] = mapped
-      }
-      return [{ id: state.id, nodeOverrides }]
-    }),
-  }
-}
-
-function slideScenesFromCourseProject(value: Record<string, unknown>): ProjectScene[] {
-  const surfaces = Array.isArray(value.surfaces) ? value.surfaces : []
-  const scenes: ProjectScene[] = []
-  for (const surfaceValue of surfaces) {
-    const surface = asRecord(surfaceValue)
-    if (!surface || surface.type !== 'slide' || !Array.isArray(surface.scenes)) continue
-    for (const sceneValue of surface.scenes) {
-      const scene = asRecord(sceneValue)
-      if (!scene || typeof scene.id !== 'string') continue
-      const items = Array.isArray(scene.layerItems) ? scene.layerItems : []
-      scenes.push({
-        id: scene.id,
-        nodes: items.flatMap((item) => {
-          const node = nativeTextNodeFromLayer(item)
-          return node ? [node] : []
-        }),
-        presentation: presentationFromV9Scene(scene),
-      })
-    }
-  }
-  return scenes
-}
-
 function projectFromArchive(bytes: Uint8Array): AuthoringProjectProjection {
-  const archive = unzipSync(bytes)
-  const projectBytes = archive['project.json']
-  if (!projectBytes) throw new Error('Project archive has no project.json')
-  const value = JSON.parse(strFromU8(projectBytes)) as Record<string, unknown>
-  if (value.schemaVersion !== 9) throw new Error('Project must be Course Project V9')
-  const scenes = slideScenesFromCourseProject(value)
-  if (scenes.length === 0) throw new Error('Course Project V9 has no Slide scenes')
-  return { schemaVersion: 9, scenes }
+  const { project } = openCourseProjectV10Archive(bytes)
+  const scenes: ProjectScene[] = []
+  for (const surface of project.surfaces) {
+    if (surface.kind !== 'slide') continue
+    const nodes: ProjectNode[] = []
+    const visit = (ids: readonly string[], parent: AffineMatrix, parentVisible: boolean) => {
+      for (const id of ids) {
+        const instance = project.instances[id]
+        if (!instance) continue
+        const frame = instance.frame
+        const matrix = frame ? multiplyMatrices(parent, frame.transform) : parent
+        const visible = parentVisible && isComponentVisibleAtSurface(instance, surface.id)
+        if (frame && componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.text') {
+          const data = textComponentDataSchema.parse(instance.data)
+          const corners = frameCorners(frame, parent)
+          const xs = corners.map(point => point.x), ys = corners.map(point => point.y)
+          nodes.push({ id, type: 'text', text: data.content.inlines.map(inline => inline.type === 'text' ? inline.text : '\uFFFC').join(''),
+            x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys), visible })
+        }
+        visit(instance.childIds ?? [], matrix, visible)
+      }
+    }
+    visit(surface.childIds, IDENTITY_MATRIX, true)
+    scenes.push({ id: surface.id, nodes, presentation: surface.presentation ? {
+      initialStateId: surface.presentation.initialStateId ?? '',
+      states: surface.presentation.states.map(state => ({ id: state.id, nodeOverrides: Object.fromEntries(Object.entries(state.overrides).map(([id, override]) => {
+        const data = asRecord(override.data)
+        return [id, { ...(override.visible === undefined ? {} : { visible: override.visible }),
+          ...(data && Object.hasOwn(data, 'content') ? { content: data.content } : {}) }]
+      })) })),
+    } : undefined })
+  }
+  if (!scenes.length) throw new Error('Project V10 has no Slide surfaces')
+  return { schemaVersion: 10, scenes }
+}
+
+function resourceFingerprint(bytes: Uint8Array): string {
+  const { resources } = openCourseProjectV10Archive(bytes)
+  return canonicalJson({ assets: Object.fromEntries(Object.entries(resources.assets).map(([id, value]) => [id, sha256(value)])),
+    components: Object.fromEntries(Object.entries(resources.components).map(([id, files]) => [id,
+      Object.fromEntries(Object.entries(files).map(([name, value]) => [name, sha256(value)]))])) })
 }
 
 function observationStateId(scene: ProjectScene, node: ProjectNode): string | null {
@@ -586,7 +551,7 @@ function assertObservationUsesBoundField(
   scene: ProjectScene,
   node: ProjectNode,
   stateId: string | null,
-  field: NativeTextTarget['field'],
+  field: ComponentTextTarget['field'],
 ): void {
   if (stateId === null) return
   const state = scene.presentation?.states.find((candidate) => candidate.id === stateId)
@@ -607,19 +572,10 @@ export function withInitialState(
   const archive = unzipSync(bytes)
   const projectBytes = archive['project.json']
   if (!projectBytes) throw new Error('Project archive has no project.json')
-  const project = JSON.parse(strFromU8(projectBytes)) as Record<string, unknown>
-  if (project.schemaVersion !== 9) throw new Error('Project must be Course Project V9')
-  const surfaces = Array.isArray(project.surfaces) ? project.surfaces : []
-  let scene: Record<string, unknown> | null = null
-  for (const surfaceValue of surfaces) {
-    const surface = asRecord(surfaceValue)
-    if (!surface || surface.type !== 'slide' || !Array.isArray(surface.scenes)) continue
-    scene = surface.scenes.map(asRecord).find((candidate) => candidate?.id === sceneId) ?? null
-    if (scene) break
-  }
-  const presentation = asRecord(scene?.presentation)
-  const states = Array.isArray(presentation?.states) ? presentation.states : []
-  if (!presentation || !states.some((candidate) => asRecord(candidate)?.id === stateId)) {
+  const { project } = openCourseProjectV10Archive(bytes)
+  const surface = project.surfaces.find(candidate => candidate.kind === 'slide' && candidate.id === sceneId)
+  const presentation = surface?.presentation
+  if (!presentation?.states.some(candidate => candidate.id === stateId)) {
     throw new Error(`observation state is absent from Project: ${sceneId}/${stateId}`)
   }
   presentation.initialStateId = stateId
@@ -651,11 +607,11 @@ function collectRequiredEntities(inventory: Record<string, unknown>): InventoryE
   return output
 }
 
-function nativeTextTarget(entity: InventoryEntity): NativeTextTarget | null {
+function componentTextTarget(entity: InventoryEntity): ComponentTextTarget | null {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(entity.id)) return null
-  const match = /^native:scene:([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+):(text)$/.exec(entity.binding)
+  const match = /^component:surface:([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+):(content)$/.exec(entity.binding)
   if (!match || entity.kind !== 'text') return null
-  return { ...entity, sceneId: match[1]!, nodeId: match[2]!, field: 'text' }
+  return { ...entity, sceneId: match[1]!, nodeId: match[2]!, field: 'content' }
 }
 
 async function patchDialogs(
@@ -736,23 +692,36 @@ async function openProject(page: Page, app: ElectronApplication, projectPath: st
   await page.getByText('正在处理…', { exact: true }).waitFor({ state: 'hidden' })
   await patchDialogs(app, { projectOpen: projectPath, htmlSave: htmlPath })
   await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
-  await page.locator('[data-testid="canvas-stage"] canvas').waitFor({ state: 'visible' })
+  await page.getByTestId('canvas-stage').waitFor({ state: 'visible' })
+}
+
+async function waitForExport(page: Page, outputPath: string, dialogName: string, timeoutMs: number): Promise<void> {
+  const preflight = page.getByRole('alertdialog', { name: dialogName })
+  const deadline = Date.now() + timeoutMs
+  let previousSize = -1, stablePolls = 0, continued = false
+  while (Date.now() < deadline) {
+    // Current V10 exports show preflight only for findings requiring a decision.
+    if (!continued && await preflight.isVisible()) {
+      const continueButton = preflight.getByRole('button', { name: '继续导出' })
+      if (!await continueButton.isEnabled()) throw new Error(`${dialogName} is blocked`)
+      await continueButton.click()
+      continued = true
+    }
+    const size = await stat(outputPath).then(metadata => metadata.size).catch(() => 0)
+    if (size > 100 && size === previousSize) stablePolls += 1
+    else stablePolls = 0
+    if (stablePolls >= 3) return
+    previousSize = size
+    await page.waitForTimeout(100)
+  }
+  throw new Error(`${dialogName} did not create a stable output file`)
 }
 
 async function exportHtml(page: Page, outputPath: string): Promise<void> {
   await rm(outputPath, { force: true })
   await page.getByTestId('export-menu-trigger').click()
   await page.getByTestId('export-single-html').click()
-  const preflight = page.getByRole('alertdialog', { name: '单 HTML 导出预检' })
-  await preflight.waitFor({ state: 'visible' })
-  const continueButton = preflight.getByRole('button', { name: '继续导出' })
-  if (!(await continueButton.isEnabled())) throw new Error('single HTML export preflight is blocked')
-  await continueButton.click()
-  const deadline = Date.now() + 20_000
-  while (!existsSync(outputPath) && Date.now() < deadline) {
-    await page.waitForTimeout(100)
-  }
-  if (!existsSync(outputPath)) throw new Error('single HTML export did not create a file')
+  await waitForExport(page, outputPath, '单 HTML 导出预检', 20_000)
 }
 
 async function exportDelivery(
@@ -764,35 +733,18 @@ async function exportDelivery(
   await rm(outputPath, { force: true })
   await page.getByTestId('export-menu-trigger').click()
   await page.getByTestId(testId).click()
-  const preflight = page.getByRole('alertdialog', { name: dialogName })
-  await preflight.waitFor({ state: 'visible' })
-  const continueButton = preflight.getByRole('button', { name: '继续导出' })
-  if (!(await continueButton.isEnabled())) throw new Error(`${dialogName} is blocked`)
-  await continueButton.click()
-  const deadline = Date.now() + 120_000
-  let previousSize = -1
-  let stablePolls = 0
-  while (Date.now() < deadline) {
-    const size = await stat(outputPath).then((metadata) => metadata.size).catch(() => 0)
-    if (size > 100 && size === previousSize) stablePolls += 1
-    else stablePolls = 0
-    if (stablePolls >= 3) return
-    previousSize = size
-    await page.waitForTimeout(100)
-  }
-  throw new Error(`${dialogName} did not create a stable output file`)
+  await waitForExport(page, outputPath, dialogName, 120_000)
 }
 
 async function sceneCanvasScreenshot(page: Page, sceneIndex: number): Promise<Buffer> {
-  const canvas = page.locator('.lesson-canvas-host canvas')
-  const adapter = page.locator('.slide-published-adapter')
-  await canvas.or(adapter).waitFor({ state: 'visible', timeout: 20_000 })
+  const stage = page.locator('[data-component-model-player]')
+  await stage.waitFor({ state: 'visible', timeout: 20_000 })
   for (let index = 0; index < sceneIndex; index += 1) {
     await page.keyboard.press('ArrowRight')
     await page.waitForTimeout(150)
   }
-  if (await adapter.isVisible()) return adapter.screenshot()
-  return canvas.screenshot()
+  await page.evaluate(async () => { await document.fonts.ready; await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) })
+  return stage.screenshot()
 }
 
 async function previewScreenshot(
@@ -805,12 +757,13 @@ async function previewScreenshot(
   await page.getByRole('button', { name: '整课预览', exact: true }).click()
   await overlay.waitFor({ state: 'visible', timeout: 30_000 })
   try {
-    const stage = overlay.locator('.slide-published-adapter')
+    const stage = overlay.locator('[data-component-model-player]')
     await stage.waitFor({ state: 'visible', timeout: 20_000 })
     for (let index = 0; index < sceneIndex; index += 1) {
       await page.getByTestId('course-preview-next').click()
       await page.waitForTimeout(150)
     }
+    await page.evaluate(async () => { await document.fonts.ready; await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) })
     return await stage.screenshot()
   } finally {
     await overlay.getByRole('button', { name: '关闭预览' }).click()
@@ -852,6 +805,7 @@ function stableProjection(receipt: AuthoringReceipt): unknown {
     schemaVersion: receipt.schemaVersion,
     receiptType: receipt.receiptType,
     caseId: receipt.caseId,
+    protocols: receipt.protocols,
     runnerSha256: receipt.runnerSha256,
     inputs: receipt.inputs,
     editorBuild: receipt.editorBuild,
@@ -886,6 +840,9 @@ function stableProjection(receipt: AuthoringReceipt): unknown {
       canvasSelectionVerified: entity.canvasSelectionVerified,
       renderedBounds: entity.renderedBounds,
       observationStateId: entity.observationStateId,
+      undoVerified: entity.undoVerified,
+      redoVerified: entity.redoVerified,
+      resourcesPreserved: entity.resourcesPreserved,
       saved: entity.saved,
       reopened: entity.reopened,
       player: entity.player,
@@ -941,7 +898,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
     ? inside(caseRoot, options.deliveryPptx, '--delivery-pptx')
     : undefined
   requireExtension(inventoryPath, ['.json'], '--inventory')
-  requireExtension(projectPath, ['.h5lesson'], '--project')
+  requireExtension(projectPath, ['.glx', '.h5lesson'], '--project')
   requireExtension(reportPath, ['.json'], '--report')
   if (deliveryHtmlPath) requireExtension(deliveryHtmlPath, ['.html', '.htm'], '--delivery-html')
   if (deliveryWebPackagePath) requireExtension(deliveryWebPackagePath, ['.zip'], '--delivery-web-package')
@@ -998,10 +955,12 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
     Object.entries(buildFiles).map(async ([key, filename]) => [key, await hashFile(filename)]),
   ))
   const runnerSha256 = await hashFile(fileURLToPath(import.meta.url))
-  const project = projectFromArchive(await readFile(projectPath))
+  const inputProjectBytes = await readFile(projectPath)
+  const project = projectFromArchive(inputProjectBytes)
+  const inputResources = resourceFingerprint(inputProjectBytes)
   const required = collectRequiredEntities(inventory)
   for (const entity of required) {
-    const target = nativeTextTarget(entity)
+    const target = componentTextTarget(entity)
     if (!target) continue
     const scene = project.scenes.find((candidate) => candidate.id === target.sceneId)
     const node = scene?.nodes.find((candidate) => candidate.id === target.nodeId)
@@ -1011,7 +970,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
   }
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'courseware-authoring-'))
   const profile = path.join(temporaryRoot, 'profile')
-  const baselineProject = path.join(temporaryRoot, 'baseline.h5lesson')
+  const baselineProject = path.join(temporaryRoot, 'baseline.glx')
   const baselineHtml = path.join(temporaryRoot, 'baseline.html')
   const baselineWebPackage = path.join(temporaryRoot, 'baseline-web.zip')
   const baselinePdf = path.join(temporaryRoot, 'baseline.pdf')
@@ -1047,22 +1006,17 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
         ...process.env,
         ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
         COURSEWARE_E2E_BACKGROUND: '1',
+        VITE_DEV_SERVER_URL: '',
       },
     })
     await installElectronOfflineGuard(app)
     const page = await app.firstWindow()
     await enforceOffline(page, errors)
-    // 冷启动落在着陆页、内容区默认收起；用 App 级「新建 H5 演示（Ctrl+N）」建立空白独立课件并展开工作台。
-    // 「更多 → 新建独立课件」入口已从产品移除（V3.1）；旧按钮走 newProject({origin:'lesson'})，
-    // Ctrl+N 走 newProject()，两者同样落在空白 slide 工程上（随后 openProject 覆写为基线工程）。
-    // App 级键盘路由挂在 React useEffect 里（src/renderer/app/useEditorKeyboardRouter.ts:44-62），
-    // firstWindow() 返回时首帧尚未提交，此刻按键会被静默丢弃（探针实测 App 挂载在 firstWindow 后约 0.7s）；
-    // 先等着陆页 CTA 出现（等价于 App 已提交、路由已挂载）再按键，canvas waitFor 仍是唯一产品态闸门。
-    // 2.0 冷启动落在工作台空白页；新建后从右上角唯一入口进入编辑器，打开工程与导出都在编辑器顶栏。
-    await page.getByRole('button', { name: '新建 H5 演示', exact: true }).first().waitFor({ state: 'visible' })
-    await page.keyboard.press('Control+N')
-    await page.locator('[data-testid="canvas-stage"] canvas').waitFor({ state: 'visible' })
+    // The document bridge hydrates its initial untitled V10 document before
+    // workspace actions can use the current document and History owner.
+    await page.getByTestId('canvas-stage').waitFor({ state: 'visible' })
     await page.getByRole('button', { name: '在编辑器中打开', exact: true }).click()
+    await page.getByRole('button', { name: '新建 果铃工程（Ctrl+N）', exact: true }).click()
     await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).waitFor({ state: 'visible' })
     await openProject(page, app, baselineProject, baselineHtml)
     await patchDialogs(app, {
@@ -1119,21 +1073,21 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
     browser = await launchBrowser()
 
     for (const entity of required) {
-      const target = nativeTextTarget(entity)
+      const target = componentTextTarget(entity)
       if (!target) {
         entities.push({
           inventoryEntityId: entity.id,
           binding: entity.binding,
-          carrier: 'native-scene-text',
+          carrier: 'component-surface-text',
           status: 'unsupported',
-          errors: ['only native scene text is supported by editor-authoring-session-v1'],
+          errors: ['only Project V10 professional text instances are supported by editor-authoring-session-v1'],
         })
         continue
       }
       const receipt: EntityReceipt = {
         inventoryEntityId: target.id,
         binding: target.binding,
-        carrier: 'native-scene-text',
+        carrier: 'component-surface-text',
         status: 'failed',
         errors: [],
       }
@@ -1142,11 +1096,11 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
         const scene = project.scenes[sceneIndex]
         const node = scene?.nodes.find((candidate) => candidate.id === target.nodeId)
         if (sceneIndex < 0 || !node || node.type !== 'text' || typeof node.text !== 'string') {
-          throw new Error('native text binding is absent from the current Project')
+          throw new Error('professional text binding is absent from the current Project V10')
         }
         const probe = `${node.text} [probe-${sha256(target.binding).slice(0, 8)}]`
         const observedStateId = observationStateId(scene, node)
-        if (scene.presentation && observedStateId === null) {
+        if (scene.presentation?.states.length && observedStateId === null) {
           throw new Error('bound node is hidden in every named presentation state')
         }
         assertObservationUsesBoundField(scene, node, observedStateId, target.field)
@@ -1154,7 +1108,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
         receipt.probeValue = probe
         receipt.renderedBounds = { x: node.x, y: node.y, width: node.width, height: node.height }
         const safeToken = sha256(`${target.id}\0${target.binding}`).slice(0, 32)
-        const probeProject = path.join(temporaryRoot, `${safeToken}.h5lesson`)
+        const probeProject = path.join(temporaryRoot, `${safeToken}.glx`)
         const beforeHtml = path.join(temporaryRoot, `${safeToken}-before.html`)
         const probeHtml = path.join(temporaryRoot, `${safeToken}.html`)
         if (
@@ -1167,7 +1121,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
           probeProject,
           withInitialState(await readFile(projectPath), target.sceneId, observedStateId),
         )
-        await page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
+        await page.getByRole('button', { name: '新建 果铃工程（Ctrl+N）' }).click()
         await openProject(page, app, probeProject, beforeHtml)
         await showEditorPanel(page, '页面与图层')
         await page.getByTestId(`scene-item-${target.sceneId}`).click()
@@ -1176,7 +1130,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
         await patchDialogs(app, { projectOpen: probeProject, htmlSave: beforeHtml })
         await exportHtml(page, beforeHtml)
         const beforePlayer = await previewScreenshot(app, page, sceneIndex, receipt.errors)
-        const canvas = page.locator('[data-testid="canvas-stage"] canvas')
+        const canvas = page.getByTestId('canvas-stage')
         const bounds = await canvas.boundingBox()
         if (!bounds) throw new Error('editor canvas has no measurable bounds')
         await page.mouse.click(
@@ -1199,6 +1153,12 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
         if (await text.inputValue() !== node.text) throw new Error('selected text does not match Project binding')
         await text.fill(probe)
         await text.press('Tab')
+        await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+        await page.waitForFunction(expected => [...document.querySelectorAll('textarea')].some(input => input.value === expected), node.text)
+        receipt.undoVerified = true
+        await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+        await page.waitForFunction(expected => [...document.querySelectorAll('textarea')].some(input => input.value === expected), probe)
+        receipt.redoVerified = true
         const beforeSaveHash = await hashFile(probeProject)
         await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
         const deadline = Date.now() + 20_000
@@ -1208,8 +1168,13 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
           outputHash = await hashFile(probeProject)
         }
         if (outputHash === beforeSaveHash) throw new Error('Editor save did not change the temporary Project bytes')
+        const savedBytes = await readFile(probeProject)
+        const savedNode = projectFromArchive(savedBytes).scenes.find(value => value.id === target.sceneId)?.nodes.find(value => value.id === target.nodeId)
+        if (savedNode?.text !== probe) throw new Error('Editor save did not persist the bound Project V10 content')
+        if (resourceFingerprint(savedBytes) !== inputResources) throw new Error('Editor authoring changed unrelated original resource bytes')
+        receipt.resourcesPreserved = true
         receipt.saved = true
-        await page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
+        await page.getByRole('button', { name: '新建 果铃工程（Ctrl+N）' }).click()
         await openProject(page, app, probeProject, probeHtml)
         await showEditorPanel(page, '页面与图层')
         await page.getByTestId(`scene-item-${target.sceneId}`).click()
@@ -1263,6 +1228,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
     }
     await rm(temporaryRoot, { recursive: true, force: true })
   }
+  if (!(await readFile(projectPath)).equals(inputProjectBytes)) errors.push('authoring changed the original Project archive instead of its isolated copy')
   if (required.length === 0) errors.push('inventory has no required authoring entities')
   for (const entity of entities) {
     if (entity.status !== 'passed') errors.push(`${entity.inventoryEntityId}: ${entity.errors.join('; ')}`)
@@ -1271,6 +1237,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
     schemaVersion: 1,
     receiptType: 'editor-authoring-session-v1',
     caseId,
+    protocols: { courseProject: 10, publishedCourse: 3, componentApi: 5 },
     runnerSha256,
     inputs: actualHashes,
     editorBuild,

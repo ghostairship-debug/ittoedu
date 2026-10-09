@@ -95,7 +95,7 @@ describe('courseware skill contracts: staged project authoring and external impo
     expect(await service.read({ skill: 'edit-content', path: '../workbench-usage/SKILL.md', offset: 0, limit: 100 }))
       .toMatchObject({ status: 'unknown-path' })
   })
-  it('installs actual sources into an isolated destination and discovers the same shared files through scoped reads', async () => {
+  it.skipIf(process.platform !== 'win32')('installs actual sources into an isolated destination and discovers the same shared files through scoped reads', async () => {
     const destination = await mkdtemp(path.join(os.tmpdir(), 'ni06-skills-install-'))
     try {
       await promisify(execFile)('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',

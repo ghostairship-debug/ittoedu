@@ -35,7 +35,7 @@ export const materialToolRegistrations = (Object.keys(materialSchemas) as Materi
   manual: { label: ({ 'material.list': '材料目录', 'material.read': '读取材料', 'material.find': '检索材料', 'material.extract': '提取材料' })[name], group: 'read', targetKinds: [] },
 }, {
   capability: 'read', effect: null,
-  supports: context => context.materials !== false && context.workbenchServices !== false,
+  supports: context => context.materials !== false,
   targets: () => [],
   handler: (context, input) => context.host.readMaterial(context.runId, name, input),
 }))

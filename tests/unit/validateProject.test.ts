@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
 import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPreflight'
 import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createBlankCourseProjectV10 } from '@/core/course/createCourseProjectV10'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import {
   createCourseProjectArchive,
@@ -213,7 +214,7 @@ function publicValidatorCommand(
   })
 }
 
-describe('headless Course Project V9 validation', () => {
+describe('historical V9 diagnostics and public V10 validation', () => {
   it('returns a deterministic four-surface report for a valid archive', () => {
     const source = blankArchiveData()
     const bytes = createCourseProjectArchive(source, {
@@ -723,127 +724,52 @@ describe('headless Course Project V9 validation', () => {
     expect(invalidStderr.join('')).not.toContain('只接受 Project V8')
   })
 
-  it('runs the public command with pure JSON, stable exit codes, and no input writes', async () => {
+  it('runs both public V10 commands with pure JSON, stable exit codes, and no input writes', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'validate-course-project-cli-'))
     const lessonPath = path.join(directory, 'lesson.h5lesson')
-    const completePath = path.join(directory, 'complete-context.h5lesson')
-    const markerPath = path.join(directory, 'legacy-markers.h5lesson')
-    const oldPath = path.join(directory, 'old.h5lesson')
-    const v8Path = path.join(directory, 'legacy-v8.h5lesson')
-    const schemaPath = path.join(directory, 'schema-invalid.h5lesson')
-    const missingAssetPath = path.join(directory, 'missing-asset.h5lesson')
+    const project = createBlankCourseProjectV10('Current CLI fixture')
+    const archive = (value: unknown) => zipSync({ 'project.json': strToU8(JSON.stringify(value)) })
     try {
-      const validBytes = createCourseProjectArchive(blankArchiveData())
+      const validBytes = archive(project)
       await writeFile(lessonPath, validBytes)
-      const valid = await publicValidatorCommand(lessonPath)
-      expect(valid.exitCode).toBe(0)
-      expect(valid.stderr).toBe('')
-      expect(JSON.parse(valid.stdout)).toMatchObject({
-        reportVersion: 1,
-        status: 'valid',
-        schema: { schemaVersion: 9 },
-      })
-      expect(await readFile(lessonPath)).toEqual(Buffer.from(validBytes))
-
-      const alias = await publicValidatorCommand(lessonPath, 'validate:project')
-      expect(alias.exitCode).toBe(0)
-      expect(JSON.parse(alias.stdout)).toMatchObject({
-        status: 'valid',
-        schema: { schemaVersion: 9 },
-      })
-      expect(alias.stderr).not.toContain('只接受 Project V8')
-
-      const complete = completeContextArchive()
-      await writeFile(completePath, complete.bytes)
-      const completeResult = await publicValidatorCommand(completePath)
-      expect(completeResult.exitCode).toBe(0)
-      expect(completeResult.stderr).toBe('')
-      const completeReport = JSON.parse(completeResult.stdout) as {
-        project: { assetCount: number; componentPackageCount: number }
-        exportPreflight: Record<string, { items: Array<{ code: string }> }>
+      for (const command of ['validate:course-project', 'validate:project']) {
+        const valid = await publicValidatorCommand(lessonPath, command)
+        expect(valid.exitCode).toBe(0)
+        expect(valid.stderr).toBe('')
+        expect(JSON.parse(valid.stdout)).toMatchObject({
+          reportVersion: 2,
+          status: 'valid',
+          schema: { valid: true, schemaVersion: 10 },
+          protocols: { project: 10, publishedCourse: 3, component: 5 },
+          project: { title: 'Current CLI fixture' },
+        })
+        expect(await readFile(lessonPath)).toEqual(Buffer.from(validBytes))
       }
-      expect(completeReport.project).toMatchObject({
-        assetCount: 1,
-        componentPackageCount: 1,
-      })
-      expect(completeReport.exportPreflight['single-html']!.items.some(
-        (item) => item.code === 'node-fully-outside-canvas',
-      )).toBe(false)
-      expect(await readFile(completePath)).toEqual(Buffer.from(complete.bytes))
 
-      const markerBytes = migrationMarkerArchive()
-      await writeFile(markerPath, markerBytes)
-      const markerResult = await publicValidatorCommand(markerPath)
-      expect(markerResult.exitCode).toBe(2)
-      expect(JSON.parse(markerResult.stdout)).toMatchObject({
-        status: 'unreadable',
-        schema: { valid: false, schemaVersion: 9 },
-      })
-
-      const old = { ...blankArchiveData().project, schemaVersion: 7 }
-      await writeFile(oldPath, zipSync({
-        'project.json': strToU8(JSON.stringify(old)),
-      }))
-      const oldResult = await publicValidatorCommand(oldPath)
-      expect(oldResult.exitCode).toBe(2)
-      expect(oldResult.stderr).not.toContain('只接受 Project V8')
-      expect(JSON.parse(oldResult.stdout)).toMatchObject({
-        status: 'unreadable',
-        fatal: { code: 'unsupported-project-version' },
-      })
-
-      const v8Bytes = COURSE_PROJECT_REJECTION_INPUTS['v8-unsupported']
-      await writeFile(v8Path, v8Bytes)
-      const v8Result = await publicValidatorCommand(v8Path)
-      expect(v8Result.exitCode).toBe(2)
-      expect(v8Result.stderr).not.toContain('只接受 Project V8')
-      expect(JSON.parse(v8Result.stdout)).toMatchObject({
-        status: 'unreadable',
-        fatal: { code: 'unsupported-project-version' },
-      })
-
-      const schemaFiles = unzipSync(createCourseProjectArchive(blankArchiveData()))
-      const schemaProject = JSON.parse(
-        new TextDecoder().decode(schemaFiles['project.json']),
-      ) as Record<string, unknown>
-      delete schemaProject.locations
-      schemaFiles['project.json'] = strToU8(JSON.stringify(schemaProject))
-      await writeFile(schemaPath, zipSync(schemaFiles))
-      const schemaResult = await publicValidatorCommand(schemaPath)
-      expect(schemaResult.exitCode).toBe(2)
-      expect(JSON.parse(schemaResult.stdout)).toMatchObject({
-        status: 'unreadable',
-        schema: {
-          valid: false,
-          schemaVersion: 9,
-          issues: [expect.objectContaining({ path: ['locations'] })],
-        },
-        fatal: { code: 'schema-invalid' },
-      })
-
-      const missingAsset = blankArchiveData()
-      missingAsset.project.assets.hero = {
-        id: 'hero',
-        filename: 'hero.png',
-        mimeType: 'image/png',
-        kind: 'image',
-        path: 'assets/hero.png',
-        byteLength: 4,
-        width: 10,
-        height: 10,
+      const invalidSchema = { ...project, surfaces: [{ ...project.surfaces[0], kind: 'unknown' }] }
+      const missingAsset = { ...project, assets: { hero: { id: 'hero', path: 'assets/hero.png', mimeType: 'image/png', kind: 'image' } } }
+      const cases = [
+        { name: 'retired-v9', bytes: createCourseProjectArchive(blankArchiveData()), exitCode: 1,
+          report: { status: 'invalid', schema: { valid: false, schemaVersion: 9 }, fatal: { code: 'unsupported-project-version' } } },
+        { name: 'retired-v8', bytes: COURSE_PROJECT_REJECTION_INPUTS['v8-unsupported'], exitCode: 1,
+          report: { status: 'invalid', schema: { valid: false, schemaVersion: 8 }, fatal: { code: 'unsupported-project-version' } } },
+        { name: 'invalid-schema', bytes: archive(invalidSchema), exitCode: 1,
+          report: { status: 'invalid', schema: { valid: false, schemaVersion: 10,
+            issues: [expect.objectContaining({ path: ['surfaces', 0, 'kind'] })] } } },
+        { name: 'missing-asset', bytes: archive(missingAsset), exitCode: 1,
+          report: { status: 'invalid', fatal: { code: 'invalid-project-content', message: expect.stringContaining('hero') } } },
+        { name: 'corrupt', bytes: Uint8Array.of(1, 2, 3), exitCode: 2,
+          report: { status: 'unreadable', fatal: { code: 'unreadable-project' } } },
+      ]
+      for (const candidate of cases) {
+        const filename = path.join(directory, `${candidate.name}.h5lesson`)
+        await writeFile(filename, candidate.bytes)
+        const result = await publicValidatorCommand(filename)
+        expect(result.exitCode, candidate.name).toBe(candidate.exitCode)
+        expect(result.stderr, candidate.name).toBe('')
+        expect(JSON.parse(result.stdout), candidate.name).toMatchObject(candidate.report)
+        expect(await readFile(filename), candidate.name).toEqual(Buffer.from(candidate.bytes))
       }
-      await writeFile(missingAssetPath, zipSync({
-        'project.json': strToU8(JSON.stringify(missingAsset.project)),
-      }))
-      const missingAssetResult = await publicValidatorCommand(missingAssetPath)
-      expect(missingAssetResult.exitCode).toBe(2)
-      expect(JSON.parse(missingAssetResult.stdout)).toMatchObject({
-        status: 'unreadable',
-        fatal: {
-          code: 'archive-invalid',
-          message: expect.stringContaining('hero.png'),
-        },
-      })
     } finally {
       await rm(directory, { recursive: true, force: true })
     }

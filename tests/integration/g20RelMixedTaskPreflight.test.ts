@@ -8,7 +8,6 @@ import { AgentFileService } from '../../src/main/workbench/execution/AgentFileSe
 import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
-import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import type { ModelEvent, ModelProvider, ModelRequest } from '../../src/shared/workbench/modelProvider'
 
 const roots: string[] = []
@@ -25,32 +24,29 @@ function complete(request: ModelRequest, turn: number, name?: string, input?: ob
         function: { name: call.name, arguments: call.argumentsText } })) } : {}) } }
 }
 
-it('REL-T11 zero-cost preflight creates a V9 file from a document-free run and exposes its tool families', async () => {
+it('REL-T11 zero-cost preflight creates a V10 file from a document-free run and directly exposes authorized course tools', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'g20-rel-mixed-preflight-')); roots.push(root)
   const workspace = path.join(root, 'workspace'); await mkdir(workspace)
   const host = new DocumentHostService(path.join(root, 'journal'))
-  const filePath = path.join(workspace, '材料创作课件.h5lesson')
-  let turn = 0, finalTools: string[] = [], loadedFamilies: string[] = []
+  const filePath = path.join(workspace, '材料创作课件.glx')
+  let turn = 0, finalTools: string[] = []
   const provider: ModelProvider = { async *stream(request) {
     turn++
     const tools = request.tools?.map(tool => tool.name) ?? []
     if (turn === 1) {
       expect(tools).toContain('file.create')
-      // Before a document exists only the workspace office family can be loaded; course families come with the file.
-      const load = request.tools?.find(tool => tool.name === 'tools.load')
-      expect(load?.description).toContain('office')
-      expect(load?.description).not.toContain('navigation')
-      yield complete(request, turn, 'file.create', { name: path.basename(filePath), kind: 'course-v9' }); return
+      expect(tools).not.toContain('surface.configure')
+      expect(tools).not.toContain('interaction.update')
+      expect(tools).not.toContain('media.insert')
+      yield complete(request, turn, 'file.create', { name: path.basename(filePath), kind: 'course-v10' }); return
     }
     const latest = [...request.messages].reverse().find(message => message.role === 'tool')
     if (turn === 2) {
       const result = JSON.parse(String(latest?.content))
       expect(result).toMatchObject({ kind: 'read', data: { writable: true, operation: { status: 'success' } } })
       expect(result.data.target).toEqual(expect.any(String))
-      expect(tools).toContain('tools.load')
-      yield complete(request, turn, 'tools.load', { families: ['navigation', 'interaction', 'media'] }); return
+      expect(tools).toEqual(expect.arrayContaining(['surface.configure', 'interaction.update', 'media.insert']))
     }
-    loadedFamilies = JSON.parse(String(latest?.content)).data.loaded
     finalTools = tools
     yield complete(request, turn)
   } }
@@ -63,13 +59,13 @@ it('REL-T11 zero-cost preflight creates a V9 file from a document-free run and e
       capabilities: { tools: 'supported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } } })
   const result = await engine.wait(started.runId)
   expect(result.status, JSON.stringify({ failure: result.failure, tools: result.tools.map(tool => ({ name: tool.call.name, result: tool.result })) })).toBe('completed')
-  expect(result.tools.map(tool => tool.call.name)).toEqual(['file.create', 'tools.load'])
-  expect(turn).toBe(3)
-  expect(loadedFamilies).toEqual(['navigation', 'interaction', 'media'])
-  expect(finalTools).toEqual(expect.arrayContaining(['slide.create', 'interaction.compose', 'media.insert']))
+  expect(result.tools.map(tool => tool.call.name)).toEqual(['file.create'])
+  expect(turn).toBe(2)
+  expect(finalTools).toEqual(expect.arrayContaining(['surface.configure', 'interaction.update', 'media.insert']))
   expect(finalTools).not.toContain('image.generate') // No image provider is configured in this local fixture.
-  const archive = openCourseProjectArchive(new Uint8Array(await readFile(filePath)))
+  const { openCourseProjectV10Archive } = await import('../../src/core/drivers/codecs/courseProjectV10Archive')
+  const archive = openCourseProjectV10Archive(new Uint8Array(await readFile(filePath)))
   expect(archive.project.surfaces.length).toBeGreaterThan(0)
-  expect(host.registry.list().some(snapshot => snapshot.model.kind === 'course-v9' && snapshot.binding.kind === 'file'
+  expect(host.registry.list().some(snapshot => snapshot.model.kind === 'course-v10' && snapshot.binding.kind === 'file'
     && snapshot.binding.path === filePath)).toBe(true)
 })

@@ -59,7 +59,7 @@ describe('F0 actual draft ACK boundary', () => {
       expect(view.state.doc.textContent).toBe('中文输入新增中文')
       expect(view.state.selection.anchor).toBe(1)
       expect(view.state.storedMarks).toBeNull()
-      expect(ui.getByRole('button', { name: '插入段落' })).toBeInTheDocument()
+      expect(within(toolbarHost).getByRole('button', { name: '插入表格' })).toBeInTheDocument()
       expect(within(toolbarHost).getByRole('button', { name: '粗体' })).toBeInTheDocument()
       expect(ui.queryByRole('button', { name: '撤销' })).not.toBeInTheDocument()
       expect(ui.queryByRole('button', { name: '重做' })).not.toBeInTheDocument()

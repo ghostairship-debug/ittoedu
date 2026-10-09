@@ -47,12 +47,13 @@ describe('HTML import closure', () => {
     expect(source).toContain('\\u003c!-- \\u003cscript>')
   })
 
-  it('rejects invalid scripts and preserves existing module dependencies with an actionable warning', () => {
+  it('rejects invalid scripts and preserves an available local module graph', () => {
     const invalid = extractHtmlResources({ html: `<script>const = '${uri}'</script>` })
     expect(invalid.resources).toEqual([])
     expect(validateHtmlImport(invalid).map(error => error.code)).toContain('script-parse')
     const module = extractHtmlResources({ html: '<script type="module">import "./dependency.js"</script>', siblingFiles: new Map([['dependency.js', new TextEncoder().encode('export default 1')]]) })
-    expect(validateHtmlImport(module).map(error => error.code)).toContain('unsupported-module-graph')
+    expect(validateHtmlImport(module)).toEqual([])
+    expect(module.modules).toEqual({ 'dependency.js': 'export default 1' })
     expect(validateHtmlImport(module).some(error => error.level === 'error')).toBe(false)
     expect(module.resources).toEqual([])
     expect(module.html).toContain('import "./dependency.js"')
@@ -68,7 +69,9 @@ describe('HTML import closure', () => {
   it('does not treat a bare package name as a missing local file', () => {
     const result = extractHtmlResources({ html: '<script type="module">import "react"</script>' })
     expect(validateHtmlImport(result).filter(error => error.level === 'error')).toEqual([])
-    expect(result.diagnostics.find(error => error.code === 'unsupported-module-graph')?.message).toContain('合并为单文件')
+    expect(result.html).toBe('<script type="module">import "react"</script>')
+    expect(result.modules).toBeUndefined()
+    expect(result.diagnostics).not.toContainEqual(expect.objectContaining({ code: 'missing-relative-resource' }))
   })
 
   it.each(['click', 'keydown', 'drop', 'dragover', 'dragstart', 'touchstart', 'wheel', 'mouseenter', 'mouseleave',

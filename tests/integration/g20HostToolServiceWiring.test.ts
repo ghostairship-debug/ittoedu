@@ -11,7 +11,7 @@ const coordinator = (services: HostToolServices) => new HostToolCoordinator(serv
 
 describe('M27-M29 host service wiring', () => {
   it('routes durable owner queries under the frozen run and stops web/MCP/media before further calls', async () => {
-    const status = vi.fn(async (ref: HostJobRef) => ({ ...ref, status: 'ready', terminal: true, snapshot: { runId: ref.runId } }))
+    const status = vi.fn(async (ref: HostJobRef) => ({ ...ref, status: 'ready', terminal: true, snapshot: { runId: ref.runId, resources: [] } }))
     const stopRun = vi.fn(async () => {})
     const webOpen = vi.fn(async () => ({ status: 'opened', source: { url: 'https://example.org/' }, text: 'Observed page' }))
     const services: HostToolServices = {

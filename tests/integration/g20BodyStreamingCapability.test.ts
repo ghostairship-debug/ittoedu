@@ -22,7 +22,7 @@ import { EditorView } from 'prosemirror-view'
 import { layoutPreviewKey, layoutPreviewPlugin, layoutPreviewRange, sourcePreviewRange } from '../../src/renderer/document/editPreviewWidgets'
 
 const directories: string[] = []
-afterEach(async () => { vi.unstubAllGlobals(); for (const directory of directories.splice(0)) await fs.rm(directory, { recursive: true, force: true }) })
+afterEach(async () => { vi.unstubAllGlobals(); for (const directory of directories.splice(0)) await fs.rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }) })
 async function directory() { const value = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-body-stream-')); directories.push(value); return value }
 const selection: ModelSelection = { model: 'configured', connection: { id: 'connection', revision: 1, provider: 'fixture', protocol: 'openai-chat',
   baseURL: 'https://fixture.invalid/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'secret-ref' },

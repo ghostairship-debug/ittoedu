@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
-import { hasUnresolvedToolFailure, runEndSummary } from '../../src/main/workbench/execution/executionOutcome'
+import { executionAuditWarnings, hasUnresolvedToolFailure, runEndSummary } from '../../src/main/workbench/execution/executionOutcome'
+import { computeArtifactSource } from '../../src/core/tools/HostArtifactTools'
 import type { ExecutionRunRecord, ExecutionToolRecord } from '../../src/shared/workbench/execution'
 
 const tool = (index: number, name: string, input: unknown, result: ExecutionToolRecord['result']): ExecutionToolRecord => ({
@@ -28,7 +29,7 @@ describe('M26 R7 offline settlement replay', () => {
   })
 
   it('does not let an unrelated success settle a required export failure', () => {
-    const record = run(tool(0, 'document.export', { target: 'required-document', format: 'html' }, error('export-failed')),
+    const record = run(tool(0, 'document.export', { target: 'required-document', format: 'html-offline' }, error('export-failed')),
       tool(1, 'file.write', { path: 'other.md', mode: 'create', content: '旁支' }, written('other.md')))
     expect(hasUnresolvedToolFailure(record)).toBe(true)
     record.status = 'partial'
@@ -36,21 +37,25 @@ describe('M26 R7 offline settlement replay', () => {
   })
 
   it('retains an unknown external write even if a later receipt appears successful', () => {
-    const input = { kind: 'compute', job: 'job-1', name: 'result.txt', destination: 'result.txt' }
+    const input = { source: computeArtifactSource('compute-job-1', 'result.txt'), destination: 'result.txt' }
     const record = run(tool(0, 'artifact.save', input, { kind: 'read', data: { status: 'unknown', reason: '回执丢失' } }),
       tool(1, 'artifact.save', input, { kind: 'read', data: { status: 'written', sourceKind: 'compute',
-        sourceId: 'job-1@result.txt' } }))
+        sourceId: 'compute-job-1@result.txt' } }))
     expect(hasUnresolvedToolFailure(record)).toBe(true)
   })
 
-  it('settles a failed concrete request only when the same operation and arguments succeed', () => {
+  it('retains definite write failures as audit warnings while completing from real output rather than repeated arguments', () => {
     const first = { mode: 'replace', path: 'draft.md', content: '完成', expectedVersion: 'v1' }
     const sameWithDifferentPropertyOrder = { expectedVersion: 'v1', content: '完成', path: 'draft.md', mode: 'replace' }
     const other = { mode: 'replace', path: 'other.md', content: '完成', expectedVersion: 'v1' }
-    expect(hasUnresolvedToolFailure(run(tool(0, 'file.write', first, error('file-tool-failed')),
-      tool(1, 'file.write', other, written('other.md'))))).toBe(true)
-    expect(hasUnresolvedToolFailure(run(tool(0, 'file.write', first, error('file-tool-failed')),
-      tool(1, 'file.write', sameWithDifferentPropertyOrder, written('draft.md'))))).toBe(false)
+    const failed = tool(0, 'file.write', first, error('file-tool-failed'))
+    expect(hasUnresolvedToolFailure(run(failed))).toBe(true) // No actual output yet.
+    for (const [input, filename] of [[other, 'other.md'], [sameWithDifferentPropertyOrder, 'draft.md']] as const) {
+      const settled = run(failed, tool(1, 'file.write', input, written(filename)))
+      expect(hasUnresolvedToolFailure(settled)).toBe(false)
+      expect(settled.tools[0]!.result).toEqual(error('file-tool-failed'))
+      expect(executionAuditWarnings(settled)).toMatchObject([{ name: 'file.write', status: 'failed', callId: failed.callId }])
+    }
   })
 
   const realRelRecord = path.resolve('output/g20/rel-t11/real-4ul0ka/profile/workbench-v2/runs',

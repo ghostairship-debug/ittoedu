@@ -1,20 +1,21 @@
 // @vitest-environment node
 import { randomUUID } from 'node:crypto'
 import { expect, it } from 'vitest'
-import { createNamedSelectionFixture } from '../helpers/g20NamedSelectionFixture'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
+import { createCurrentSelectionFixture } from '../helpers/g20CurrentSelectionFixture'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
-import { buildSlideEditorView } from '../../src/core/tools/slideLayerView'
+import { resolveComponentPresentation } from '../../src/shared/contracts/component-platform/project'
+import { readCourseInstanceText } from '../../src/core/tools/ToolTargets'
 import { captureCourseObjectSelection, selectionReference } from '../../src/renderer/workbench/SelectionContextController'
 
 it('M04-T04 two same-page selected objects stay independently writable through the same run', async () => {
-  const fixture = createNamedSelectionFixture(), driver = new CourseV9Driver()
+  const fixture = createCurrentSelectionFixture(), driver = new CourseV10Driver()
   const registry = new DocumentRegistry({ drivers: [driver], createId: randomUUID, bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('unused') } } })
   const session = await registry.create(fixture.model, '多选.h5lesson')
   const gateway = new DocumentToolGateway(registry, [driver], randomUUID)
-  const selection = captureCourseObjectSelection(session.read(), fixture.locationId, ['scene-text', 'scene-other'], 'named-a')
+  const selection = captureCourseObjectSelection(session.read(), fixture.surfaceId, ['scene-text', 'scene-other'], 'named-a')
   const reference = selectionReference(selection, true)
   expect(reference.writable).toEqual(selection.targets)
   await gateway.beginRun({ runId: 'multi-run', actor: 'agent', documents: [{ documentId: session.documentId, writable: reference.writable }] })
@@ -25,13 +26,15 @@ it('M04-T04 two same-page selected objects stay independently writable through t
       .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
   }
   const after = session.read(), model = after.model
-  if (model.kind !== 'course-v9') throw new Error('fixture')
-  const item = (stateId: string | null, id: string) => buildSlideEditorView({ project: model.project, locationId: fixture.locationId, stateId })
-    .layers.find(layer => layer.selectionId === id)?.item
-  expect(item('named-a', 'scene-text')).toMatchObject({ content: { data: { text: replacement[0] } } })
-  expect(item('named-a', 'scene-other')).toMatchObject({ content: { data: { text: replacement[1] } } })
-  expect(item('named-b', 'scene-text')).toMatchObject({ content: { data: { text: '命名态 B 正文' } } })
-  expect(item(null, 'scene-text')).toMatchObject({ content: { data: { text: '基础态正文' } } })
+  if (model.kind !== 'course-v10') throw new Error('fixture')
+  const text = (stateId: string | null, id: string) => readCourseInstanceText({ ...model, project: resolveComponentPresentation(model.project, fixture.surfaceId, stateId) },
+    { kind: 'course-instance', surfaceId: fixture.surfaceId, instanceId: id, stateId: null })
+  expect(text('named-a', 'scene-text')).toMatchObject({ inlines: [{ text: replacement[0] }] })
+  expect(text('named-a', 'scene-other')).toMatchObject({ inlines: [{ text: replacement[1] }] })
+  expect(text('named-b', 'scene-text')).toMatchObject({ inlines: [{ text: '命名态 B 正文' }] })
+  expect(text(null, 'scene-text')).toMatchObject({ inlines: [{ text: '基础态正文' }] })
+  expect(model.resources).toEqual(fixture.model.resources)
+  expect(driver.load(driver.serialize(model))).toEqual(model)
   expect(after.undoDepth).toBe(2)
   for (let index = 0; index < 2; index++) {
     const current = session.read()
@@ -39,8 +42,8 @@ it('M04-T04 two same-page selected objects stay independently writable through t
       actor: 'human', mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
   }
   const reverted = session.read()
-  if (reverted.model.kind !== 'course-v9') throw new Error('fixture')
+  if (reverted.model.kind !== 'course-v10') throw new Error('fixture')
   expect(reverted.model.project.surfaces).toEqual(fixture.model.project.surfaces)
-  expect(reverted.model.project.globalLayerItems).toEqual(fixture.model.project.globalLayerItems)
+  expect(reverted.model.project.global).toEqual(fixture.model.project.global)
   expect(reverted.undoDepth).toBe(0)
 })

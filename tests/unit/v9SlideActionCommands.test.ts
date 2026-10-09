@@ -442,7 +442,7 @@ describe('V9 Slide scene actions', () => {
     })
     expect(foreign).toMatchObject({
       ok: false,
-      reason: '剪贴板不属于当前 H5 演示，请重新复制',
+      reason: '剪贴板不属于当前 果铃工程，请重新复制',
       historyEntry: false,
     })
     expect(foreign.nextSession?.history.present).toBe(session.history.present)
@@ -527,7 +527,7 @@ describe('V9 Slide scene actions', () => {
     })
     expect(foreign).toMatchObject({
       ok: false,
-      reason: '剪贴板不属于当前 H5 演示，请重新复制',
+      reason: '剪贴板不属于当前 果铃工程，请重新复制',
       historyEntry: false,
     })
     expect(foreign.nextSession?.history.present).toBe(globalSession.history.present)

@@ -24,6 +24,7 @@ __pycache__/
 *.tmp
 *.tsbuildinfo
 *.zip
+!public/vendor/compute-runtime/pyodide/python_stdlib.zip
 
 # Built by `npm run build:clipboard-helper` (part of build:desktop); only Program.cs is source.
 resources/clipboard-file-list/*.exe

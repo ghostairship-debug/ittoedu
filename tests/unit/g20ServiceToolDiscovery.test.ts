@@ -9,9 +9,8 @@ import { workbenchServiceToolCatalog } from '../../src/core/tools/WorkbenchServi
 import type { ComputeJobInput, ComputeJobSnapshot } from '../../src/shared/workbench/compute'
 import type { ExecutionPermissionMode } from '../../src/shared/workbench/executionPermission'
 
-const baseline = ['web.search', 'web.open', 'mcp.discover', 'mcp.invoke', 'mcp.resource', 'media.discover',
-  'image.search', 'image.preview', 'image.fetch', 'asset.search', 'asset.use', 'asset.save']
-const jobs = ['job.status', 'job.wait', 'job.logs', 'job.cancel', 'compute.run', 'delegate.start', 'delegate.read']
+const jobs = ['job.status', 'job.wait', 'job.logs', 'job.cancel', 'compute.run', 'delegate.start', 'local.run', 'delegate.readonly', 'delegate.read']
+const baseline = [...jobs, 'media.discover', 'media.start']
 const serviceNames = new Set<string>(workbenchServiceToolCatalog.map(tool => tool.name))
 
 function fixture() {
@@ -22,7 +21,7 @@ function fixture() {
   const calls: string[] = []
   const jobView = (name: string, ref: HostJobRef) => {
     calls.push(name)
-    return { kind: ref.kind, jobId: ref.jobId, status: 'running', terminal: false, snapshot: {} }
+    return { kind: ref.kind, jobId: ref.jobId, status: 'running', terminal: false, snapshot: { runId: ref.runId, jobId: ref.jobId, status: 'running', artifacts: [] } }
   }
   const compute = (input: ComputeJobInput): ComputeJobSnapshot => ({ runId: input.runId, jobId: input.jobId,
     requestDigest: 'fixture', status: 'running', createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
@@ -51,7 +50,7 @@ function fixture() {
   return { driver, registry, gateway, calls, begin, names }
 }
 
-it('keeps web and MCP discovery visible in empty and Markdown runs while advertising the two optional service families', async () => {
+it('advertises configured services in empty and Markdown runs without granting unavailable web or MCP routes', async () => {
   const h = fixture()
   await h.begin('empty')
   const document = await h.registry.create(h.driver.load(new TextEncoder().encode('draft')), 'draft.md')
@@ -61,10 +60,9 @@ it('keeps web and MCP discovery visible in empty and Markdown runs while adverti
   for (const runId of ['empty', 'markdown']) {
     expect((await h.names(runId)).filter(name => serviceNames.has(name))).toEqual(baseline)
     expect(await h.gateway.availableToolFamilies(runId)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ family: 'jobs', count: 7 }), expect.objectContaining({ family: 'media', count: 1 }),
+      expect.objectContaining({ family: 'jobs', count: 9 }), expect.objectContaining({ family: 'media', count: 1 }),
     ]))
-    expect(await h.gateway.execute(runId, 'hidden-compute', { name: 'compute.run', input: { code: 'print(1)' } }))
-      .toMatchObject({ kind: 'error', code: 'tool-not-advertised' })
+    expect(await h.names(runId)).not.toEqual(expect.arrayContaining(['web.search', 'mcp.discover']))
   }
   await h.gateway.beginRun({ runId: 'without-file-grant', actor: 'agent', documents: [] })
   await h.gateway.loadToolFamilies('without-file-grant', ['jobs', 'media'])
@@ -78,13 +76,13 @@ it('one jobs load exposes working compute, delegation and all job management rou
   await h.gateway.loadToolFamilies('work', ['jobs'])
   const loaded = await h.names('work')
   expect(loaded.filter(name => jobs.includes(name))).toEqual(jobs)
-  expect(loaded).not.toContain('media.start')
+  expect(loaded).toContain('media.start')
   const compute = await h.gateway.execute('work', 'compute', { name: 'compute.run', input: { code: 'print(1)' } })
   expect(compute).toMatchObject({ kind: 'read', data: { status: 'running' } })
   if (compute.kind !== 'read') throw new Error('Expected a compute receipt')
   const job = (compute.data as { job: string }).job
   for (const name of ['job.status', 'job.wait', 'job.logs', 'job.cancel']) {
-    expect(await h.gateway.execute('work', name, { name, input: { kind: 'compute', job,
+    expect(await h.gateway.execute('work', name, { name, input: { job,
       ...(name === 'job.wait' ? { milliseconds: 0 } : {}) } })).toMatchObject({ kind: 'read' })
   }
   const delegated = await h.gateway.execute('work', 'delegate', { name: 'delegate.start',
@@ -105,7 +103,7 @@ it('loading jobs and media never grants write permission to a read-only run', as
   for (const call of [
     { name: 'compute.run', input: { code: 'print(1)' } },
     { name: 'delegate.start', input: { goal: 'Do work', expectedArtifacts: ['answer.txt'] } },
-    { name: 'job.cancel', input: { kind: 'compute', job: 'prior-job' } },
+    { name: 'job.cancel', input: { job: 'compute-prior-job' } },
     { name: 'media.start', input: { kind: 'speech', prompt: 'Read this' } },
   ]) expect(await h.gateway.execute('read-only', call.name, call))
     .toMatchObject({ kind: 'error', message: expect.stringContaining('只读') })

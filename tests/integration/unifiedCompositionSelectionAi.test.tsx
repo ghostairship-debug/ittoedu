@@ -3,19 +3,17 @@ import sharp from 'sharp'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
-import { locateCourseLayer } from '../../src/core/drivers/course/layerProperties'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { prepareImageResource } from '../../src/main/workbench/admittedImageResource'
-import { CompositionSelectionContext } from '../../src/renderer/workbench/CompositionSelectionContext'
+import { SelectionQuickBar } from '../../src/renderer/editing/quickbar/SelectionQuickBar'
+import { ElementAiButton } from '../../src/renderer/workbench/elementCards/ElementAiCard'
 import { captureCompositionSelection, captureCourseObjectSelection, workbenchSelection } from '../../src/renderer/workbench/SelectionContextController'
 import { elementCardKey, elementCards } from '../../src/renderer/workbench/elementCards/elementCardController'
-import { findCompositionNode } from '../../src/shared/composition/content'
-import type { CompositionLayerItem } from '../../src/shared/courseProjectTypes'
 import type { ConversationRecord } from '../../src/shared/workbench/conversations'
 import type { DocumentPersistence, DocumentSnapshot } from '../../src/shared/workbench/document'
 import { executionDocumentReferenceSchema, type ExecutionSelectionTarget, type ExecutionSendInput } from '../../src/shared/workbench/executionDesktop'
-import { compositionFragmentFixture, fragmentPrompt } from '../helpers/compositionFragmentFixture'
+import { currentCompositionGatewayFixture, currentFragmentPrompt } from '../helpers/currentCompositionGatewayFixture'
 
 const openDocuments: string[] = []
 const roots: HTMLElement[] = []
@@ -27,16 +25,11 @@ afterEach(() => {
   vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 
-it('sends selected composition text and image from their canvas AI cards with narrow writable targets and applies only those targets through the real Gateway', async () => {
-  const source = compositionFragmentFixture(), driver = new CourseV9Driver()
-  const picture = findCompositionNode(source.item.content.root, 'picture')
-  const right = findCompositionNode(source.item.content.root, 'right')
-  if (picture?.kind !== 'element' || right?.kind !== 'element') throw new Error('Fixture required')
-  right.children.push({ ...structuredClone(picture), id: 'unselected-picture' })
+it('sends selected component text and image from current AI cards, preserves narrow writes and returns to the original card after a late canvas read', async () => {
+  const source = currentCompositionGatewayFixture({ professionalText: true }), driver = new CourseV10Driver()
   const persistence: DocumentPersistence = { async append() {}, async save() { throw new Error('Not saving in this UI check') } }
   const registry = new DocumentRegistry({ drivers: [driver], persistence, createId: randomUUID, bindingKey: binding => binding.path })
-  const session = await registry.create({ kind: 'course-v9', project: source.project,
-    resources: { assets: source.assetFiles, components: {} } }, 'selected-content.h5lesson')
+  const session = await registry.create(source.model, 'selected-content.glx')
   openDocuments.push(session.documentId)
   const gateway = new DocumentToolGateway(registry, [driver], randomUUID, { prepareImage: prepareImageResource })
   const conversations = new Map<string, ConversationRecord>(), requests: ExecutionSendInput[] = []
@@ -63,30 +56,23 @@ it('sends selected composition text and image from their canvas AI cards with na
         conversation: { connectionId: 'fixture', model: 'fixture-model' }, vision: null, imageGenerate: null, imageEdit: null } } }) } })
   elementCards.setWorkspace('workspace'); elementCards.setPermission('workspace')
 
-  const canvasRoot = document.createElement('div'), frame = document.createElement('iframe')
-  canvasRoot.append(frame); document.body.append(canvasRoot); roots.push(canvasRoot)
-  frame.dataset.webComposition = source.item.layerItemId
-  Object.defineProperties(frame, { clientWidth: { value: 800 }, clientHeight: { value: 900 } })
-  frame.contentDocument!.body.innerHTML = '<p data-composition-node="paragraph"></p><img data-composition-node="picture">'
-  const rect = (left: number, top: number, width: number, height: number) => ({ x: left, y: top, left, top, width, height,
-    right: left + width, bottom: top + height, toJSON() {} })
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    if (this === frame) return rect(120, 100, 400, 450)
-    return rect(0, 0, 800, 600)
-  })
-  const paragraphElement = frame.contentDocument!.querySelector<HTMLElement>('[data-composition-node="paragraph"]')!
-  const imageElement = frame.contentDocument!.querySelector<HTMLElement>('[data-composition-node="picture"]')!
-  vi.spyOn(paragraphElement, 'getBoundingClientRect').mockReturnValue(rect(40, 20, 600, 40))
-  vi.spyOn(imageElement, 'getBoundingClientRect').mockReturnValue(rect(40, 100, 32, 32))
-  const locationId = source.project.locations[0]!.id
-  const props = { documentId: session.documentId, revision: session.read().revision, locationId, canvasRoot,
-    selection: { layerItemId: source.item.layerItemId, nodeId: 'paragraph', bounds: { x: 40, y: 20, width: 600, height: 40 } } }
-  const ui = render(<CompositionSelectionContext {...props} />)
+  const rootId = source.target.instanceId, surfaceId = source.target.surfaceId
+  const capture = (id: string) => captureCompositionSelection(session.read(), surfaceId, rootId, id, null,
+    id === 'paragraph' ? '所选文字' : '所选图片')
+  const textTarget: ExecutionSelectionTarget = { ...source.instanceTarget('paragraph'), stateId: null }
+  const imageTarget: ExecutionSelectionTarget = { ...source.instanceTarget('native-picture'), stateId: null }
+  const selected = (id: string) => <SelectionQuickBar key={id} label="选中内容快捷工具"
+    anchor={{ left: 100, top: 120, width: 330, height: 90 }} bounds={{ left: 0, top: 0, right: 1000, bottom: 700 }} selectionKey={id}>
+    <ElementAiButton documentId={session.documentId} target={source.instanceTarget(id)}
+      label={id === 'paragraph' ? '所选文字' : '所选图片'} capture={async () => capture(id)} />
+  </SelectionQuickBar>
+  await act(async () => { workbenchSelection.setManual(session.documentId, capture('paragraph')) })
+  const ui = render(selected('paragraph'))
   await waitFor(() => expect(screen.getByRole('button', { name: 'AI 修改' })).toBeEnabled())
-  const textTarget: ExecutionSelectionTarget = { kind: 'course-object', locationId, itemId: source.item.layerItemId, compositionNodeId: 'paragraph' }
   expect(workbenchSelection.getManual(session.documentId)?.targets).toEqual([textTarget])
   const submit = async (instruction: string) => {
     fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }))
+    await waitFor(() => expect(screen.getByLabelText('AI 修改要求')).toBeTruthy())
     fireEvent.change(screen.getByLabelText('AI 修改要求'), { target: { value: instruction } })
     await act(async () => { fireEvent.submit(screen.getByLabelText('AI 修改要求').closest('form')!) })
   }
@@ -95,74 +81,61 @@ it('sends selected composition text and image from their canvas AI cards with na
   expect(executionDocumentReferenceSchema.parse(requests[0]!.documents[0]).writable).toEqual([textTarget])
   expect(requests[0]!.documents[0]!.selection).toEqual([textTarget])
 
+  const current = () => { const model = session.read().model; if (model.kind !== 'course-v10') throw new Error('Current component model required'); return model }
+  const before = session.read()
   const applyFromCard = async (request: ExecutionSendInput, kind: 'text' | 'image') => {
     const reference = request.documents[0]!, runId = randomUUID(), selected = reference.selection![0]!
     await gateway.beginRun({ runId, actor: 'agent', documents: [{ documentId: reference.documentId, writable: reference.writable }] })
-    const handle = await gateway.issueTarget(runId, reference.documentId, selected)
-    const discovered = await gateway.execute(runId, randomUUID(), { name: 'content.targets', input: { target: handle } })
-    if (discovered.kind !== 'read') throw new Error(JSON.stringify(discovered))
-    const targets = (discovered.data as { targets: { target: string; kind: string; text?: string }[] }).targets
-    const found = targets.find(target => target.kind === kind)
-    if (!found) throw new Error('Selected target missing')
-    if (kind === 'text') expect(targets.filter(target => target.kind === 'text').map(target => target.text)).toEqual([fragmentPrompt])
-    else expect(targets.filter(target => target.kind === 'image')).toHaveLength(1)
-    const input = kind === 'text' ? { target: found.target, text: '先预测，再比较证据。' } : { target: found.target,
+    // Read visibility never widens the selected child's frozen write grant.
+    const untouched = session.read()
+    const sibling = await gateway.issueTarget(runId, reference.documentId, { ...source.instanceTarget('heading'), dataPath: ['content'] })
+    expect(await gateway.execute(runId, randomUUID(), { name: 'text.replace', input: { target: sibling, content: 'Unauthorized sibling edit' } }))
+      .toMatchObject({ kind: 'error' })
+    expect(session.read()).toEqual(untouched)
+    const handle = await gateway.issueTarget(runId, reference.documentId, kind === 'text'
+      ? { ...source.instanceTarget('paragraph'), dataPath: ['content'] } : selected)
+    const input = kind === 'text' ? { target: handle, content: '先预测，再比较证据。' } : { target: handle,
       resource: await gateway.provideImage(runId, reference.documentId, { filename: 'replacement.png', mimeType: 'image/png',
         bytes: new Uint8Array(await sharp({ create: { width: 8, height: 8, channels: 4, background: '#246ab0' } }).png().toBuffer()) }) }
-    const applied = await gateway.execute(runId, randomUUID(), { name: 'content.update', input })
-    expect(applied).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    const applied = await gateway.execute(runId, randomUUID(), { name: kind === 'text' ? 'text.replace' : 'media.apply', input })
+    expect(applied, JSON.stringify(applied)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     await gateway.stop(runId)
   }
   await applyFromCard(requests[0]!, 'text')
-  const composition = (): CompositionLayerItem => {
-    const model = session.read().model
-    if (model.kind !== 'course-v9') throw new Error('Course fixture required')
-    const item = locateCourseLayer(model.project, source.item.layerItemId)?.item
-    if (item?.kind !== 'composition') throw new Error('Composition required')
-    return item
-  }
-  expect(findCompositionNode(composition().content.root, 'paragraph-text')).toMatchObject({ text: '先预测，再比较证据。' })
-  expect(findCompositionNode(composition().content.root, 'heading-text')).toMatchObject({ text: '用观察解释变化' })
-  ui.rerender(<CompositionSelectionContext {...props} revision={session.read().revision}
-    selection={{ ...props.selection, nodeId: 'picture' }} />)
-  await waitFor(() => expect(screen.getByText('所选图片')).toBeTruthy())
+  expect(JSON.stringify(current().project.instances.paragraph.data)).toContain('先预测，再比较证据。')
+  expect(JSON.stringify(current().project.instances.paragraph.data)).not.toContain(currentFragmentPrompt)
+  expect(current().project.instances.heading).toEqual(source.project.instances.heading)
+  ui.rerender(selected('native-picture'))
   await submit('只替换这张图片')
   expect(requests).toHaveLength(2)
-  const imageTarget: ExecutionSelectionTarget = { ...textTarget, compositionNodeId: 'picture' }
   expect(requests[1]!.documents[0]!.writable).toEqual([imageTarget])
   expect(elementCardKey(session.documentId, imageTarget)).not.toBe(elementCardKey(session.documentId, textTarget))
   await applyFromCard(requests[1]!, 'image')
-  const currentPicture = findCompositionNode(composition().content.root, 'picture')
-  expect(currentPicture).toMatchObject({ kind: 'element', attributes: { alt: '资源闭包示例' } })
-  if (currentPicture?.kind !== 'element') throw new Error('Image required')
-  expect(currentPicture.attributes.src).not.toBe('cw-resource:photo')
-  expect(findCompositionNode(composition().content.root, 'unselected-picture')).toMatchObject({ attributes: { src: 'cw-resource:photo' } })
-  expect(findCompositionNode(composition().content.root, 'counter')).toEqual(findCompositionNode(source.item.content.root, 'counter'))
+  expect(current().project.instances['native-picture'].data).toMatchObject({ alt: '原生图片', assetId: expect.not.stringMatching(/^source-photo$/) })
+  for (const id of ['heading', 'picture', 'shared-picture', 'interaction', 'chart'])
+    expect(current().project.instances[id]).toEqual(source.project.instances[id])
+  expect(current().resources.components).toEqual(before.model.resources.components)
   expect(session.read().undoDepth).toBe(2)
-  ui.rerender(<CompositionSelectionContext {...props} revision={session.read().revision} selection={null} />)
+  ui.rerender(<></>)
+  await act(async () => { workbenchSelection.setManual(session.documentId, null) })
   expect(workbenchSelection.getManual(session.documentId)).toBeNull()
   expect(screen.queryByRole('button', { name: 'AI 修改' })).toBeNull()
 
-  const restore = vi.fn()
-  ui.rerender(<CompositionSelectionContext {...props} revision={session.read().revision} selection={null} onRestoreSelection={restore} />)
-  // The indicator jump reuses the same manual selection projection; the iframe supplies only fresh geometry.
-  const current = session.read(), restored = captureCompositionSelection(current, locationId, source.item.layerItemId, 'paragraph')
+  // The current indicator opens the same persistent card after canvas navigation.
+  // A late read of the prior parent selection cannot replace that explicit child selection.
+  const snapshot = session.read(), restored = capture('paragraph')
   let finishOldRead!: (snapshot: DocumentSnapshot) => void
   vi.spyOn(window.desktopAPI!.documents!, 'read').mockReturnValueOnce(new Promise<DocumentSnapshot>(resolve => { finishOldRead = resolve }))
-  const oldRead = workbenchSelection.observe(session.documentId, current.revision,
-    snapshot => captureCourseObjectSelection(snapshot, locationId, [source.item.layerItemId]))
+  const oldRead = workbenchSelection.observe(session.documentId, snapshot.revision,
+    value => captureCourseObjectSelection(value, surfaceId, [rootId]))
   await act(async () => {
     workbenchSelection.setManual(session.documentId, restored)
     elementCards.requestOpen(elementCardKey(session.documentId, textTarget))
   })
-  expect(restore).toHaveBeenCalledTimes(1)
-  expect(restore.mock.calls[0]![0]).toEqual(props.selection)
-  await act(async () => { finishOldRead(current); await oldRead })
+  await act(async () => { finishOldRead(snapshot); await oldRead })
   expect(workbenchSelection.getManual(session.documentId)?.targets).toEqual([textTarget])
-  ui.rerender(<CompositionSelectionContext {...props} revision={session.read().revision}
-    selection={restore.mock.calls[0]![0]} onRestoreSelection={restore} />)
+  ui.rerender(selected('paragraph'))
   await waitFor(() => expect(screen.getByLabelText('AI 修改要求')).toBeTruthy())
   expect(screen.getByText('把这句话改为先预测再比较证据')).toBeTruthy()
-  expect(restore).toHaveBeenCalledTimes(1)
   expect(requests).toHaveLength(2)
 })

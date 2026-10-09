@@ -617,14 +617,18 @@ describe('planRuntimeSourceUpdate', () => {
     expect(source.project).toEqual(before)
   })
 
-  it('rejects source that violates the canonical V9 UTF-8 size limit', () => {
+  it('preserves source beyond the retired size limit through a reversible transaction', () => {
     const source = fixture('spatial-world')
-    const oversized = `CoursewareRuntime.define({runtimeApiVersion:3});/*${'x'.repeat(
+    const largeSource = `CoursewareRuntime.define({runtimeApiVersion:3});/*${'x'.repeat(
       2 * 1024 * 1024,
     )}*/`
-
-    expect(planRuntimeSourceUpdate(input(source, { source: oversized })))
-      .toMatchObject({ ok: false, code: 'invalid-source' })
+    const plan = planned(planRuntimeSourceUpdate(input(source, { source: largeSource })))
+    const step = createEditorTransactionStep(source.project, plan)
+    expect(step).not.toBeNull()
+    const before = { document: source.project, resources: { componentPackages: {}, assetFiles: {} } }
+    const forward = applyEditorTransactionStep(before, step!, 'forward')
+    expect(findRuntime(forward.document, source.itemId).runtime.source).toBe(largeSource)
+    expect(applyEditorTransactionStep(forward, step!, 'inverse')).toEqual(before)
   })
 
   it('rejects invalid clock, captured state, current non-Slide state and full V9 document', () => {

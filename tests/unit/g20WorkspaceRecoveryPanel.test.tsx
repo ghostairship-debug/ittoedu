@@ -52,7 +52,7 @@ it('lists every Main recovery draft and retries navigation without restoring a s
   await editMarkdown(original, markdown, '# 崩溃前的正文')
   const project = createBlankCourseProjectV10('待恢复课件')
   const course = await original.internalAPI.create({ kind: 'course-v10', project,
-    resources: { assets: {}, components: {} } }, '待恢复课件.h5lesson')
+    resources: { assets: {}, components: {} } }, '待恢复课件.glx')
   expect(await original.internalAPI.dispatch({ documentId: course.documentId, epoch: course.epoch, baseRevision: course.revision,
     operationId: 'course-edit', actor: 'human', mutation: { type: 'command', command: captureComponentOperation(project, [{ type: 'project.title.set', title: '待恢复课件（编辑）' }]) },
   })).toMatchObject({ status: 'applied' })
@@ -63,7 +63,7 @@ it('lists every Main recovery draft and retries navigation without restoring a s
   fireEvent.click(await screen.findByRole('button', { name: '恢复稿（2）' }))
   await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(2))
   expect(screen.getByText('未命名文档.md')).toBeTruthy()
-  expect(screen.getByText('待恢复课件（编辑）.h5lesson')).toBeTruthy()
+  expect(screen.getByText('待恢复课件（编辑）.glx')).toBeTruthy()
   const row = screen.getByText('未命名文档.md').closest('li')!
   fireEvent.click(within(row).getByRole('button', { name: '恢复并打开' }))
   await waitFor(() => expect(within(row).getByRole('button', { name: '打开已恢复稿' })).toBeTruthy())
@@ -80,7 +80,7 @@ it('lists every Main recovery draft and retries navigation without restoring a s
   expect(screen.queryByText('未命名文档.md')).toBeNull()
   expect(api.restore).toHaveBeenCalledTimes(1)
   expect(onRestored).toHaveBeenCalledTimes(2)
-  expect(screen.getByText('待恢复课件（编辑）.h5lesson')).toBeTruthy()
+  expect(screen.getByText('待恢复课件（编辑）.glx')).toBeTruthy()
 })
 
 it('discards a recovery draft with one click and leaves the user file untouched', async () => {

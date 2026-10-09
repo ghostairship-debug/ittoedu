@@ -58,6 +58,8 @@ it('waits for the Flow body ACK during drain and preserves rejected input with t
   expect(drafts.mock.calls.at(-1)).toEqual([expect.objectContaining({source:expect.stringContaining('保留新原文'),diagnostics:expect.any(Array)}),'flow-doc'])
 })
 it('binds the original Flow observation session while rendering floating children and preserving custom teacher chrome',async()=>{
+  vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(1280)
+  vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockReturnValue(720)
   const project:CourseProjectV10={schemaVersion:10,id:'observation',revision:0,title:'Flow',definitions:{[TEXT_DEFINITION.id]:TEXT_DEFINITION,
     group:{id:'group',role:'content',implementation:{kind:'builtin',key:'guoling.group'}},'guoling.navigation':{id:'guoling.navigation',role:'content',professionalBuiltinKey:'guoling.navigation',implementation:{kind:'source',language:'javascript',source:'export default 1'}}},
     instances:{body:{id:'body',definitionId:TEXT_DEFINITION.id,data:JSON.parse(JSON.stringify(createTextComponentData('正文')))},
@@ -70,7 +72,7 @@ it('binds the original Flow observation session while rendering floating childre
   const bindings: {readZoom():number;setZoom(value:number):void;reset():void}[]=[],release=vi.fn(),navigation={changed:vi.fn()},renderInstance=vi.fn((id:string)=><div key={id} data-testid={id}/>)
   probe.state={courseBridge:bridge,courseKernel:bridge,flowDocumentDrafts:{},setFlowDocumentDraft:()=>{},setFlowContextSelection:()=>{},flowEditingInstance:null,slideContentEdit:null}
   probe.runtime={resources,selectedInstanceIds:['group','teacher'],selectInstances:()=>{},onElement:()=>{},onTargetElement:()=>{},world:{beforeProjectionMutation:()=>{},afterProjectionMutation:()=>{}},renderInstance,navigation,registerObservation:(_id:string,binding:typeof bindings[number])=>{bindings.push(binding);return release}}
-  const ui=render(<FlowWorkspace documentId="observe-doc" project={project} surfaceId="flow" onSelectImageAsset={async()=>null}/>)
+  const ui=render(<FlowWorkspace documentId="observe-doc" project={project} surfaceId="flow" toolbarContainer={document.createElement('div')} onSelectImageAsset={async()=>null}/>)
   expect(renderInstance).toHaveBeenCalledWith('child',project,'free')
   expect(bindings).toHaveLength(1)
   act(()=>bindings[0].setZoom(2))
@@ -113,7 +115,6 @@ it('explicitly discards restored valid rejected source and its resource preparat
   probe.runtime={resources,selectedInstanceIds:[],selectInstances:()=>{},onElement:()=>{},onTargetElement:()=>{},world:{beforeProjectionMutation:()=>{},afterProjectionMutation:()=>{}},renderInstance:()=>null,registerObservation:()=>()=>{},navigation:{changed:()=>{}}}
   const ui=render(<FlowWorkspace documentId="restore-doc" project={project} surfaceId="flow" onSelectImageAsset={async()=>null}/>)
   expect(await drainFlowWorkspace('restore-doc')).toMatchObject({ok:false})
-  fireEvent.click(ui.getByLabelText('更多正文操作'))
   await act(async()=>fireEvent.click(ui.getByRole('button',{name:'丢弃待修草稿'})))
   expect(drafts).toHaveBeenCalledWith(null,'restore-doc');expect(editCaptured).not.toHaveBeenCalled()
   expect(()=>prepareFlowDocumentResourceTransaction(target,'flow',changed.content.blocks,[pasted.prepared])).toThrow('准备已失效')

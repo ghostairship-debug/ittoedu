@@ -39,7 +39,14 @@ vi.mock('electron', async () => {
     setBounds() {}
     setVisible() {}
   }
-  return { WebContentsView, session: { fromPartition: () => browserSession } }
+  class BaseWindow extends EventEmitter {
+    contentView = { addChildView: vi.fn(), removeChildView: vi.fn() }
+    private destroyed = false
+    isDestroyed() { return this.destroyed }
+    setContentSize() {}
+    destroy() { this.destroyed = true; this.emit('closed') }
+  }
+  return { BaseWindow, WebContentsView, session: { fromPartition: () => browserSession } }
 })
 
 let browser: EmbeddedBrowserBackend | undefined

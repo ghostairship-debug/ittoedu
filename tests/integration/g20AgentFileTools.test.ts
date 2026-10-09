@@ -65,7 +65,7 @@ describe('general agent file tools', () => {
   })
   it('creates explicit formats without suffixes at the same preflight path and reports the actual initial course', async () => {
     const h = await fixture()
-    for (const [kind, extension] of [['course-v10', '.h5lesson'], ['markdown', '.md'], ['html', '.html']] as const) {
+    for (const [kind, extension] of [['course-v10', '.glx'], ['markdown', '.md'], ['html', '.html']] as const) {
       const input = { name: `无后缀-${kind}`, kind }
       const scope = await h.files.preflightMutation(h.context, 'file.create', input)
       const expected = path.join(h.workspace, 'lesson', input.name + extension)
@@ -229,23 +229,32 @@ describe('general agent file tools', () => {
     expect(result.tools.map(tool => tool.result?.kind)).toEqual(['read', 'document-operation'])
     expect(h.host.registry.list().some(snapshot => snapshot.model.kind === 'markdown' && snapshot.model.source === '改写正文')).toBe(true)
   })
-  it('discovers course tool families after file.open adds a V9 document to a live run', async () => {
+  it('discovers course tool families after file.open adds a V10 document to a live run', async () => {
     const h = await fixture()
-    await h.files.execute(h.context, 'file.create', { name: 'course.h5lesson', kind: 'course-v9' }, 'course-fixture')
+    await h.files.execute(h.context, 'file.create', { name: 'course.glx', kind: 'course-v10' }, 'course-fixture')
     let turn = 0
     const provider: ModelProvider = { async *stream(request) {
       turn++
       if (turn === 1) {
-        // Before any course document is attached, V9-only tool families
+        // Before any course document is attached, course-only tool families
         // are not yet advertised, even though general file/work tools are.
         expect(request.tools?.map(tool => tool.name)).toEqual(expect.arrayContaining(['file.open', 'file.list']))
-        expect(request.tools?.some(tool => tool.name === 'slide.duplicate' || tool.name === 'course.history' || tool.name === 'layer.duplicate')).toBe(false)
-        const call = { id: 'open-course', type: 'function' as const, function: { name: 'file.open', arguments: JSON.stringify({ path: 'lesson/course.h5lesson' }) } }
+        expect(request.tools?.some(tool => tool.name === 'surface.duplicate' || tool.name === 'course.configure' || tool.name === 'object.structure')).toBe(false)
+        const call = { id: 'open-course', type: 'function' as const, function: { name: 'file.open', arguments: JSON.stringify({ path: 'lesson/course.glx' }) } }
         yield { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: 'r1', actualModel: 'fixture', nativeResponse: {}, finishReason: 'tool_calls',
           toolCalls: [{ id: call.id, name: call.function.name, argumentsText: call.function.arguments }], assistant: { role: 'assistant', content: '', tool_calls: [call] } } as Extract<ModelEvent, { type: 'response.completed' }>
         return
       }
       expect(request.tools?.map(tool => tool.name)).toEqual(expect.arrayContaining(['tools.load', 'file.open', 'read']))
+      if (turn === 2) {
+        const prior = [...request.messages].reverse().find(message => message.role === 'tool')
+        expect(JSON.parse(String(prior?.content))).toMatchObject({ data: { kind: 'course-v10' } })
+        const call = { id: 'load-course-layout', type: 'function' as const, function: { name: 'tools.load', arguments: JSON.stringify({ families: ['layout'] }) } }
+        yield { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: 'r2', actualModel: 'fixture', nativeResponse: {}, finishReason: 'tool_calls',
+          toolCalls: [{ id: call.id, name: call.function.name, argumentsText: call.function.arguments }], assistant: { role: 'assistant', content: '', tool_calls: [call] } } as Extract<ModelEvent, { type: 'response.completed' }>
+        return
+      }
+      expect(request.tools?.map(tool => tool.name)).toEqual(expect.arrayContaining(['course.configure', 'object.structure', 'surface.configure']))
       yield { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: 'r2', actualModel: 'fixture', nativeResponse: {}, finishReason: 'stop', toolCalls: [], assistant: { role: 'assistant', content: '已打开' } } as Extract<ModelEvent, { type: 'response.completed' }>
     } }
     const engine = new ExecutionEngine({ registry: h.host.registry, gateway: h.host.tools, provider, files: h.files,
@@ -319,12 +328,12 @@ it('infers file.create kind from the extension and rejects utf-8 or incompatible
   // Strict kinds still enforce extension consistency.
   await expect(h.files.execute(h.context, 'file.create', { name: 'wrong.json', kind: 'markdown' }, 'wrong-md')).rejects.toThrow('格式不符')
   await expect(h.files.execute(h.context, 'file.create', { name: 'css.css', kind: 'html' }, 'wrong-html')).rejects.toThrow('格式不符')
-  await expect(h.files.execute(h.context, 'file.create', { name: 'lesson.md', kind: 'course-v9' }, 'wrong-course')).rejects.toThrow('格式不符')
-  for (const name of ['lesson.md', 'lesson.markdown', 'page.html', 'lesson.h5lesson']) {
+  await expect(h.files.execute(h.context, 'file.create', { name: 'lesson.md', kind: 'course-v10' }, 'wrong-course')).rejects.toThrow('格式不符')
+  for (const name of ['lesson.md', 'lesson.markdown', 'page.html', 'lesson.glx', 'legacy.chapter.h5lesson']) {
     const created = await h.files.execute(h.context, 'file.create', { name }, `create-${name}`)
-    const kind = name.endsWith('.h5lesson') ? 'course-v9' : name.endsWith('.html') ? 'text' : 'markdown'
+    const kind = /\.(?:glx|h5lesson)$/.test(name) ? 'course-v10' : name.endsWith('.html') ? 'text' : 'markdown'
     expect(created.data).toMatchObject({ operation: { status: 'success' } })
-    expect(created.opened).toMatchObject({ kind, writable: true })
+    expect(created.opened).toMatchObject({ kind, writable: true, name: path.join(h.workspace, 'lesson', name.replace(/\.h5lesson$/, '.glx')) })
     expect(h.host.registry.get(created.opened!.documentId).read().model.kind).toBe(kind)
   }
   for (const input of [{ name: 'picture.png' }, { name: 'broken.h5lesson', kind: 'text' }, { name: 'raw.json', kind: 'utf-8' }]) {
@@ -775,19 +784,25 @@ it('file.copy defaults to copying the disk version of a dirty draft and marks co
   // The copy carries the on-disk body, not the GUI draft.
   expect(await readFile(path.join(h.workspace, 'lesson', 'copies', 'existing.md'), 'utf8')).toBe('正文')
   expect(await readFile(filename, 'utf8')).toBe('正文')
-  // flushFirst still refuses when the model asked for the GUI draft but did not save.
+  // flushFirst selects the current committed draft without saving the source.
   await h.files.execute(h.context, 'file.mkdir', { path: 'lesson', name: 'flush' }, 'mkdir-flush')
   const flushed = (await h.files.execute(h.context, 'file.copy', { sources: ['lesson/existing.md'],
     destination: 'lesson/flush', flushFirst: true }, 'copy-dirty-flush')).data as any
-  expect(flushed.operation.status).toBe('failed')
-  expect(flushed.operation.items[0]?.error?.message).toContain('未保存')
-  // After saving, flushFirst succeeds and the GUI body reaches the copy.
-  await h.host.saveToPath(snapshot.documentId)
-  const afterSave = (await h.files.execute(h.context, 'file.copy', { sources: ['lesson/existing.md'],
-    destination: 'lesson/flush', flushFirst: true }, 'copy-saved')).data as any
-  expect(afterSave.operation.status).toBe('success')
-  expect(afterSave.copied).toBeUndefined()
+  expect(flushed.operation.status).toBe('success')
+  expect(flushed.copied).toBe('current-draft')
+  expect(flushed.operation.items[0]?.copied).toBe('current-draft')
   expect(await readFile(path.join(h.workspace, 'lesson', 'flush', 'existing.md'), 'utf8')).toBe('未保存草稿')
+  expect(await readFile(filename, 'utf8')).toBe('正文')
+  expect(await h.host.internalAPI.read(snapshot.documentId)).toMatchObject({ dirty: true, undoDepth: 1, model: { source: '未保存草稿' } })
+  // An explicit save keeps the same body for a later current-version copy.
+  await h.host.saveToPath(snapshot.documentId)
+  await h.files.execute(h.context, 'file.mkdir', { path: 'lesson', name: 'saved' }, 'mkdir-saved')
+  const afterSave = (await h.files.execute(h.context, 'file.copy', { sources: ['lesson/existing.md'],
+    destination: 'lesson/saved', sourceVersion: 'current' }, 'copy-saved')).data as any
+  expect(afterSave.operation.status).toBe('success')
+  expect(afterSave.copied).toBe('current-draft')
+  expect(await h.host.internalAPI.read(snapshot.documentId)).toMatchObject({ dirty: false, undoDepth: 1 })
+  expect(await readFile(path.join(h.workspace, 'lesson', 'saved', 'existing.md'), 'utf8')).toBe('未保存草稿')
 })
 
 it('M27 rename preserves an opened dirty document binding; trash uses the host recycle callback', async () => {

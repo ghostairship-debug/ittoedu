@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { ObservationImageStore } from '../../src/main/workbench/observation/ObservationImageStore'
 import { ViewObservationService } from '../../src/main/workbench/observation/ViewObservationService'
 import { executeViewObserveTool } from '../../src/core/tools/ViewObserveTools'
@@ -6,10 +7,13 @@ import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 
 const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'))
 const identity = { documentId: 'd', epoch: 'e', revision: 3, locationId: 'second' }
-const snapshot = { documentId: 'd', epoch: 'e', revision: 3,
-  model: { kind: 'course-v9', project: { id: 'project', locations: [{ id: 'first' }, { id: 'second' }] }, resources: { assets: {}, components: {} } },
+const project = createBlankCourseProjectV10('观察'); project.id = 'project'
+project.surfaces = ['first', 'second'].map(id => ({ id, kind: 'slide', title: id, childIds: [] }))
+project.global.overlay = []; project.instances = {}; project.definitions = {}
+const snapshot: DocumentSnapshot = { documentId: 'd', epoch: 'e', revision: 3,
+  model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } },
   binding: { kind: 'untitled', suggestedName: 'test' }, dirty: true, saving: false, recoverable: true,
-  undoDepth: 2, redoDepth: 0 } as unknown as DocumentSnapshot
+  undoDepth: 2, redoDepth: 0 }
 const input = { runId: 'run', requestId: 'call', documentId: 'd', epoch: 'e', revision: 3,
   projectId: 'project', locationId: 'second' }
 const captured = { identity, png, width: 1, height: 1, structure: ['Second'], diagnostics: [] }

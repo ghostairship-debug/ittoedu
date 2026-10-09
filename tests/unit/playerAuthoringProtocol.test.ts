@@ -65,6 +65,9 @@ describe('Player authoring protocol', () => {
     expect(PUBLISHED_AUTHORING_CAPABILITIES).toEqual([
       ...PLAYER_AUTHORING_CAPABILITIES,
       'runtime-content',
+      'composition-content',
+      'composition-frame',
+      'scene-canvas',
     ])
   })
 

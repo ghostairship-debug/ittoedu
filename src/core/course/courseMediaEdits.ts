@@ -1,6 +1,8 @@
 import { nanoid } from 'nanoid'
 import type { AudioChannel, ProjectAudioSettings, SoundDefinition } from '../../shared/contracts/media-v1'
 import type { ComponentEdit, CourseProjectV10 } from '../../shared/contracts/component-platform'
+import { componentDefinitionBuiltinKey, resolveComponentPresentation } from '../../shared/contracts/component-platform'
+import { componentInteractionDataSchema } from '../../shared/componentInteractionData'
 
 export interface ProjectAudioSettingsPatch {
   defaultMuted?: boolean
@@ -23,7 +25,19 @@ export function courseSoundEdits(project: CourseProjectV10, soundId: string, pat
   const audio = courseAudioSettings(project)
   if (!audio.sounds[soundId]) throw new Error('原声音已不存在')
   const sounds = { ...audio.sounds }
-  if (patch === null) delete sounds[soundId]
+  if (patch === null) {
+    const referenced = (view: CourseProjectV10) => Object.values(view.instances).some(instance => {
+      if (componentDefinitionBuiltinKey(view.definitions[instance.definitionId]) !== 'guoling.interactions') return false
+      return componentInteractionDataSchema.parse(instance.data).rules.some(rule =>
+        rule.trigger.type === 'audio.ended' && rule.trigger.soundId === soundId
+        || rule.actions.some(({ action }) => 'soundId' in action && action.soundId === soundId
+          || 'target' in action && action.target.kind === 'sound' && action.target.soundId === soundId))
+    })
+    if (referenced(project) || project.surfaces.some(surface => surface.presentation?.states.some(state =>
+      referenced(resolveComponentPresentation(project, surface.id, state.id)))))
+      throw new Error('该声音仍被互动规则引用，请先删除或改写相关声音动作。')
+    delete sounds[soundId]
+  }
   else sounds[soundId] = { ...sounds[soundId], ...patch }
   return [{ type: 'project.media.set', media: { audio: { ...audio, sounds } } }]
 }

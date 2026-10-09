@@ -13,11 +13,9 @@ import { workspaceIdentityV1Schema } from '../../src/shared/workspaceIdentity'
 import { materialCitationText } from '../../src/shared/materialContract'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { strToU8, zipSync } from 'fflate'
-import { createTextNode } from '@/core/tools/nativeNodeFactories'
-import { createBlankCourseProject } from '@/core/course/createCourseProject'
-import { createCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
-import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import { TEXT_DEFINITION, createTextData } from '../../src/components/text'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { createCourseProjectV10Archive } from '../../src/core/drivers/codecs/courseProjectV10Archive'
 import {
   canonicalDeliveryFingerprint,
   runCoursewareAuthoringCli,
@@ -182,7 +180,7 @@ describe('trusted courseware authoring runner', () => {
     await writeJson(inventoryPath, {
       schemaVersion: 2,
       caseId: 'path-safety',
-      projectPath: 'project/path-safety.h5lesson',
+      projectPath: 'project/path-safety.glx',
     })
     const baseArgs = [
       '--case-dir', caseRoot,
@@ -208,7 +206,7 @@ describe('trusted courseware authoring runner', () => {
           expectedError: '--report must not alias or overwrite --inventory',
         },
         {
-          unsafeArgs: ['--report', 'evidence/session.json', '--delivery-html', 'project/path-safety.h5lesson'],
+          unsafeArgs: ['--report', 'evidence/session.json', '--delivery-html', 'project/path-safety.glx'],
           expectedError: '--delivery-html must use .html or .htm',
         },
         {
@@ -227,7 +225,7 @@ describe('trusted courseware authoring runner', () => {
   })
 
   it.skipIf(!existsSync(path.join(root, 'dist-renderer', 'index.html')))(
-    'runs a real native text Editor round trip from an external cwd and rejects a forged receipt',
+    'runs a real Project V10 text Editor round trip from an external cwd and rejects a forged receipt',
     async () => {
     temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'courseware-authoring-test-'))
     const caseRoot = path.join(temporaryRoot, 'external case #1')
@@ -241,50 +239,30 @@ describe('trusted courseware authoring runner', () => {
     await writeFile(path.join(caseRoot, '02-presentation-script.md'), presentation)
     await writeFile(path.join(caseRoot, '03-development-plan.md'), plan)
 
-    const project = createBlankCourseProject({
-      id: 'project_authoring_runner',
-      title: '可信编辑会话',
-      now: '2026-08-13T00:00:00.000Z',
-      includeDefaultController: false,
-      controls: 'none',
-    })
-    const surface = project.surfaces[0]
-    if (!surface || surface.type !== 'slide') throw new Error('expected a Slide surface')
-    const scene = surface.scenes[0]!
-    const location = project.locations[0]
-    scene.id = 'scene_authoring_runner'
-    scene.name = '真实编辑'
-    if (location?.kind === 'slide-scene') {
-      location.id = scene.id
-      location.sceneId = scene.id
-      location.label = scene.name
-    }
-    project.startLocationId = scene.id
-    const node = createTextNode({
-      id: 'node_authoring_title',
-      name: '可编辑标题',
-      text: '真实编辑前标题',
-      x: 240,
-      y: 240,
-      width: 800,
-      height: 160,
-      style: { fontSize: 52, color: '#172033', backgroundColor: '#ffffff', backgroundOpacity: 1 },
-    })
-    scene.layerItems = [sceneNodeToCourseLayerItem(node, 0)]
-    const archive = createCourseProjectArchive({
-      project: courseProjectDocumentSchema.parse(project),
-      assetFiles: {},
-      componentFiles: {},
-    }, {
-      mtime: '2026-08-13T00:00:00.000Z',
-    })
-    const projectPath = path.join(caseRoot, 'project', 'authoring-runner-case.h5lesson')
+    const project = createBlankCourseProjectV10('可信编辑会话', () => crypto.randomUUID())
+    project.id = 'project_authoring_runner'
+    const scene = project.surfaces[0]!
+    scene.id = 'surface_authoring_runner'
+    scene.title = '真实编辑'
+    scene.presentation = { states: [] }
+    const data = createTextData('真实编辑前标题')
+    Object.assign(data.appearance, { fontSize: 52, color: '#172033', backgroundColor: '#ffffff', backgroundOpacity: 1 })
+    project.definitions[TEXT_DEFINITION.id] = structuredClone(TEXT_DEFINITION)
+    const node = { id: 'node_authoring_title', definitionId: TEXT_DEFINITION.id, name: '可编辑标题',
+      data: JSON.parse(JSON.stringify(data)), frame: { transform: [1, 0, 0, 1, 240, 240] as [number, number, number, number, number, number], width: 800, height: 160 } }
+    project.instances[node.id] = node
+    scene.childIds = [node.id]
+    project.assets.retained = { id: 'retained', path: 'assets/retained.bin', mimeType: 'application/octet-stream' }
+    const resources = { assets: { retained: Uint8Array.of(0, 255, 128, 1) },
+      components: { retained: { 'opaque.bin': Uint8Array.of(255, 0, 128) } } }
+    const archive = createCourseProjectV10Archive({ project, resources })
+    const projectPath = path.join(caseRoot, 'project', 'authoring-runner-case.glx')
     await writeFile(projectPath, archive)
     const capabilityBytes = await readFile(path.join(root, 'artifacts', 'ai-capabilities', 'index.json'))
     const inventory = {
       schemaVersion: 2,
       caseId: 'authoring-runner-case',
-      projectPath: 'project/authoring-runner-case.h5lesson',
+      projectPath: 'project/authoring-runner-case.glx',
       generatedFrom: {
         coursewareContractSha256: sha256(contract),
         presentationScriptSha256: sha256(presentation),
@@ -294,7 +272,7 @@ describe('trusted courseware authoring runner', () => {
       globalEntities: [],
       scenes: [{
         sceneId: scene.id,
-        ownership: 'native-owned',
+        ownership: 'component-owned',
         entities: [{
           id: 'title',
           label: '标题',
@@ -304,7 +282,7 @@ describe('trusted courseware authoring runner', () => {
           authoringEntry: '画布选择后编辑',
           expectedOutcome: '保存重开与Player/HTML一致',
           authoringOutcomeId: 'AUTH-001',
-          binding: `native:scene:${scene.id}:${node.id}:text`,
+          binding: `component:surface:${scene.id}:${node.id}:content`,
           editability: 'canvas-distinct',
           requiredForAcceptance: true,
         }],
@@ -335,6 +313,7 @@ describe('trusted courseware authoring runner', () => {
     expect(receipt).toMatchObject({
       schemaVersion: 1,
       receiptType: 'editor-authoring-session-v1',
+      protocols: { courseProject: 10, publishedCourse: 3, componentApi: 5 },
       caseId: 'authoring-runner-case',
       exporter: {
         deliveryMatches: true,
@@ -350,12 +329,17 @@ describe('trusted courseware authoring runner', () => {
         inventoryEntityId: 'title',
         status: 'passed',
         canvasSelectionVerified: true,
+        undoVerified: true,
+        redoVerified: true,
+        resourcesPreserved: true,
         saved: true,
         reopened: true,
         player: { changed: true },
         html: { changed: true },
       }],
     })
+
+    expect(await readFile(projectPath)).toEqual(Buffer.from(archive))
 
     receipt.runnerSha256 = '0'.repeat(64)
     ;(receipt.entities as Array<Record<string, unknown>>)[0]!.probeValue = 'forged persisted probe'
@@ -370,23 +354,14 @@ describe('trusted courseware authoring runner', () => {
     scene.presentation = {
       initialStateId: 'state_override',
       thumbnailStateId: 'state_override',
-      states: [{
-        id: 'state_override',
-        name: '状态文本覆盖',
-        layerItemOverrides: {
-          [node.id]: { visible: true, nativeData: { text: '覆盖了持久绑定的文本' } },
-        },
+      states: [{ id: 'state_override', title: '状态文本覆盖',
+        overrides: { [node.id]: { visible: true, data: { ...node.data, content: createTextData('覆盖了持久绑定的文本').content } } },
       }],
     }
-    const overriddenArchive = createCourseProjectArchive({
-      project: courseProjectDocumentSchema.parse(project),
-      assetFiles: {},
-      componentFiles: {},
-    }, {
-      mtime: '2026-08-13T00:00:00.000Z',
-    })
-    await writeFile(projectPath, overriddenArchive)
-    await expect(execFileAsync(process.execPath, baseArgs, {
+    const overriddenArchive = createCourseProjectV10Archive({ project, resources })
+    const aliasProjectPath = path.join(caseRoot, 'project', 'authoring-runner-case.h5lesson')
+    await writeFile(aliasProjectPath, overriddenArchive)
+    await expect(execFileAsync(process.execPath, [...baseArgs, '--project', 'project/authoring-runner-case.h5lesson'], {
       cwd: os.tmpdir(),
       encoding: 'utf8',
       timeout: 15_000,

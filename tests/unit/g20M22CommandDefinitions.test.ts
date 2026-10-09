@@ -35,9 +35,9 @@ describe('M22 command definitions', () => {
     expect(object.some(command => command.kind === 'scene-background' || command.kind === 'audio-import')).toBe(false)
   })
 
-  it('keeps unavailable entries disabled with a reason', () => {
+  it('omits text-only entries for non-text and explains unavailable actions', () => {
     const commands = slideLightCommands({ ...state, isText: false, clickBindable: false, stateBackgroundOverride: true })
-    expect(commands.find(command => command.kind === 'font')?.disabledReason).toContain('仅文字')
+    expect(commands.some(command => command.kind === 'font')).toBe(false)
     expect(commands.find(command => command.kind === 'audio-play')?.disabledReason).toContain('点击互动')
     expect(commands.find(command => command.kind === 'scene-background')?.disabledReason).toContain('独立背景')
   })

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { documentDigest } from '../documents/documentDigest'
 import { componentSpatialAuthoringSchema, componentSpatialPoseSchema, owningContainer,
   type ComponentEdit, type ComponentSpatialAuthoring, type ComponentSpatialPose, type CourseProjectV10 } from '../../shared/contracts/component-platform'
 
@@ -178,4 +179,57 @@ export function prepareSpatialSourceEdit(project: CourseProjectV10, surfaceId: s
       else Object.assign(draft, { [kind]: spatial[kind] })
     }
   })
+}
+
+/** The existing path/relation identity is the complete write boundary. */
+export interface SpatialGraphScope { surfaceId: string; graph: 'path' | 'relation'; graphId: string }
+export function spatialGraphItem(project: CourseProjectV10, scope: SpatialGraphScope) {
+  const surface = project.surfaces.find(value => value.id === scope.surfaceId && value.kind === 'spatial')
+  const item = surface?.spatial?.[scope.graph === 'path' ? 'paths' : 'relations']?.find(value => value.id === scope.graphId)
+  if (!item) throw new Error('所选空间图项已不存在')
+  return item
+}
+
+/** Both preparation and final authorization verify the canonical command, including unchanged siblings. */
+export function isSpatialGraphScopedEdit(project: CourseProjectV10, scope: SpatialGraphScope, edit: ComponentEdit): boolean {
+  if (edit.type !== 'spatial.set' || edit.surfaceId !== scope.surfaceId) return false
+  const prior = project.surfaces.find(value => value.id === scope.surfaceId && value.kind === 'spatial')?.spatial
+  const kind = scope.graph === 'path' ? 'paths' : 'relations'
+  const index = prior?.[kind]?.findIndex(value => value.id === scope.graphId) ?? -1
+  if (!prior || index < 0 || edit.spatial[kind]?.[index]?.id !== scope.graphId) return false
+  const restored = structuredClone(edit.spatial)
+  // Restore exactly, so removing an optional field from the selected item remains legal.
+  if (kind === 'paths') restored.paths!.splice(index, 1, structuredClone(prior.paths![index]!))
+  else restored.relations!.splice(index, 1, structuredClone(prior.relations![index]!))
+  return documentDigest(restored) === documentDigest(prior)
+}
+
+/** Read geometry and the actual ancestor chain used by tour/relation endpoints. */
+export function spatialGraphDependencyPaths(project: CourseProjectV10, scope: SpatialGraphScope): string[][] {
+  const item = spatialGraphItem(project, scope), surface = project.surfaces.find(value => value.id === scope.surfaceId)!
+  const ids = 'frameIds' in item ? [...item.instanceIds ?? [], ...surface.spatial!.frames.filter(frame => item.frameIds.includes(frame.id)).flatMap(frame => frame.targetInstanceId ? [frame.targetInstanceId] : [])]
+    : [item.sourceInstanceId, item.targetInstanceId]
+  const paths: string[][] = [['@surface', scope.surfaceId, 'id'], ['@surface', scope.surfaceId, 'kind']]
+  if ('frameIds' in item) surface.spatial!.frames.forEach((frame, index) => {
+    if (item.frameIds.includes(frame.id)) paths.push(['@surface', scope.surfaceId, 'spatial', 'frames', String(index)])
+  })
+  for (const endpoint of new Set(ids)) {
+    let id = endpoint
+    const visited = new Set<string>()
+    while (!visited.has(id)) {
+      visited.add(id); paths.push(['instances', id, 'id'], ['instances', id, 'frame'], ['@owner', id])
+      const owner = owningContainer(project, id)
+      if (owner?.kind !== 'instance') break
+      id = owner.instanceId
+    }
+  }
+  return paths
+}
+
+export function prepareSpatialGraphSourceEdit(project: CourseProjectV10, scope: SpatialGraphScope, source: unknown,
+  observed: SpatialObservedRefs, objectPaths: Readonly<Record<string, string>>, currentViewport?: ComponentSpatialPose): ComponentEdit {
+  spatialGraphItem(project, scope)
+  const edit = prepareSpatialSourceEdit(project, scope.surfaceId, source, observed, objectPaths, currentViewport)
+  if (!isSpatialGraphScopedEdit(project, scope, edit)) throw new Error('只能修改所选空间图项；镜头、首页、其他图项及新增删除不在授权内')
+  return edit
 }

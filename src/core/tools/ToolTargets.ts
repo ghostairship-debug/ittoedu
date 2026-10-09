@@ -19,6 +19,7 @@ import { parseDocumentMarkdown } from '../../shared/document/markdown'
 import { inlineHtml } from '../../shared/document/html'
 import { readHtmlDocumentText, type DocumentHtmlNode } from '../../shared/document/htmlText'
 import { parse, parseFragment, type DefaultTreeAdapterTypes } from 'parse5'
+import { spatialGraphItem, spatialGraphDependencyPaths } from '../course/courseSpatialEdits'
 
 export type CourseInstanceTarget = Extract<ToolTarget, { kind: 'course-instance' }>
 export type HtmlAuthorFieldTarget = Extract<ToolTarget, { kind: 'html-author-field' }>
@@ -472,7 +473,7 @@ export function courseInstanceTextEdit(model: DocumentModel, target: CourseInsta
 export function containsTarget(allowed: ToolTarget, target: ToolTarget, model?: DocumentModel): boolean {
   if (target.kind === 'text-selection') return target.fragments.length > 0 && target.fragments.every(fragment => containsTarget(allowed, fragment.target, model))
   if (allowed.kind === 'text-selection') return allowed.fragments.some(fragment => containsTarget(fragment.target, target, model))
-  const kinds = ['document', 'markdown-range', 'html-author-field', 'course-instance', 'course-surface', 'course-asset']
+  const kinds = ['document', 'markdown-range', 'html-author-field', 'course-instance', 'course-surface', 'course-asset', 'spatial-graph']
   if (!kinds.includes(allowed.kind) || !kinds.includes(target.kind)) return false
   if (allowed.kind === 'document') return true
   if (allowed.kind === 'html-author-field' && target.kind === 'html-author-field')
@@ -480,6 +481,7 @@ export function containsTarget(allowed: ToolTarget, target: ToolTarget, model?: 
       && (allowed.source ? target.source?.from === allowed.source.from && target.source.to === allowed.source.to : !target.source)
       && equalComponentValue({ kind: allowed.record.kind, scope: allowed.record.scope, binding: allowed.record.binding },
         { kind: target.record.kind, scope: target.record.scope, binding: target.record.binding })
+  if (allowed.kind === 'course-surface' && target.kind === 'spatial-graph') return allowed.surfaceId === target.surfaceId && !allowed.stateId
   if (allowed.kind === 'course-surface' && target.kind === 'course-instance' && model?.kind === 'course-v10') {
     const owner = instanceRootOwner(model.project, target.instanceId)
     return allowed.surfaceId === target.surfaceId && owner?.kind === 'surface' && owner.surfaceId === allowed.surfaceId
@@ -523,6 +525,7 @@ export function readTarget(model: DocumentModel, target: ToolTarget): unknown {
     return model.source.slice(target.from, target.to)
   }
   if (model.kind !== 'course-v10') throw new Error('组件目标需要 Project V10 文档')
+  if (target.kind === 'spatial-graph') return spatialGraphItem(model.project, target)
   if (target.kind === 'course-instance') {
     const { instance, value } = courseInstanceContext(model, target)
     if (isCourseInstanceRange(target)) {
@@ -565,6 +568,8 @@ export function targetFootprint(model: DocumentModel, target: ToolTarget): strin
       ...(target.dataPath ? { fieldIdentity: courseInstanceFieldIdentity(model, target) } : {}),
       value: target.dataPath ? context.value : context.instance })
   }
+  if (target.kind === 'spatial-graph' && model.kind === 'course-v10') return documentDigest({
+    graph: readTarget(model, target), dependencies: spatialGraphDependencyPaths(model.project, target).map(path => ({ path, ...componentValueAt(model.project, path) })) })
   return documentDigest(readTarget(model, target))
 }
 
@@ -614,8 +619,12 @@ export function childTargets(model: DocumentModel, target: ToolTarget): { target
     const project = target.stateId ? resolveComponentPresentation(model.project, target.surfaceId, target.stateId) : model.project
     const ids = target.kind === 'course-surface' ? project.surfaces.find(value => value.id === target.surfaceId)!.childIds
       : target.dataPath ? [] : project.instances[target.instanceId].childIds ?? []
-    return ids.map(instanceId => ({ target: { kind: 'course-instance', surfaceId: target.surfaceId, instanceId, stateId: target.stateId ?? null },
-      label: model.project.instances[instanceId].name ?? model.project.definitions[model.project.instances[instanceId].definitionId]?.title ?? '所选对象' }))
+    const graphs = target.kind === 'course-surface' && !target.stateId
+      ? (['paths', 'relations'] as const).flatMap(kind => (project.surfaces.find(value => value.id === target.surfaceId)?.spatial?.[kind] ?? []).map(item => ({
+          target: { kind: 'spatial-graph' as const, surfaceId: target.surfaceId, graph: kind === 'paths' ? 'path' as const : 'relation' as const, graphId: item.id },
+          label: ('title' in item ? item.title : 'label' in item ? item.label : undefined) ?? (kind === 'paths' ? '路径' : '关系') }))) : []
+    return [...graphs, ...ids.map(instanceId => ({ target: { kind: 'course-instance' as const, surfaceId: target.surfaceId, instanceId, stateId: target.stateId ?? null },
+      label: model.project.instances[instanceId].name ?? model.project.definitions[model.project.instances[instanceId].definitionId]?.title ?? '所选对象' }))]
   }
   if (target.kind === 'document') {
     if (isSourceDocumentModel(model)) return [{ target: { kind: 'markdown-range', from: 0, to: model.source.length }, label: '正文' }]

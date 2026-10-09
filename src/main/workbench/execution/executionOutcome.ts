@@ -121,11 +121,12 @@ function sameObservedTarget(failed: ExecutionToolRecord, later: ExecutionToolRec
   if ((failed.call.name !== 'view.observe' && failed.call.name !== 'html.observe') || failed.call.name !== later.call.name
     || later.state !== 'returned' || failedTool(later) || later.result?.kind !== 'read') return false
   const receipt = (tool: ExecutionToolRecord) => tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
-    ? tool.result.data as { identity?: { documentId?: unknown; locationId?: unknown }; image?: { resourceId?: unknown } } : null
+    ? tool.result.data as { identity?: { documentId?: unknown; locationId?: unknown; stateId?: unknown }; image?: { resourceId?: unknown } } : null
   const before = receipt(failed), after = receipt(later)
   if (typeof after?.identity?.documentId !== 'string' || typeof after.image?.resourceId !== 'string') return false
   if (typeof before?.identity?.documentId === 'string') return before.identity.documentId === after.identity.documentId
     && before.identity.locationId === after.identity.locationId
+    && (before.identity.stateId ?? null) === (after.identity.stateId ?? null)
   return !!failed.effectTargets?.length && !!later.effectTargets?.length
     && JSON.stringify(stable(failed.effectTargets)) === JSON.stringify(stable(later.effectTargets))
 }
@@ -145,6 +146,9 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
     if(tool.call.name===USER_QUESTION_TOOL||tool.call.name==='task.note'||tool.call.name==='task.finish') return false
     if(tool.notInvokedReason==='steering')return false
     if(tool.state!=='returned'||unknownToolOutcome(tool))return true
+    // Required visual verification remains unfinished until the same displayed state is observed successfully.
+    if(tool.observationFailure&&(tool.call.name==='view.observe'||tool.call.name==='html.observe')
+      &&!optionalObservationFailure(tool)&&!record.tools.slice(index+1).some(later=>sameObservedTarget(tool,later)))return true
     const pending=pendingJob(tool)
     if(pending){
       const later=record.tools.slice(index+1)

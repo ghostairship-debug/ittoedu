@@ -25,6 +25,7 @@ import {
 } from '../../src/core/drivers/codecs/courseProjectArchive'
 import type { CourseProjectDocument, FlowBlock } from '../../src/shared/courseProjectTypes'
 import { publishedCourseV2Schema } from '../../src/shared/publishedCourseSchema'
+import { decodePublishedCode } from '../../src/player/decodePublishedExecutableCode'
 import { validateCourseProjectArchiveBytes } from '../../scripts/historical/validate-course-project-v9'
 import {
   COURSE_PROJECT_REJECTION_INPUTS,
@@ -497,7 +498,8 @@ describe('r11-050 fixed Course Project V9 IDs', () => {
     ) as CourseProjectDocument
     const published = JSON.parse(
       readFileSync(join(exampleRoot, 'published-v2.json'), 'utf8'),
-    ) as { format: string; formatVersion: number; sourceSchemaVersion: number }
+    ) as unknown
+    const parsedPublished = publishedCourseV2Schema.parse(published)
     const html = readFileSync(join(exampleRoot, 'render-host-benchmark-v2.html'), 'utf8')
     const lesson = new Uint8Array(readFileSync(join(exampleRoot, 'render-host-benchmark-v9.h5lesson')))
 
@@ -512,7 +514,34 @@ describe('r11-050 fixed Course Project V9 IDs', () => {
       sourceSchemaVersion: 9,
     })
     expect(html).toContain('h5course-published')
-    expect(html).toContain('CoursewareRuntime.define')
+    // Executable sources belong to the encoded payload, independently of which
+    // Player bundle currently generates the historical standalone HTML.
+    const serialized = html.match(/<script>window\.__H5_COURSE_PAYLOAD__=([\s\S]*?);<\/script>/)?.[1]
+    expect(serialized).toBeDefined()
+    const embedded = publishedCourseV2Schema.parse(JSON.parse(serialized!))
+    const runtimes = embedded.surfaces.flatMap(surface => surface.type === 'slide'
+      ? surface.scenes.flatMap(scene => scene.layerItems).filter(item => item.kind === 'runtime') : [])
+    const publishedRuntimes = parsedPublished.surfaces.flatMap(surface => surface.type === 'slide'
+      ? surface.scenes.flatMap(scene => scene.layerItems).filter(item => item.kind === 'runtime') : [])
+    expect(runtimes).toEqual(publishedRuntimes)
+    expect(runtimes.map(item => [item.layerItemId, item.runtime.protocol, item.runtime.runtimeApiVersion, item.runtime.renderMode])).toEqual([
+      ['phaser_runtime_instance_v9', 'canvas-runtime', 2, 'phaser'],
+      ['three_runtime_instance_v9', 'canvas-runtime', 2, 'dom'],
+    ])
+    const lessonFiles = unzipSync(lesson)
+    for (const item of runtimes) {
+      const source = decodePublishedCode(item.runtime.code)
+      expect(source).toContain('CoursewareRuntime.define')
+      const original = project.surfaces.flatMap(surface => surface.type === 'slide' ? surface.scenes.flatMap(scene => scene.layerItems) : [])
+        .find(layer => layer.layerItemId === item.layerItemId)
+      if (original?.kind !== 'runtime') throw new Error(`Missing original runtime ${item.layerItemId}`)
+      expect(source).toBe(original.runtime.source)
+      expect(item.runtime.staticFallback).toEqual(original.runtime.staticFallback)
+      const assetId = item.runtime.staticFallback!.assetId, asset = project.assets[assetId]
+      expect(lessonFiles[asset.path]).toBeDefined()
+      expect(embedded.assets[assetId]).toEqual({ mimeType: asset.mimeType,
+        url: `data:${asset.mimeType};base64,${Buffer.from(lessonFiles[asset.path]).toString('base64')}` })
+    }
     expect(html).toContain('staticFallback')
     expect(JSON.stringify(project)).toContain('CoursewareRuntime.define')
     expect(JSON.stringify(project)).toContain('staticFallback')

@@ -73,7 +73,7 @@ describe('mounted canonical editors with volatile generation projection', () => 
     expect(layout.view.dom.querySelector('[data-edit-preview]')?.getAttribute('contenteditable')).toBe('false')
     await act(async () => { expect(await handle.current!.flush()).toBe(true) })
     expect(disk.source).toBe('第一段 OLD。\n\n第二段\n'); expect(canonical.read().undoDepth).toBe(0)
-    fireEvent.click(screen.getByRole('button', { name: /^源文$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^源码$/ }))
     const source = SourceView.findFromDOM(screen.getByLabelText('正文源文编辑'))!
     expect(source.state.doc.toString()).toBe(disk.source)
     await waitFor(() => expect(source.dom.querySelector('[data-edit-preview]')?.textContent).toBe('新的😀正文'))
@@ -120,11 +120,11 @@ describe('mounted canonical editors with volatile generation projection', () => 
     expect(factory.mock.calls).toHaveLength(1); expect(editor.view).toBe(originalView)
     expect(editor.view.state.doc.textContent).toBe('甲😀乙丙另一段人工更新')
     expect(handle.current!.flush().source).not.toContain('继续生成')
-    fireEvent.click(screen.getByRole('button', { name: /^源文$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^源码$/ }))
     const source = SourceView.findFromDOM(screen.getByLabelText('正文源文编辑'))!
     expect(source.state.doc.toString()).toBe(serializeDocumentMarkdown(next, 'flow'))
     expect(source.dom.querySelector('[data-edit-preview]')?.textContent).toBe('继续生成')
-    fireEvent.click(screen.getByRole('button', { name: /^撤销$/ }))
+    fireEvent.keyDown(source.contentDOM, { key: 'z', ctrlKey: true })
     expect(cancel).toHaveBeenCalledTimes(1); expect(onUndo).not.toHaveBeenCalled()
   })
 })

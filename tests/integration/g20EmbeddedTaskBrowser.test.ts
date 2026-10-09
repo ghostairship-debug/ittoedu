@@ -127,13 +127,15 @@ it('embeds the actual automated task page and resumes after human login without 
     expect(artifact).toBe('same-session protected lesson')
     const screenshot = await invoke('screenshot', 'browser_take_screenshot')
     expect(screenshot.status).toBe('returned')
-    const hidden = await application.evaluate(() => {
+    const hidden = await application.evaluate(({ BaseWindow }) => {
       const { service, window } = (globalThis as any).embeddedBrowserFixture
-      service.viewport('task', { visible: false })
       const view = window.contentView.children.find((view: any) => view.webContents && view.webContents.id !== window.webContents.id)
-      return { id: view.webContents.id, visible: view.getVisible(), url: view.webContents.getURL() }
+      const viewport = service.viewport('task', { visible: false })
+      const carrier = BaseWindow.getAllWindows().find((candidate: any) => candidate.contentView.children.includes(view))
+      return { id: view.webContents.id, visible: viewport.visible, carrierVisible: carrier?.isVisible(),
+        detachedFromWorkbench: !window.contentView.children.includes(view), destroyed: view.webContents.isDestroyed(), url: view.webContents.getURL() }
     })
-    expect(hidden).toEqual({ id: viewIdentity.id, visible: false, url: `${origin}/protected` })
+    expect(hidden).toEqual({ id: viewIdentity.id, visible: false, carrierVisible: false, detachedFromWorkbench: true, destroyed: false, url: `${origin}/protected` })
     expect(JSON.stringify(results)).not.toContain(cookie)
     expect(JSON.stringify(results)).not.toContain(password)
     const waiting = invoke('stop-long-wait', 'browser_wait_for', { time: 30 })

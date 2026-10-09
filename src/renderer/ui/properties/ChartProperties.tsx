@@ -221,17 +221,17 @@ export function ChartProperties({
   const blurPendingRef = useRef(false)
   const baselineRef = useRef(draftSignature(node))
   const signatureRef = useRef(draftSignature(node))
-  const preparedCanvasSignature = useRef<string | null>(null)
+  const preparedCanvasCommit = useRef<{ signature: string; raw: string; nodeId: string; bindingKey: string } | null>(null)
   const pendingApply = useRef<Promise<string | null> | null>(null)
   const nodeRef = useRef(node); nodeRef.current = node
 
   const commitCandidate = (candidate: ChartCandidateData): string | null | Promise<string | null> => {
     if (pendingApply.current) return pendingApply.current
-    const raw = JSON.stringify(draftRef.current), target = targetRef.current
+    const raw = JSON.stringify(draftRef.current), target = targetRef.current, nodeId = nodeRef.current.id
     const finish = (reason: string | null) => {
       if (targetRef.current !== target) return reason
-      if (reason) { preparedCanvasSignature.current = null; setApplyError(reason); return reason }
-      preparedCanvasSignature.current = tableValueSignature(candidate)
+      if (reason) { preparedCanvasCommit.current = null; setApplyError(reason); return reason }
+      preparedCanvasCommit.current = { signature: tableValueSignature(candidate), raw, nodeId, bindingKey: target }
       const acknowledged = validateDraft(draftFromView(nodeRef.current), chartType).candidate
       if (acknowledged && tableValueSignature(acknowledged) === tableValueSignature(candidate)) baselineRef.current = draftSignature(nodeRef.current)
       if (JSON.stringify(draftRef.current) === raw && !composingRef.current && !resumeRequired.current) {
@@ -266,11 +266,14 @@ export function ChartProperties({
     if (signatureRef.current === signature) return
     signatureRef.current = signature
     const canonical = validateDraft(draftFromView(node), chartType).candidate
-    if (!pendingApply.current && canonical && preparedCanvasSignature.current === tableValueSignature(canonical)) {
-      preparedCanvasSignature.current = null
+    const prepared = preparedCanvasCommit.current
+    if (!pendingApply.current && canonical && prepared?.bindingKey === bindingKey && prepared.nodeId === node.id
+      && prepared.signature === tableValueSignature(canonical)) {
+      preparedCanvasCommit.current = null
       baselineRef.current = signature
-      const current = validateDraft(draftRef.current, chartType).candidate
-      if (current && tableValueSignature(current) === tableValueSignature(canonical)) {
+      // prepare captures the canvas label without changing the inspector draft.
+      // Its matching canonical save acknowledges only that captured raw draft.
+      if (JSON.stringify(draftRef.current) === prepared.raw && !composingRef.current && !resumeRequired.current) {
         dirtyRef.current = false
         setDirty(false)
       }
@@ -278,16 +281,16 @@ export function ChartProperties({
     }
     if (!dirtyRef.current) setDraft(draftFromView(node))
   })
-  // Reset the local draft only when the target node changes. The binding key
-  // embeds the session revision, and every chart command bumps it; resetting
-  // on revision would wipe an in-progress draft after unrelated style commits.
+  // The binding key identifies the document, surface, state and selection;
+  // canonical revisions keep it stable. Retain unfinished input when its
+  // owner changes until the user applies or discards that captured draft.
   useEffect(() => {
     if (dirtyRef.current) return
     dirtyRef.current = false
     setDirty(false)
     setApplyError(null)
     setPendingType(null)
-    preparedCanvasSignature.current = null
+    preparedCanvasCommit.current = null
     signatureRef.current = draftSignature(node)
     setDraft(draftFromView(node))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -309,7 +312,8 @@ export function ChartProperties({
         categories: draft.categories.map(entry => kind === 'category' && entry.id === id ? { ...entry, label: value } : entry),
         series: draft.series.map(entry => kind === 'series' && entry.id === id ? { ...entry, name: value } : entry),
       }, chartType)
-      preparedCanvasSignature.current = validated.candidate ? tableValueSignature(validated.candidate) : null
+      preparedCanvasCommit.current = validated.candidate ? { signature: tableValueSignature(validated.candidate),
+        raw: JSON.stringify(draftRef.current), nodeId: node.id, bindingKey } : null
       return { candidate: validated.candidate, error: validated.candidate ? null : '数据草稿含有未完成或无效的内容，请在属性栏修正后应用。' }
     },
     read: (kind, id) => kind === 'category'

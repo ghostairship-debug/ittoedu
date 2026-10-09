@@ -37,11 +37,16 @@ describe('M27 run-attached WorkingNote', () => {
     expect(record.input.permission).toBe('workspace')
   })
 
-  it('rejects stale checkpoints, stopped runs, fabricated provenance and oversized notes', () => {
+  it('rejects stale checkpoints, stopped runs and oversized notes while diagnosing unverified citations', () => {
     const record = run()
     expect(() => prepareTaskNote(record, { remaining: ['继续'] }, 6)).toThrow(/检查点已变化/)
-    expect(() => prepareTaskNote(record, { decisions: [{ text: '已完成', sourceRefs: ['tool:missing'] }] }, 7)).toThrow(/来源引用未由宿主确认/)
-    expect(() => prepareTaskNote(record, { decisions: [{ text: '已完成', sourceRefs: ['D:/other/file'] }] }, 7)).toThrow(/来源引用未由宿主确认/)
+    const before = structuredClone(record)
+    for (const reference of ['tool:missing', 'D:/other/file']) {
+      const prepared = prepareTaskNote(record, { decisions: [{ text: '待确认内容', sourceRefs: [reference] }] }, 7)
+      expect(prepared.note.decisions).toEqual([{ text: '待确认内容', sourceRefs: [] }])
+      expect(prepared.result).toMatchObject({ kind: 'read', data: { diagnostics: [expect.stringContaining(reference)], authority: 'advisory-run-note' } })
+      expect(record).toEqual(before)
+    }
     expect(() => prepareTaskNote(record, { remaining: Array.from({ length: 24 }, () => '中'.repeat(600)) }, 7)).toThrow(/16 KiB/)
     record.status = 'stopping'
     expect(() => prepareTaskNote(record, { remaining: [] }, 7)).toThrow(/运行中的任务/)
@@ -80,8 +85,10 @@ describe('M27 run-attached WorkingNote', () => {
     current.workingNote = continuedWorkingNote(old, current.input)
     expect(prepareTaskNote(current, { remaining: ['保存重开'] }, current.version).note.decisions)
       .toEqual(old.workingNote.decisions)
-    expect(() => prepareTaskNote(current, { decisions: [{ text: '新来源', sourceRefs: ['tool:ancestor-read'] }] }, current.version))
-      .toThrow(/来源引用未由宿主确认/)
+    const prepared = prepareTaskNote(current, { decisions: [{ text: '新来源', sourceRefs: ['tool:ancestor-read'] }] }, current.version)
+    expect(prepared.note.decisions).toEqual([{ text: '新来源', sourceRefs: [] }])
+    expect(prepared.result).toMatchObject({ kind: 'read', data: { diagnostics: [expect.stringContaining('tool:ancestor-read')] } })
+    expect(current.workingNote.decisions).toEqual(old.workingNote.decisions)
     expect(() => continuedWorkingNote(old, { ...current.input, instruction: '另一项任务' })).toThrow(/同一会话的原任务/)
   })
 })

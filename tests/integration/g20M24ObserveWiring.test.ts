@@ -1,11 +1,10 @@
 // @vitest-environment node
 import { createServer } from 'node:http'
-import { readFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
@@ -39,7 +38,7 @@ describe('M24 view.observe shared Gateway and model transport', () => {
     const root = await mkdtemp(path.join(tmpdir(), 'g20-view-wiring-'))
     cleanups.push(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }))
     const host = new DocumentHostService(path.join(root, 'documents'))
-    const model = new CourseV9Driver().load(new Uint8Array(readFileSync('tests/fixtures/course-project-v9/slide-native.h5lesson')))
+    const model = { kind: 'course-v10' as const, project: createBlankCourseProjectV10('观察课件'), resources: { assets: {}, components: {} } }
     const created = await host.internalAPI.create(model, 'course.h5lesson')
     const before = await host.internalAPI.read(created.documentId)
     let captures = 0
@@ -83,9 +82,11 @@ describe('M24 view.observe shared Gateway and model transport', () => {
     expect(captures).toBe(1)
     expect(requests).toHaveLength(2)
     const second = requests[1].messages
-    expect(second.slice(-3).map((item: any) => item.role)).toEqual(['assistant', 'tool', 'user'])
-    expect(second.at(-1).content[0].text).toContain('locationId=')
-    expect(second.at(-1).content[1].image_url.url).toBe(`data:image/png;base64,${Buffer.from(png).toString('base64')}`)
+    const toolIndex = second.findIndex((item: any) => item.role === 'tool' && item.tool_call_id === 'observe-call')
+    expect(toolIndex).toBeGreaterThan(0)
+    expect(second.slice(toolIndex - 1, toolIndex + 2).map((item: any) => item.role)).toEqual(['assistant', 'tool', 'user'])
+    expect(second[toolIndex + 1].content[0].text).toContain('locationId=')
+    expect(second[toolIndex + 1].content[1].image_url.url).toBe(`data:image/png;base64,${Buffer.from(png).toString('base64')}`)
     const after = await host.internalAPI.read(created.documentId)
     expect(after.revision).toBe(before.revision)
     expect(after.undoDepth).toBe(before.undoDepth)

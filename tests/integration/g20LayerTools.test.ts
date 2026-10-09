@@ -1,98 +1,128 @@
 // @vitest-environment node
-import { readFileSync } from 'node:fs'
 import { expect, it } from 'vitest'
+import { randomUUID } from 'node:crypto'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
-import { createShapeNode, createImageNode, createTableNode, createChartNode, createTableLayerItem, createChartLayerItem } from '../../src/core/tools/nativeNodeFactories'
-import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
-import { allocateCourseLayerOrder, sortAllCourseLayerLists } from '../../src/core/tools/layerOrder'
-import { composeSlideInteraction } from '../../src/core/tools/interactionCompose'
-import { locateCourseLayer } from '../../src/core/drivers/course/layerProperties'
-import type { DocumentModel, DocumentSnapshot } from '../../src/shared/workbench/document'
-import type { ToolTarget, ToolResult } from '../../src/shared/workbench/tools'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { createImageData } from '../../src/components/image/data'
+import { createTableData, parseTableData } from '../../src/components/table/data'
+import { createChartData } from '../../src/components/chart/data'
+import type { DocumentSnapshot } from '../../src/shared/workbench/document'
+import type { ToolResult } from '../../src/shared/workbench/tools'
 
-const driver = new CourseV9Driver()
-function fixture() {
-  const model = driver.load(new Uint8Array(readFileSync('tests/fixtures/course-project-v9/slide-native.h5lesson'))) as Extract<DocumentModel, { kind: 'course-v9' }>
-  const surface = model.project.surfaces.find(surface => surface.type === 'slide')!
-  if (surface.type !== 'slide') throw new Error('slide')
-  const scene = surface.scenes[0], location = model.project.locations.find(location => location.kind === 'slide-scene' && location.sceneId === scene.id)!
-  const assetId = Object.keys(model.resources.assets)[0]
-  for (const node of [createShapeNode('rectangle', { id: 'shape-a', x: 20, y: 30, width: 100, height: 60 }), createShapeNode('rectangle', { id: 'shape-b', x: 230, y: 110, width: 80, height: 70 }), createShapeNode('rectangle', { id: 'shape-c', x: 650, y: 230, width: 120, height: 90 }), createImageNode({ id: 'picture', assetId }), createTableNode({ id: 'table' }), createChartNode({ id: 'chart' })]) {
-    const item = node.type === 'table' ? createTableLayerItem(node) : node.type === 'chart' ? createChartLayerItem(node) : sceneNodeToCourseLayerItem(node); item.order = allocateCourseLayerOrder(model.project, 0); scene.layerItems.push(item)
-  }
-  for (const [id, plane] of [['global-back', 'underlay'], ['global-front', 'overlay']] as const) {
-    const item = sceneNodeToCourseLayerItem(createShapeNode('rectangle', { id, x: 10, y: 10 })); item.order = allocateCourseLayerOrder(model.project, 0)
-    model.project.globalLayerItems.push({ item, plane, visibility: { mode: 'all', locationIds: [] } })
-  }
-  sortAllCourseLayerLists(model.project)
-  return { model, scene, location, surface }
-}
+const driver = new CourseV10Driver()
 async function harness(localOnly = false) {
-  const f = fixture(); let id = 0
-  const registry = new DocumentRegistry({ drivers: [driver], createId: () => `doc-${++id}`, bindingKey: binding => binding.path, persistence: { async append() {}, async save() { throw new Error('not requested') } } })
-  const session = await registry.create(f.model, 'layers.h5lesson'), gateway = new DocumentToolGateway(registry, [driver], () => String(++id))
-  const owner: ToolTarget = { kind: 'course-owner', locationId: f.location.id, owner: 'scene' }
-  await gateway.beginRun({ runId: 'r', actor: 'agent', documents: [{ documentId: session.documentId, writable: [localOnly ? owner : { kind: 'document' }] }] })
-  return { ...f, registry, session, gateway, object: (itemId: string) => gateway.issueTarget('r', session.documentId, { kind: 'course-object', locationId: f.location.id, itemId }), owner: (scope: 'scene' | 'global' = 'scene') => gateway.issueTarget('r', session.documentId, { kind: 'course-owner', locationId: f.location.id, owner: scope }), invoke: (callId: string, name: string, input: unknown) => gateway.execute('r', callId, { name, input }) }
-}
-function applied(result: ToolResult) { expect(result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } }); if (result.kind !== 'document-operation') throw new Error(JSON.stringify(result)); return result }
-function project(snapshot: DocumentSnapshot) { if (snapshot.model.kind !== 'course-v9') throw new Error('course'); return snapshot.model.project }
-async function undo(f: Awaited<ReturnType<typeof harness>>, id: string) { const before = f.session.read(); await f.session.execute({ documentId: before.documentId, epoch: before.epoch, operationId: id, actor: 'human', baseRevision: before.revision, mutation: { type: 'undo' } }) }
-
-it('duplicates real Native images/table/chart with independent identities, preserved resources, reopen and a single undo under local owner authority', async () => {
-  const f = await harness(true), owner = await f.owner(), before = f.session.read()
-  const sourceIds = ['picture', 'table', 'chart'], sources = await Promise.all(sourceIds.map(f.object))
-  const result = applied(await f.invoke('copies', 'batch', { operations: sources.map(target => ({ name: 'layer.duplicate', input: { target, owner, placement: { side: 'right', gap: 12 } } })) }))
-  const after = f.session.read(); expect(after.undoDepth).toBe(1); expect(after.model.resources).toEqual(before.model.resources)
-  expect(driver.load(driver.serialize(after.model))).toEqual(after.model)
-  for (let index = 0; index < result.affected.length; index++) {
-    const target = (await f.gateway.resolveEditTarget('r', result.affected[index])).target
-    if (target.kind !== 'course-object') throw new Error('object')
-    expect(target.itemId).not.toBe(sourceIds[index])
-    const original = locateCourseLayer(project(before), sourceIds[index])!.item, copied = locateCourseLayer(project(after), target.itemId)!.item
-    expect(copied.frame.x).toBe(original.frame.x + original.frame.width + 12)
-    if (original.kind === 'native' && copied.kind === 'native' && original.content.nativeType === 'table' && copied.content.nativeType === 'table') {
-      expect(copied.content.data.rows.map(row => row.id).some(id => original.content.nativeType === 'table' && original.content.data.rows.some(row => row.id === id))).toBe(false)
-      expect(copied.content.data.columns.map(column => column.id).some(id => original.content.nativeType === 'table' && original.content.data.columns.some(column => column.id === id))).toBe(false)
-    }
-    if (original.kind === 'native' && copied.kind === 'native' && original.content.nativeType === 'chart' && copied.content.nativeType === 'chart') expect(copied.content.data.series[0].id).not.toBe(original.content.data.series[0].id)
+  const project = createBlankCourseProjectV10('Layers'), surfaceId = project.surfaces[0].id
+  for (const key of ['shape', 'image', 'table', 'chart']) project.definitions[key] = { id: key, role: 'content', implementation: { kind: 'builtin', key: `guoling.${key}` } }
+  const frame = (x: number, y: number, width = 100, height = 60) => ({ width, height, transform: [1, 0, 0, 1, x, y] as [number, number, number, number, number, number] })
+  const { defaultShapeData } = await import('../../src/components/shape/data')
+  for (const [id, x, y, width, height] of [['shape-a', 20, 30, 100, 60], ['shape-b', 230, 110, 80, 70], ['shape-c', 650, 230, 120, 90]] as const)
+    project.instances[id] = { id, definitionId: 'shape', data: defaultShapeData(), frame: frame(x, y, width, height) }
+  const bytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>')
+  project.assets.image = { id: 'image', path: 'assets/image.svg', mimeType: 'image/svg+xml', byteLength: bytes.length }
+  project.instances.picture = { id: 'picture', definitionId: 'image', data: createImageData('image'), frame: frame(50, 70) }
+  project.instances.table = { id: 'table', definitionId: 'table', data: createTableData() as never, frame: frame(200, 70) }
+  project.instances.chart = { id: 'chart', definitionId: 'chart', data: createChartData() as never, frame: frame(400, 70) }
+  project.surfaces[0].childIds = ['shape-a', 'shape-b', 'shape-c', 'picture', 'table', 'chart']
+  for (const [id, plane] of [['global-back', 'underlay'], ['global-front', 'overlay']] as const) {
+    project.instances[id] = { id, definitionId: 'shape', data: defaultShapeData(), frame: frame(10, 10) }
+    project.global[plane].push(id)
   }
-  const global = await f.object('global-front')
-  expect(await f.invoke('scope-escape', 'layer.delete', { target: global })).toMatchObject({ kind: 'error', code: 'not-authorized' })
-  await undo(f, 'undo-copies'); expect(project(f.session.read()).surfaces).toEqual(project(before).surfaces); expect(f.session.read().model.resources).toEqual(before.model.resources)
-})
+  const registry = new DocumentRegistry({ drivers: [driver], createId: randomUUID, bindingKey: binding => binding.path,
+    persistence: { async append() {}, async save() { throw new Error('No physical save requested') } } })
+  const session = await registry.create({ kind: 'course-v10', project, resources: { assets: { image: bytes }, components: {} } }, 'layers.glx')
+  const gateway = new DocumentToolGateway(registry, [driver], randomUUID)
+  await gateway.beginRun({ runId: 'r', actor: 'agent', documents: [{ documentId: session.documentId, writable: [localOnly ? { kind: 'course-surface', surfaceId } : { kind: 'document' }] }] })
+  return { project, surfaceId, session, gateway,
+    object: (instanceId: string) => gateway.issueTarget('r', session.documentId, { kind: 'course-instance', surfaceId, instanceId }),
+    page: () => gateway.issueTarget('r', session.documentId, { kind: 'course-surface', surfaceId }),
+    invoke: (callId: string, name: string, input: unknown) => gateway.execute('r', callId, { name, input }) }
+}
+function applied(result: ToolResult) {
+  expect(result, JSON.stringify(result)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  if (result.kind !== 'document-operation') throw new Error(JSON.stringify(result))
+  return result
+}
+function project(snapshot: DocumentSnapshot) { if (snapshot.model.kind !== 'course-v10') throw new Error('Expected V10'); return snapshot.model.project }
+async function undo(f: Awaited<ReturnType<typeof harness>>, operationId: string) {
+  const before = f.session.read()
+  expect(await f.session.execute({ documentId: before.documentId, epoch: before.epoch, operationId, actor: 'human', baseRevision: before.revision, mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
+}
 
-it('deletes referenced Native objects atomically, cleans rules, retains archive assets and restores references on undo', async () => {
-  const f = await harness(), state = f.session.read(), next = structuredClone(project(state))
-  const surface = next.surfaces.find(surface => surface.id === f.surface.id)!
-  if (surface.type !== 'slide') throw new Error('slide')
-  const scene = surface.scenes[0]
-  scene.interactions.push(composeSlideInteraction(next, { locationId: f.location.id, surfaceId: f.surface.id }, scene, 'click-picture', { operation: 'compose', trigger: { kind: 'click', node: 'picture' }, effects: [{ kind: 'next-scene' }] }))
-  await f.session.execute({ documentId: state.documentId, epoch: state.epoch, operationId: 'seed-rule', actor: 'human', baseRevision: state.revision, mutation: { type: 'command', command: { type: 'course.replace', project: next } } })
-  const before = f.session.read(), picture = await f.object('picture'), shape = await f.object('shape-a')
-  applied(await f.invoke('delete', 'batch', { operations: [{ name: 'layer.delete', input: { target: picture } }, { name: 'layer.delete', input: { target: shape } }] }))
-  const after = f.session.read(); expect(after.undoDepth).toBe(before.undoDepth + 1)
-  expect(locateCourseLayer(project(after), 'picture')).toBeNull(); expect(locateCourseLayer(project(after), 'shape-a')).toBeNull()
-  expect(JSON.stringify(project(after))).not.toContain('click-picture'); expect(after.model.resources).toEqual(before.model.resources)
-  expect(project(after).globalLayerItems).toEqual(project(before).globalLayerItems)
+it('duplicates professional image/table/chart with independent identities, preserved resources, reopen and one undo under page authority', async () => {
+  const f = await harness(true), before = f.session.read(), sourceIds = ['picture', 'table', 'chart']
+  const result = applied(await f.invoke('copies', 'batch', { operations: await Promise.all(sourceIds.map(async id => ({ name: 'object.structure', input: { target: await f.object(id), action: 'duplicate' } }))) }))
+  const after = f.session.read()
+  expect(after.undoDepth).toBe(1); expect(after.model.resources).toEqual(before.model.resources)
   expect(driver.load(driver.serialize(after.model))).toEqual(after.model)
-  await undo(f, 'undo-delete'); expect(project(f.session.read()).surfaces).toEqual(project(before).surfaces)
+  expect(result.affected).toHaveLength(3)
+  for (let index = 0; index < result.affected.length; index++) {
+    const original = project(before).instances[sourceIds[index]]
+    const copied = Object.values(project(after).instances).find(instance => !project(before).instances[instance.id] && instance.definitionId === original.definitionId)!
+    expect(copied).toBeDefined()
+    expect(copied.id).not.toBe(sourceIds[index])
+    expect(copied.frame).toEqual({ ...original.frame, transform: [1, 0, 0, 1, original.frame!.transform[4] + 20, original.frame!.transform[5] + 20] })
+    expect(copied.data).toEqual(original.data)
+  }
+  const copies = Object.values(project(after).instances).filter(instance => !project(before).instances[instance.id])
+  const tableCopy = copies.find(instance => instance.definitionId === 'table')!, chartCopy = copies.find(instance => instance.definitionId === 'chart')!
+  const cellId = parseTableData(tableCopy.data).rows[0].cells[0].id
+  applied(await f.invoke('edit-copies', 'batch', { operations: [
+    { name: 'object.author', input: { target: await f.object(tableCopy.id), change: { kind: 'table', edit: { kind: 'cell-text', cellId, text: 'Copy only' } } } },
+    { name: 'object.author', input: { target: await f.object(chartCopy.id), change: { kind: 'chart', edit: { type: 'title', value: 'Copy chart only' } } } },
+  ] }))
+  expect(parseTableData(project(f.session.read()).instances[tableCopy.id].data).rows[0].cells[0].text).toBe('Copy only')
+  expect(project(f.session.read()).instances[chartCopy.id].data).toMatchObject({ title: 'Copy chart only' })
+  expect(project(f.session.read()).instances.table.data).toEqual(project(before).instances.table.data)
+  expect(project(f.session.read()).instances.chart.data).toEqual(project(before).instances.chart.data)
+  await undo(f, 'undo-copy-edits')
+  expect(project(f.session.read()).instances).toEqual(project(after).instances)
+  expect(await f.invoke('scope-escape', 'object.structure', { target: await f.object('global-front'), action: 'remove' })).toMatchObject({ kind: 'error', code: 'not-authorized' })
+  await undo(f, 'undo-copies')
+  expect(project(f.session.read()).instances).toEqual(project(before).instances)
+  expect(project(f.session.read()).surfaces).toEqual(project(before).surfaces)
+  expect(f.session.read().model.resources).toEqual(before.model.resources)
 })
 
-it('aligns and distributes unmounted layers through shared geometry while rejecting cross-owner/plane reorder and partial batches', async () => {
-  const f = await harness(), owner = await f.owner(), globalOwner = await f.owner('global'), ids = ['shape-a', 'shape-b', 'shape-c'], handles = await Promise.all(ids.map(f.object))
-  const global = await f.object('global-front'), underlay = await f.object('global-back'), baseline = f.session.read()
-  expect(await f.invoke('plane', 'layer.reorder', { target: global, owner: globalOwner, position: { kind: 'before', sibling: underlay } })).toMatchObject({ kind: 'error' })
-  expect(await f.invoke('owner', 'layer.duplicate', { target: handles[0], owner: globalOwner, placement: { side: 'right', gap: 4 } })).toMatchObject({ kind: 'error' })
-  expect(await f.invoke('atomic-invalid', 'batch', { operations: [{ name: 'layer.delete', input: { target: handles[0] } }, { name: 'layer.align', input: { target: handles[1], targets: [handles[1], global], mode: 'top' } }] })).toMatchObject({ kind: 'error' })
+it('deletes referenced objects atomically, cleans rules, retains archive assets and restores references on undo', async () => {
+  const f = await harness()
+  applied(await f.invoke('seed-rule', 'interaction.update', { target: await f.page(), change: { kind: 'add', rule: {
+    name: 'click-picture', enabled: true, trigger: { type: 'node.click', nodeId: 'picture' }, conditions: [],
+    actions: [{ start: 'after-previous', delayMs: 0, action: { type: 'node.exit', nodeId: 'shape-a', effect: 'none', durationMs: 0, easing: 'linear' } }],
+  } } }))
+  const before = f.session.read()
+  applied(await f.invoke('delete', 'batch', { operations: await Promise.all(['picture', 'shape-a'].map(async id => ({ name: 'object.structure', input: { target: await f.object(id), action: 'remove' } }))) }))
+  const after = f.session.read()
+  expect(after.undoDepth).toBe(before.undoDepth + 1)
+  expect(project(after).instances.picture).toBeUndefined(); expect(project(after).instances['shape-a']).toBeUndefined()
+  expect(JSON.stringify(project(after))).not.toContain('click-picture')
+  expect(project(after).assets).toEqual(project(before).assets); expect(after.model.resources).toEqual(before.model.resources)
+  expect(project(after).global).toEqual(project(before).global)
+  expect(driver.load(driver.serialize(after.model))).toEqual(after.model)
+  await undo(f, 'undo-delete')
+  expect(project(f.session.read()).instances).toEqual(project(before).instances)
+  expect(project(f.session.read()).surfaces).toEqual(project(before).surfaces)
+})
+
+it('aligns and distributes unmounted objects while rejecting cross-owner moves and partial batches', async () => {
+  const f = await harness(), ids = ['shape-a', 'shape-b', 'shape-c'], handles = await Promise.all(ids.map(f.object)), global = await f.object('global-front'), baseline = f.session.read()
+  expect(await f.invoke('plane', 'object.structure', { target: global, action: 'move', destination: await f.page() })).toMatchObject({ kind: 'error' })
+  expect(await f.invoke('atomic-invalid', 'batch', { operations: [
+    { name: 'object.structure', input: { target: handles[0], action: 'remove' } },
+    { name: 'object.layout', input: { targets: [handles[1], global], intent: { kind: 'align', alignment: 'top' } } },
+  ] })).toMatchObject({ kind: 'error' })
   expect(f.session.read()).toEqual(baseline)
-  applied(await f.invoke('layout', 'batch', { operations: [{ name: 'layer.align', input: { target: handles[0], targets: handles, mode: 'top' } }, { name: 'layer.distribute', input: { target: handles[0], targets: handles, axis: 'horizontal' } }, { name: 'layer.reorder', input: { target: handles[0], owner, position: { kind: 'front' } } }] }))
-  const after = f.session.read(), items = ids.map(id => locateCourseLayer(project(after), id)!.item)
-  expect(new Set(items.map(item => item.frame.y)).size).toBe(1)
-  expect(items[1].frame.x - items[0].frame.x - items[0].frame.width).toBe(items[2].frame.x - items[1].frame.x - items[1].frame.width)
-  expect(project(after).globalLayerItems).toEqual(project(baseline).globalLayerItems)
+  applied(await f.invoke('layout', 'batch', { operations: [
+    { name: 'object.layout', input: { targets: handles, intent: { kind: 'align', alignment: 'top' } } },
+    { name: 'object.layout', input: { targets: handles, intent: { kind: 'distribute', axis: 'horizontal' } } },
+    { name: 'object.structure', input: { target: handles[0], action: 'reorder', direction: 'front' } },
+  ] }))
+  const after = f.session.read(), frames = ids.map(id => project(after).instances[id].frame!)
+  expect(new Set(frames.map(frame => frame.transform[5])).size).toBe(1)
+  expect(frames[1].transform[4] - frames[0].transform[4] - frames[0].width).toBe(frames[2].transform[4] - frames[1].transform[4] - frames[1].width)
+  expect(project(after).global).toEqual(project(baseline).global)
+  expect(project(after).instances['global-front']).toEqual(project(baseline).instances['global-front'])
   expect(after.undoDepth).toBe(1); expect(driver.load(driver.serialize(after.model))).toEqual(after.model)
-  await undo(f, 'undo-layout'); expect(project(f.session.read()).surfaces).toEqual(project(baseline).surfaces)
+  await undo(f, 'undo-layout'); expect(project(f.session.read()).instances).toEqual(project(baseline).instances)
 })

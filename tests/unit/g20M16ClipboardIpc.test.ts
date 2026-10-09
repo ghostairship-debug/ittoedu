@@ -12,16 +12,17 @@ vi.mock('electron', () => ({
   ipcMain: {
     removeHandler: (channel: string) => state.handlers.delete(channel),
     handle: (channel: string, handler: (event: unknown, ...args: unknown[]) => Promise<unknown>) => state.handlers.set(channel, handler),
-    on: vi.fn(), removeAllListeners: vi.fn(),
+    on: vi.fn(), removeListener: vi.fn(), removeAllListeners: vi.fn(),
   },
 }))
 vi.mock('../../src/main/workbench/workbenchToolServices', () => ({ installWorkbenchToolServices: state.install,
-  disposeWorkbenchExportPort: vi.fn(), acceptWorkbenchExportBuildReply: vi.fn(), workbenchImageService: vi.fn(), workbenchImageSelection: vi.fn() }))
+  setWorkbenchHtmlPreview: vi.fn(), releaseWorkbenchHtmlDocument: vi.fn(), disposeWorkbenchExportPort: vi.fn(), acceptWorkbenchExportBuildReply: vi.fn(), workbenchImageService: vi.fn(), workbenchImageSelection: vi.fn() }))
 vi.mock('../../src/main/workbench/execution/ExecutionDesktopService', () => ({ executionDesktopService: () => new Promise(() => {}) }))
 vi.mock('../../src/main/workbench/workspaceFilesDesktopService', () => ({ subscribeWorkspaceFilesChanges: () => new Promise(() => {}),
   attachHtmlPreviewHost: () => new Promise(() => {}), operateWorkspaceFiles: vi.fn() }))
 vi.mock('../../src/main/protocols', () => ({ setHtmlPreviewProtocolHandler: vi.fn() }))
-vi.mock('../../src/main/workbench/documentHost', () => ({ documentHost: () => ({ setEventSink: vi.fn(),
+vi.mock('../../src/main/workbench/documentHost', () => ({ documentHost: () => ({ setEventSink: vi.fn(), setDocumentInputPreparer: vi.fn(), setSpatialViewportPreparer: vi.fn(), setMediaCopyPreparer: vi.fn(),
+  artifacts: { subscribeBindings: () => () => undefined },
   subscribeEvents: () => () => undefined, subscribeClosed: () => () => undefined, tools: { configureDynamicContentServices: vi.fn() } }) }))
 vi.mock('../../src/main/diagnosticLog', () => ({ diagnosticLog: { append: vi.fn() }, exportDiagnosticReport: vi.fn() }))
 vi.mock('../../src/main/workbench/images/ImageResultsDesktopService', () => ({ ImageResultsDesktopService: class {} }))

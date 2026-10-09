@@ -70,6 +70,8 @@ async function fixture(mode: 'unverified' | 'unusable' | 'lost-ack' | 'missing-r
     const started = await engine.start({ conversationId: 'facts', taskId: 'facts', instruction: '修改主题并读取结果',
       selection, workspaceRoot, permission: 'workspace', documents: [{ documentId: document.documentId, writable: [{ kind: 'document' }] }] })
     const finished = await engine.wait(started.runId)
+    // Execution completion does not wait for the non-authoritative event queue's durable ACK.
+    await events.flushPending()
     const snapshot = await host.internalAPI.read(document.documentId)
     const applied = finished.tools.filter(item => item.call.name === 'project.apply')
     expect(snapshot).toMatchObject({ revision: 1, undoDepth: 1, model: { project: { theme: { css } } } })
@@ -94,11 +96,14 @@ it('continues observation after committed + unverified and publishes the nested 
   expect(observed.filter(event => event.type === 'document.commit')).toMatchObject([{ data: { status: 'applied', revision: 1 } }])
   expect(observed.filter(event => event.itemId === applied[0]!.callId).at(-1)!.data).toMatchObject({ applicationStatus: 'applied', revision: 1 })
 })
-it('keeps a committed unusable result partial while preserving its commit event and subsequent observation', async () => {
-  const { finished, observed } = await fixture('unusable')
-  expect(finished.status).toBe('partial')
+it('completes the confirmed edit and observation while preserving the original unusable receipt as an audit warning', async () => {
+  const { finished, applied, observed, requests } = await fixture('unusable')
+  expect(finished.status).toBe('completed')
+  expect(applied[0]!.result).toMatchObject({ kind: 'read', data: { commit: 'committed', usability: 'unusable' } })
   expect(observed.filter(event => event.type === 'document.commit')).toMatchObject([{ data: { status: 'applied', revision: 1 } }])
-  expect(observed.find(event => event.type === 'run.end')!.data.text).toContain('已保留 1 项正式文档修改')
+  expect(observed.find(event => event.type === 'run.end')!.data.text).toContain('中间操作警告 1 项')
+  expect(requests.at(-1)!.messages.some(message => message.role === 'tool'
+    && typeof message.content === 'string' && message.content.includes('"usability":"unusable"'))).toBe(true)
 })
 it('confirms a lost nested ACK by original lookup, clears the guard and never replays the original write', async () => {
   const { finished, applied, observed, lost, executeCalls, lookupCalls, requests, operationIds } = await fixture('lost-ack')

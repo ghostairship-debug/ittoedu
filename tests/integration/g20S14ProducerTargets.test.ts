@@ -1,155 +1,155 @@
 // @vitest-environment node
-import { readFileSync } from 'node:fs'
+import { expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
-import { expect, it, vi } from 'vitest'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { hostToolCatalog } from '../../src/core/tools/HostToolServices'
 import { describeTools } from '../../src/core/tools/ToolCatalog'
+import { objectInsertInputSchema } from '../../src/core/tools/toolSchemas'
+import { TEXT_DEFINITION } from '../../src/components/text/adapters'
+import { createTextComponentData } from '../../src/components/text/data'
+import { SHAPE_DEFINITION, defaultShapeData } from '../../src/components/shape/authoring'
 import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
-import type { DocumentModel } from '../../src/shared/workbench/document'
-import type { ExecutionStart } from '../../src/shared/workbench/execution'
 import type { ModelEvent, ModelProvider, ModelSelection } from '../../src/shared/workbench/modelProvider'
+import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
+import type { DocumentResources } from '../../src/shared/workbench/document'
+import type { ComponentEdit } from '../../src/shared/contracts/component-platform/operations'
 import type { ToolResult, ToolTarget } from '../../src/shared/workbench/tools'
 
-const driver = new CourseV9Driver()
-function fixture() {
-  const model = driver.load(new Uint8Array(readFileSync('tests/fixtures/course-project-v9/slide-native.h5lesson'))) as Extract<DocumentModel, { kind: 'course-v9' }>
-  const slide = model.project.surfaces.find(surface => surface.type === 'slide')!
-  if (slide.type !== 'slide') throw new Error('slide fixture')
-  const mixed = driver.load(new Uint8Array(readFileSync('tests/fixtures/course-project-v9/mixed.h5lesson'))) as typeof model
-  model.project.surfaces.push(...mixed.project.surfaces.filter(surface => surface.type !== 'slide'))
-  model.project.locations.push(...mixed.project.locations.filter(location => location.kind !== 'slide-scene'))
-  model.project.mixedPrintPlan = { pageSize: 'surface-native', orientation: 'auto', entries: [
-    ...model.project.surfaces.filter(surface => surface.type === 'slide').map(surface => ({ id: `print-${surface.id}`, kind: 'slide-scenes' as const, surfaceId: surface.id, sceneIds: surface.scenes.map(scene => scene.id) })),
-    ...mixed.project.mixedPrintPlan!.entries.filter(entry => entry.kind !== 'slide-scenes'),
-  ] }
-  const scene = slide.scenes[0]
-  const location = model.project.locations.find(entry => entry.kind === 'slide-scene' && entry.sceneId === scene.id)!
-  const stateId = 'producer-state'
-  scene.presentation = { initialStateId: stateId, states: [
-    { id: stateId, name: 'Default', layerItemOverrides: {} },
-    { id: 'other-state', name: 'Other', layerItemOverrides: {} },
-  ] }
-  return { model, slide, scene, location, stateId, otherSurface: model.project.surfaces.find(surface => surface.type === 'flow')! }
-}
-async function harness(writable: ToolTarget[], configure?: (value: ReturnType<typeof fixture>) => void) {
+const driver = new CourseV10Driver()
+async function harness(writable: ToolTarget[] = [{ kind: 'document' }], setup?: (project: CourseProjectV10, resources: DocumentResources) => void) {
   let id = 0
   const registry = new DocumentRegistry({ drivers: [driver], createId: () => `doc-${++id}`, bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('unused') } } })
-  const f = fixture()
-  configure?.(f)
-  const session = await registry.create(f.model, 'producer.h5lesson')
+  const project = createBlankCourseProjectV10('制作目标', () => `fixture-${++id}`)
+  project.global.overlay = []; project.instances = {}; project.definitions = {}
+  project.background = { color: '#eeeeee' }
+  project.surfaces = [{ id: 'slide', kind: 'slide', title: '演示页', childIds: [], designSize: { width: 1280, height: 720 },
+    background: { color: '#ffffff' }, presentation: { states: [{ id: 'default', title: 'Default', overrides: {} },
+      { id: 'other', title: 'Other', overrides: {} }] } }, { id: 'flow', kind: 'flow', title: '讲义', childIds: [] }]
+  const resources: DocumentResources = { assets: {}, components: {} }
+  setup?.(project, resources)
+  const session = await registry.create({ kind: 'course-v10', project, resources }, 'producer.h5lesson')
   const gateway = new DocumentToolGateway(registry, [driver], () => String(++id))
   await gateway.beginRun({ runId: 'producer', actor: 'agent', documents: [{ documentId: session.documentId, writable }] })
   const call = (id: string, name: string, input: unknown) => gateway.execute('producer', id, { name, input })
   const issue = (target: ToolTarget, readOnly = false) => gateway.issueTarget('producer', session.documentId, target, { readOnly })
-  return { ...f, registry, gateway, session, call, issue }
-}
-type Child = { target: string; kind: ToolTarget['kind']; label: string }
-async function children(f: Awaited<ReturnType<typeof harness>>, target: string): Promise<Child[]> {
-  const result = await f.call(`children-${target}`, 'listChildren', { target, limit: 100 })
-  if (result.kind !== 'read') throw new Error(JSON.stringify(result))
-  return result.data as Child[]
-}
-function child(items: Child[], kind: ToolTarget['kind'], label?: string) {
-  const matches = items.filter(item => item.kind === kind && (!label || item.label === label))
-  expect(matches).toHaveLength(1)
-  return matches[0].target
-}
-function status(result: ToolResult) { return result.kind === 'document-operation' ? result.result.status : result.kind }
-
-it('discovers course, surface, scene and named-state backgrounds from the document tree and commits one scene edit', async () => {
-  const f = await harness([{ kind: 'document' }])
-  const root = await f.issue({ kind: 'document' })
-  const rootChildren = await children(f, root)
-  const courseBackground = child(rootChildren, 'course-background', '课程背景')
-  expect((await f.call('course-inspect', 'inspect', { target: courseBackground }))).toMatchObject({ kind: 'read', data: { writable: true, tools: expect.arrayContaining(['owner.background', 'media.apply']) } })
-  const surface = child(rootChildren, 'course-surface', f.slide.title)
-  child(await children(f, surface), 'course-background', '表面背景')
-  const location = child(rootChildren, 'course-location', f.location.label)
-  const sceneBackground = child(await children(f, location), 'course-background', '场景背景')
-  const owner = child(await children(f, location), 'course-owner')
-  child(await children(f, owner), 'course-background', '场景背景')
-  const state = child(await children(f, location), 'course-state', 'Default')
-  child(await children(f, state), 'course-background', '命名态背景')
-  expect(status(await f.call('scene-background', 'owner.background', { target: sceneBackground, properties: { backgroundColor: '#123456' } }))).toBe('applied')
-  expect(f.session.read().undoDepth).toBe(1)
-  const changed = f.session.read().model
-  if (changed.kind !== 'course-v9') throw new Error('course')
-  const changedSlide = changed.project.surfaces.find(surface => surface.id === f.slide.id)
-  if (changedSlide?.type !== 'slide') throw new Error('slide')
-  expect(changedSlide.scenes[0].backgroundColor).toBe('#123456')
-})
-
-it('keeps location, owner, named-state and read-only background handles inside their frozen grants', async () => {
-  const f = await harness([{ kind: 'course-location', locationId: fixture().location.id }])
-  const sceneTarget: ToolTarget = { kind: 'course-background', owner: 'scene', surfaceId: f.slide.id, sceneId: f.scene.id }
-  const surfaceTarget: ToolTarget = { kind: 'course-background', owner: 'surface', surfaceId: f.otherSurface.id }
-  const namedTarget: ToolTarget = { ...sceneTarget, stateId: f.stateId }
-  const root = await f.issue({ kind: 'document' })
-  const location = child(await children(f, root), 'course-location', f.location.label)
-  const discovered = child(await children(f, location), 'course-background', '场景背景')
-  expect((await f.call('location-inspect', 'inspect', { target: discovered }))).toMatchObject({ kind: 'read', data: { writable: true, tools: expect.arrayContaining(['owner.background']) } })
-  await f.gateway.loadToolFamilies('producer', ['content'])
-  expect((await f.gateway.describeRun('producer')).map(tool => tool.name)).toContain('owner.background')
-  const readonly = await f.issue(sceneTarget, true)
-  expect(await f.call('readonly', 'owner.background', { target: readonly, properties: { backgroundColor: '#abcdef' } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
-  const unrelated = await f.issue(surfaceTarget)
-  expect(await f.call('unrelated', 'owner.background', { target: unrelated, properties: { backgroundColor: '#abcdef' } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
-  const named = await f.issue(namedTarget)
-  expect(await f.call('named', 'owner.background', { target: named, properties: { backgroundColor: '#abcdef' } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
-  expect(f.session.read().undoDepth).toBe(0)
-  expect(status(await f.call('location-scene', 'owner.background', { target: discovered, properties: { backgroundColor: '#abcdef' } }))).toBe('applied')
-})
-
-it('maps state and owner scope to their exact background without exposing sibling state or course background', async () => {
-  const baseline = fixture(), f = await harness([{ kind: 'course-owner', owner: 'scene', locationId: baseline.location.id, stateId: baseline.stateId }])
-  const owner = await f.issue({ kind: 'course-owner', owner: 'scene', locationId: f.location.id, stateId: f.stateId })
-  const stateTarget: ToolTarget = { kind: 'course-background', owner: 'scene', surfaceId: f.slide.id, sceneId: f.scene.id, stateId: f.stateId }
-  const otherTarget: ToolTarget = { ...stateTarget, stateId: 'other-state' }
-  const baseTarget: ToolTarget = { kind: 'course-background', owner: 'scene', surfaceId: f.slide.id, sceneId: f.scene.id }
-  expect((await f.call('state-describe', 'inspect', { target: await f.issue(stateTarget) }))).toMatchObject({ kind: 'read', data: { writable: true } })
-  expect(await f.call('other-state', 'owner.background', { target: await f.issue(otherTarget), properties: { backgroundColor: '#abcdef' } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
-  expect(await f.call('base-state', 'owner.background', { target: await f.issue(baseTarget), properties: { backgroundColor: '#abcdef' } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
-  expect(await f.call('course', 'owner.background', { target: await f.issue({ kind: 'course-background', owner: 'course' }), properties: { backgroundColor: '#abcdef' } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
-  const background = child(await children(f, owner), 'course-background', '命名态背景')
-  expect((await f.call('scoped-background-inspect', 'inspect', { target: background }))).toMatchObject({ kind: 'read', data: { writable: true } })
-  expect(f.session.read().undoDepth).toBe(0)
-})
-
-it('allows a surface grant only within its surface and keeps course background separate', async () => {
-  const baseline = fixture(), f = await harness([{ kind: 'course-surface', surfaceId: baseline.slide.id }])
-  const root = await f.issue({ kind: 'document' })
-  const rootChildren = await children(f, root)
-  const slide = child(rootChildren, 'course-surface', f.slide.title)
-  const background = child(await children(f, slide), 'course-background', '表面背景')
-  expect((await f.call('surface-inspect', 'inspect', { target: background }))).toMatchObject({ kind: 'read', data: { writable: true } })
-  const other = await f.issue({ kind: 'course-background', owner: 'surface', surfaceId: f.otherSurface.id })
-  const course = child(rootChildren, 'course-background', '课程背景')
-  for (const target of [other, course]) {
-    expect(await f.call(`denied-${target}`, 'owner.background', { target, properties: { backgroundColor: '#abcdef' } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
+  const human = async (edits: ComponentEdit[]) => {
+    const before = await session.drain()
+    if (before.model.kind !== 'course-v10') throw new Error('Expected V10')
+    return session.execute({ documentId: before.documentId, epoch: before.epoch, baseRevision: before.revision,
+      operationId: `human-${++id}`, actor: 'human', mutation: { type: 'command', command: captureComponentOperation(before.model.project, edits) } })
   }
-  expect(status(await f.call('surface-write', 'owner.background', { target: background, properties: { backgroundColor: '#123456', backgroundMode: 'own' } }))).toBe('applied')
+  const current = () => { const model = session.read().model; if (model.kind !== 'course-v10') throw new Error('Expected V10'); return model.project }
+  return { registry, gateway, session, call, issue, human, current }
+}
+const applied = (result: ToolResult) => expect(result, JSON.stringify(result)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+const textTarget = { kind: 'course-instance', surfaceId: 'slide', instanceId: 'title' } as const
+function textFixture(project: CourseProjectV10) {
+  project.background = { color: '#ffffff' }
+  project.definitions[TEXT_DEFINITION.id] = structuredClone(TEXT_DEFINITION)
+  const data = createTextComponentData('白色标题'); data.appearance.color = '#FFFFFF'
+  project.instances.title = { id: 'title', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(data)),
+    frame: { width: 400, height: 70, transform: [1, 0, 0, 1, 600, 500] } }
+  project.surfaces[0].childIds = ['title']
+}
+async function refresh(f: Awaited<ReturnType<typeof harness>>, handle: string) {
+  const result = await f.call(`read-${handle}`, 'read', { target: handle })
+  expect(result, JSON.stringify(result)).toMatchObject({ kind: 'read', data: { target: expect.any(String), text: expect.any(String) } })
+  if (result.kind !== 'read') throw new Error('Expected read')
+  return (result.data as { target: string }).target
+}
+
+it('discovers current V10 surfaces, reads their backgrounds and commits a named-state background in one undoable edit', async () => {
+  const f = await harness(), root = await f.issue({ kind: 'document' })
+  const children = await f.call('root-tree', 'listChildren', { target: root, limit: 100 })
+  expect(children).toMatchObject({ kind: 'read', data: [
+    { kind: 'course-surface', label: '演示页' }, { kind: 'course-surface', label: '讲义' },
+  ] })
+  if (children.kind !== 'read') throw new Error('Expected tree')
+  const slide = (children.data as Array<{ target: string }>)[0].target
+  const read = await f.call('surface-source', 'read', { target: slide })
+  expect(read).toMatchObject({ kind: 'read', data: { text: expect.any(String) } })
+  if (read.kind !== 'read') throw new Error('Expected read')
+  expect(JSON.parse((read.data as { text: string }).text)).toMatchObject({ background: { color: '#ffffff' }, presentation: { states: [{ title: 'Default' }, { title: 'Other' }] } })
+  applied(await f.call('state-background', 'presentation.update', { target: slide, action: 'background', state: 'Default', background: { color: '#123456' } }))
+  expect(f.current().surfaces[0].presentation!.states[0].background).toEqual({ color: '#123456' })
+  expect(f.current().surfaces[0].background).toEqual({ color: '#ffffff' })
+  expect(f.current().surfaces[0].presentation!.states[1].background).toBeUndefined()
   expect(f.session.read().undoDepth).toBe(1)
+  const before = f.session.read()
+  expect((await f.session.execute({ documentId: before.documentId, epoch: before.epoch, baseRevision: before.revision,
+    operationId: 'undo-background', actor: 'human', mutation: { type: 'undo' } })).status).toBe('applied')
+  expect(f.current().surfaces[0].presentation!.states[0].background).toBeUndefined()
 })
 
-it('lists a state background under an exact state grant without granting the sibling', async () => {
-  const baseline = fixture(), f = await harness([{ kind: 'course-state', locationId: baseline.location.id, stateId: baseline.stateId }])
-  const state = await f.issue({ kind: 'course-state', locationId: f.location.id, stateId: f.stateId })
-  const background = child(await children(f, state), 'course-background', '命名态背景')
-  expect((await f.call('state-inspect', 'inspect', { target: background }))).toMatchObject({ kind: 'read', data: { writable: true } })
-  const sibling = await f.issue({ kind: 'course-background', owner: 'scene', surfaceId: f.slide.id, sceneId: f.scene.id, stateId: 'other-state' })
-  expect(await f.call('sibling', 'owner.background', { target: sibling, properties: { backgroundColor: '#abcdef' } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
+it('keeps surface and read-only handles inside frozen grants and separates whole-course background edits', async () => {
+  const f = await harness([{ kind: 'course-surface', surfaceId: 'slide' }])
+  const slide = await f.issue({ kind: 'course-surface', surfaceId: 'slide' })
+  for (const target of [await f.issue({ kind: 'course-surface', surfaceId: 'slide' }, true), await f.issue({ kind: 'course-surface', surfaceId: 'flow' })]) {
+    expect(await f.call(`deny-${target}`, 'surface.configure', { target, settings: { background: { color: '#abcdef' } } }))
+      .toMatchObject({ kind: 'error', code: 'not-authorized' })
+  }
+  expect(await f.call('deny-course', 'course.configure', { target: await f.issue({ kind: 'document' }), settings: { background: { color: '#abcdef' } } }))
+    .toMatchObject({ kind: 'error', code: 'not-authorized' })
+  expect(f.session.read().undoDepth).toBe(0)
+  applied(await f.call('surface-background', 'surface.configure', { target: slide, settings: { background: { color: '#abcdef' } } }))
+  expect(f.current().surfaces[0].background).toEqual({ color: '#abcdef' })
+  expect(f.current().background).toEqual({ color: '#eeeeee' })
+  expect(f.current().surfaces[1].background).toBeUndefined()
 })
 
-it('publishes only frozen OAuth image request options and gives native layout guidance', () => {
+it('keeps exact named-state grants from changing the base page, sibling state or course settings', async () => {
+  const f = await harness([{ kind: 'course-surface', surfaceId: 'slide', stateId: 'default' }])
+  const named = await f.issue({ kind: 'course-surface', surfaceId: 'slide', stateId: 'default' })
+  expect(await f.call('named-inspect', 'inspect', { target: named })).toMatchObject({ kind: 'read', data: { writable: true } })
+  for (const stateId of [null, 'other'] as const) {
+    const target = await f.issue({ kind: 'course-surface', surfaceId: 'slide', stateId })
+    expect(await f.call(`deny-${stateId}`, 'surface.configure', { target, settings: { background: { color: '#abcdef' } } }))
+      .toMatchObject({ kind: 'error', code: 'not-authorized' })
+  }
+  // State-scoped content edits do not grant management of the whole presentation.
+  expect(await f.call('deny-state-management', 'presentation.update', { target: named, action: 'background', state: 'other', background: { color: '#abcdef' } }))
+    .toMatchObject({ kind: 'error', code: 'invalid-target' })
+  expect(await f.call('deny-base-settings', 'surface.configure', { target: named, settings: { background: { color: '#abcdef' } } }))
+    .toMatchObject({ kind: 'error', code: 'invalid-target' })
+  expect(f.session.read().undoDepth).toBe(0)
+})
+
+it('reuses acknowledged insertion handles but refuses a handle after a human removes an acknowledged child', async () => {
+  const f = await harness(), owner = await f.issue({ kind: 'course-surface', surfaceId: 'slide' })
+  const insert = (id: string, target: string, text: string) => f.call(id, 'object.insert', { target, kind: 'text', text, x: 600, y: 500, width: 250, height: 70 })
+  applied(await insert('first', owner, '第一次'))
+  applied(await insert('second', owner, '同柄续插'))
+  const next = await refresh(f, owner)
+  expect(next).not.toBe(owner)
+  applied(await insert('third', next, '第三次'))
+  expect(f.session.read().undoDepth).toBe(3)
+  const first = f.current().surfaces[0].childIds[0]
+  expect((await f.human([{ type: 'instance.remove', instanceId: first }])).status).toBe('applied')
+  expect(await insert('deleted', next, '删除后不能续插')).toMatchObject({ kind: 'error', code: 'target-conflict' })
+  expect(f.session.read().undoDepth).toBe(4)
+})
+
+it('refreshes the current page after an unrelated human title edit and preserves that title when inserting again', async () => {
+  const f = await harness(), owner = await f.issue({ kind: 'course-surface', surfaceId: 'slide' })
+  applied(await f.call('first', 'object.insert', { target: owner, kind: 'text', text: '第一次' }))
+  expect((await f.human([{ type: 'project.title.set', title: '人工标题' }])).status).toBe('applied')
+  const next = await refresh(f, owner)
+  expect(next).not.toBe(owner)
+  applied(await f.call('next', 'object.insert', { target: next, kind: 'text', text: '第二次' }))
+  expect(f.current().title).toBe('人工标题')
+  expect(f.session.read().undoDepth).toBe(3)
+})
+
+it('publishes only frozen OAuth image options and the current professional insertion schema', () => {
   for (const name of ['image.generate', 'image.edit'] as const) {
     const tool = hostToolCatalog.find(tool => tool.name === name)!
     const input = { target: 'document-handle', prompt: 'draw a diagram', ...(name === 'image.edit' ? { references: ['image-handle'] } : {}) }
@@ -164,186 +164,118 @@ it('publishes only frozen OAuth image request options and gives native layout gu
     for (const forbidden of ['moderation', 'jpeg', 'webp', 'xhigh', 'max']) expect(schema).not.toContain(`"${forbidden}"`)
     expect(schema).toContain('png')
   }
-  const descriptions = Object.fromEntries(describeTools(['native.insert', 'object.update', 'media.insert']).map(tool => [tool.name, tool.description]))
-  expect(descriptions['native.insert']).toMatch(/padding.*shrink.*backgroundOpacity/)
-  expect(descriptions['native.insert']).toMatch(/batch.*read\/inspect.*data.target/)
-  const batchDescription = describeTools(['batch'])[0].description
-  expect(batchDescription).toMatch(/同文档两项及以上.*batch.*一次校验提交/)
-  expect(batchDescription).toMatch(/\$result:\{step:0\}.*不可前向引用/)
-  expect(batchDescription).toMatch(/跨文档须分别调用/)
-  expect(descriptions['object.update']).toMatch(/padding.*shrink.*backgroundOpacity/)
-  expect(descriptions['media.insert']).toMatch(/frame.*遮挡/)
+  expect(objectInsertInputSchema.safeParse({ target: 'page', kind: 'text', text: '文字', x: 10, width: 200 }).success).toBe(true)
+  expect(objectInsertInputSchema.safeParse({ target: 'page', nativeType: 'text', template: { text: '旧Native输入' } }).success).toBe(false)
+  expect(describeTools(['object.insert', 'object.update', 'media.insert']).map(tool => tool.name).sort())
+    .toEqual(['media.insert', 'object.insert', 'object.update'])
+  expect(describeTools(['native.insert', 'owner.background'])).toEqual([])
 })
 
-it('advises on transparent Native text against a known flat Slide background without assuming image or dark backgrounds', async () => {
-  const description = describeTools(['native.insert', 'object.update']).map(tool => tool.description).join(' ')
-  expect(description).toMatch(/文字颜色.*有效.*Slide.*背景/)
-  for (const [name, backgroundColor, backgroundAssetId, textColor, lowContrast] of [
-    ['white-title', '#ffffff', null, '#FFFFFF', true],
-    ['pale-blue-label', '#ffffff', null, '#BFE9FF', true],
-    ['dark-scene', '#13263a', null, '#FFFFFF', false],
-    ['image-scene', '#ffffff', 'badge', '#FFFFFF', false],
-  ] as const) {
-    const f = await harness([{ kind: 'document' }], value => {
-      value.scene.backgroundColor = backgroundColor
-      value.scene.backgroundAssetId = backgroundAssetId
+it('reports proved professional text risks without rejecting or repeating the edit, and sends the warnings to the model', async () => {
+  for (const mode of ['white', 'pale', 'dark', 'image', 'black-card-overlap', 'black-card-outside',
+    'named-state-dark', 'opaque-text', 'inline-color', 'inline-font', 'overflow-text', 'overflow-group',
+    'unknown-color', 'custom-style', 'custom-source'] as const) {
+    const f = await harness([{ kind: 'document' }], (project, resources) => {
+      textFixture(project)
+      const surface = project.surfaces[0], title = project.instances.title
+      const data = title.data as unknown as ReturnType<typeof createTextComponentData>
+      if (mode === 'pale') project.background = { color: '#fefefe' }
+      if (mode === 'dark') project.background = { color: '#000000' }
+      if (mode === 'image') {
+        project.background = { color: '#ffffff', assetId: 'background' }
+        project.assets.background = { id: 'background', path: 'assets/background.svg', mimeType: 'image/svg+xml', kind: 'image' }
+        resources.assets.background = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720"><rect width="1280" height="720" fill="black"/></svg>')
+      }
+      if (mode === 'named-state-dark') surface.presentation!.states[0].background = { mode: 'own', color: '#000000' }
+      if (mode === 'opaque-text') { data.appearance.backgroundOpacity = 1; data.appearance.backgroundColor = '#000000' }
+      if (mode === 'inline-color') data.content.inlines = [{ type: 'text', text: '黑色标题', style: { color: '#000000' } }]
+      if (mode === 'inline-font') {
+        data.appearance.color = '#888888'
+        data.content.inlines = [{ type: 'text', text: '大号标题', style: { fontSize: 30, bold: true } }]
+      }
+      if (mode === 'overflow-text') {
+        const overflow = createTextComponentData('很高的正文\n'.repeat(30))
+        project.instances.overflow = { id: 'overflow', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(overflow)),
+          frame: { width: 400, height: 1, transform: [1, 0, 0, 1, 600, 0] } }
+        surface.childIds.unshift('overflow')
+      }
+      if (mode === 'overflow-group') {
+        project.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
+        project.instances.group = { id: 'group', definitionId: 'group', data: {}, childIds: ['outside-child'],
+          frame: { width: 10, height: 10, transform: [1, 0, 0, 1, 0, 0] } }
+        project.instances['outside-child'] = { ...structuredClone(title), id: 'outside-child' }
+        surface.childIds.unshift('group')
+      }
+      if (mode === 'unknown-color') data.appearance.color = 'var(--text-color)'
+      if (mode === 'custom-style') title.style = { filter: 'invert(1)' }
+      if (mode === 'custom-source') title.implementationOverride = { kind: 'source', source: 'export default {}', language: 'javascript' }
+      if (mode.startsWith('black-card')) {
+        project.definitions[SHAPE_DEFINITION.id] = structuredClone(SHAPE_DEFINITION)
+        const shape = defaultShapeData(); shape.style.fillColor = '#000000'
+        project.instances.card = { id: 'card', definitionId: SHAPE_DEFINITION.id, data: shape,
+          frame: { width: 500, height: 100, transform: [1, 0, 0, 1, mode === 'black-card-overlap' ? 580 : 0, mode === 'black-card-overlap' ? 480 : 0] } }
+        surface.childIds.unshift('card')
+      }
     })
-    const owner = await f.issue({ kind: 'course-owner', owner: 'scene', locationId: f.location.id })
-    const result = await f.call(name, 'native.insert', { target: owner, template: {
-      nativeType: 'text', text: name, x: 600, y: 500, width: 400, height: 70,
-      style: { color: textColor, fontSize: 30, backgroundOpacity: 0 },
-    } })
-    expect(result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    const target = await f.issue({ ...textTarget, ...(mode === 'named-state-dark' ? { stateId: 'default' } : {}) })
+    const result = await f.call(mode, 'object.update', { target, properties: { data: { appearance: { fontSize: mode === 'inline-font' ? 10 : 34 } } } })
+    applied(result)
     if (result.kind !== 'document-operation') throw new Error(JSON.stringify(result))
-    expect(result.advisories?.some(item => item.code === 'native-text-low-contrast') ?? false).toBe(lowContrast)
-    if (lowContrast) expect(result.advisories?.find(item => item.code === 'native-text-low-contrast')?.message)
-      .toMatch(/文字颜色.*场景背景.*透明/)
-    expect(f.session.read().undoDepth).toBe(1)
+    expect(result.advisories?.some(item => item.code === 'native-text-low-contrast') ?? false, mode)
+      .toBe(['white', 'pale', 'black-card-outside'].includes(mode))
+    expect(f.session.read().undoDepth, mode).toBe(1)
   }
-})
 
-it('does not infer white scene pixels beneath text when a black Native card occupies the same area', async () => {
-  for (const [name, cardX, cardY, overlaps] of [
-    ['black-card-behind', 580, 480, true],
-    ['distant-card', 20, 20, false],
-  ] as const) {
-    const f = await harness([{ kind: 'document' }], value => { value.scene.backgroundColor = '#ffffff' })
-    const owner = await f.issue({ kind: 'course-owner', owner: 'scene', locationId: f.location.id })
-    const card = await f.call(`${name}-card`, 'native.insert', { target: owner, template: {
-      nativeType: 'shape', shapeType: 'rectangle', x: cardX, y: cardY, width: 500, height: 100,
-      style: { fillColor: '#000000', fillOpacity: 1 },
-    } })
-    expect(status(card)).toBe('applied')
-    const textOwner = await f.issue({ kind: 'course-owner', owner: 'scene', locationId: f.location.id })
-    const text = await f.call(`${name}-text`, 'native.insert', { target: textOwner, template: {
-      nativeType: 'text', text: '白色标题', x: 600, y: 500, width: 400, height: 70,
-      style: { color: '#FFFFFF', fontSize: 34, backgroundOpacity: 0 },
-    } })
-    expect(status(text)).toBe('applied')
-    if (text.kind !== 'document-operation') throw new Error(JSON.stringify(text))
-    expect(text.advisories?.some(item => item.code === 'native-text-low-contrast') ?? false).toBe(!overlaps)
-    const model = f.session.read().model
-    if (model.kind !== 'course-v9') throw new Error('course')
-    const scene = model.project.surfaces.find(surface => surface.id === f.slide.id)
-    if (scene?.type !== 'slide') throw new Error('slide')
-    const shape = scene.scenes[0].layerItems.find(item => item.kind === 'native' && item.content.nativeType === 'shape'
-      && item.content.data.style.fillColor === '#000000')
-    const title = scene.scenes[0].layerItems.find(item => item.kind === 'native' && item.content.nativeType === 'text'
-      && item.content.data.text === '白色标题')
-    expect(shape?.order).toBeLessThan(title?.order ?? 0)
-  }
-})
-
-it('refreshes a scene owner through read after its own insert; external deletion still conflicts', async () => {
-  const f = await harness([{ kind: 'document' }])
-  const owner = await f.issue({ kind: 'course-owner', owner: 'scene', locationId: f.location.id })
-  const insert = (id: string, target: string, text: string) => f.call(id, 'native.insert', { target, template: {
-    nativeType: 'text', text, x: 600, y: 500, width: 250, height: 70,
-  } })
-  expect(status(await insert('first', owner, '第一次'))).toBe('applied')
-  // The run's own repeat inserts reuse the same owner handle: insertion footprint is
-  // acknowledged after each commit, so the next native.insert on the same handle still applies.
-  expect(status(await insert('same-handle-second', owner, '同柄续插'))).toBe('applied')
-  const read = await f.call('read-owner', 'read', { target: owner })
-  expect(read).toMatchObject({ kind: 'read', data: { target: expect.any(String), text: expect.any(String) } })
-  if (read.kind !== 'read' || typeof read.data !== 'object' || read.data === null || !('target' in read.data)) throw new Error(JSON.stringify(read))
-  const refreshed = read.data.target as string
-  expect(refreshed).not.toBe(owner)
-  expect(status(await insert('second', refreshed, '第二次'))).toBe('applied')
-  expect(f.session.read().undoDepth).toBe(3)
-
-  // An external human change that removes one of the acknowledged children invalidates
-  // the insertion dependency footprint; the stale handle then refuses further inserts.
-  const beforeHuman = f.session.read()
-  if (beforeHuman.model.kind !== 'course-v9') throw new Error('course')
-  const project = structuredClone(beforeHuman.model.project)
-  const slide = project.surfaces.find(surface => surface.id === f.slide.id)
-  if (slide?.type !== 'slide') throw new Error('slide')
-  slide.scenes[0].layerItems = slide.scenes[0].layerItems.filter(item => item.kind !== 'native' || item.content.nativeType !== 'text')
-  expect((await f.session.execute({ documentId: beforeHuman.documentId, epoch: beforeHuman.epoch,
-    operationId: 'human-scene-delete', baseRevision: beforeHuman.revision, actor: 'human',
-    mutation: { type: 'command', command: { type: 'course.replace', project } } })).status).toBe('applied')
-  expect(await insert('external-delete', refreshed, '外部删除后不可续插')).toMatchObject({ kind: 'error', code: 'target-conflict' })
-})
-
-it('refreshes a scene owner after an unrelated human title edit between task inserts', async () => {
-  const f = await harness([{ kind: 'document' }])
-  const owner = await f.issue({ kind: 'course-owner', owner: 'scene', locationId: f.location.id })
-  const insert = (id: string, target: string, text: string) => f.call(id, 'native.insert', { target, template: {
-    nativeType: 'text', text, x: 600, y: 500, width: 250, height: 70,
-  } })
-  expect(status(await insert('first-title-case', owner, '第一次'))).toBe('applied')
-  const beforeHuman = f.session.read()
-  if (beforeHuman.model.kind !== 'course-v9') throw new Error('course')
-  const project = structuredClone(beforeHuman.model.project)
-  project.title = 'Human title edit'
-  expect((await f.session.execute({ documentId: beforeHuman.documentId, epoch: beforeHuman.epoch,
-    operationId: 'human-title-edit', baseRevision: beforeHuman.revision, actor: 'human',
-    mutation: { type: 'command', command: { type: 'course.replace', project } } })).status).toBe('applied')
-
-  const read = await f.call('read-after-title', 'read', { target: owner })
-  expect(read).toMatchObject({ kind: 'read', data: { target: expect.any(String) } })
-  if (read.kind !== 'read' || typeof read.data !== 'object' || read.data === null || !('target' in read.data)) throw new Error(JSON.stringify(read))
-  const refreshed = read.data.target as string
-  expect(refreshed).not.toBe(owner)
-  expect(status(await insert('second-after-title', refreshed, '第二次'))).toBe('applied')
-  const after = f.session.read()
-  if (after.model.kind !== 'course-v9') throw new Error('course')
-  expect(after.model.project.title).toBe('Human title edit')
-  expect(after.undoDepth).toBe(3)
-})
-
-it('keeps a legal small Native text edit committed once while reporting shrink, transparency and contrast to the model', async () => {
-  const f = await harness([{ kind: 'document' }])
-  const owner = await f.issue({ kind: 'course-owner', owner: 'scene', locationId: f.location.id })
-  const result = await f.call('small-label', 'native.insert', { target: owner, template: {
-    nativeType: 'text', text: '输入一', x: 600, y: 500, width: 200, height: 62,
-    style: { fontSize: 24, padding: 24, overflow: 'shrink', color: '#ffffff', backgroundColor: '#ffffff' },
-  } })
-  expect(result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' }, advisories: [
-    { code: 'native-text-shrink', step: 0 }, { code: 'native-text-transparent-background', step: 0 },
-    { code: 'native-text-low-contrast', step: 0 },
+  const f = await harness([{ kind: 'document' }], project => { textFixture(project); project.instances.title.frame!.height = 62 })
+  const target = await f.issue(textTarget)
+  const input = { target, properties: { data: { appearance: { fontSize: 24, padding: 24, backgroundColor: '#ffffff' }, sizing: { mode: 'shrink-text' } } } }
+  const receipt = await f.call('small-label', 'object.update', input)
+  expect(receipt).toMatchObject({ kind: 'document-operation', result: { status: 'applied' }, advisories: [
+    { code: 'native-text-shrink', step: 0 }, { code: 'native-text-transparent-background', step: 0 }, { code: 'native-text-low-contrast', step: 0 },
   ] })
-  expect(status(await f.call('small-label', 'native.insert', { target: owner, template: {
-    nativeType: 'text', text: '输入一', x: 600, y: 500, width: 200, height: 62,
-    style: { fontSize: 24, padding: 24, overflow: 'shrink', color: '#ffffff', backgroundColor: '#ffffff' },
-  } }))).toBe('applied')
+  applied(await f.call('small-label', 'object.update', input))
   expect(f.session.read().undoDepth).toBe(1)
+  expect(f.current().instances.title.frame!.height).toBe(62)
 
-  const root = await mkdtemp(path.join(tmpdir(), 'g20-s14-producer-'))
+  const modelFixture = await harness([{ kind: 'document' }], project => { textFixture(project); project.instances.title.frame!.height = 62 })
+  const directory = await mkdtemp(path.join(tmpdir(), 'g20-s14-advisories-'))
   try {
-    const selection: ModelSelection = { model: 'fixture-model', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
-      baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture-account', auth: { kind: 'api-key', credentialRef: 'fixture-ref' }, billing: { kind: 'unknown' },
-      capabilities: { tools: 'supported', stream: 'supported', vision: 'supported', reasoning: 'supported' } } }
-    const execute = vi.spyOn(f.gateway, 'execute').mockResolvedValue(result)
+    const selection: ModelSelection = { model: 'local-advisory', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
+      baseURL: 'https://fixture.invalid/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'unused' }, billing: { kind: 'unknown' },
+      capabilities: { tools: 'supported', stream: 'supported', vision: 'unsupported', reasoning: 'unsupported' } } }
+    const runs = new ExecutionRunStore(path.join(directory, 'runs'))
+    const events = new ExecutionEventStore({ directory: path.join(directory, 'events') })
     let turn = 0, modelSawWarning = false
     const provider: ModelProvider = { async *stream(request) {
-      const first = turn++ === 0
-      if (!first) {
-        const message = request.messages.find(message => message.role === 'tool')
-        modelSawWarning = typeof message?.content === 'string' && message.content.includes('native-text-shrink')
-          && message.content.includes('native-text-transparent-background')
-          && message.content.includes('native-text-low-contrast')
+      const currentTurn = ++turn
+      let call: { id: string; name: string; argumentsText: string } | undefined
+      if (currentTurn === 1) call = { id: 'load-layout', name: 'tools.load', argumentsText: JSON.stringify({ families: ['layout'] }) }
+      else if (currentTurn === 2) {
+        const [run] = await runs.list()
+        const handle = await modelFixture.gateway.issueTarget(run.runId, modelFixture.session.documentId, textTarget)
+        call = { id: 'edit-professional-text', name: 'object.update', argumentsText: JSON.stringify({ ...input, target: handle }) }
+      } else {
+        const messages = JSON.stringify(request.messages.filter(message => message.role === 'tool'))
+        modelSawWarning = ['native-text-shrink', 'native-text-transparent-background', 'native-text-low-contrast'].every(code => messages.includes(code))
       }
-      const call = first ? { id: 'native-call', name: 'native.insert', argumentsText: '{}' } : undefined
       const calls = call ? [call] : []
-      yield { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: `fixture-${turn}`, actualModel: 'fixture-model',
+      yield { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: `local-${turn}`, actualModel: selection.model,
         nativeResponse: {}, finishReason: call ? 'tool_calls' : 'stop', toolCalls: calls,
         assistant: { role: 'assistant', content: call ? '' : 'done', ...(call ? { tool_calls: [{ id: call.id, type: 'function', function: { name: call.name, arguments: call.argumentsText } }] } : {}) },
       } satisfies Extract<ModelEvent, { type: 'response.completed' }>
     } }
-    const engine = new ExecutionEngine({ registry: f.registry, gateway: f.gateway, provider,
-      runs: new ExecutionRunStore(path.join(root, 'runs')), events: new ExecutionEventStore({ directory: path.join(root, 'events') }) })
-    const input: ExecutionStart = { conversationId: 'producer-conversation', taskId: 'producer-task', instruction: 'insert text', selection,
-      documents: [{ documentId: f.session.documentId, writable: [{ kind: 'document' }] }] }
-    const started = await engine.start(input)
-    await engine.wait(started.runId)
-    expect(execute).toHaveBeenCalledTimes(1)
+    const engine = new ExecutionEngine({ registry: modelFixture.registry, gateway: modelFixture.gateway, provider, runs, events })
+    const started = await engine.start({ conversationId: 'producer', taskId: 'producer', instruction: '调整文字样式并检查反馈', selection,
+      documents: [{ documentId: modelFixture.session.documentId, writable: [textTarget] }] })
+    const finished = await engine.wait(started.runId)
+    await events.flushPending()
+    expect(finished.status).toBe('completed')
+    expect(finished.tools.filter(tool => tool.call.name === 'object.update')).toHaveLength(1)
     expect(modelSawWarning).toBe(true)
-    expect(f.session.read().undoDepth).toBe(1)
+    expect(modelFixture.session.read().undoDepth).toBe(1)
+    expect(modelFixture.current().instances.title.frame!.height).toBe(62)
   } finally {
-    vi.restoreAllMocks()
-    if (!path.resolve(root).startsWith(path.resolve(tmpdir()) + path.sep)) throw new Error('Unsafe temp directory')
-    await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 })
+    if (!path.resolve(directory).startsWith(path.resolve(tmpdir()) + path.sep)) throw new Error('Unsafe temporary directory')
+    await rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 })
   }
 })

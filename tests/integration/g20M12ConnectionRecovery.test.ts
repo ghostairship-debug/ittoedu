@@ -15,6 +15,16 @@ import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
 import type { ExecutionSendResult } from '../../src/shared/workbench/executionDesktop'
 import { selectionReference } from '../../src/renderer/workbench/SelectionContextController'
 
+import { GENERATION_RETRY_DELAYS_MS, MAX_GENERATION_ATTEMPTS, waitForGenerationRetry } from '../../src/main/workbench/execution/modelGenerationRetry'
+
+vi.mock('../../src/main/workbench/execution/modelGenerationRetry', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../src/main/workbench/execution/modelGenerationRetry')>()
+  return { ...actual, waitForGenerationRetry: vi.fn(async (_delay: number, signal: AbortSignal) => {
+    signal.throwIfAborted()
+    await Promise.resolve()
+  }) }
+})
+
 const roots: string[] = [], servers: Server[] = []
 afterEach(async () => {
   for (const server of servers.splice(0)) await new Promise<void>(resolve => {
@@ -162,14 +172,17 @@ it.each([
   { fault: 'quota' as const, kind: 'quota', code: 'http-402', outcome: 'rejected' },
   { fault: 'disconnect' as const, kind: 'transport', code: 'transport', outcome: 'unknown' },
 ])('M12-T02 $fault: reports the cause and retains the failed task input for connection recovery', async ({ fault, kind, code, outcome }) => {
+  vi.mocked(waitForGenerationRetry).mockClear()
   const f = await fixture(fault)
   const sent = await f.service.operate(f.send) as ExecutionSendResult
   const failed = await f.service.engine.wait(sent.run!.runId)
   expect(failed.status).toBe('failed')
-  const attempts = fault === 'disconnect' ? 3 : 1
+  const attempts = fault === 'disconnect' ? MAX_GENERATION_ATTEMPTS : 1
   expect(failed.requests).toHaveLength(attempts)
   expect(failed.requests[0].failure).toMatchObject({ kind, code, outcome })
   expect(f.requests).toBe(attempts)
+  expect(failed.requests.every(request => request.failure?.outcome === outcome)).toBe(true)
+  expect(vi.mocked(waitForGenerationRetry).mock.calls.map(([delay]) => delay)).toEqual(fault === 'disconnect' ? GENERATION_RETRY_DELAYS_MS : [])
 
   const persisted = await f.service.operate({ type: 'run', runId: failed.runId }) as ExecutionRunRecord
   expect(persisted.requests[0].failure).toMatchObject({ kind, code })

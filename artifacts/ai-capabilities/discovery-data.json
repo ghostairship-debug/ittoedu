@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "fcd051d09ad3113b17c72f47d9d883c5b729ff9d67377d057541f067ff385fd2",
+  "semanticVersion": "883c950ebc89526da39161d0e89bbfdf1ddaeb37b2237b6ee70fac4bc5114592",
   "entries": [
     {
       "id": "artifact.save",
@@ -1709,7 +1709,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "列出Project V10工程虚拟路径，使用project.read/apply。project可用文档、页面或对象的已读target：对象列其内容、源码和依赖，页面列本页及关联源码，文档列完整作者内容和全部文件。路径由软件映射，不猜路径或填写内部身份。目录很长时沿用project，将nextOffset传给offset续读同一捕获目录。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。"
+      "summary": "列出Project V10工程虚拟路径，使用project.read/apply。project可用文档、页面、对象或空间路径/关系的已读target：对象列其内容、源码和依赖，页面列本页及关联源码，文档列完整作者内容和全部文件。路径由软件映射，不猜路径或填写内部身份。目录很长时沿用project，将nextOffset传给offset续读同一捕获目录。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。"
     },
     {
       "id": "project.read",
@@ -1730,7 +1730,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "读取project.list返回的工程虚拟路径的当前正式内容与人工修改；不用file.read读取这些路径。普通Web读HTML，专业组件读data.json；正文读body.html/body.md；空间镜头读spatial.json。components/源码作用于共享定义，页面/global内源码为实例独立实现；workspace中的模块和二进制文件原样保留。很长文本将回执nextOffset传给offset并用limit续读，不使用cursor。后续project.apply固定本次观察的原目标，提交失败保留原文与诊断。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。"
+      "summary": "读取project.list返回的工程虚拟路径的当前正式内容与人工修改；不用file.read读取这些路径。普通Web读HTML，专业组件读data.json；正文读body.html/body.md；空间镜头读spatial.json；单路径/关系target只可修改所选图项，保留首页、镜头与其他图项。components/源码作用于共享定义，页面/global内源码为实例独立实现；workspace中的模块和二进制文件原样保留。很长文本将回执nextOffset传给offset并用limit续读，不使用cursor。后续project.apply固定本次观察的原目标，提交失败保留原文与诊断。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。"
     },
     {
       "id": "project.save",

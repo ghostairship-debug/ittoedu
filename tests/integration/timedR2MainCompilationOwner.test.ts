@@ -28,6 +28,7 @@ vi.mock('electron', async () => {
   class Window extends EventEmitter {
     destroyed = false
     readonly webContents = Object.assign(new EventEmitter(), { setWindowOpenHandler() {},
+      mainFrame: { framesInSubtree: [{ detached: false, executeJavaScript: async () => undefined }] },
       executeJavaScript: async (source: string) => {
         const encoded = JSON.parse(source.slice(source.indexOf('(') + 1, -1)) as string
         const request = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'))
@@ -46,7 +47,7 @@ vi.mock('electron', async () => {
     session: { fromPartition: () => ({ protocol: { unhandle() {} }, clearStorageData: async () => undefined }) } }
 })
 vi.mock('../../src/main/workbench/workbenchToolServices', () => ({ installWorkbenchToolServices() {},
-  disposeWorkbenchExportPort() {}, acceptWorkbenchExportBuildReply() {}, workbenchImageService() {}, workbenchImageSelection() {} }))
+  setWorkbenchHtmlPreview() {}, releaseWorkbenchHtmlDocument() {}, disposeWorkbenchExportPort() {}, acceptWorkbenchExportBuildReply() {}, workbenchImageService() {}, workbenchImageSelection() {} }))
 vi.mock('../../src/main/workbench/execution/ExecutionDesktopService', () => ({ executionDesktopService: () => new Promise(() => {}) }))
 vi.mock('../../src/main/workbench/workspaceFilesDesktopService', () => ({ subscribeWorkspaceFilesChanges: () => new Promise(() => {}),
   attachHtmlPreviewHost: () => new Promise(() => {}), operateWorkspaceFiles() {} }))

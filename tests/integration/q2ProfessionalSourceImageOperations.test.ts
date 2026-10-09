@@ -68,7 +68,7 @@ it('replaces an aliased professional image with shared source through both live 
     const fetched = imageDataSchema.parse(current.project.instances.image.data)
     expect(fetched.assetId).not.toBe(original.meta.id)
     expect(fetched).toMatchObject({ originalAssetId: fetched.assetId, fit: 'cover', filters: { contrast: 1.3 },
-      crop: { left: 0, top: 0, right: 0, bottom: 0 }, cropX: .2, cropY: .8 })
+      crop: imageData.crop, cropX: .2, cropY: .8 })
     expect(current.resources.assets[fetched.assetId]).toEqual(encode(svg('red')))
     expect(current.project.assets[fetched.assetId].source).toEqual(assetSource)
     const resourceResult = await call('image.fetch', { image: 'green' })
@@ -81,7 +81,7 @@ it('replaces an aliased professional image with shared source through both live 
     const replaced = imageDataSchema.parse(current.project.instances.image.data)
     expect(replaced.assetId).not.toBe(fetched.assetId)
     expect(replaced).toMatchObject({ originalAssetId: replaced.assetId, fit: 'cover', filters: { contrast: 1.3 },
-      crop: { left: 0, top: 0, right: 0, bottom: 0 }, cropX: .2, cropY: .8 })
+      crop: imageData.crop, cropX: .2, cropY: .8 })
     expect(current.resources.assets[replaced.assetId]).toEqual(encode(svg('green')))
     expect(Object.keys(current.project.instances).sort()).toEqual(originalInstanceIds)
     expect(current.project.instances.image).toMatchObject({ id: 'image', definitionId: definition.id, frame, style: { opacity: .7 } })

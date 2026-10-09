@@ -40,8 +40,12 @@ vi.mock('../../src/main/windowVisibility', () => ({ BACKGROUND_E2E_WINDOW_ORIGIN
 
 import { ipcMain, dialog } from 'electron'
 vi.mock('../../src/main/workbench/documentHost', () => ({
-  documentHost: () => ({ registry: { list: () => [], get: () => ({ drain: async () => undefined }) } }),
+  documentHost: () => ({ registry: { list: () => [], get: () => ({ drain: async () => undefined }) },
+    tools: { withWriteTaskBarrier: async (_ids: string[], work: () => Promise<unknown>) => work() } }),
 }))
+
+vi.mock('../../src/main/workbench/execution/ExecutionDesktopService', () => ({ executionDesktopService: async () => ({ stopTasksForDocument: vi.fn() }) }))
+vi.mock('../../src/main/workbench/external/externalDesktopService', () => ({ externalMcpService: async () => ({ stopForDocument: vi.fn() }) }))
 
 import { createMainWindow } from '../../src/main/createWindow'
 
@@ -66,22 +70,23 @@ describe('window close recovery handshake', () => {
     }))
     expect(window.isDestroyed()).toBe(false)
     expect(contents.executeJavaScript).not.toHaveBeenCalled()
-    expect(contents.send).not.toHaveBeenCalled()
+    expect(vi.mocked(contents.send).mock.calls.every(([channel]) => channel === IPC_CHANNELS.requestResumeClose)).toBe(true)
     expect(controls.clearRecovery).not.toHaveBeenCalled()
     expect(state.setDirty).not.toHaveBeenCalled()
     controls.recoveryChoice = 2
     window.close(); await settle()
     expect(window.isDestroyed()).toBe(true)
     expect(contents.executeJavaScript).not.toHaveBeenCalled()
-    expect(contents.send).not.toHaveBeenCalled()
+    expect(vi.mocked(contents.send).mock.calls.every(([channel]) => channel === IPC_CHANNELS.requestResumeClose)).toBe(true)
     expect(controls.clearRecovery).not.toHaveBeenCalled()
     expect(state.setDirty).not.toHaveBeenCalled()
   })
   it('requires the matching renderer preserve success before a preserve close, without clearing legacy project recovery', async () => {
+    controls.dirty = false
     const { window, state } = await openWindow()
     window.close()
     await settle()
-    expect(window.webContents.send).toHaveBeenCalledWith(IPC_CHANNELS.requestPreserveAndClose, expect.any(String))
+    expect(window.webContents.send).toHaveBeenCalledWith(IPC_CHANNELS.requestPreserveAndClose, expect.any(String), undefined)
     expect(window.isDestroyed()).toBe(false)
     ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: {} }, requestId(window), true)
     ipcMain.emit(IPC_CHANNELS.saveAndCloseResult, { sender: window.webContents }, requestId(window), true)
@@ -90,16 +95,13 @@ describe('window close recovery handshake', () => {
     expect(controls.clearRecovery).not.toHaveBeenCalled()
     ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, requestId(window), true)
     await settle()
-    expect(window.isDestroyed()).toBe(false)
-    expect(window.webContents.send).toHaveBeenCalledTimes(2)
-    ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, requestId(window), true)
-    await settle()
     expect(window.isDestroyed()).toBe(true)
     expect(controls.clearRecovery).not.toHaveBeenCalled()
     expect(state.setDirty).toHaveBeenCalledWith(false)
     expect(ipcMain.listenerCount(IPC_CHANNELS.preserveAndCloseResult)).toBe(0)
   })
   it.each([false, 'true', null])('keeps the window and recovery on unsuccessful preserve result %s', async result => {
+    controls.dirty = false
     const { window, state } = await openWindow()
     window.close(); await settle()
     ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, requestId(window), result)
@@ -110,7 +112,7 @@ describe('window close recovery handshake', () => {
     expect(ipcMain.listenerCount(IPC_CHANNELS.preserveAndCloseResult)).toBe(0)
   })
   it('offers recovery while waiting; choosing to wait does not expire the original request', async () => {
-    controls.recoveryChoice = 1
+    controls.recoveryChoice = 1; controls.dirty = false
     const { window } = await openWindow()
     window.close(); await settle()
     const original = requestId(window)
@@ -121,13 +123,11 @@ describe('window close recovery handshake', () => {
     expect(ipcMain.listenerCount(IPC_CHANNELS.preserveAndCloseResult)).toBe(1)
     ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, original, true)
     await settle()
-    ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, requestId(window), true)
-    await settle()
     expect(window.isDestroyed()).toBe(true)
     expect(controls.clearRecovery).not.toHaveBeenCalled()
   })
   it.each(['preserve', 'save'] as const)('ignores a cancelled %s handshake when a newer close is in progress', async mode => {
-    controls.choice = mode === 'save' ? 0 : 1
+    controls.choice = mode === 'save' ? 0 : 1; controls.dirty = mode === 'save'
     const channel = mode === 'save' ? IPC_CHANNELS.saveAndCloseResult : IPC_CHANNELS.preserveAndCloseResult
     const { window } = await openWindow()
     window.close(); await settle()
@@ -137,15 +137,19 @@ describe('window close recovery handshake', () => {
     window.close(); await settle()
     const fresh = requestId(window)
     expect(fresh).not.toBe(old)
-    ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, old, true)
+    ipcMain.emit(channel, { sender: window.webContents }, old, true)
     await settle(); expect(window.isDestroyed()).toBe(false)
-    ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, fresh, true)
+    ipcMain.emit(channel, { sender: window.webContents }, fresh, true)
     await settle()
-    ipcMain.emit(channel, { sender: window.webContents }, requestId(window), true)
-    await settle(); expect(window.isDestroyed()).toBe(true)
+    if (mode === 'save') {
+      expect(window.isDestroyed()).toBe(false)
+      ipcMain.emit(channel, { sender: window.webContents }, requestId(window), true)
+      await settle()
+    }
+    expect(window.isDestroyed()).toBe(true)
   })
   it('allows only an explicit confirmed-recovery close when renderer preparation fails', async () => {
-    controls.recoveryChoice = 2
+    controls.dirty = false; controls.recoveryChoice = 2
     const { window } = await openWindow()
     window.close(); await settle()
     ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, requestId(window), false)
@@ -158,37 +162,28 @@ describe('window close recovery handshake', () => {
     controls.dirty = false
     const { window } = await openWindow()
     window.close(); await settle()
-    expect(window.webContents.send).toHaveBeenCalledWith(IPC_CHANNELS.requestPreserveAndClose, expect.any(String))
-    expect(window.isDestroyed()).toBe(false)
-    ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, requestId(window), true)
-    await settle()
+    expect(window.webContents.send).toHaveBeenCalledWith(IPC_CHANNELS.requestPreserveAndClose, expect.any(String), undefined)
     expect(window.isDestroyed()).toBe(false)
     ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, requestId(window), true)
     await settle()
     expect(window.isDestroyed()).toBe(true)
     expect(controls.clearRecovery).not.toHaveBeenCalled()
   })
-  it('retains the save handshake and only closes after save success', async () => {
+  it('retains both save handshakes and only closes after save success', async () => {
     controls.choice = 0
     const { window } = await openWindow()
     window.close(); await settle()
-    expect(window.webContents.send).toHaveBeenCalledWith(IPC_CHANNELS.requestPreserveAndClose, expect.any(String))
+    expect(window.webContents.send).toHaveBeenCalledWith(IPC_CHANNELS.requestSaveAndClose, expect.any(String), [])
     ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, requestId(window), true)
-    await settle()
-    expect(window.isDestroyed()).toBe(false)
-    expect(window.webContents.send).toHaveBeenCalledWith(IPC_CHANNELS.requestSaveAndClose, expect.any(String))
-    ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, requestId(window), true)
-    await settle()
-    expect(window.isDestroyed()).toBe(false)
+    await settle(); expect(window.isDestroyed()).toBe(false)
     ipcMain.emit(IPC_CHANNELS.saveAndCloseResult, { sender: window.webContents }, requestId(window), false)
-    await settle()
-    expect(window.isDestroyed()).toBe(false)
+    await settle(); expect(window.isDestroyed()).toBe(false)
     window.close(); await settle()
-    ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, requestId(window), true)
-    await settle()
     ipcMain.emit(IPC_CHANNELS.saveAndCloseResult, { sender: window.webContents }, requestId(window), true)
-    await settle()
-    expect(window.isDestroyed()).toBe(true)
+    await settle(); expect(window.isDestroyed()).toBe(false)
+    ipcMain.emit(IPC_CHANNELS.saveAndCloseResult, { sender: window.webContents }, requestId(window), true)
+    await settle(); expect(window.isDestroyed()).toBe(true)
+    expect(controls.clearRecovery).not.toHaveBeenCalled()
   })
 })
 

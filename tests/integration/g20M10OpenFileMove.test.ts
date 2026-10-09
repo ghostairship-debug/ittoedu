@@ -3,6 +3,15 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, it } from 'vitest'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { createCourseProjectV10Archive } from '../../src/core/drivers/codecs/courseProjectV10Archive'
+import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
+import { TEXT_DEFINITION } from '../../src/components/text/adapters'
+import { createTextComponentData } from '../../src/components/text/data'
+import { IMAGE_DEFINITION } from '../../src/components/image'
+import { createImageData } from '../../src/components/image/data'
+import { plainDocumentText } from '../../src/shared/document/content'
+import { textComponentDataSchema } from '../../src/components/text/data'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { WorkspaceFilesDesktopService } from '../../src/main/workbench/workspaceFilesDesktopService'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
@@ -90,48 +99,65 @@ it('M10-T02 keeps a dirty Markdown document and its frozen AI target on the new 
   } finally { tree.dispose() }
 })
 
-it('M10-T02 keeps a dirty V9 course, embedded resources and History through tree move and later AI edit', async () => {
+it('M10-T02 keeps a dirty V10 course, embedded resources and History through tree move and later AI edit', async () => {
   const { root, workspace, target, host, tree, registered } = await fixture()
   try {
-    const original = path.join(workspace, 'course.h5lesson'), moved = path.join(target, 'course.h5lesson')
-    await fs.copyFile(path.resolve('tests/fixtures/course-project-v9/multi-asset.h5lesson'), original)
+    const original = path.join(workspace, 'course.glx'), moved = path.join(target, 'course.glx')
+    const project = createBlankCourseProjectV10('文件移动')
+    const surfaceId = project.surfaces[0].id
+    project.definitions[TEXT_DEFINITION.id] = structuredClone(TEXT_DEFINITION)
+    project.definitions[IMAGE_DEFINITION.id] = structuredClone(IMAGE_DEFINITION)
+    project.definitions.note = { id: 'note', role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'note', entry: 'main.js' } } }
+    project.instances['slide-title'] = { id: 'slide-title', definitionId: TEXT_DEFINITION.id,
+      data: JSON.parse(JSON.stringify(createTextComponentData('原页面标题'))), frame: { width: 400, height: 70, transform: [1, 0, 0, 1, 40, 40] } }
+    project.assets.image = { id: 'image', path: 'assets/image.svg', mimeType: 'image/svg+xml', kind: 'image' }
+    project.instances.image = { id: 'image', definitionId: IMAGE_DEFINITION.id, data: JSON.parse(JSON.stringify(createImageData('image', '素材'))),
+      frame: { width: 10, height: 10, transform: [1, 0, 0, 1, 40, 140] } }
+    project.instances.note = { id: 'note', definitionId: 'note', data: {}, frame: { width: 100, height: 70, transform: [1, 0, 0, 1, 200, 140] } }
+    project.surfaces[0].childIds = ['slide-title', 'image', 'note']
+    await fs.writeFile(original, createCourseProjectV10Archive({ project, resources: {
+      assets: { image: new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>') },
+      components: { note: { 'main.js': new TextEncoder().encode('export default {mount({root}) {const note=document.createElement("span"); note.textContent="附注"; root.append(note); return {dispose(){note.remove()}}}}') } },
+    } }))
     const opened = await host.open(original)
-    if (opened.model.kind !== 'course-v9') throw new Error('Expected V9 fixture')
+    if (opened.model.kind !== 'course-v10') throw new Error('Expected V10 fixture')
     const originals = structuredClone(opened.model.resources)
-    const project = structuredClone(opened.model.project)
-    project.title = '人工修改的课件名'
     await host.internalAPI.dispatch({ documentId: opened.documentId, epoch: opened.epoch, baseRevision: opened.revision,
-      operationId: 'human-course-before-move', actor: 'human', mutation: { type: 'command', command: { type: 'course.replace', project } } })
+      operationId: 'human-course-before-move', actor: 'human', mutation: { type: 'command', command: captureComponentOperation(opened.model.project, [{ type: 'project.title.set', title: '人工修改的课件名' }]) } })
     await host.tools.beginRun({ runId: 'm10-course-ai', actor: 'agent', documents: [{ documentId: opened.documentId,
-      writable: [{ kind: 'course-object', locationId: 'location-scene-1', itemId: 'slide-title' }] }] })
+      writable: [{ kind: 'course-instance', surfaceId, instanceId: 'slide-title', dataPath: ['content'], from: 0, to: Array.from('原页面标题').length }] }] })
     const handle = await host.tools.issueTarget('m10-course-ai', opened.documentId,
-      { kind: 'course-object', locationId: 'location-scene-1', itemId: 'slide-title' })
+      { kind: 'course-instance', surfaceId, instanceId: 'slide-title', dataPath: ['content'], from: 0, to: Array.from('原页面标题').length })
 
-    expect(await moveFromTree(tree, registered, 'course.h5lesson')).toMatchObject({ status: 'success' })
+    expect(await moveFromTree(tree, registered, 'course.glx')).toMatchObject({ status: 'success' })
     expect(await host.internalAPI.read(opened.documentId)).toMatchObject({ documentId: opened.documentId, dirty: true,
       undoDepth: 1, binding: { kind: 'file', path: moved, bindingVersion: 2 } })
     const ai = await host.tools.execute('m10-course-ai', 'course-after-move',
       { name: 'text.replace', input: { target: handle, content: 'AI 更新的页面标题' } })
     expect(ai).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     const changed = await host.internalAPI.read(opened.documentId)
-    if (changed.model.kind !== 'course-v9') throw new Error('Course model changed kind')
+    if (changed.model.kind !== 'course-v10') throw new Error('Course model changed kind')
     expect(changed.undoDepth).toBe(2)
     expect(changed.model.project.title).toBe('人工修改的课件名')
     expect(changed.model.resources).toEqual(originals)
-    const slide = changed.model.project.surfaces.find(surface => surface.type === 'slide')
-    const title = slide?.scenes[0]?.layerItems.find(item => item.layerItemId === 'slide-title')
-    expect(title?.kind === 'native' && title.content.nativeType === 'text' && title.content.data.text).toBe('AI 更新的页面标题')
+    expect(plainDocumentText(textComponentDataSchema.parse(changed.model.project.instances['slide-title'].data).content)).toBe('AI 更新的页面标题')
 
     await host.saveToPath(opened.documentId)
     await expect(fs.access(original)).rejects.toMatchObject({ code: 'ENOENT' })
     const reopened = await new DocumentHostService(path.join(root, 'reopen')).open(moved)
-    if (reopened.model.kind !== 'course-v9') throw new Error('Reopened course changed kind')
+    if (reopened.model.kind !== 'course-v10') throw new Error('Reopened course changed kind')
     expect(reopened.model.project.title).toBe('人工修改的课件名')
     expect(reopened.model.resources).toEqual(originals)
+    expect(plainDocumentText(textComponentDataSchema.parse(reopened.model.project.instances['slide-title'].data).content)).toBe('AI 更新的页面标题')
     const saved = await host.internalAPI.read(opened.documentId)
     await host.internalAPI.dispatch({ documentId: saved.documentId, epoch: saved.epoch, baseRevision: saved.revision,
       operationId: 'undo-course-after-move', actor: 'human', mutation: { type: 'undo' } })
-    expect(await host.internalAPI.read(opened.documentId)).toMatchObject({ undoDepth: 1, binding: { path: moved } })
+    const undone = await host.internalAPI.read(opened.documentId)
+    expect(undone).toMatchObject({ undoDepth: 1, binding: { path: moved } })
+    if (undone.model.kind !== 'course-v10') throw new Error('Undo changed course kind')
+    expect(plainDocumentText(textComponentDataSchema.parse(undone.model.project.instances['slide-title'].data).content)).toBe('原页面标题')
+    expect(undone.model.project.title).toBe('人工修改的课件名')
+    expect(undone.model.resources).toEqual(originals)
     await expect(fs.access(original)).rejects.toMatchObject({ code: 'ENOENT' })
   } finally { tree.dispose() }
 })

@@ -15,7 +15,7 @@ const packageJson = JSON.parse(
   readFileSync(resolve(__dirname, '..', '..', 'package.json'), 'utf8'),
 ) as { scripts: Record<string, string> }
 const doubleClickLauncher = readFileSync(
-  resolve(__dirname, '..', '..', '启动课件编辑器.cmd'),
+  resolve(__dirname, '..', '..', '启动果铃工作台.cmd'),
   'utf8',
 )
 

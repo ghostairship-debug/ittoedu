@@ -28,7 +28,7 @@ it('cold Engine lookup settles a PPTX create whose ACK was lost without converti
   try {
     const workspace = path.join(directory, 'workspace'), hostDirectory = path.join(directory, 'documents')
     await fs.mkdir(workspace)
-    const source = path.join(workspace, 'source.pptx'), destination = path.join(workspace, 'imported.h5lesson')
+    const source = path.join(workspace, 'source.pptx'), destination = path.join(workspace, 'imported.glx')
     const pptx = new PptxGenJS()
     pptx.addSlide().addText('Original teacher slide', { x: 1, y: 1, w: 4, h: 1 })
     await pptx.writeFile({ fileName: source })
@@ -84,20 +84,20 @@ it('cold Engine lookup settles a PPTX create whose ACK was lost without converti
       modelCalls++
       expect(modelCalls).toBe(1)
       expect(request.tools?.map(tool => tool.name)).toContain('course.importPptx')
-      const input = { path: 'source.pptx', destination: 'imported.h5lesson' }, callId = `call-${request.requestId}`
+      const input = { path: 'source.pptx', destination: 'imported.glx' }, callId = `call-${request.requestId}`
       yield { type: 'response.completed', requestId: request.requestId, sequence: 1, responseId: request.requestId, actualModel: selection.model,
         nativeResponse: {}, finishReason: 'tool_calls', toolCalls: [{ id: callId, name: 'course.importPptx', argumentsText: JSON.stringify(input) }],
         assistant: { role: 'assistant', content: '', tool_calls: [{ id: callId, type: 'function', function: { name: 'course.importPptx', arguments: JSON.stringify(input) } }] } } satisfies ModelEvent
     } }
     engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, files: host.agentFiles, provider, runs, events })
-    const start = await engine.start({ conversationId: 'conversation', taskId: 'original-pptx-import', instruction: '导入 source.pptx 为 imported.h5lesson',
+    const start = await engine.start({ conversationId: 'conversation', taskId: 'original-pptx-import', instruction: '导入 source.pptx 为 imported.glx',
       documents: [], workspaceRoot: workspace, permission: 'workspace', selection })
     await expect.poll(() => created).toBe(true)
     expect(convert).toHaveBeenCalledTimes(1)
     expect(create).toHaveBeenCalledTimes(1)
     expect(preparedCreate).toHaveBeenCalledTimes(1)
     expect(openCourseProjectV10Archive(new Uint8Array(await fs.readFile(destination))).project.title).toBe('Converted once')
-    expect((await fs.readdir(workspace)).filter(name => name.endsWith('.h5lesson'))).toEqual(['imported.h5lesson'])
+    expect((await fs.readdir(workspace)).filter(name => name.endsWith('.glx'))).toEqual(['imported.glx'])
     const stopping = engine.stop(start.runId)
     releaseAck()
     expect((await stopping)?.status).toBe('stopped')
@@ -127,7 +127,7 @@ it('cold Engine lookup settles a PPTX create whose ACK was lost without converti
       expect(item).not.toHaveProperty('entryId')
       expect(item).not.toHaveProperty('sourceEntryId')
     }
-    expect(await cold.tools.lookup(crash.runId, tool.callId, { ...tool.call, input: { path: 'source.pptx', destination: 'different.h5lesson' } }))
+    expect(await cold.tools.lookup(crash.runId, tool.callId, { ...tool.call, input: { path: 'source.pptx', destination: 'different.glx' } }))
       .toMatchObject({ kind: 'error', code: 'operation-payload-mismatch' })
     expect(cold.registry.list()).toHaveLength(0)
     expect(cold.tools.runtimeCounts(crash.runId)).toMatchObject({ activeRuns: 0, handles: 0, operationLeases: 0, host: { runs: 0 } })
@@ -162,7 +162,7 @@ it('a creation receipt write failure stays unknown after publication and preserv
     const workspace = path.join(directory, 'workspace'), hostDirectory = path.join(directory, 'documents')
     await fs.mkdir(workspace)
     const host = new DocumentHostService(hostDirectory), runId = 'receipt-failure-run', callId = 'original-create'
-    const call = { name: 'course.importPptx', input: { path: 'source.pptx', destination: 'retained.h5lesson' } }
+    const call = { name: 'course.importPptx', input: { path: 'source.pptx', destination: 'retained.glx' } }
     const operationId = host.tools.operationIdentity(runId, callId), requestDigest = documentDigest(call)
     const destination = path.join(workspace, call.input.destination), receiptDirectory = path.join(hostDirectory, 'creation-receipts')
     const project = createBlankCourseProjectV10('Published before receipt failure')
@@ -186,7 +186,7 @@ it('a creation receipt write failure stays unknown after publication and preserv
     expect(ownerOutcome).toBeInstanceOf(WorkspaceCreationOutcomeUnknown)
     expect(ownerOutcome).toMatchObject({ code: 'tool-outcome-unknown' })
     expect(openCourseProjectV10Archive(new Uint8Array(await fs.readFile(destination))).project.title).toBe('Published before receipt failure')
-    expect(await fs.readdir(workspace)).toEqual(['retained.h5lesson'])
+    expect(await fs.readdir(workspace)).toEqual(['retained.glx'])
     expect(host.registry.list()).toHaveLength(0)
     expect(open).not.toHaveBeenCalled()
     const cold = new DocumentHostService(hostDirectory), coldCreate = vi.spyOn(cold.files, 'createFile')

@@ -594,16 +594,16 @@ describe('the editor renderer reads its own font bytes', () => {
     const main = readFileSync(join(repoRoot, 'src/renderer/main.tsx'), 'utf8')
     expect(main).toContain('installFetchBundledFontEmbedSource({ manifest: BUNDLED_FONT_MANIFEST })')
 
-    // And the export commands are what await the lazy read.
-    const delivery = readFileSync(join(repoRoot, 'src/renderer/app/useCourseDelivery.ts'), 'utf8')
-    const html = delivery.indexOf('const emitHtml')
-    const web = delivery.indexOf('const emitWebPackage')
-    const pptx = delivery.indexOf('const emitPptx')
+    // The current V10 producers prepare bytes before publishing either delivery.
+    const delivery = readFileSync(join(repoRoot, 'src/renderer/export/componentPlatform/buildHtml.ts'), 'utf8')
+    const html = delivery.indexOf('export async function buildComponentHtml')
+    const web = delivery.indexOf('export async function buildComponentWebPackage')
     expect(html).toBeGreaterThan(-1)
-    expect(web).toBeGreaterThan(-1)
-    expect(pptx).toBeGreaterThan(-1)
+    expect(web).toBeGreaterThan(html)
+    expect(delivery.indexOf('await prepareBundledFontEmbedding()', html)).toBeGreaterThan(html)
     expect(delivery.indexOf('await prepareBundledFontEmbedding()', html)).toBeLessThan(web)
-    expect(delivery.indexOf('await prepareBundledFontEmbedding()', web)).toBeLessThan(pptx)
+    expect(delivery.indexOf('await prepareBundledFontEmbedding()', web)).toBeGreaterThan(web)
+
   })
 })
 

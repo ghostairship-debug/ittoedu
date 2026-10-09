@@ -559,7 +559,15 @@ describe('r11-042 V9 fixture print facts', () => {
       slide.files.find((file) => file.kind === 'pdf-html')!.bytes,
     )
     expect(slidePdf).toContain(V2_CAPTURE_IMAGE)
-    expect(slidePdf).toContain('@page { size: 13.333in 7.5in; margin: 0; }')
+    const slidePdfDocument = new DOMParser().parseFromString(slidePdf, 'text/html')
+    const slidePdfPage = slidePdfDocument.querySelector<HTMLElement>('.page')
+    expect(slidePdfPage?.style.width).toBe('1280px')
+    expect(slidePdfPage?.style.height).toBe('720px')
+    const pageRule = slidePdfDocument.querySelector('style')?.textContent?.match(
+      /@page\s+([\w-]+)\s*\{\s*size:\s*(\d+)px\s+(\d+)px;\s*margin:\s*0;\s*\}/,
+    )
+    expect(pageRule?.slice(2).map(Number)).toEqual([1280, 720])
+    expect(slidePdfPage?.style.getPropertyValue('page')).toBe(pageRule?.[1])
     const slidePrint = new TextDecoder().decode(
       slide.files.find((file) => file.kind === 'flow-print-html')!.bytes,
     )

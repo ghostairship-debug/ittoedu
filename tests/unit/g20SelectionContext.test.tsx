@@ -1,4 +1,6 @@
-import { createBlankFlowCourseProject } from '../../src/renderer/project/createFlowCourseProject'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { TEXT_DEFINITION } from '../../src/components/text/adapters'
+import { createTextComponentData } from '../../src/components/text/data'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { SelectionContextController, captureSelection, captureFlowSelection, selectionReference } from '../../src/renderer/workbench/SelectionContextController'
@@ -29,14 +31,17 @@ it('M04 freezes a multi-range reference independently of the next manual selecti
   await controller.request(selected, '只改两处'); expect(sent.mock.calls[0][0].selection.targets).toEqual(selected.targets)
   current.revision++; await expect(controller.request(selected, '迟到请求')).rejects.toThrow('已改变')
   expect(sent).toHaveBeenCalledTimes(1)
-  const course = createBlankFlowCourseProject({ includeDefaultController: false, controls: 'none' })
+  const course = createBlankCourseProjectV10('Flow selection')
   const flow = course.surfaces[0]
-  if (flow.type !== 'flow') throw new Error('fixture')
-  flow.blocks = [{ id: 'body', type: 'paragraph', content: { inlines: [{ type: 'text', text: '甲乙丙丁' }] } }]
-  const flowSnapshot: DocumentSnapshot = { ...snapshot(), documentId: 'flow', model: { kind: 'course-v9', project: course, resources: snapshot().model.resources } }
+  flow.kind = 'flow'
+  flow.childIds = ['body']
+  course.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
+  course.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id,
+    data: JSON.parse(JSON.stringify(createTextComponentData('甲乙丙丁'))) }
+  const flowSnapshot: DocumentSnapshot = { ...snapshot(), documentId: 'flow', model: { kind: 'course-v10', project: course, resources: snapshot().model.resources } }
   const textSelection = { mode: 'layout' as const, revision: '0', source: '', label: '讲义两字', ranges: null,
     selection: { kind: 'text' as const, revision: '0', anchor: { blockId: 'body', slot: { kind: 'field' as const, field: 'content' as const }, offset: 1, affinity: 'after' as const }, head: { blockId: 'body', slot: { kind: 'field' as const, field: 'content' as const }, offset: 3, affinity: 'before' as const } } }
-  expect(captureFlowSelection(flowSnapshot, flow.id, textSelection).targets).toEqual([{ kind: 'flow-range', surfaceId: flow.id, blockId: 'body', parentId: null, slot: { kind: 'field', field: 'content' }, from: 1, to: 3 }])
+  expect(captureFlowSelection(flowSnapshot, flow.id, textSelection).targets).toEqual([{ kind: 'course-instance', surfaceId: flow.id, instanceId: 'body', stateId: null, dataPath: ['content'], from: 1, to: 3 }])
   expect(() => captureFlowSelection(flowSnapshot, flow.id, { ...textSelection, selection: { ...textSelection.selection, head: { ...textSelection.selection.head, blockId: 'other' } } })).toThrow()
 
   expect(() => captureSelection(current, [], '空')).toThrow('没有选中')

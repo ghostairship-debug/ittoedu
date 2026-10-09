@@ -11,6 +11,9 @@ import { afterEach, expect, it } from 'vitest'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionDesktopService } from '../../src/main/workbench/execution/ExecutionDesktopService'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
+import { attachmentHostToolServices } from '../helpers/attachmentHostToolServices'
+import { materialImageSource } from '../../src/main/workbench/execution/MaterialReadTools'
+import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { AttachmentComposer } from '../../src/renderer/workbench/attachments/AttachmentComposer'
 import type { InputAttachmentReference } from '../../src/shared/workbench/attachments'
 import type { AttachmentsDesktopAPI } from '../../src/shared/workbench/attachmentsDesktop'
@@ -36,11 +39,12 @@ it('S08-T02 sends two distinct image cards as decoded image bytes while read sta
     if (request.method !== 'POST' || request.url !== '/v1/chat/completions') throw new Error(`Unexpected local route ${request.method} ${request.url}`)
     const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk))
     requests.push({ path: request.url, raw: Buffer.concat(chunks).toString() })
+
     response.writeHead(200, { 'Content-Type': 'text/event-stream' })
     if (materialRound === 1 || materialRound === 2) {
       const body = JSON.parse(requests.at(-1)!.raw)
-      const prefix = materialRound === 1 ? '列出当前显式材料' : '按 material.list'
-      const tool = body.tools.find((tool: any) => tool.function.description.startsWith(prefix))
+      const name = materialRound === 1 ? 'material.list' : 'material.read'
+      const tool = body.tools.find((tool: any) => tool.function.name === modelToolWireName(name))
       if (!tool) throw new Error('Material tool missing from actual request')
       const args = materialRound === 1 ? {} : { attachmentId: first.id, representationId: 'original-image' }
       materialRound++
@@ -48,7 +52,7 @@ it('S08-T02 sends two distinct image cards as decoded image bytes while read sta
       return
     }
     response.end(`data: ${JSON.stringify({ id: 'two-image-fixture', model: 'fixture-vision', choices: [{ index: 0, delta: { role: 'assistant', content: '两张图像已收到' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`)
-  })().catch(error => { errors.push(String(error)); response.destroy() }) })
+  })().catch(error => { errors.push(String(error)); response.end() }) })
   servers.push(server)
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-two-image-')); roots.push(root)
@@ -61,6 +65,8 @@ it('S08-T02 sends two distinct image cards as decoded image bytes while read sta
   const visionConnection = await settings.saveConnection({ apiKey: 'local-only', connection: { provider: 'local-fixture', protocol: 'openai-chat', baseURL: endpoint, accountId: 'vision', authKind: 'api-key', billing: { kind: 'unknown' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'supported', reasoning: 'unknown' } } })
   await settings.saveProfile({ roles: { conversation: { connectionId: conversationConnection.connection.id, model: 'fixture-chat' }, vision: { connectionId: visionConnection.connection.id, model: 'fixture-vision' }, imageGenerate: null, imageEdit: null } })
   const service = new ExecutionDesktopService({ directory: root, documents, settings, authorizeWorkspaceRoot: async value => ({ resolvedPath: value }) })
+  const materialServices = attachmentHostToolServices(service.attachments, documents)
+  documents.tools.configureHostServices(materialServices)
   const workspace = await service.operate({ type: 'workspace', root: null }) as { workspace: { workspaceId: string } }
   const conversation = await service.operate({ type: 'create-conversation', workspaceId: workspace.workspace.workspaceId }) as ConversationRecord
   const identity = { workspaceId: conversation.workspaceId, conversationId: conversation.conversationId }
@@ -173,4 +179,25 @@ it('S08-T02 sends two distinct image cards as decoded image bytes while read sta
   expect(rereadRun.initialPayload?.totals.imageBytes).toBe(0)
   expect(rereadRun.initialPayload?.readStatus).toBe('unknown')
   expect(requests).toHaveLength(7)
+
+  // Material grants are independent of workspace file grants and never cover other tasks' attachments.
+  const scopedRun = randomUUID(), otherRun = randomUUID()
+  await documents.tools.beginRun({ runId: scopedRun, actor: 'agent', documents: [], materialIds: [first.id] })
+  await documents.tools.beginRun({ runId: otherRun, actor: 'agent', documents: [], materialIds: [second.id] })
+  expect((await documents.tools.describeRun(scopedRun)).map(tool => tool.name)).toContain('material.read')
+  expect(await documents.tools.execute(scopedRun, randomUUID(), { name: 'material.list', input: {} }))
+    .toMatchObject({ kind: 'read', data: { sources: [expect.objectContaining({ attachmentId: first.id })] } })
+  expect(await documents.tools.execute(scopedRun, randomUUID(), { name: 'material.read',
+    input: { attachmentId: second.id, representationId: 'original-image' } })).toMatchObject({ kind: 'error' })
+  expect(await documents.tools.execute(scopedRun, randomUUID(), { name: 'material.read',
+    input: { attachmentId: randomUUID(), representationId: 'original-image' } })).toMatchObject({ kind: 'error' })
+  expect(await documents.tools.execute(scopedRun, randomUUID(), { name: 'material.list', input: { path: '/private/ungranted.png' } }))
+    .toMatchObject({ kind: 'error', code: 'not-authorized' })
+  const readResource = materialServices.materials!.readResource!
+  expect(Buffer.from((await readResource({ runId: scopedRun, resourceId: materialImageSource(first.id, 'original-image') })).bytes)).toEqual(firstBytes)
+  await expect(readResource({ runId: otherRun, resourceId: materialImageSource(first.id, 'original-image') })).rejects.toThrow('材料不在当前')
+  await documents.tools.stop(scopedRun)
+  expect(await documents.tools.execute(scopedRun, randomUUID(), { name: 'material.list', input: {} })).toMatchObject({ kind: 'error', code: 'run-stopped' })
+  await expect(readResource({ runId: scopedRun, resourceId: materialImageSource(first.id, 'original-image') })).rejects.toThrow('stopped')
+  await documents.tools.stop(otherRun)
 })

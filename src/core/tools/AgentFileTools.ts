@@ -109,7 +109,7 @@ export interface AgentFileService {
   preflightOffice?(context: AgentFileContext, name: OfficeContentToolName, input: unknown): Promise<{ paths: string[]; outside: boolean }>
   executeOffice?(context: AgentFileContext, name: OfficeContentToolName, input: unknown, operationId: string): Promise<AgentFileOutcome>
 }
-export class AgentFileOutcomeUnknown extends Error {}
+export class AgentFileOutcomeUnknown extends Error { readonly code = 'tool-outcome-unknown' }
 /** A refused create preflight; this diagnostic path carries no execution permission. */
 export class AgentFileMissingParent extends Error {
   constructor(message: string, readonly pendingCreationPath: string) { super(message) }

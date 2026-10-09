@@ -5,9 +5,9 @@ import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
 import { afterEach, expect, it, vi } from 'vitest'
-import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { prepareImageResource } from '../../src/main/workbench/admittedImageResource'
 import { createDocumentJournal } from '../../src/main/workbench/documentJournal'
@@ -118,11 +118,11 @@ it('projects original image producer instants onto their own request/tool while 
     fetch: async () => new Response(JSON.stringify({ created: 1, data: [{ b64_json: output.toString('base64') }] }),
       { headers: { 'Content-Type': 'application/json' } }),
   }) })
-  const driver = new CourseV9Driver()
+  const driver = new CourseV10Driver()
   const registry = new DocumentRegistry({ drivers: [driver], persistence: createDocumentJournal({ directory: path.join(directory, 'documents') }),
     createId: randomUUID, bindingKey: binding => binding.path })
-  const session = await registry.create({ kind: 'course-v9', project: createBlankCourseProject({ includeDefaultController: false, controls: 'none' }),
-    resources: { assets: {}, components: {} } }, 'test.h5lesson')
+  const session = await registry.create({ kind: 'course-v10', project: createBlankCourseProjectV10('Image fixture'),
+    resources: { assets: {}, components: {} } }, 'test.glx')
   const gateway = new DocumentToolGateway(registry, [driver], randomUUID, { prepareImage: prepareImageResource, services: { images: {
     selection: () => imageSelection, run: (input, options) => images.run(input, options), read: id => images.read(id),
     stop: id => images.stop(id), readResource: id => images.readResource(id),
@@ -177,11 +177,11 @@ it('retains image job facts after stop revokes tool authority without applying t
       })
     },
   }) })
-  const driver = new CourseV9Driver()
+  const driver = new CourseV10Driver()
   const registry = new DocumentRegistry({ drivers: [driver], persistence: createDocumentJournal({ directory: path.join(directory, 'documents') }),
     createId: randomUUID, bindingKey: binding => binding.path })
-  const session = await registry.create({ kind: 'course-v9', project: createBlankCourseProject({ includeDefaultController: false, controls: 'none' }),
-    resources: { assets: {}, components: {} } }, 'stopped.h5lesson')
+  const session = await registry.create({ kind: 'course-v10', project: createBlankCourseProjectV10('Image fixture'),
+    resources: { assets: {}, components: {} } }, 'stopped.glx')
   const before = session.read().revision
   const gateway = new DocumentToolGateway(registry, [driver], randomUUID, { prepareImage: prepareImageResource, services: { images: {
     selection: () => imageSelection, run: (input, options) => images.run(input, options), read: id => images.read(id),

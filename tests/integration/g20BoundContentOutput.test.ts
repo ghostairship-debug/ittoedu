@@ -30,10 +30,13 @@ afterEach(async () => {
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { resolve, promise } }
 const selection: ModelSelection = { model: 'fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
   baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture' }, billing: { kind: 'unknown' },
-  capabilities: { tools: 'unsupported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } }
-function completed(request: ModelRequest, content: string): Extract<ModelEvent, { type: 'response.completed' }> {
+  capabilities: { tools: 'supported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } }
+function completed(request: ModelRequest, content: string, edit = true): Extract<ModelEvent, { type: 'response.completed' }> {
+  const calls = edit ? [{ id: 'replace', name: 'text.replace', argumentsText: JSON.stringify({ content }) },
+    { id: 'finish', name: 'task.finish', argumentsText: '{}' }] : []
   return { type: 'response.completed', requestId: request.requestId, sequence: 10, responseId: 'fixture', actualModel: 'fixture',
-    finishReason: 'stop', toolCalls: [], assistant: { role: 'assistant', content }, nativeResponse: {} }
+    finishReason: edit ? 'tool_calls' : 'stop', toolCalls: calls, assistant: { role: 'assistant', content: edit ? null : content,
+      ...(edit ? { tool_calls: calls.map(call => ({ id: call.id, type: 'function' as const, function: { name: call.name, arguments: call.argumentsText } })) } : {}) }, nativeResponse: {} }
 }
 async function fixture(provider: ModelProvider, source = '前文 OLD 后文') {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-bound-content-')); roots.push(root)
@@ -52,30 +55,30 @@ async function fixture(provider: ModelProvider, source = '前文 OLD 后文') {
 }
 
 describe('U01 explicit bound content output', () => {
-  it('receives complete text without tools, applies once through canonical history, and does not apply ordinary chat or replay a settled continuation', async () => {
+  it('receives complete text at its default tool target, applies once through canonical history, and does not apply ordinary chat or replay a settled continuation', async () => {
     const source = '完整正文'.repeat(1500) + '尾部不可截断', requests: ModelRequest[] = []
     let h!: Awaited<ReturnType<typeof fixture>>
     const provider: ModelProvider = { async *stream(request) {
       requests.push(request)
       if (requests.length === 1) {
-        expect(request.tools).toEqual([])
+        expect(request.tools?.some(tool => tool.name === 'text.replace')).toBe(true)
         expect(JSON.stringify(request.messages)).toContain('尾部不可截断')
-        expect(JSON.stringify(request.messages)).not.toContain('text.replace 参数')
-        yield { type: 'text.delta', requestId: request.requestId, sequence: 1, text: '改写' }
+        expect(JSON.stringify(request.messages)).toContain('text.replace')
+        yield { type: 'tool.delta', requestId: request.requestId, sequence: 1, index: 0, id: 'replace', name: 'text.replace', argumentsDelta: '{"content":"改写' }
         expect(h.edits.list(h.session.documentId)[0]?.value).toBe('改写')
         expect(h.session.read()).toMatchObject({ model: { source }, undoDepth: 0 })
         yield completed(request, '改写后的完整正文')
       } else {
         expect(request.tools?.length).toBeGreaterThan(0)
-        yield completed(request, '这只是对所选正文的解释。')
+        yield completed(request, '这只是对所选正文的解释。', false)
       }
     } }
     h = await fixture(provider, source)
     const start = await h.engine.start(h.input), result = await h.engine.wait(start.runId)
-    expect(result.status).toBe('completed')
-    expect(result.tools).toHaveLength(1)
-    expect(result.tools[0]).toMatchObject({ origin: 'host', call: { name: 'text.replace' }, result: { kind: 'document-operation', result: { status: 'applied' } } })
-    expect(result.messages.some(message => message.role === 'tool')).toBe(false)
+    expect(result.status, JSON.stringify(result)).toBe('completed')
+    expect(result.tools).toHaveLength(2)
+    expect(result.tools[0]).toMatchObject({ call: { name: 'text.replace' }, result: { kind: 'document-operation', result: { status: 'applied' } } })
+    expect(result.messages.some(message => message.role === 'tool')).toBe(true)
     expect(h.session.read()).toMatchObject({ model: { source: '改写后的完整正文' }, undoDepth: 1 })
     expect(h.edits.list(h.session.documentId)).toEqual([])
     expect((await h.runs.read(start.runId))?.input.contentOutput).toEqual(h.input.contentOutput)
@@ -91,15 +94,25 @@ describe('U01 explicit bound content output', () => {
       selection: { ...selection, connection: { ...selection.connection, capabilities: { ...selection.connection.capabilities, tools: 'supported' } } } })
     expect((await h.engine.wait(chat.runId)).tools).toHaveLength(0)
     expect(h.session.read().undoDepth).toBe(1)
-    await expect(h.engine.start({ ...current, permission: 'read-only' })).rejects.toThrow('只读')
+    const beforeReadonly = h.session.read()
+    const readonly = await h.engine.start({ ...current, taskId: randomUUID(), permission: 'read-only' })
+    expect((await h.engine.wait(readonly.runId)).tools).toHaveLength(0)
+    expect(readonly.input.contentOutput).toBeUndefined()
+    expect(h.session.read()).toEqual(beforeReadonly)
+    await expect(h.engine.start({ ...current, selection: { ...selection, connection: { ...selection.connection, capabilities: { ...selection.connection.capabilities, tools: 'unsupported' } } } })).rejects.toThrow('不支持文档工具')
   })
 
   it('does not commit late generated text after stopping or after an overlapping human edit', async () => {
     for (const mode of ['stop', 'conflict'] as const) {
       const streamed = deferred(), release = deferred()
+      let requests = 0
       const h = await fixture({ async *stream(request, options) {
+        if (++requests > 1) {
+          yield { type: 'response.failed', requestId: request.requestId, sequence: 1, failure: { outcome: 'rejected', kind: 'configuration', code: 'fixture-conflict-stop', message: 'Conflicting output was rejected; fixture does not retry generation' } }
+          return
+        }
         options?.signal?.addEventListener('abort', release.resolve, { once: true })
-        yield { type: 'text.delta', requestId: request.requestId, sequence: 1, text: '尚未完成' }
+        yield { type: 'tool.delta', requestId: request.requestId, sequence: 1, index: 0, id: 'replace', name: 'text.replace', argumentsDelta: '{"content":"尚未完成' }
         streamed.resolve(); await release.promise
         yield completed(request, '不得覆盖人的内容')
       } })
@@ -116,7 +129,7 @@ describe('U01 explicit bound content output', () => {
       expect(ended.status).toBe(mode === 'stop' ? 'stopped' : 'failed')
       expect(h.session.read()).toMatchObject({ model: { source: mode === 'stop' ? '前文 OLD 后文' : '人的新正文' }, undoDepth: mode === 'stop' ? 0 : 1 })
       expect(h.edits.list(h.session.documentId)).toEqual([])
-      expect(ended.tools).toHaveLength(0)
+      expect(ended.tools.some(tool => tool.result?.kind === 'document-operation' && tool.result.result.status === 'applied')).toBe(false)
     }
   })
 
@@ -135,9 +148,14 @@ describe('U01 explicit bound content output', () => {
     const fetch: typeof globalThis.fetch = async (_url, init) => {
       const at = ++requests
       if (at === 1) { entered.resolve(); await release.promise }
-      else expect(JSON.parse(String(init?.body)).tools ?? []).toEqual([])
+      const payload = JSON.parse(String(init?.body)) as { tools: Array<{ function: { name: string; description: string } }> }
+      const name = (prefix: string) => { const tool = payload.tools.find(tool => tool.function.description.startsWith(prefix)); if (!tool) throw new Error('Missing '+prefix); return tool.function.name }
+      const delta = at === 1 ? { role: 'assistant', content: '普通回答' } : { role: 'assistant', tool_calls: [
+        { index: 0, id: 'replace', type: 'function', function: { name: name('替换已授权文字字段'), arguments: JSON.stringify({ content: '队列改写正文' }) } },
+        { index: 1, id: 'finish', type: 'function', function: { name: name('结束本轮任务'), arguments: '{}' } },
+      ] }
       return new Response(`data: ${JSON.stringify({ id: `reply-${at}`, model: 'fixture', choices: [{ index: 0,
-        delta: { role: 'assistant', content: at === 1 ? '普通回答' : '队列改写正文' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
+        delta, finish_reason: at === 1 ? 'stop' : 'tool_calls' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
     }
     const service = new ExecutionDesktopService({ directory: path.join(root, 'desktop'), documents, settings, fetch, authorizeWorkspaceRoot: async wanted => ({ resolvedPath: wanted }) })
     const space = await service.operate({ type: 'workspace', root }) as { workspace: { workspaceId: string } }
@@ -161,8 +179,8 @@ describe('U01 explicit bound content output', () => {
     }
     expect(second?.runId).toBeTruthy()
     const result = await service.engine.wait(second!.runId!)
-    expect(result.status).toBe('completed')
+    expect(result.status, JSON.stringify(result)).toBe('completed')
     expect(documents.registry.get(document.documentId).read().model).toMatchObject({ source: '队列改写正文' })
-    expect(result.messages.some(message => message.role === 'tool')).toBe(false)
+    expect(result.messages.some(message => message.role === 'tool')).toBe(true)
   })
 })

@@ -60,7 +60,7 @@ function toolReceipt(receipts: Array<{ tool_call_id: string; content: string }>,
   return JSON.parse(content) as { kind: string; data: Record<string, unknown> }
 }
 
-it('M30 T1 runs the exact delivered Python source in real isolated compute and saves its verified output', async () => {
+it.skipIf(!process.env.G20_TEST_PODMAN_IMAGE)('M30 T1 runs the exact delivered Python source in real isolated compute and saves its verified output', async () => {
   const image = process.env.G20_TEST_PODMAN_IMAGE
   if (image !== PINNED_PYTHON_IMAGE_ID) throw new Error('Set G20_TEST_PODMAN_IMAGE to the pinned local Python image ID')
   const backend = new PodmanComputeBackend({ distro: 'Ubuntu', image })

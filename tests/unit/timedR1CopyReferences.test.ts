@@ -27,7 +27,8 @@ async function proveEvents(behavior: ComponentInstance, newButton: string, surfa
     courseState: { get: () => undefined, set() {} }, subscribeTrigger(trigger, listener) {
       const key = JSON.stringify(trigger); listeners.set(key, listener); return () => { listeners.delete(key) }
     }, executeAction(action) { actions.push(action); return true }, report(message) { throw new Error(message) } }))
-  const mounted = await runtime.mount({ instance: behavior, scope: { signal: new AbortController().signal, isActive: () => true, cleanup() {} } } as unknown as ComponentRuntimeContext)
+  const mounted = await runtime.mount({ instance: behavior, scope: { signal: new AbortController().signal, isActive: () => true,
+    events: { subscribe: () => () => undefined }, cleanup() {} } } as unknown as ComponentRuntimeContext)
   const emit = async (trigger: InteractionTrigger) => { listeners.get(JSON.stringify(trigger))?.(); await new Promise(resolve => setTimeout(resolve, 0)) }
   try {
     await emit({ type: 'node.click', nodeId: newButton })

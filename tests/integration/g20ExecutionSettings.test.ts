@@ -3,7 +3,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { ChatGPTOAuthClient } from '../../src/main/workbench/providers/ChatGPTOAuthClient'
 import { createOAuthSecurePersistence } from '../../src/main/workbench/providers/OAuthSecurePersistence'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
@@ -204,9 +204,14 @@ it('preserves prior settings when secure storage/encryption/disk writes fail, wh
   cipher.state.failEncrypt = false; cipher.state.failDecrypt = true
   await expect(store.resolveCredential(first.connection)).rejects.toMatchObject({ code: 'credential-decryption-failed' })
   cipher.state.failDecrypt = false
+  const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(Object.assign(new Error('fixture disk full'), { code: 'ENOSPC' }))
+  try {
+    await expect(store.saveConnection({ id: first.connection.id, connection: config(), apiKey: 'fixture-private' })).rejects.toMatchObject({ code: 'settings-write-failed' })
+  } finally { rename.mockRestore() }
+  expect(await fs.readFile(filename, 'utf8')).toBe(before)
   const obstructed = path.join(directory, 'blocked-parent')
   await fs.writeFile(obstructed, 'ordinary file')
-  await expect(new ExecutionSettingsStore({ ...options, directory: obstructed }).saveConnection({ connection: config(), apiKey: 'fixture-private' })).rejects.toMatchObject({ code: 'settings-write-failed' })
+  await expect(new ExecutionSettingsStore({ ...options, directory: obstructed }).saveConnection({ connection: config(), apiKey: 'fixture-private' })).rejects.toMatchObject({ code: 'settings-read-failed' })
   expect(await fs.readFile(filename, 'utf8')).toBe(before)
   cipher.state.available = false
   await store.revokeConnection(first.connection.id)

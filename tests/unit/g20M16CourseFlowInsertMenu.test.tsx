@@ -30,7 +30,7 @@ describe('M16 Flow workbench insertion menu', () => {
     const body = screen.getByRole('region', { name: '插入到正文' })
     const paper = screen.getByRole('region', { name: '放到纸面上' })
     expect(within(body).getAllByRole('menuitem').map(item => item.textContent)).toEqual([
-      '标题', '列表', '表格', '公式', '分隔线', '提示框', '折叠节', '图片', '视频', '音频', '组件',
+      '正文', '标题', '引用', '列表', '代码', '分隔线', '表格', '提示框', '折叠节', '公式', '图片', '视频', '音频', '组件',
     ])
     expect(within(paper).getAllByRole('menuitem').map(item => item.textContent)).toEqual(['文本框', '图片', '形状', '组件'])
     expect(screen.queryByText('Runtime')).toBeNull()

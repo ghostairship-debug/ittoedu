@@ -138,7 +138,7 @@ describe('projectPersistence', () => {
 
     const mismatched = await readRecoveryProject()
     expect(mismatched).toMatchObject({
-      projectName: '恢复的 H5 演示.h5lesson',
+      projectName: '恢复的 果铃工程.glx',
       projectPath: undefined,
     })
     expect([...mismatched!.bytes]).toEqual([...newerValidPackage])
@@ -297,7 +297,7 @@ describe('projectPersistence', () => {
     await fs.writeFile(selectedPath, external)
     await expect(saveProjectFile({} as Parameters<typeof saveProjectFile>[0], { path: selectedPath, suggestedName: 'external-change', bytes: original })).rejects.toMatchObject({ code: 'PROJECT_EXTERNAL_CHANGE' })
     expect([...await fs.readFile(selectedPath)]).toEqual([...external])
-    const newPath = path.join(testRoot, 'preserved.h5lesson')
+    const newPath = path.join(testRoot, 'preserved.glx')
     electronState.showSaveDialog.mockResolvedValue({ canceled: false, filePath: newPath })
     await expect(saveProjectFile({} as Parameters<typeof saveProjectFile>[0], { suggestedName: 'preserved', bytes: original })).resolves.toEqual({ path: newPath })
     expect([...await fs.readFile(newPath)]).toEqual([...original])

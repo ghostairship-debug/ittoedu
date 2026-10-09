@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionDesktopService } from '../../src/main/workbench/execution/ExecutionDesktopService'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
@@ -93,6 +93,9 @@ it('HTML text card uses the existing markdown-range text.replace path through lo
   expect((await documents.internalAPI.read(snapshot.documentId)).model).toMatchObject({
     source: '<html><body><h1>新的标题</h1><p>保持原文</p></body></html>',
   })
-  const change = await service.operate({ type: 'element-change', submissionId: sent.submission.submissionId })
-  expect(change).toMatchObject({ state: 'applied', content: '新的标题' })
+  const change = () => service.operate({ type: 'element-change', submissionId: sent.submission.submissionId })
+  await vi.waitFor(async () => expect(await change()).toMatchObject({ state: 'applied', content: '新的标题' }))
+  expect(await service.operate({ type: 'element-revert', submissionId: sent.submission.submissionId, direction: 'undo' }))
+    .toMatchObject({ status: 'applied', change: { state: 'undone', content: '原来的标题' } })
+  expect((await documents.internalAPI.read(snapshot.documentId)).model).toMatchObject({ source: original })
 })

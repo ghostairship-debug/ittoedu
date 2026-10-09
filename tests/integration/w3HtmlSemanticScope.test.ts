@@ -76,7 +76,12 @@ it('retains radio/label/reset/state CSS in one real Web carrier and permits loca
     const semantic = Object.values(project.instances).find((value: any) => value.data?.html?.includes('id="pg4rOn"')) as any
     expect(semantic.childIds ?? []).toEqual([])
     const kinds = Object.values(project.instances).map((value: any) => project.definitions[value.definitionId].implementation.key)
-    expect(kinds.filter(value => value === 'guoling.text').length).toBeGreaterThanOrEqual(2)
+    // The current ancestor-paint-order scope retains this entire source in one
+    // Web carrier so form ownership and state CSS share their original DOM.
+    expect(imported.assembly.root.retainedSource).toEqual({ html, reason: 'ancestor-paint-order' })
+    expect(project.surfaces[0].childIds).toEqual([semantic.id])
+    expect(kinds.filter(value => value === 'guoling.web')).toEqual(['guoling.web'])
+    expect(semantic.data.html).toBe(html)
     const frame = semantic.frame, children = project.surfaces[0].childIds
     const edited: any = await application.evaluate(async (_electron, input) => (globalThis as any).w3Fixture.edit(input.id, input.html), { id: semantic.id, html: semantic.data.html.replace('总电压为 6 V', '总电压为 9 V') })
     raw.push({ phase: 'local-edit', ...edited }); expect(edited.result).toMatchObject({ kind: 'read', data: { commit: 'committed' } })

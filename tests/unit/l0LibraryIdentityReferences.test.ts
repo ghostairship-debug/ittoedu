@@ -38,7 +38,7 @@ it('executes the copied button event once and ignores the old button identity wh
   const implementation = createComponentInteractionRuntime(() => ({ currentSurfaceId: () => 'target-page', currentStateId: () => null,
     courseState: { get: () => undefined, set() {} }, subscribeTrigger(trigger, listener) { const key = JSON.stringify(trigger); listeners.set(key, listener); return () => { listeners.delete(key) } },
     executeAction(action) { observed.push(action); return true }, report(message) { throw new Error(message) } }))
-  const mounted = await implementation.mount({ instance: behavior, scope: { signal: controller.signal, isActive: () => true, cleanup() {} } } as unknown as ComponentRuntimeContext)
+  const mounted = await implementation.mount({ instance: behavior, scope: { signal: controller.signal, isActive: () => true, cleanup() {}, events: { subscribe: () => () => {} } } } as unknown as ComponentRuntimeContext)
   const emit = (trigger: InteractionTrigger) => listeners.get(JSON.stringify(trigger))?.()
   try {
     emit({ type: 'node.click', nodeId: insertion.identities.instances.get('button')! })

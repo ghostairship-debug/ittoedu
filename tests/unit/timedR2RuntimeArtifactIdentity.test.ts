@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises'
 import { URL as NodeURL } from 'node:url'
 import { Blob as NodeBlob } from 'node:buffer'
 import { MessageChannel } from 'node:worker_threads'
@@ -17,11 +16,29 @@ it('retains the UI6 clicked generation for an unused opaque edit, visibly and wh
   // esbuild executes in Node; use its real typed-array realm before loading the native compiler.
   vi.stubGlobal('Uint8Array', new NodeTextEncoder().encode('').constructor)
   const { transform } = await import('esbuild')
-  const sample = JSON.parse(await readFile('D:/果铃恢复候选/samples/20261006-q0-ui6/prepared-14611556/sample.input.json', 'utf8'))
-  const project = sample.project as CourseProjectV10
-  const resources: DocumentResources = { assets: Object.fromEntries(Object.entries(sample.resources.assets).map(([id, bytes]) => [id, Uint8Array.from(bytes as number[])])),
-    components: Object.fromEntries(Object.entries(sample.resources.components).map(([owner, files]) => [owner,
-      Object.fromEntries(Object.entries(files as Record<string, number[]>).map(([name, bytes]) => [name, Uint8Array.from(bytes)]))])) }
+  const project: CourseProjectV10 = { schemaVersion: 10, id: 'ui6-artifact', revision: 0, title: 'Artifact identity',
+    assets: {}, global: { underlay: [], overlay: [] },
+    definitions: { 'ui6-counter': { id: 'ui6-counter', role: 'content', implementation: {
+      kind: 'source', language: 'javascript', workspace: { ownerId: 'ui6-shared-files', entry: 'main.js' },
+    } } },
+    instances: Object.fromEntries(['a', 'b'].map(id => [`ui6-${id}`, { id: `ui6-${id}`, definitionId: 'ui6-counter', data: { label: id.toUpperCase() },
+      frame: { width: 320, height: 180, transform: [1, 0, 0, 1, 0, 0] as [number, number, number, number, number, number] } }])),
+    surfaces: [{ id: 'page', kind: 'slide', title: 'Page', childIds: ['ui6-a', 'ui6-b'] }] }
+  const resources: DocumentResources = { assets: {}, components: { 'ui6-shared-files': {
+    'opaque.bin': Uint8Array.of(0, 255, 128),
+    'helper.js': new TextEncoder().encode('export const step = 1;\n'),
+    'main.js': new TextEncoder().encode(`import { step } from './helper.js';
+      export function mount(context) {
+        let clicks = 0, label = context.instance.data.label;
+        const button = document.createElement('button'), output = document.createElement('output');
+        button.textContent = 'Count';
+        const render = () => { output.textContent = label + ' | step ' + step + ' | clicks ' + clicks; };
+        const click = () => { clicks += step; render(); }; button.addEventListener('click', click);
+        context.root.append(button, output); render();
+        return { update(instance) { label = instance.data.label; render(); },
+          dispose() { button.removeEventListener('click', click); button.remove(); output.remove(); } };
+      }`),
+  } } }
   const authorBefore = structuredClone({ project, resources })
   let currentResources = resources, builds = 0, mounts = 0, updates = 0, releases = 0, cleanups = 0
   const generations: number[] = [], live = new Set<number>()

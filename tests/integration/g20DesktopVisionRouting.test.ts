@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { attachmentHostToolServices } from '../helpers/attachmentHostToolServices'
+import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { createServer, type Server } from 'node:http'
@@ -43,8 +45,7 @@ it('routes only current image bytes to vision while keeping the historical image
     requests.push({ ...body, path: request.url!, authorization: request.headers.authorization })
     response.writeHead(200, { 'Content-Type': 'text/event-stream' })
     if (toolCommand && !toolCommand.dispatched) {
-      const description = toolCommand.name === 'context.read' ? '按 sourceId 重读' : '按 material.list'
-      const tool = body.tools.find(item => item.function.description.startsWith(description))
+      const tool = body.tools.find(item => item.function.name === modelToolWireName(toolCommand!.name))
       if (!tool) throw new Error(`${toolCommand.name} was absent from the real Provider request`)
       const callId = `reread-${toolCommand.name.replace('.', '-')}`
       toolCommand.dispatched = true
@@ -73,6 +74,7 @@ it('routes only current image bytes to vision while keeping the historical image
     vision: { connectionId: vision.connection.id, model: 'fixture-vision' }, imageGenerate: null, imageEdit: null } })
   const service = new ExecutionDesktopService({ directory: root, documents, settings,
     authorizeWorkspaceRoot: async value => ({ resolvedPath: value }) })
+  documents.tools.configureHostServices(attachmentHostToolServices(service.attachments, documents))
   const workspace = await service.operate({ type: 'workspace', root: null }) as { workspace: { workspaceId: string } }
   const conversation = await service.operate({ type: 'create-conversation', workspaceId: workspace.workspace.workspaceId }) as ConversationRecord
   const identity = { workspaceId: conversation.workspaceId, conversationId: conversation.conversationId }

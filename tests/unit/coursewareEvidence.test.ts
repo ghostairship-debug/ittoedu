@@ -11,7 +11,7 @@ function manifest(overrides: Record<string, unknown> = {}) {
     scope: 'core-sample',
     generatedAt: '2026-08-07T00:00:00.000Z',
     generatedBy: 'automation',
-    artifacts: [{ id: 'lesson', kind: 'h5lesson', path: 'output/sample.h5lesson', sha256: hash }],
+    artifacts: [{ id: 'lesson', kind: 'glx', path: 'output/sample.glx', sha256: hash }],
     evidence: [{
       id: 'frame',
       kind: 'screenshot',

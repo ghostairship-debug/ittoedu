@@ -9,7 +9,7 @@ import { LessonDirectoryTree } from '../../src/renderer/lessonWorkspace/view/Les
 import { LessonWorkspaceShell, type LessonWorkspaceShellHandle } from '../../src/renderer/lessonWorkspace/LessonWorkspaceShell'
 import { createMarkdownTestHost } from '../helpers/markdownDocumentHost'
 import { dispatchRevealInExplorer } from '../../src/renderer/workbench/revealInExplorer'
-import { createCourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
+import { createCourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { createLessonDocumentFiles } from '../../src/main/lessonDocumentFiles'
 import type { WorkspaceFilesAPI, WorkspaceFilesRequest, WorkspaceListItem } from '../../src/shared/workbench/workspaceFiles'
 
@@ -192,9 +192,9 @@ it('keeps keyboard commands scoped to the tree and performs multi-file clipboard
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'external.txt' })); fireEvent.keyDown(screen.getByRole('button', { name: 'external.txt' }), { key: 'F2' })
   fireEvent.keyDown(screen.getByLabelText('文件名称'), { key: 'Escape' }); expect(await fs.readFile(path.join(directory, 'external.txt'), 'utf8')).toBe('external')
-  fireEvent.click(screen.getByRole('button', { name: 'child' })); fireEvent.click(screen.getByRole('menuitem', { name: '新建 H5 演示' }))
+  fireEvent.click(screen.getByRole('button', { name: 'child' })); fireEvent.click(screen.getByRole('menuitem', { name: '新建 果铃工程' }))
   fireEvent.change(screen.getByLabelText('文件名称'), { target: { value: 'new-course' } }); fireEvent.click(screen.getByRole('button', { name: '确认' }))
-  await waitFor(async () => { const model = await createCourseV9Driver().load(await fs.readFile(path.join(directory, 'child', 'new-course.h5lesson'))); expect(model.kind).toBe('course-v9') })
+  await waitFor(async () => { const model = await createCourseV10Driver().load(await fs.readFile(path.join(directory, 'child', 'new-course.glx'))); expect(model.kind).toBe('course-v10') })
   await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建 Markdown 文档' })).not.toHaveAttribute('aria-disabled', 'true'))
   const dropped = Object.assign(new File(['payload'], 'photo.png'), { arrayBuffer: async () => new TextEncoder().encode('payload').buffer })
   let reads = 0
@@ -213,11 +213,11 @@ it('displays creation menu items in correct order and wording in toolbar and con
   const itemBtn = await screen.findByRole('button', { name: 'item.md' })
   const createMenu = document.querySelector('.workspace-files-create-options')!
   const toolbarButtons = within(createMenu as HTMLElement).getAllByRole('menuitem').map(b => b.getAttribute('aria-label'))
-  expect(toolbarButtons.slice(0, 6)).toEqual(['新建 Markdown 文档', '新建 H5 演示', '从 PPT 新建 H5 演示', '新建文本文档', '新建 HTML 文档', '新建文件夹'])
+  expect(toolbarButtons.slice(0, 6)).toEqual(['新建 Markdown 文档', '新建 果铃工程', '从 PPT 新建 果铃工程', '新建文本文档', '新建 HTML 文档', '新建文件夹'])
   fireEvent.contextMenu(itemBtn)
   const contextMenu = screen.getByRole('menu', { name: '文件菜单' })
   const contextButtons = within(contextMenu).getAllByRole('menuitem').map(b => b.getAttribute('aria-label'))
-  expect(contextButtons.slice(0, 6)).toEqual(['新建 Markdown 文档', '新建 H5 演示', '从 PPT 新建 H5 演示', '新建文本文档', '新建 HTML 文档', '新建文件夹'])
+  expect(contextButtons.slice(0, 6)).toEqual(['新建 Markdown 文档', '新建 果铃工程', '从 PPT 新建 果铃工程', '新建文本文档', '新建 HTML 文档', '新建文件夹'])
 })
 
 it('prefills default names, numbers collisions with (2) and selects only the main stem on focus', async () => {
@@ -236,12 +236,12 @@ it('prefills default names, numbers collisions with (2) and selects only the mai
   expect(input.selectionEnd).toBe('新建 Markdown 文档'.length)
   fireEvent.click(screen.getByRole('button', { name: '取消' }))
 
-  fireEvent.click(screen.getByRole('menuitem', { name: '新建 H5 演示' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建 果铃工程' }))
   input = (await screen.findByLabelText('文件名称')) as HTMLInputElement
-  expect(input.value).toBe('新建 H5 演示.h5lesson')
+  expect(input.value).toBe('新建 果铃工程.glx')
   fireEvent.focus(input)
   expect(input.selectionStart).toBe(0)
-  expect(input.selectionEnd).toBe('新建 H5 演示'.length)
+  expect(input.selectionEnd).toBe('新建 果铃工程'.length)
   fireEvent.click(screen.getByRole('button', { name: '取消' }))
 
   fireEvent.click(screen.getByRole('menuitem', { name: '新建文本文档' }))
@@ -378,16 +378,16 @@ it('M19 creates a course with the Slide canvas size chosen in the creation dialo
   const operate = ((request: WorkspaceFilesRequest) => { requests.push(request); return service.operate(request) }) as WorkspaceFilesAPI
   render(<LessonDirectoryTree directory={directory} files={operate} operation={async () => ({})} onFile={vi.fn()} onDirectory={vi.fn()} />)
   await screen.findByRole('button', { name: '工作空间根目录' })
-  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建 H5 演示' })).not.toHaveAttribute('aria-disabled', 'true'))
-  fireEvent.click(screen.getByRole('menuitem', { name: '新建 H5 演示' }))
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建 果铃工程' })).not.toHaveAttribute('aria-disabled', 'true'))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建 果铃工程' }))
   const size = await screen.findByLabelText('画布尺寸')
   expect(size).toHaveValue('wide')
   fireEvent.change(size, { target: { value: 'portrait' } })
   fireEvent.change(screen.getByLabelText('文件名称'), { target: { value: 'tall' } })
   fireEvent.click(screen.getByRole('button', { name: '确认' }))
-  await waitFor(() => expect(requests).toContainEqual(expect.objectContaining({ type: 'create-course', name: 'tall.h5lesson', canvas: { width: 720, height: 1280 } })))
-  await waitFor(() => fs.access(path.join(directory, 'tall.h5lesson')))
-  const archive = await createCourseV9Driver().load(new Uint8Array(await fs.readFile(path.join(directory, 'tall.h5lesson'))))
-  if (archive.kind !== 'course-v9') throw new Error('course fixture')
-  expect(archive.project.surfaces.find(surface => surface.type === 'slide')).toMatchObject({ canvas: { width: 720, height: 1280 } })
+  await waitFor(() => expect(requests).toContainEqual(expect.objectContaining({ type: 'create-course', name: 'tall.glx', canvas: { width: 720, height: 1280 } })))
+  await waitFor(() => fs.access(path.join(directory, 'tall.glx')))
+  const archive = await createCourseV10Driver().load(new Uint8Array(await fs.readFile(path.join(directory, 'tall.glx'))))
+  if (archive.kind !== 'course-v10') throw new Error('course fixture')
+  expect(archive.project.surfaces.find(surface => surface.kind === 'slide')).toMatchObject({ designSize: { width: 720, height: 1280 } })
 })

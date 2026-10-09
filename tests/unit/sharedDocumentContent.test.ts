@@ -41,12 +41,15 @@ describe('shared document strict content', () => {
     table.rows[0]!.cells.extra = body('额外格')
     expect(documentContentSchema.safeParse(doc).success).toBe(false)
   })
-  it('rejects missing, duplicate, extra and temporary resources', () => {
+  it('rejects missing, duplicate and temporary referenced resources while preserving unused assets', () => {
     const doc = sharedDocumentFixture()
     const block = doc.content.blocks.find(b => b.type === 'component')!
     expect(documentObjectSchema.safeParse({ kind: 'flow-block', block, resources: { assets: [], components: [] } }).success).toBe(false)
     expect(() => validateDocumentResources(doc.content.blocks, { ...doc.resources, assets: [...doc.resources.assets, doc.resources.assets[0]!] })).toThrow('重复')
-    expect(() => validateDocumentResources(doc.content.blocks, { ...doc.resources, assets: [...doc.resources.assets, { assetId: 'unused', source: { kind: 'project' } }] })).toThrow('素材')
+    const resources = { ...doc.resources, assets: [...doc.resources.assets, { assetId: 'unused', source: { kind: 'project' as const } }] }
+    const before = structuredClone(resources)
+    expect(() => validateDocumentResources(doc.content.blocks, resources, 'file')).not.toThrow()
+    expect(resources).toEqual(before)
     doc.resources.assets[0]!.source = { kind: 'project' }
     expect(() => validateDocumentResources(doc.content.blocks, doc.resources, 'file')).toThrow('相对资源')
   })

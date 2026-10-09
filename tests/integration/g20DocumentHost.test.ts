@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { afterEach, expect, it } from 'vitest'
+import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 
@@ -32,10 +33,10 @@ it('G20 automatic starter is pristine, reuses one writer and becomes recoverable
   expect(a.documentId).toBe(b.documentId)
   expect(a).toMatchObject({ dirty: false, binding: { kind: 'untitled' }, undoDepth: 0 })
   expect(await host.operate({ type: 'recoverable' })).toEqual([])
-  if (a.model.kind !== 'course-v9') throw new Error('starter kind')
+  if (a.model.kind !== 'course-v10') throw new Error('starter kind')
   expect(await host.operate({ type: 'dispatch', operation: { documentId: a.documentId, epoch: a.epoch,
     operationId: 'edit-starter', baseRevision: a.revision, actor: 'human',
-    mutation: { type: 'command', command: { type: 'course.replace', project: { ...a.model.project, title: '有内容的课件' } } },
+    mutation: { type: 'command', command: captureComponentOperation(a.model.project, [{ type: 'project.title.set', title: '有内容的课件' }]) },
   } })).toMatchObject({ status: 'applied' })
   expect(await host.bootstrapCourse()).toMatchObject({ documentId: a.documentId, dirty: true, undoDepth: 1 })
   expect(await host.operate({ type: 'recoverable' })).toEqual([])

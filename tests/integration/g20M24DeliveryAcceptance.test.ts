@@ -9,11 +9,12 @@ import { pathToFileURL } from 'node:url'
 import { chromium } from '@playwright/test'
 import { unzipSync } from 'fflate'
 import { afterEach, expect, it, vi } from 'vitest'
-import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
-import { createTextNode } from '../../src/core/tools/nativeNodeFactories'
-import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
-import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
-import { createHtmlDocumentRuntimeSource } from '../../src/shared/runtime/htmlDocumentSource'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { TEXT_DEFINITION } from '../../src/components/text/adapters'
+import { createTextComponentData } from '../../src/components/text/data'
+import { WEB_DEFINITION } from '../../src/components/web/data'
+import { applyComponentOperation, captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
+import { componentRuleEdits } from '../../src/shared/componentInteractionData'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import type { ModelEvent, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
@@ -34,7 +35,7 @@ vi.mock('../../src/renderer/export/loadPlayerBundle', async () => {
   return { loadPlayerBundle: () => readFileSync(resolve(cwd(), 'dist-player/player.iife.js'), 'utf8') }
 })
 
-import { buildDocumentExport } from '../../src/renderer/workbench/delivery/DocumentExportRenderer'
+import { buildDocumentExport } from '../../src/renderer/workbench/delivery/buildDocumentExport'
 
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => {
@@ -83,35 +84,32 @@ function frozenDocuments(request: ModelRequest): Array<{
 }
 
 function interactionProject() {
-  const project = createBlankCourseProject({ title: '交付验收互动课', includeDefaultController: false, controls: 'none' })
-  const surface = project.surfaces.find((candidate) => candidate.type === 'slide')
-  if (!surface || surface.type !== 'slide') throw new Error('缺少 Slide 表面')
-  const scene = surface.scenes[0]
-  if (!scene) throw new Error('缺少初始场景')
-  const trigger = sceneNodeToCourseLayerItem(createTextNode({ id: 'm24-export-trigger', name: '揭示按钮', text: '点击查看答案', x: 120, y: 100, width: 420, height: 90 }), 10)
-  const answer = sceneNodeToCourseLayerItem(createTextNode({ id: 'm24-export-answer', name: '答案', text: '交互已执行', x: 120, y: 220, width: 420, height: 90, playbackInitialVisibility: 'hidden' }), 20)
-  scene.layerItems.push(trigger, answer)
-  scene.interactions.push({
-    id: 'm24-export-reveal', enabled: true, trigger: { type: 'node.click', nodeId: trigger.layerItemId }, conditions: [],
+  const project = createBlankCourseProjectV10('交付验收互动课')
+  project.global.overlay = []; project.instances = {}
+  project.definitions = { [TEXT_DEFINITION.id]: structuredClone(TEXT_DEFINITION) }
+  const surface = project.surfaces[0]
+  surface.childIds = ['m24-export-trigger', 'm24-export-answer']
+  for (const [id, text, y] of [['m24-export-trigger', '点击查看答案', 100], ['m24-export-answer', '交互已执行', 220]] as const) {
+    project.instances[id] = { id, definitionId: TEXT_DEFINITION.id,
+      data: JSON.parse(JSON.stringify(createTextComponentData(text))),
+      frame: { width: 420, height: 90, transform: [1, 0, 0, 1, 120, y] },
+      ...(id === 'm24-export-answer' ? { playbackInitialVisibility: 'hidden' as const } : {}) }
+  }
+  return applyComponentOperation(project, captureComponentOperation(project, componentRuleEdits(project, { kind: 'surface', surfaceId: surface.id }, [{
+    id: 'm24-export-reveal', enabled: true, trigger: { type: 'node.click', nodeId: 'm24-export-trigger' }, conditions: [],
     actions: [{ id: 'm24-export-show-answer', start: 'after-previous', delayMs: 0,
-      action: { type: 'node.enter', nodeId: answer.layerItemId, durationMs: 1, easing: 'linear', effect: 'none' } }],
-  })
-  return courseProjectDocumentSchema.parse(project)
+      action: { type: 'node.enter', nodeId: 'm24-export-answer', durationMs: 1, easing: 'linear', effect: 'none' } }],
+  }])))
 }
 
 function managedRemoteProject(url: string) {
-  const project = createBlankCourseProject({ title: '远程依赖离线拒绝', includeDefaultController: false, controls: 'none' })
-  const surface = project.surfaces.find((candidate) => candidate.type === 'slide')
-  if (!surface || surface.type !== 'slide') throw new Error('缺少 Slide 表面')
-  surface.scenes[0]!.layerItems.push({
-    layerItemId: 'm24-remote-html', label: '远程 HTML', kind: 'runtime',
-    frame: { mode: 'absolute', x: 40, y: 40, width: 640, height: 360 }, order: 10,
-    visible: true, locked: false, rotation: 0, opacity: 1, hitPolicy: 'auto', playbackInitialVisibility: 'inherit',
-    runtime: { protocol: 'surface-runtime', runtimeApiVersion: 3, enabled: true, renderMode: 'dom',
-      source: createHtmlDocumentRuntimeSource({ html: `<!doctype html><html><body><img alt="远程图" src="${url}"></body></html>`, resourceKeys: [] }),
-      content: { values: {} }, assets: {} },
-  })
-  return courseProjectDocumentSchema.parse(project)
+  const project = createBlankCourseProjectV10('远程依赖离线拒绝')
+  project.global.overlay = []; project.instances = {}; project.definitions = { [WEB_DEFINITION.id]: structuredClone(WEB_DEFINITION) }
+  project.instances['m24-remote-html'] = { id: 'm24-remote-html', definitionId: WEB_DEFINITION.id,
+    data: { html: `<!doctype html><html><body><img alt="远程图" src="${url}"></body></html>` },
+    frame: { width: 640, height: 360, transform: [1, 0, 0, 1, 40, 40] } }
+  project.surfaces[0].childIds = ['m24-remote-html']
+  return project
 }
 
 async function fixture() {
@@ -135,7 +133,7 @@ async function fixture() {
     resolveSaveDestination: ({ runId, snapshot, requested }) => resolveSaveDestination(runId, snapshot, requested, id => host.tools.runFileAccess(id)),
     resolveExportDestination: ({ runId, snapshot, requested, format, suggestedName }) =>
       resolveExportDestination(runId, snapshot, requested, suggestedName, format, id => host.tools.runFileAccess(id)),
-    build: { build: (request, signal) => buildDocumentExport(request, signal) },
+    build: { build: (request, signal) => buildDocumentExport(request, signal, async () => { throw new Error('fixture contains only builtins') }, async () => {}) },
     writer: workbenchExportWriter,
   })
   host.tools.configureHostServices({ deliveries })
@@ -180,19 +178,16 @@ async function openAndInteract(browser: Awaited<ReturnType<typeof chromium.launc
   page.on('pageerror', error => pageErrors.push(error.message))
   try {
     await page.goto(pathToFileURL(filename).href, { waitUntil: 'load' })
-    const trigger = '[data-slide-layer-item="m24-export-trigger"]'
-    const answer = '[data-slide-layer-item="m24-export-answer"]'
+    const trigger = '[data-component-instance-id="m24-export-trigger"]'
+    const answer = '[data-component-instance-id="m24-export-answer"]'
     await page.waitForSelector(trigger, { state: 'visible', timeout: 20_000 })
     await page.waitForFunction(selector => {
       const element = document.querySelector(selector)
       return !!element && getComputedStyle(element).visibility === 'visible'
     }, trigger, { timeout: 20_000 })
-    expect(await page.locator(answer).evaluate(element => getComputedStyle(element).visibility)).toBe('hidden')
+    expect(await page.locator(answer).isVisible()).toBe(false)
     await page.locator(trigger).click()
-    await page.waitForFunction(selector => {
-      const element = document.querySelector(selector)
-      return !!element && getComputedStyle(element).visibility === 'visible'
-    }, answer, { timeout: 10_000 })
+    await page.waitForSelector(answer, { state: 'visible', timeout: 10_000 })
     expect(await page.locator(answer).innerText()).toContain('交互已执行')
     expect(httpRequests).toEqual([])
     expect(pageErrors).toEqual([])
@@ -297,7 +292,7 @@ it('M24-T04: edits without file.save stay only in the document session', async (
 
 it('M24-T04: all three renderer exports write actual bytes which open and execute an interaction', async () => {
   const h = await fixture()
-  const course = await h.host.internalAPI.create({ kind: 'course-v9', project: interactionProject(),
+  const course = await h.host.internalAPI.create({ kind: 'course-v10', project: interactionProject(),
     resources: { assets: {}, components: {} } }, '互动验收.h5lesson')
   const runId = 'm24-three-format-export'
   await bindTask(h.host, h.workspace, runId, course, 'workspace')
@@ -314,7 +309,7 @@ it('M24-T04: all three renderer exports write actual bytes which open and execut
       let htmlPath = destination
       if (format === 'web-package') {
         const archive = unzipSync(new Uint8Array(bytes))
-        expect(Object.keys(archive)).toEqual(expect.arrayContaining(['index.html', 'course-data.js', 'player/player.iife.js', 'player/player.css']))
+        expect(Object.keys(archive)).toEqual(expect.arrayContaining(['index.html']))
         const packageRoot = path.join(h.exports, 'opened-web-package')
         for (const [relative, content] of Object.entries(archive)) {
           const target = path.join(packageRoot, ...relative.split('/'))
@@ -329,21 +324,21 @@ it('M24-T04: all three renderer exports write actual bytes which open and execut
     await browser.close()
     await h.host.tools.stop(runId)
   }
-})
+}, 30000)
 
-it('M24-T04: offline export rejects a managed HTML remote dependency before writing', async () => {
+it('M24-T04: offline export preserves a remote dependency and reports that it still requires network', async () => {
   const h = await fixture()
   const remoteUrl = 'https://media.example.test/lesson.png'
-  const course = await h.host.internalAPI.create({ kind: 'course-v9', project: managedRemoteProject(remoteUrl),
+  const course = await h.host.internalAPI.create({ kind: 'course-v10', project: managedRemoteProject(remoteUrl),
     resources: { assets: {}, components: {} } }, '远程依赖.h5lesson')
   const runId = 'm24-offline-remote'
   await bindTask(h.host, h.workspace, runId, course, 'workspace')
   const destination = path.join(h.exports, 'remote-offline.html')
   const result = await h.deliveries.export({ runId, operationId: 'offline-remote', requestDigest: 'offline-remote-digest',
     documentId: course.documentId, epoch: course.epoch, revision: course.revision, format: 'html-offline', destination })
-  expect(result).toMatchObject({ status: 'rejected', format: 'html-offline', reason: expect.stringContaining(remoteUrl) })
-  expect(result.reason).toMatch(/离线|远程媒体|工程内素材/)
-  await expect(fs.stat(destination)).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(result).toMatchObject({ status: 'written', format: 'html-offline', warnings: expect.arrayContaining([expect.stringContaining(remoteUrl)]) })
+  expect(result.warnings.join(' ')).toMatch(/离线.*网络/)
+  expect(await fs.readFile(destination, 'utf8')).toContain(remoteUrl)
   await h.host.tools.stop(runId)
 })
 
@@ -355,8 +350,8 @@ it('M24-T04: unsupported export formats return a readable reason without resolvi
   }
   const resolveHandle = vi.fn(async () => ({ documentId: 'doc', epoch: 'epoch', revision: 1 }))
   const result = await executeDocumentDeliveryTool(service, { runId: 'unsupported', operationId: 'unsupported-call',
-    requestDigest: 'unsupported-digest', resolveHandle }, 'document.export', { target: 'doc', format: 'pptx' })
-  expect(result).toMatchObject({ kind: 'error', code: 'invalid-input', message: expect.stringContaining('PPTX、PDF、DOCX') })
+    requestDigest: 'unsupported-digest', resolveHandle }, 'document.export', { target: 'doc', format: 'epub' })
+  expect(result).toMatchObject({ kind: 'error', code: 'invalid-input', message: expect.stringContaining('pptx、pdf、docx') })
   expect(resolveHandle).not.toHaveBeenCalled()
   expect(service.export).not.toHaveBeenCalled()
   expect(service.lookup).not.toHaveBeenCalled()

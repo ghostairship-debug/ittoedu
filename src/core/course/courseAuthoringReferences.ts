@@ -3,6 +3,7 @@ import type { InteractionAction, InteractionCondition, InteractionRule, Interact
 
 /** Current facts captured by the input adapter, never a public model-authored registry. */
 export type CourseAuthoringReference =
+  | { kind: 'unavailable' } // A known host token outside this run/document/epoch is never authored literal data.
   | { kind: 'instance'; instanceId: string }
   | { kind: 'surface'; surfaceId: string }
   | { kind: 'presentation-state'; surfaceId: string; stateId: string }

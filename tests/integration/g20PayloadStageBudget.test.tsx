@@ -10,6 +10,7 @@ import { afterEach, expect, it } from 'vitest'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionDesktopService } from '../../src/main/workbench/execution/ExecutionDesktopService'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
+import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import type { ConversationRecord } from '../../src/shared/workbench/conversations'
 import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
 import type { ExecutionSendResult } from '../../src/shared/workbench/executionDesktop'
@@ -45,12 +46,12 @@ it('budgets the actual initial HTTP body with runtime context and PNG base64, th
       if (wire.length === 1) {
         const fixed = body.messages.find((message: { role: string; content: string }) => message.role === 'system' && message.content?.startsWith('本次固定文档与权限')).content as string
         const references = JSON.parse(fixed.slice(fixed.indexOf('：') + 1)) as Array<{ target: string; writable: Array<{ target: string }> }>
-        const readName = body.tools.find((tool: { function: { description: string } }) => tool.function.description.includes('分页读取目标文字')).function.name as string
+        const readName = body.tools.find((tool: { function: { name: string } }) => tool.function.name === modelToolWireName('read')).function.name as string
         sse(response, 'read-response', { role: 'assistant', tool_calls: [{ index: 0, id: 'read-call', type: 'function',
           function: { name: readName, arguments: JSON.stringify({ target: references[0]!.target }) } }] }, 'tool_calls')
       } else if (wire.length === 2) {
-        const replaceName = body.tools.find((tool: { function: { description: string } }) =>
-          tool.function.description.startsWith('只替换已授权 Markdown 范围')).function.name as string
+        const replaceName = body.tools.find((tool: { function: { name: string } }) =>
+          tool.function.name === modelToolWireName('text.replace')).function.name as string
         const fixed = body.messages.find((message: { role: string; content: string }) => message.role === 'system' && message.content?.startsWith('本次固定文档与权限')).content as string
         const references = JSON.parse(fixed.slice(fixed.indexOf('：') + 1)) as Array<{ writable: Array<{ target: string }> }>
         sse(response, 'repair-response', { role: 'assistant', tool_calls: [{ index: 0, id: 'repair-call', type: 'function',
@@ -94,8 +95,15 @@ it('budgets the actual initial HTTP body with runtime context and PNG base64, th
     totals: { serializedBytes: Buffer.byteLength(wire[0]!.raw), imageBytes: attachment.length,
       base64Characters: attachment.toString('base64').length } })
   expect(initial.payloadDigest).toBe(createHash('sha256').update(wire[0]!.raw).digest('hex'))
-  expect(initial.automaticContext).toHaveLength(2)
-  expect(initial.automaticContext.map(item => item.provenance.kind)).toEqual(['runtime', 'runtime'])
+  const automatic = wire[0]!.body.messages.flatMap((message: { role: string }, index: number) =>
+    index !== initial.userMessageIndex && message.role !== 'user' ? [index] : [])
+  expect(initial.automaticContext.map(item => item.messageIndex)).toEqual(automatic)
+  for (const item of initial.automaticContext) {
+    expect(item.provenance.kind).toBe('runtime')
+    const serialized = JSON.stringify(wire[0]!.body.messages[item.messageIndex])
+    expect(item.digest).toBe(createHash('sha256').update(serialized).digest('hex'))
+    expect(item.serializedBytes).toBe(Buffer.byteLength(serialized))
+  }
   expect(initial.explicitAttachments).toMatchObject([{ attachmentId: snapshot.id, representationId: 'original-image' }])
   expect(JSON.stringify(wire[0]!.body)).toContain(`data:image/png;base64,${attachment.toString('base64')}`)
   expect(wire[0]!.raw).toContain('本次固定文档与权限')

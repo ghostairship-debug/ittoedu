@@ -1,11 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { readFileSync } from 'node:fs'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ImageResultCard } from '../../src/renderer/workbench/ImageResultCard'
 import type { ImageResultEvent, ImageResultView, ImageResultsDesktopAPI } from '../../src/shared/workbench/imageResultsDesktop'
 import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { workbenchSelection } from '../../src/renderer/workbench/SelectionContextController'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
@@ -40,9 +39,8 @@ it('S14 image result updates preserve edit focus and previews never start image 
 
 it('lets the user inspect and change the insertion frame while replacement stays independent', async () => {
   const owner = { workspaceId: 'workspace', conversationId: 'conversation', runId: 'run', jobId: 'job' }
-  const model = new CourseV9Driver().load(new Uint8Array(readFileSync('tests/fixtures/course-project-v9/slide-native.h5lesson')))
-  if (model.kind !== 'course-v9') throw new Error('fixture must be a course')
-  const location = model.project.locations.find(value => value.kind === 'slide-scene')!
+  const model = { kind: 'course-v10' as const, project: createBlankCourseProjectV10('图片测试'), resources: { assets: {}, components: {} } }
+  const location = model.project.surfaces[0]
   const snapshot: DocumentSnapshot = { documentId: 'document', epoch: 'epoch', revision: 0, binding: { kind: 'untitled', suggestedName: '图片测试.h5lesson' },
     model, dirty: false, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0 }
   const view: ImageResultView = { ...owner, source: 'builtin', applications: [], job: {
@@ -58,7 +56,7 @@ it('lets the user inspect and change the insertion frame while replacement stays
   try {
     render(<ImageResultCard api={api} owner={owner} documents={documents} />)
     await screen.findByRole('button', { name: '插入图片' })
-    fireEvent.change(screen.getByLabelText('应用到 H5 演示'), { target: { value: snapshot.documentId } })
+    fireEvent.change(screen.getByLabelText('应用到 果铃工程'), { target: { value: snapshot.documentId } })
     fireEvent.change(screen.getByLabelText('插入位置'), { target: { value: location.id } })
     const details = screen.getByText(/画布位置与尺寸：/).closest('details')!
     await waitFor(() => expect(details.querySelector('summary')).toHaveTextContent('X 752 · Y 352 · 480×320'))

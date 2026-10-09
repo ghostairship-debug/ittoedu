@@ -9,6 +9,7 @@ import { afterEach, expect, it } from 'vitest'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionDesktopService } from '../../src/main/workbench/execution/ExecutionDesktopService'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
+import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import type { CredentialEncryptionPort } from '../../src/main/workbench/providers/providerCredentials'
 import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
 
@@ -86,7 +87,7 @@ it('freezes the active Token Plan route through tool continuation while a later 
     if (request.url === '/token/v1/chat/completions' && received.length === 1) {
       await gate
       const references = JSON.parse(fixed!.slice(fixed!.indexOf('：') + 1)) as Array<{ writable: Array<{ target: string }> }>
-      const name = body.tools.find(tool => tool.function.description.includes('只替换已授权 Markdown 范围'))?.function.name
+      const name = body.tools.find(tool => tool.function.name === modelToolWireName('text.replace'))?.function.name
       if (!name) throw new Error('text replace tool unavailable')
       sse(response, 'token-actual', [
         { id: 'token-response-1', object: 'chat.completion.chunk', model: 'token-actual', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'token-tool-1', type: 'function', function: { name, arguments: JSON.stringify({ target: references[0]!.writable[0]!.target, content: 'first changed\n' }) } }] }, finish_reason: null }] },

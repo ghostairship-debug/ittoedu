@@ -1,5 +1,5 @@
 {
-  "name": "ittoedu-courseware-editor",
+  "name": "guoling-workbench",
   "version": "0.0.1",
   "description": "果铃工作台：可编辑课件与 AI 内容创作工作台",
   "main": "dist-electron/main/index.js",

@@ -15,7 +15,7 @@ describe('M16 document block commands', () => {
     const apply = vi.fn(), ai = vi.fn()
     const menu = documentBlockMenu({ content: initial, blockId: 'first', apply, ai, createId: () => 'new' })
     expect(menu.map(item => item.id)).toEqual([
-      'insert-paragraph', 'insert-heading', 'insert-quote', 'insert-list', 'insert-code', 'insert-divider', 'insert-table', 'insert-above',
+      'insert-paragraph', 'insert-heading', 'insert-quote', 'insert-list', 'insert-code', 'insert-divider', 'insert-table', 'insert-callout', 'insert-section', 'insert-above',
       'convert-paragraph', 'convert-heading', 'convert-quote', 'convert-list', 'convert-code', 'convert-divider',
       'duplicate', 'delete', 'move-up', 'move-down', 'ai',
     ])

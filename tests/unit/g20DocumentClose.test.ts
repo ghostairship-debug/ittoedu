@@ -7,8 +7,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { prepareDocumentWindowClose } from '../../src/main/workbench/documentCloseCoordinator'
 import { saveDocumentWithDialog } from '../../src/main/workbench/documentSaveDialog'
-import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
+import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 
 const { getPath, showSaveDialog } = vi.hoisted(() => ({ getPath: vi.fn(), showSaveDialog: vi.fn() }))
@@ -23,9 +24,7 @@ async function host() {
   getPath.mockReturnValue(directory)
   const journal = path.join(directory, 'journal')
   const documents = new DocumentHostService(journal)
-  const course = await documents.internalAPI.create({ kind: 'course-v9', project: createBlankCourseProject({
-    title: 'saved baseline', includeDefaultController: false, controls: 'none',
-  }), resources: { assets: {}, components: {} } }, 'background.h5lesson')
+  const course = await documents.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('saved baseline'), resources: { assets: {}, components: {} } }, 'background.h5lesson')
   const coursePath = path.join(directory, 'background.h5lesson')
   await documents.saveToPath(course.documentId, coursePath)
   const foregroundPath = path.join(directory, 'foreground.md')
@@ -38,8 +37,8 @@ async function host() {
     return documents.internalAPI.dispatch({ documentId: id, epoch: current.epoch, baseRevision: current.revision,
       operationId: `close-edit-${++sequence}`, actor: 'human', mutation: { type: 'command', command: current.model.kind === 'markdown'
         ? { type: 'markdown.replace', source: text }
-        : current.model.kind === 'course-v9'
-          ? { type: 'course.replace', project: { ...current.model.project, title: text } }
+        : current.model.kind === 'course-v10'
+          ? captureComponentOperation(current.model.project, [{ type: 'project.title.set', title: text }])
           : (() => { throw new Error('关闭测试只编辑 Markdown 或课件') })() } })
   }
   return { documents, directory, journal, course, coursePath, foreground, foregroundPath, read, edit, drain }
@@ -74,7 +73,7 @@ describe('G20 whole-window document close', () => {
       filters: [{ name: 'Markdown 文档', extensions: ['md'] }],
     }))
     expect(h.documents.registry.list().every(value => !value.dirty)).toBe(true)
-    expect(new CourseV9Driver().load(new Uint8Array(await fs.readFile(h.coursePath)))).toMatchObject({ project: { title: 'background must be saved' } })
+    expect(new CourseV10Driver().load(new Uint8Array(await fs.readFile(h.coursePath)))).toMatchObject({ project: { title: 'background must be saved' } })
     expect(await fs.readFile(notesPath, 'utf8')).toBe('# new notes')
   })
 
@@ -118,7 +117,7 @@ describe('G20 whole-window document close', () => {
     expect(h.read(h.course.documentId).dirty).toBe(true)
     expect(h.read(h.foreground.documentId).dirty).toBe(true)
     expect(await fs.readFile(h.foregroundPath, 'utf8')).toBe('# clean foreground')
-    expect(new CourseV9Driver().load(new Uint8Array(await fs.readFile(h.coursePath)))).toMatchObject({ project: { title: 'version selected for save' } })
+    expect(new CourseV10Driver().load(new Uint8Array(await fs.readFile(h.coursePath)))).toMatchObject({ project: { title: 'version selected for save' } })
     await expect(prepareDocumentWindowClose({ ...ports, prepareRenderer: async () => true,
       save: async () => { throw new Error('disk unavailable') } })).rejects.toThrow('disk unavailable')
     expect(h.documents.registry.list()).toHaveLength(2)

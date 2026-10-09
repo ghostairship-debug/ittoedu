@@ -48,7 +48,7 @@ it('observes the current formal page through its listed HTML path after insertin
     expect(current.model.project.instances.web).toEqual(project.instances.web)
     expect(current.model.project.surfaces[0].childIds).toHaveLength(2)
     const next = data<{ files: { path: string; type: string }[] }>(await call('project.list', {}))
-    expect(next.files.some(file => file.path === pagePath)).toBe(false)
+    expect(next.files).toContainEqual(expect.objectContaining({ path: pagePath, type: 'page' }))
     expect(next.files).toContainEqual(expect.objectContaining({ path: pagePath.replace(/\.html$/, '.json'), type: 'structure' }))
     for (const projectSelector of [undefined, 'observe.h5lesson']) {
       expect(await call('view.observe', { path: pagePath, ...(projectSelector ? { project: projectSelector } : {}) }))

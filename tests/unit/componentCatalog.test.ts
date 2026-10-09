@@ -4,6 +4,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { componentCatalogSchema } from '@/shared/componentCatalog'
+import { exportComponentLibraryArchive, importComponentLibraryArchive } from '@/core/components/library/archive'
+import { unzipSync, zipSync } from 'fflate'
 import {
   readCatalogComponentPackage,
   scanComponentCatalogDirectory,
@@ -34,8 +36,8 @@ function catalogPackage(sha256 = '0'.repeat(64)) {
     packagePath: 'packages/catalog-card.h5component',
     thumbnailPath: 'thumbnails/catalog-card.svg',
     sha256,
-    componentSchemaVersion: 4 as const,
-    runtimeApiVersion: 4 as const,
+    componentSchemaVersion: 1 as const,
+    runtimeApiVersion: 5 as const,
     renderMode: 'dom' as const,
     supportedScopes: ['scene'] as const,
     quality: 'experimental' as const,
@@ -46,8 +48,21 @@ function catalogPackage(sha256 = '0'.repeat(64)) {
   }
 }
 
+async function packageArchive(payload?: Uint8Array, title = '目录卡片') {
+  const { entry } = importComponentLibraryArchive(await fs.readFile(path.resolve(__dirname, '../../resources/built-in-components/packages/image-frame.h5component')))
+  entry.id = 'com.example.catalog-card'
+  entry.title = title
+  if (payload) {
+    entry.assets.payload = { id: 'payload', path: 'assets/payload.bin', byteLength: payload.byteLength }
+    entry.resources.assets.payload = payload
+  }
+  // Store the resource without compression so the real archive remains above
+  // the retired file-size ceiling, rather than testing only expanded bytes.
+  return zipSync(unzipSync(exportComponentLibraryArchive(entry)), { level: 0 })
+}
+
 describe('Component Catalog V1', () => {
-  it('接受 API4 experimental 并禁止未授权条目升级为 stable', () => {
+  it('接受 API5 experimental 并禁止未授权条目升级为 stable', () => {
     const experimental = componentCatalogSchema.safeParse({
       catalogVersion: 1,
       name: '测试目录',
@@ -94,7 +109,7 @@ describe('Component Catalog V1', () => {
     temporaryRoots.push(root)
     await fs.mkdir(path.join(root, 'packages'), { recursive: true })
     await fs.mkdir(path.join(root, 'thumbnails'), { recursive: true })
-    const packageBytes = new TextEncoder().encode('not-executed-test-package')
+    const packageBytes = await packageArchive()
     const sha256 = createHash('sha256').update(packageBytes).digest('hex')
     await fs.writeFile(path.join(root, 'packages', 'catalog-card.h5component'), packageBytes)
     await fs.writeFile(
@@ -131,14 +146,20 @@ describe('Component Catalog V1', () => {
 
     await fs.writeFile(
       path.join(root, 'packages', 'catalog-card.h5component'),
-      'changed-after-scan',
-      'utf8',
+      await packageArchive(undefined, '同身份但内容已改变'),
     )
     await expect(readCatalogComponentPackage(
       scanned,
       'com.example.catalog-card',
       '1.0.0',
     )).rejects.toThrow('SHA-256')
+
+    await fs.writeFile(path.join(root, 'packages', 'catalog-card.h5component'), packageBytes)
+    await fs.writeFile(path.join(root, 'catalog.json'), JSON.stringify({ catalogVersion: 1, packages: [catalogPackage('0'.repeat(64))] }))
+    const mismatched = await scanComponentCatalogDirectory(root, 'prompt')
+    expect(mismatched.packages).toEqual([])
+    expect(mismatched.packageIndex.size).toBe(0)
+    expect(mismatched.issues).toEqual([expect.objectContaining({ code: 'package-hash-mismatch', packageId: 'com.example.catalog-card' })])
   })
 
   it('reads real catalog, package and thumbnail files above the former byte ceilings', async () => {
@@ -146,7 +167,9 @@ describe('Component Catalog V1', () => {
     temporaryRoots.push(root)
     await fs.mkdir(path.join(root, 'packages'))
     await fs.mkdir(path.join(root, 'thumbnails'))
-    const bytes = Buffer.alloc(50 * 1024 * 1024 + 1, 120)
+    const payload = Buffer.alloc(50 * 1024 * 1024 + 1, 120)
+    const bytes = await packageArchive(payload)
+    expect(bytes.byteLength).toBeGreaterThan(50 * 1024 * 1024)
     const sha256 = createHash('sha256').update(bytes).digest('hex')
     await fs.writeFile(path.join(root, 'packages/catalog-card.h5component'), bytes)
     await fs.writeFile(path.join(root, 'thumbnails/catalog-card.svg'), `<svg xmlns="http://www.w3.org/2000/svg"><!--${'x'.repeat(5 * 1024 * 1024)}--></svg>`)
@@ -158,5 +181,8 @@ describe('Component Catalog V1', () => {
     const loaded = await readCatalogComponentPackage(scanned, 'com.example.catalog-card', '1.0.0')
     expect(loaded.bytes.length).toBe(bytes.length)
     expect(loaded.sha256).toBe(sha256)
+    const retained = importComponentLibraryArchive(loaded.bytes).entry.resources.assets.payload
+    expect(retained.byteLength).toBe(payload.byteLength)
+    expect(createHash('sha256').update(retained).digest('hex')).toBe(createHash('sha256').update(payload).digest('hex'))
   })
 })

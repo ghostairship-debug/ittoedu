@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { defaultComponentCatalogSources } from '../../src/main/componentCatalogSources'
 import { scanComponentCatalogDirectory, readCatalogComponentPackage } from '../../src/main/componentCatalogScanner'
 import { BUILT_IN_COMPONENT_CATALOG_DIRECTORY } from '../../src/shared/builtInComponentCatalog'
-import { importComponentPackage } from '../../src/core/drivers/codecs/importComponentPackage'
+import { importComponentLibraryArchive } from '../../src/core/components/library/archive'
 
 const repositoryRoot = path.resolve(__dirname, '../..')
 const temporaryRoots: string[] = []
@@ -32,7 +32,7 @@ describe('application-owned built-in component catalog', () => {
     for (const pkg of catalog.packages) {
       expect(pkg.thumbnailDataUrl).toMatch(/^data:image\/svg\+xml;base64,/)
       const file = await readCatalogComponentPackage(catalog, pkg.packageId, pkg.version)
-      expect(importComponentPackage(file.bytes).manifest.id).toBe(pkg.packageId)
+      expect(importComponentLibraryArchive(file.bytes).entry.id).toBe(pkg.packageId)
     }
   })
 

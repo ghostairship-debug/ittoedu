@@ -20,7 +20,7 @@ afterEach(async () => {
   for (const close of closeServers.splice(0)) await close()
   for (const directory of directories.splice(0)) {
     if (!path.resolve(directory).startsWith(path.resolve(tmpdir()) + path.sep)) throw new Error('Unsafe fixture cleanup')
-    await rm(directory, { recursive: true, force: true })
+    await rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 })
   }
 })
 
@@ -219,16 +219,16 @@ it('keeps committed and unresolved facts through compaction, lost tool ACK, netw
 })
 
 it('does not release an unresolved side effect after a no-op continuation and another resume', async () => {
-  let requestCount = 0
+  let phase: 'initial' | 'noop' | 'replay' = 'initial', replayTurn = 0
   const provider: ModelProvider = { async *stream(request) {
-    requestCount += 1
+    const turn = phase === 'replay' ? ++replayTurn : 0
     const reference = refs(request)[0]!
-    if (requestCount === 1) {
+    if (phase === 'initial') {
       yield { requestId: request.requestId, sequence: 1, type: 'response.failed',
         failure: { outcome: 'unknown', kind: 'transport', code: 'fixture-response-lost', message: '结果未知' } }
-    } else if (requestCount === 3) {
+    } else if (phase === 'replay' && turn === 1) {
       yield complete(request, [{ id: 'observe', name: 'read', input: { target: reference.target } }])
-    } else if (requestCount === 4) {
+    } else if (phase === 'replay' && turn === 2) {
       yield complete(request, [{ id: 'duplicate-attempt', name: 'text.replace',
         input: { target: reference.writable[0]!.target, content: 'DUPLICATE' } }])
     } else yield complete(request)
@@ -251,8 +251,10 @@ it('does not release an unresolved side effect after a no-op continuation and an
     call: { name: 'text.replace', input: { target: 'old-run-handle', content: 'DUPLICATE' } }, state: 'executing' })
   await runs.save(crashed)
   const execute = vi.spyOn(host.tools, 'execute')
+  phase = 'noop'
   const second = await engine.resume(first.runId, { ...input, taskId: 'no-op-continuation' })
   expect((await engine.wait(second.runId)).status).toBe('partial')
+  phase = 'replay'
   const third = await engine.resume(second.runId, { ...input, taskId: 'second-continuation' })
   const final = await engine.wait(third.runId)
   expect(final.status).toBe('partial')

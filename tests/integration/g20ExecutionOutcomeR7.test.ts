@@ -150,10 +150,19 @@ describe('M26 R7 receipt-based settlement', () => {
   })
   it('retains a known observation gap and its original page as an audit warning', () => {
     const observation = (locationId: string) => ({ kind: 'read' as const, data: { identity: { documentId: 'course', locationId }, image: { resourceId: 'pixels' } } })
-    const failed = { ...tool('view.observe', { target: 'old-handle' }, observation('one'), 0), observationFailure: { message: '视觉不可用' } }
+    const failed = { ...tool('view.observe', { target: 'old-handle', purpose: 'diagnostic' }, observation('one'), 0), observationFailure: { message: '视觉不可用' } }
     expectCompletedWithWarnings(run(failed, tool('view.observe', { target: 'new-handle' }, observation('two'), 1)), failed)
     expectCompletedWithWarnings(run(failed, tool('view.observe', { target: 'new-handle' }, observation('one'), 1)), failed)
     expect(failed.result).toMatchObject({ data: { identity: { documentId: 'course', locationId: 'one' } } })
+    // Omitting purpose means required verification; another page cannot fulfil the original check.
+    const required = { ...failed, call: { name: 'view.observe', input: { target: 'old-handle' } } }
+    const differentPage = run(required, tool('view.observe', { target: 'new-handle' }, observation('two'), 1))
+    expect(differentPage.tools[0]).toEqual(required)
+    expect(executionExitDecision(differentPage)).toMatchObject({ status: 'partial', remaining: expect.arrayContaining([
+      expect.objectContaining({ name: 'view.observe', callId: required.callId, status: 'unverified' }),
+    ]) })
+    expectCompletedWithWarnings(run(required, tool('view.observe', { target: 'new-handle' }, observation('one'), 1)), required)
+    expect(hasUnresolvedToolFailure(run({ ...failed, observationFailure: { message: '结果未确认', outcome: 'unknown' } }))).toBe(true)
   })
   it('keeps a durable running image job pending until the matching owner reports ready', () => {
     const pending = tool('image.generate', { prompt: '图一' }, { kind: 'read', data: { job: 'image-one', status: 'running' } }, 0)

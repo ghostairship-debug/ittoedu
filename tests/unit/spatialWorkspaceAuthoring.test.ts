@@ -1,8 +1,5 @@
 import { controllerMetadata } from '../fixtures/teacherController'
 import { controllerPackage } from '../fixtures/teacherController'
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -881,40 +878,5 @@ describe('SpatialEditorView identities and Workspace Spatial reads', () => {
     expect(isSpatialEditorLocationKind('spatial-frames')).toBe(false)
     expect(isSpatialEditorLocationKind('flow-block')).toBe(false)
     expect(isSpatialEditorLocationKind('slide-scene')).toBe(false)
-  })
-
-  it('Spatial Workspace branch no longer uses the retired scene projection', () => {
-    const shell = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), '../../src/renderer/ui/workspaces/SpatialLocationWorkspace.tsx'),
-      'utf8',
-    )
-    const connector = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), '../../src/renderer/ui/workspaces/SpatialWorkspaceConnector.tsx'),
-      'utf8',
-    )
-    const route = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), '../../src/renderer/ui/workspaces/WorkspaceRouteContext.ts'),
-      'utf8',
-    )
-    expect(shell).not.toMatch(new RegExp(['courseLayerItemToScene', 'Node'].join('')))
-    expect(shell).not.toMatch(/selectEditingNodes/)
-    expect(shell).not.toMatch(/selectSelectedNode/)
-    expect(shell).not.toMatch(/useEditorStore/)
-    expect(shell).not.toMatch(/from ['"][^'"]*editorStore['"]/)
-    expect(shell).toMatch(/createSpatialWorldTargetAuthoringController/)
-    expect(shell).not.toMatch(/createSpatialWorldAuthoringController/)
-    expect(shell).not.toMatch(/SpatialWorldAuthoringHost|authoringHost/)
-    expect(shell).not.toMatch(/\bgetSession\b|\bsetSession\b/)
-    expect(shell).not.toMatch(/runSpatialCommand|applySpatialAuthoringSession/)
-    expect(shell).toMatch(/materializeNativeLayerItem/)
-    expect(shell).not.toMatch(/SPATIAL_SESSIONLESS_ERROR/)
-    expect(shell).not.toMatch(/spatial-workspace-sessionless/)
-    expect(route).toMatch(/expectedSurfaceType !== 'spatial-2d'/)
-    expect(connector).toMatch(/SPATIAL_SESSIONLESS_ERROR/)
-    expect(connector).toMatch(/spatial-workspace-sessionless/)
-    expect(route).toMatch(/locationSurfaceType/)
-    expect(connector).not.toMatch(/hitTestV9SpatialLayerItems/)
-    expect(connector).not.toMatch(/function SpatialSelectionOverlay/)
-    expect(connector).not.toMatch(/createSpatialWorldViewTransform/)
   })
 })

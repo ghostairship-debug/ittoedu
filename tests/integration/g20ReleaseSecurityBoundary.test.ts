@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -9,6 +9,14 @@ import { ExecutionEventStore } from '../../src/main/workbench/execution/Executio
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { OpenAIChatProvider } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import type { ModelEvent, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
+
+vi.mock('../../src/main/workbench/execution/modelGenerationRetry', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../src/main/workbench/execution/modelGenerationRetry')>()
+  return { ...actual, waitForGenerationRetry: vi.fn(async (_delay: number, signal: AbortSignal) => {
+    signal.throwIfAborted()
+    await Promise.resolve()
+  }) }
+})
 
 const roots: string[] = []
 afterEach(async () => {
@@ -56,7 +64,7 @@ it('rejects a fabricated mutation in a read-only run even when the model calls a
   const started = await engine.start({ conversationId: 'read-only', taskId: 'read-only', instruction: '查看', selection,
     permission: 'read-only', documents: [{ documentId: h.document.documentId, writable: [] }] })
   const result = await engine.wait(started.runId)
-  expect(result.tools[0]?.result).toMatchObject({ kind: 'error', code: 'tool-not-advertised' })
+  expect(result.tools[0]?.result).toMatchObject({ kind: 'error', code: 'not-authorized' })
   expect(h.host.registry.get(h.document.documentId).read()).toMatchObject({ revision: 0, undoDepth: 0, model: { source: 'OLD text' } })
   expect(await readFile(h.filename, 'utf8')).toBe('OLD text')
 })

@@ -200,11 +200,26 @@ jobs:
           node-version: '24'
           cache: 'npm'
       - run: npm ci
-      # The full path builds Player through pretest:product. The direct Vitest
-      # delta path still needs this preparation for example/benchmark consumers.
+      - name: Install browsers for product tests
+        if: needs.changes.outputs.product_tests == 'true'
+        run: npx playwright install --with-deps chromium msedge
+      - name: Prepare Electron sandbox for real compute tests
+        if: needs.changes.outputs.product_tests == 'true'
+        shell: bash
+        run: |
+          sandbox="$PWD/node_modules/electron/dist/chrome-sandbox"
+          test -f "$sandbox"
+          test ! -L "$sandbox"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
       - run: npm run build:player
-        if: needs.changes.outputs.product_tests == 'true' && needs.changes.outputs.product_full != 'true'
-      - run: npm run test:product
+        if: needs.changes.outputs.product_tests == 'true'
+      - run: npm run build:renderer
+        if: needs.changes.outputs.product_tests == 'true'
+      - run: npm run build:electron
+        if: needs.changes.outputs.product_tests == 'true'
+      # Both paths use the prepared Player, Renderer and Electron artifacts.
+      - run: xvfb-run --auto-servernum npm run test:product
         if: needs.changes.outputs.product_tests == 'true' && needs.changes.outputs.product_full == 'true'
       - name: Run affected product tests
         if: needs.changes.outputs.product_tests == 'true' && needs.changes.outputs.product_full != 'true'
@@ -243,7 +258,7 @@ jobs:
             echo 'Selected product validation has no inputs' >&2
             exit 1
           fi
-          npx vitest related "${inputs[@]}" --run \
+          xvfb-run --auto-servernum npx vitest related "${inputs[@]}" --run \
             --exclude=tests/unit/taskBoardGenerator.test.ts \
             --exclude=tests/unit/aiCapabilities.test.ts
       - run: npm run test:governance

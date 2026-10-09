@@ -53,11 +53,12 @@ for (const [label, draft, path, expected] of [
   fireEvent.focus(input); fireEvent.change(input, { target: { value: draft } }); fireEvent.blur(input)
   let settled = false, flushing!: Promise<boolean>
   await act(async () => { flushing = flushPropertiesDrafts(); void flushing.then(() => { settled = true }); await Promise.resolve() })
-  expect(submit).toHaveBeenCalledOnce(); expect(settled).toBe(false); expect(input).toHaveValue(label === '专业数量' ? 9 : draft)
+  expect(submit).toHaveBeenCalledOnce(); expect(settled).toBe(false); expect(input).toHaveValue(draft)
+  if (label === '专业数量') expect(input).toHaveAttribute('aria-valuenow', '9')
   const pending = await h.service.internalAPI.read(h.first.documentId)
   expect(pending.revision).toBe(0); expect(pending.undoDepth).toBe(0)
   await act(async () => { gate.reject(new Error('formal ACK rejected')); expect(await flushing).toBe(false) })
-  expect(input).toHaveValue(label === '专业数量' ? 9 : draft)
+  expect(input).toHaveValue(draft)
   expect(useEditorStore.getState().errorMessage).toBe('formal ACK rejected')
   expect(screen.getAllByRole('alert').some(item => item.textContent?.includes('formal ACK rejected'))).toBe(true)
   const retry = deferred()
@@ -94,23 +95,33 @@ it('actual common width waits for ACK and keeps the captured shape after selecti
 for (const [label, first, newer, path] of [
   ['专业标题', '已提交输入', '等待期间的新输入', 'title'],
   ['专业数量', '9', '12', 'count'],
-] as const) it(`${label} keeps input typed during pending ACK dirty instead of claiming it was flushed`, async () => {
+] as const) it(`${label} waits for a second ACK when input changes during the first ACK`, async () => {
   const h = await host(), kernel = useEditorStore.getState().courseKernel
-  const original = kernel.editCaptured.bind(kernel), gate = deferred()
-  vi.spyOn(kernel, 'editCaptured').mockImplementationOnce(async (...args) => { await gate.promise; return original(...args) })
+  const original = kernel.editCaptured.bind(kernel), gate = deferred(), newerGate = deferred()
+  const submit = vi.spyOn(kernel, 'editCaptured')
+    .mockImplementationOnce(async (...args) => { await gate.promise; return original(...args) })
+    .mockImplementationOnce(async (...args) => { await newerGate.promise; return original(...args) })
   const input = screen.getByLabelText(label)
   fireEvent.focus(input); fireEvent.change(input, { target: { value: first } }); fireEvent.blur(input)
-  let flushing!: Promise<boolean>
-  await act(async () => { flushing = flushPropertiesDrafts(); await Promise.resolve() })
+  let settled = false, flushing!: Promise<boolean>
+  await act(async () => { flushing = flushPropertiesDrafts(); void flushing.then(() => { settled = true }); await Promise.resolve() })
   fireEvent.change(input, { target: { value: newer } })
-  await act(async () => { gate.resolve(); expect(await flushing).toBe(false) })
-  expect(input).toHaveValue(label === '专业数量' ? Number(newer) : newer)
+  await act(async () => { gate.resolve(); await Promise.resolve() })
+  await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(2))
+  expect(settled).toBe(false)
+  expect(input).toHaveValue(newer)
+  const earlier = await h.service.internalAPI.read(h.first.documentId)
+  expect(earlier.undoDepth).toBe(1)
+  expect(earlier.model.kind === 'course-v10' && (earlier.model.project.instances.custom.data as Record<string, unknown>)[path])
+    .toEqual(label === '专业数量' ? Number(first) : first)
+  await act(async () => { newerGate.resolve(); expect(await flushing).toBe(true) })
   await act(async () => { expect(await flushPropertiesDrafts()).toBe(true) })
+  expect(submit).toHaveBeenCalledTimes(2)
   const saved = await h.service.internalAPI.read(h.first.documentId)
   expect(saved.model.kind === 'course-v10' && (saved.model.project.instances.custom.data as Record<string, unknown>)[path])
     .toEqual(label === '专业数量' ? Number(newer) : newer)
   expect(saved.undoDepth).toBe(2)
-  console.log('R1_PENDING_INPUT_RAW', JSON.stringify({ label, firstACKFlushComplete: false, newerInput: newer, undoDepth: saved.undoDepth }))
+  console.log('R1_PENDING_INPUT_RAW', JSON.stringify({ label, firstACKFlushComplete: false, latestACKFlushComplete: true, newerInput: newer, undoDepth: saved.undoDepth }))
 })
 
 for (const [label, first, composed, path] of [

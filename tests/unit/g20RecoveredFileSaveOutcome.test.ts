@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { hasUnresolvedToolFailure } from '../../src/main/workbench/execution/executionOutcome'
+import { executionAuditWarnings, hasUnresolvedToolFailure } from '../../src/main/workbench/execution/executionOutcome'
 import type { ExecutionRunRecord, ExecutionToolRecord } from '../../src/shared/workbench/execution'
 
 const tool = (name: string, input: unknown, result: ExecutionToolRecord['result'], index: number):
@@ -37,8 +37,14 @@ it('settles a mistaken save path only from an earlier host identity and a confir
     { ...failed, call: { name: 'file.save', input: { target: path, destination: 'D:\\fixture\\copy.html' } } }, saved()))).toBe(true)
   expect(hasUnresolvedToolFailure(run(created,
     { ...failed, result: error('tool-outcome-unknown') }, saved()))).toBe(true)
-  // An earlier run's identical path cannot identify this run's failed save.
-  expect(hasUnresolvedToolFailure(run(created,
+  // A confirmed save of the same current document remains a fact across continuation lineage.
+  const continuation = run(created,
     { ...failed, sourceRunId: 'origin-b' } as ExecutionToolRecord,
-    { ...saved(), sourceRunId: 'origin-b' } as ExecutionToolRecord))).toBe(true)
+    { ...saved(), sourceRunId: 'origin-b' } as ExecutionToolRecord)
+  expect(hasUnresolvedToolFailure(continuation)).toBe(false)
+  expect(continuation.tools[2]!.result).toMatchObject({ kind: 'read', data: {
+    status: 'saved', documentId: 'lesson', savedRevision: 3, currentRevision: 3, dirty: false,
+  } })
+  expect(executionAuditWarnings(continuation)).toContainEqual(expect.objectContaining({ name: 'file.save' }))
+  expect(continuation.tools[1]!.result).toEqual(error('invalid-target'))
 })

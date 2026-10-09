@@ -27,13 +27,13 @@ it('keeps usable CSV available when an auxiliary declared output is missing and 
   } as unknown as PodmanComputeBackend
   try {
     const service = new ComputeJobService({ directory, backend })
-    await service.start({ runId: 'run', jobId: 'summary', language: 'python', code: 'controlled fixture',
+    await service.start({ runId: 'run', jobId: 'compute-summary', language: 'python', code: 'controlled fixture',
       inputs: [{ name: 'teacher.csv', bytes: new TextEncoder().encode('value\n2\n4\n') }], outputNames: ['auxiliary.json', 'summary.csv'] })
-    const final = await service.wait('run', 'summary', 5000)
+    const final = await service.wait('run', 'compute-summary', 5000)
     expect(final.status).toBe('ready')
     expect(final.artifacts.map(artifact => artifact.name)).toEqual(['summary.csv'])
     expect(final).toMatchObject({ outputDiagnostics: [expect.objectContaining({ name: 'auxiliary.json', message: expect.any(String) })] })
-    expect(new TextDecoder().decode((await service.readArtifact('run', 'summary', 'summary.csv')).bytes)).toBe('count,mean\n2,3\n')
+    expect(new TextDecoder().decode((await service.readArtifact('run', 'compute-summary', 'summary.csv')).bytes)).toBe('count,mean\n2,3\n')
     const host = new DocumentHostService(path.join(directory, 'documents'))
     const images = new ImageGenerationService({ directory: path.join(directory, 'images'), provider: { generate: async () => { throw new Error('No image provider call') } } })
     const jobs = new HostJobService({ images, compute: service })
@@ -43,7 +43,7 @@ it('keeps usable CSV available when an auxiliary declared output is missing and 
     const retained: string[] = []
     let cursor = 0
     while (true) {
-      const result = await host.tools.execute('run', `logs-${cursor}`, { name: 'job.logs', input: { kind: 'compute', job: 'summary', after: cursor, limit: 1000 } })
+      const result = await host.tools.execute('run', `logs-${cursor}`, { name: 'job.logs', input: { job: 'compute-summary', after: cursor, limit: 1000 } })
       expect(result.kind, JSON.stringify(result)).toBe('read')
       if (result.kind !== 'read') throw new Error('Public job log request failed')
       const page = result.data as { entries: Array<{ stream: string; message: string }>; nextCursor: number }
@@ -53,12 +53,12 @@ it('keeps usable CSV available when an auxiliary declared output is missing and 
       cursor = page.nextCursor
     }
     expect(retained).toEqual(lines)
-    const empty = await host.tools.execute('run', 'logs-empty', { name: 'job.logs', input: { kind: 'compute', job: 'summary', after: cursor, limit: 1000 } })
+    const empty = await host.tools.execute('run', 'logs-empty', { name: 'job.logs', input: { job: 'compute-summary', after: cursor, limit: 1000 } })
     expect(empty).toMatchObject({ kind: 'read', data: { entries: [], nextCursor: cursor } })
     await host.tools.stop('run')
     const cold = new ComputeJobService({ directory, backend })
-    expect((await cold.status('run', 'summary')).status).toBe('ready')
-    expect(new TextDecoder().decode((await cold.readArtifact('run', 'summary', 'summary.csv')).bytes)).toBe('count,mean\n2,3\n')
+    expect((await cold.status('run', 'compute-summary')).status).toBe('ready')
+    expect(new TextDecoder().decode((await cold.readArtifact('run', 'compute-summary', 'summary.csv')).bytes)).toBe('count,mean\n2,3\n')
     expect(starts).toBe(1)
   } finally {
     if (!path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unsafe fixture cleanup')

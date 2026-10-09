@@ -8,6 +8,7 @@ import { HtmlPreviewUnavailableError } from '../../src/main/workbench/htmlPrevie
 import { DynamicContentFallbackCaptureService } from '../../src/main/workbench/observation/DynamicContentFallbackCaptureService'
 import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
 import { discoverDynamicContentTargets } from '../../src/core/tools/DynamicContentEditPlanner'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 
 const state = vi.hoisted(() => ({ windows: [] as any[], load: async () => undefined as void,
   execute: async (_source: string) => ({ locationId: 'page', structure: ['ready'], diagnostics: [] }) as unknown }))
@@ -17,7 +18,9 @@ vi.mock('electron', async () => {
     destroyed = false
     webContents = Object.assign(new EventEmitter(), { id: 1, setWindowOpenHandler() {},
       executeJavaScript: (source: string) => state.execute(source),
-      mainFrame: { detached: false, processId: 1, frameToken: 'frame', executeJavaScript: (source: string) => state.execute(source) },
+      mainFrame: { detached: false, processId: 1, frameToken: 'frame',
+        executeJavaScript: (source: string) => state.execute(source),
+        framesInSubtree: [{ detached: false, executeJavaScript: async () => undefined }] },
       capturePage: async () => ({ getSize: () => ({ width: 1280, height: 720 }), isEmpty: () => false,
         toPNG: () => Buffer.from('png') }),
     })
@@ -57,7 +60,9 @@ function deferred<T>() {
   return { promise, resolve }
 }
 const identity = { documentId: 'document', epoch: 'epoch', revision: 0, locationId: 'page', viewGeneration: 'view-1' }
-const snapshot = { model: { project: { assets: {}, network: { connectOrigins: [] } }, resources: { assets: {}, components: {} } } } as any
+const project = createBlankCourseProjectV10('Observation lifecycle')
+project.surfaces[0]!.id = identity.locationId
+const snapshot = { model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } } } as any
 function fallbackInput() {
   const candidate = new CourseV9Driver().load(new Uint8Array(readFileSync('tests/fixtures/course-project-v9/surface-runtime.h5lesson')))
   if (candidate.kind !== 'course-v9') throw new Error('Fixture is not a course')
@@ -91,6 +96,7 @@ it('cancels an isolated observation promptly when its owning task aborts', async
   const service = new ViewObservationDesktopService({ rendererEntryUrl: 'http://localhost:5173/index.html' })
   const work = service.captureIsolated({ identity, snapshot, signal: controller.signal })
   const rejected = expect(work).rejects.toThrow('观察已取消')
+  await vi.waitFor(() => expect(state.windows).toHaveLength(1))
   controller.abort()
   await rejected
   expect(state.windows[0].destroyed).toBe(true)
@@ -102,6 +108,7 @@ it('reports a genuinely unresponsive isolated observation operation', async () =
   const service = new ViewObservationDesktopService({ rendererEntryUrl: 'http://localhost:5173/index.html' })
   const work = service.captureIsolated({ identity, snapshot })
   const rejected = expect(work).rejects.toThrow('观察宿主准备或截图无响应')
+  await vi.waitFor(() => expect(state.windows).toHaveLength(1))
   await vi.advanceTimersByTimeAsync(20_000)
   await rejected
   expect(state.windows[0].destroyed).toBe(true)
@@ -112,6 +119,7 @@ it.each(['closed', 'render-process-gone'])('ends pending observation on actual %
   const service = new ViewObservationDesktopService({ rendererEntryUrl: 'http://localhost:5173/index.html' })
   const work = service.captureIsolated({ identity, snapshot })
   const rejected = expect(work).rejects.toThrow(event === 'closed' ? '已关闭' : '异常退出')
+  await vi.waitFor(() => expect(state.windows).toHaveLength(1))
   if (event === 'closed') state.windows[0].destroy()
   else state.windows[0].webContents.emit(event)
   await rejected

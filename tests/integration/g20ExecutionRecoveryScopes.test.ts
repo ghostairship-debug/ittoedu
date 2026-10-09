@@ -7,6 +7,7 @@ import { DocumentHostService } from '../../src/main/workbench/DocumentHostServic
 import { AgentFileService } from '../../src/main/workbench/execution/AgentFileService'
 import { AgentFileOutcomeUnknown } from '../../src/core/tools/AgentFileTools'
 import { documentDeliveryReceiptResult } from '../../src/core/tools/DocumentDeliveryTools'
+import { executionCompletionIssues } from '../../src/main/workbench/execution/executionOutcome'
 import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
@@ -14,7 +15,9 @@ import { HostArtifactDeliveryService } from '../../src/main/workbench/execution/
 import { serializeModelRequest } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { PayloadCompiler } from '../../src/core/execution/PayloadCompiler'
 import { AttachmentService } from '../../src/main/workbench/attachments/AttachmentService'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { artifactDeliverySource, computeArtifactSource } from '../../src/core/tools/HostArtifactTools'
+import { dispatchMaterialTool } from '../../src/main/workbench/execution/MaterialReadTools'
 import type { ExecutionStart } from '../../src/shared/workbench/execution'
 import type { ModelEvent, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
 
@@ -69,19 +72,22 @@ it.each(['rejected', 'unknown'] as const)('settles an attributable rejected deli
       : { kind: 'error', code: 'tool-outcome-unknown', message: '查询连接中断' })
     : lookup(runId, callId, call))
   const execute = f.host.tools.execute.bind(f.host.tools)
-  const save = vi.fn(async () => ({ kind: 'read' as const, data: { status: 'saved', documentId: f.document.documentId,
-    savedRevision: 0, currentRevision: 0, dirty: false } }))
+  const save = vi.fn(async () => {
+    const saved = await f.host.saveToPath(f.document.documentId, path.join(f.root, 'saved.md'))
+    return { kind: 'read' as const, data: { status: 'saved', documentId: saved.documentId, epoch: saved.epoch,
+      path: saved.binding.kind === 'file' ? saved.binding.path : undefined, savedRevision: saved.revision, currentRevision: saved.revision, dirty: saved.dirty } }
+  })
   vi.spyOn(f.host.tools, 'execute').mockImplementation((runId, callId, call) => call.name === 'file.save' ? save() : execute(runId, callId, call))
   const next = await f.engine.resume(old.runId, { ...f.input, taskId: 'continue' }), final = await f.engine.wait(next.runId)
   expect(save).toHaveBeenCalledTimes(outcome === 'rejected' ? 1 : 0)
   expect((await f.runs.read(old.runId))!.tools[0]!.state).toBe(outcome === 'rejected' ? 'returned' : 'executing')
-  expect(final.status).toBe(outcome === 'rejected' ? 'completed' : 'partial')
+  expect(final.status, JSON.stringify({ tools: final.tools, failure: final.failure })).toBe(outcome === 'rejected' ? 'completed' : 'partial')
   if (outcome === 'unknown') expect(final.tools[0]!.result).toMatchObject({ kind: 'error', code: 'unresolved-prior-tool' })
 })
 
 it.each(['written', 'rejected', 'unknown'] as const)('recovers original artifact owner receipts and settles only confirmed corrected deliveries (%s)', async outcome => {
   let calls = 0
-  const artifact = { kind: 'compute', job: 'compute-one', name: 'result.txt', destination: 'result.txt' }
+  const artifact = { source: computeArtifactSource('compute-one', 'result.txt'), destination: 'result.txt' }
   const provider: ModelProvider = { async *stream(request) {
     if (++calls === 2 && outcome !== 'written') yield complete(request, [{ id: 'corrected-save', name: 'artifact.save', input: artifact }])
     else yield complete(request)
@@ -105,10 +111,30 @@ it.each(['written', 'rejected', 'unknown'] as const)('recovers original artifact
   await f.runs.save(old) // The owner receipt is durable; the execution checkpoint still says executing.
   const reopenedOwner = new HostArtifactDeliveryService({ journalDirectory, withFileOperation: work => work() })
   const lookup = vi.spyOn(reopenedOwner, 'lookup'), deliver = vi.spyOn(reopenedOwner, 'deliver')
-  const readArtifact = vi.spyOn(f.host.tools, 'readComputeArtifact').mockResolvedValue({
-    artifact: { name: artifact.name, digest: 'owner-digest', byteLength: bytes.length, mimeType: 'text/plain' }, bytes,
+  const unusedJobOperation = async (): Promise<never> => { throw new Error('Recovery must not start or cancel a job') }
+  const readArtifact = vi.fn(async (runId: string, jobId: string, name: string) => {
+    expect([runId, jobId, name]).toEqual([old.runId, 'compute-one', 'result.txt'])
+    return { artifact: { name, digest: 'owner-digest', byteLength: bytes.length, mimeType: 'text/plain' }, bytes }
   })
-  const reopenedEngine = new ExecutionEngine({ registry: f.host.registry, gateway: f.host.tools, runs: f.runs,
+  const reopenedHost = new DocumentHostService(path.join(f.root, 'documents'))
+  await reopenedHost.internalAPI.restore(f.document.documentId)
+  reopenedHost.tools.configureHostServices({
+    compute: { start: unusedJobOperation, readArtifact, cancel: unusedJobOperation, cancelRun: async () => undefined },
+    jobs: { status: async ref => {
+      if (ref.runId !== old.runId || ref.kind !== 'compute' || ref.jobId !== 'compute-one') {
+        throw Object.assign(new Error('Not owned by this run'), { code: 'job-not-authorized' })
+      }
+      return { kind: 'compute', jobId: ref.jobId, status: 'ready', terminal: true, snapshot: { status: 'ready', stopped: false } }
+    }, wait: unusedJobOperation, logs: unusedJobOperation, cancel: unusedJobOperation },
+    artifacts: {
+      lookup: (runId, id) => reopenedOwner.lookup(id, runId),
+      preflight: ({ destination }) => reopenedOwner.preflight({ workspaceRoot: f.root, permission: 'workspace', destination }),
+      save: ({ grant, operationId, source, bytes, assertActive }) => reopenedOwner.deliver({ runId: grant.runId,
+        operationId, workspaceRoot: f.root, permission: 'workspace', destination: source.destination,
+        ...artifactDeliverySource(source), bytes, assertActive }),
+    },
+  })
+  const reopenedEngine = new ExecutionEngine({ registry: reopenedHost.registry, gateway: reopenedHost.tools, runs: f.runs,
     events: f.events, provider, artifacts: reopenedOwner })
   await reopenedEngine.recover(old.runId)
   expect(calls).toBe(1) // Recovery only reads the existing operation; it never calls the provider or replays publication.
@@ -118,7 +144,7 @@ it.each(['written', 'rejected', 'unknown'] as const)('recovers original artifact
     result: { kind: 'read', data: { operationId, status: outcome } } })
   const resumed = await reopenedEngine.resume(old.runId, { ...f.input, taskId: 'finish-artifact' })
   const final = await reopenedEngine.wait(resumed.runId)
-  expect(final.status).toBe(outcome === 'unknown' ? 'partial' : 'completed')
+  expect(final.status, JSON.stringify({ tools: final.tools, failure: final.failure })).toBe(outcome === 'unknown' ? 'partial' : 'completed')
   expect(readArtifact).toHaveBeenCalledTimes(outcome === 'rejected' ? 1 : 0)
   expect(deliver).toHaveBeenCalledTimes(outcome === 'rejected' ? 1 : 0)
   if (outcome === 'unknown') expect(final.tools[0]!.result).toMatchObject({ kind: 'error', code: 'unresolved-prior-tool' })
@@ -132,7 +158,7 @@ it('preserves an unresolved artifact when its owner lookup fails', async () => {
   const f = await fixture(provider), started = await f.engine.start(f.input), old = await f.engine.wait(started.runId)
   old.runId = 'unreadable-artifact-receipt'; old.status = 'running'
   old.tools = [{ callId: 'original-save', providerCallId: 'original-save', requestId: 'old-request', state: 'executing',
-    call: { name: 'artifact.save', input: { kind: 'compute', job: 'one', name: 'result.txt', destination: 'result.txt' } } }]
+    call: { name: 'artifact.save', input: { source: computeArtifactSource('one', 'result.txt'), destination: 'result.txt' } } }]
   await f.runs.save(old)
   const owner = new HostArtifactDeliveryService({ journalDirectory: path.join(f.root, 'artifact-receipts'), withFileOperation: work => work() })
   vi.spyOn(owner, 'lookup').mockRejectedValue(new Error('fixture receipt unavailable'))
@@ -146,11 +172,11 @@ it('preserves an unresolved artifact when its owner lookup fails', async () => {
 })
 
 it('isolates unknown file creation by host paths across continuation and still blocks same-path aliases', async () => {
-  let calls = 0
+  let continuing = false, initialCalls = 0, continuationCalls = 0
   const provider: ModelProvider = { async *stream(request) {
-    calls++
-    if (calls === 1) yield complete(request, [{ id: 'create-a', name: 'file.create', input: { name: 'A.md' } }])
-    else if (calls === 3) yield complete(request, [
+    const turn = continuing ? ++continuationCalls : ++initialCalls
+    if (!continuing && turn === 1) yield complete(request, [{ id: 'create-a', name: 'file.create', input: { name: 'A.md' } }])
+    else if (continuing && turn === 1) yield complete(request, [
       { id: 'create-b', name: 'file.create', input: { name: 'B.md' } },
       { id: 'create-a-alias', name: 'file.create', input: { path: '.', name: 'a.md' } },
       { id: 'write-a-alias', name: 'file.write', input: { path: './A.md', mode: 'create', content: 'replayed' } },
@@ -166,6 +192,7 @@ it('isolates unknown file creation by host paths across continuation and still b
   })
   const first = await f.engine.start(f.input), prior = await f.engine.wait(first.runId)
   expect(prior.tools[0]!.effectPaths).toEqual([path.join(f.root, 'A.md')])
+  continuing = true
   const continued = await f.engine.resume(first.runId, { ...f.input, taskId: 'continue' }), final = await f.engine.wait(continued.runId)
   expect(fileCalls).toEqual(['file.create', 'file.create'])
   expect(await fs.readFile(path.join(f.root, 'B.md'), 'utf8')).toBe('')
@@ -226,13 +253,30 @@ it('continues extracting the same original from an attached derived snapshot and
   originalId = source.id
   const attached = await materials.extract(source.id, { pages: { from: 1, to: 1 } })
   unrelatedId = (await materials.receiveBytes({ name: 'other.pdf', bytes: Buffer.from('%PDF-not-authorized'), source: { kind: 'file' } })).id
+  const materialGrants = new Map<string, Set<string>>()
+  f.host.tools.configureHostServices({
+    beginRun: async grant => { materialGrants.set(grant.runId, new Set(grant.materialIds)) },
+    stopRun: runId => { materialGrants.delete(runId) },
+    materials: {
+      admit: async (runId, ids) => {
+        for (const id of ids) { await materials.readSnapshot(id); materialGrants.get(runId)!.add(id) }
+      },
+      read: async (runId, name, input) => {
+        const ids = materialGrants.get(runId)!
+        const result = await dispatchMaterialTool(materials, ids, name, input)
+        if ('admittedSourceIds' in result) for (const id of result.admittedSourceIds ?? []) ids.add(id)
+        return { kind: 'read', data: result.data }
+      },
+      readResource: async () => { throw new Error('This fixture has no image resource') },
+    },
+  })
   const engine = new ExecutionEngine({ registry: f.host.registry, gateway: f.host.tools, runs: f.runs, events: f.events, provider, materials,
     initialCompiler: new PayloadCompiler({ attachments: materials, serializePayload: serializeModelRequest }) })
   const started = await engine.start({ ...f.input, inputContext: { id: 'attached-derived', capturedAt: 1, instruction: '读第二页', context: [],
     attachments: [{ attachmentId: attached.id, representationId: 'extracted-1' }] } }), final = await engine.wait(started.runId)
   expect(final.initialPayload?.explicitAttachments.map(item => item.attachmentId)).toEqual([attached.id])
   expect(final.tools[1]!.result).toMatchObject({ kind: 'read', data: { text: '第2页原文' } })
-  expect(final.tools[2]!.result).toMatchObject({ kind: 'error', code: 'material-read-failed' })
+  expect(final.tools[2]!.result).toMatchObject({ kind: 'error', code: 'invalid-operation', message: '材料不在当前显式输入或宿主冻结历史来源内' })
   expect(calls).toBe(3)
 })
 
@@ -246,8 +290,8 @@ it.each([undefined, 'diagnostic'] as const)('keeps required visual checks partia
     else yield complete(request)
   } }
   const f = await fixture(provider)
-  const model = new CourseV9Driver().load(await fs.readFile('tests/fixtures/course-project-v9/slide-native.h5lesson'))
-  const course = await f.host.internalAPI.create(model, 'course.h5lesson')
+  const course = await f.host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('visual recovery'),
+    resources: { assets: {}, components: {} } }, 'course.glx')
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64')
   f.host.tools.configureHostServices({ observations: {
     observe: async input => ({ source: 'isolated-published', identity: { documentId: input.documentId, epoch: input.epoch,
@@ -262,10 +306,25 @@ it.each([undefined, 'diagnostic'] as const)('keeps required visual checks partia
   expect(await fs.readFile(path.join(f.root, 'delivered.txt'), 'utf8')).toBe('交付的真实内容')
   expect(final.tools[0]!.observationFailure?.message).toContain('视觉模型')
   expect(final.failure).toBeUndefined() // No unrelated global sticky failure.
-  expect(final.status).toBe(purpose === 'diagnostic' ? 'completed' : 'partial')
+  expect(final.status, JSON.stringify({ tools: final.tools, failure: final.failure })).toBe(purpose === 'diagnostic' ? 'completed' : 'partial')
   const ended = await f.events.findEvent(f.input.conversationId, `${final.runId}:terminal`)
   expect(ended?.data.text).toContain(purpose === 'diagnostic' ? '相关视觉结果未验证' : '视觉模型')
   if (!purpose) {
+    // A receipt for another displayed state does not verify the required state.
+    const settlement = structuredClone(final), failed = settlement.tools[0]!, successful = structuredClone(failed)
+    const failedData = (failed.result as { kind: 'read'; data: { identity: { stateId?: string | null } } }).data
+    const successfulData = (successful.result as { kind: 'read'; data: { identity: { stateId?: string | null } } }).data
+    failedData.identity.stateId = 'required-state'
+    successfulData.identity.stateId = 'different-state'
+    delete successful.observationFailure
+    successful.callId = 'later-success'
+    settlement.tools.push(successful)
+    expect(executionCompletionIssues(settlement)).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'view.observe', status: 'unverified' })]))
+    successfulData.identity.stateId = 'required-state'
+    expect(executionCompletionIssues(settlement).filter(issue => issue.name === 'view.observe')).toEqual([])
+    failed.call.input = { ...failed.call.input as object, purpose: 'diagnostic' }
+    failed.observationFailure = { message: 'Unknown observation outcome', outcome: 'unknown' }
+    expect(executionCompletionIssues(settlement)).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'view.observe', status: 'unknown' })]))
     const resumed = await f.engine.resume(final.runId, { ...final.input, selection, taskId: 'check-again' })
     const verified = await f.engine.wait(resumed.runId)
     expect(verified.tools[0]!.observationFailure).toBeUndefined()

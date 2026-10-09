@@ -3,7 +3,9 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { MarkdownDriver } from '../../src/core/drivers/MarkdownDriver'
@@ -27,11 +29,11 @@ function memoryPersistence(): DocumentPersistence {
 
 async function courseFixture() {
   const root = await tempRoot('g20-workbench-delivery-')
-  const driver = new CourseV9Driver()
+  const driver = new CourseV10Driver()
   const registry = new DocumentRegistry({ persistence: memoryPersistence(), drivers: [driver],
     createId: (() => { let id = 0; return () => `doc-${++id}` })(), bindingKey: binding => binding.path })
-  const model = await driver.load(await fs.readFile(path.join(process.cwd(), 'tests/fixtures/course-project-v9/slide-native.h5lesson')))
-  const session = await registry.create(model, 'lesson.h5lesson')
+  const model = { kind: 'course-v10' as const, project: createBlankCourseProjectV10('Delivery'), resources: { assets: {}, components: {} } }
+  const session = await registry.create(model, 'lesson.glx')
   return { root, driver, registry, session }
 }
 
@@ -64,7 +66,7 @@ describe('G20 workbench save/export delivery wiring', () => {
     const markdown = new MarkdownDriver()
     const registry = new DocumentRegistry({ persistence: memoryPersistence(), drivers: [markdown], createId: () => 'external-doc', bindingKey: binding => binding.path })
     const session = await registry.create(markdown.load(new TextEncoder().encode('# note')), 'note.md')
-    const externalPath = path.join(outside, 'lesson.h5lesson')
+    const externalPath = path.join(outside, 'lesson.glx')
     const snapshot = { ...session.read(), binding: { kind: 'file' as const, path: externalPath, version: null, bindingVersion: 1 } }
     // Engine freezes this exact original path after the user approves the outside-document operation.
     const access: NonNullable<ToolRunGrant['fileAccess']> = {
@@ -110,7 +112,7 @@ describe('G20 workbench save/export delivery wiring', () => {
     const receipts = new Map<string, SaveReceipt | ExportReceipt>()
     const lookup = vi.fn(async ({ operationId }: { runId: string; operationId: string; requestDigest: string }) => receipts.get(operationId) ?? null)
     const save = vi.fn(async (input: Parameters<DocumentDeliveryServicePort['save']>[0]) => {
-        const receipt: SaveReceipt = { status: 'saved', path: path.join(root, 'lesson.h5lesson'), documentId: input.documentId,
+        const receipt: SaveReceipt = { status: 'saved', path: path.join(root, 'lesson.glx'), documentId: input.documentId,
           epoch: input.epoch, savedRevision: input.baseRevision, currentRevision: session.read().revision,
           fileVersion: 'saved-v1', dirty: false, warnings: [] }
         receipts.set(input.operationId, receipt)
@@ -143,11 +145,9 @@ describe('G20 workbench save/export delivery wiring', () => {
 
     const before = session.read()
     const model = before.model
-    if (model.kind !== 'course-v9') throw new Error('fixture must be a Course V9 document')
+    if (model.kind !== 'course-v10') throw new Error('fixture must be a Course V10 document')
     await session.execute({ documentId: before.documentId, epoch: before.epoch, operationId: 'human-change', actor: 'human',
-      baseRevision: before.revision, mutation: { type: 'command', command: {
-        type: 'course.replace', project: { ...model.project, title: `${model.project.title} changed` }, resources: model.resources,
-      } } })
+      baseRevision: before.revision, mutation: { type: 'command', command: captureComponentOperation(model.project, [{ type: 'project.title.set', title: `${model.project.title} changed` }]) } })
 
     const resolveWholeDocument = vi.spyOn(gateway, 'resolveWholeDocumentHandle')
     await expect(gateway.resolveWholeDocumentHandle(runId, target, 'write')).rejects.toMatchObject({ code: 'target-conflict' })

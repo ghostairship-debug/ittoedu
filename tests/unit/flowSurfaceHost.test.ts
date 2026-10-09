@@ -435,7 +435,7 @@ describe('FlowSurfaceHost course session overlay', () => {
 
     const invalid = structuredClone(course)
     invalid.surfaces = []
-    await expect(host.updatePublishedCourse(invalid)).rejects.toThrow('H5 演示没有 Flow 页面')
+    await expect(host.updatePublishedCourse(invalid)).rejects.toThrow('果铃工程没有 Flow 页面')
 
     expect(queryDeep(container, '[data-flow-overlay-item="flow-overlay-text"]')).toBe(text)
     text.click()

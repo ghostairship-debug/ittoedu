@@ -30,15 +30,15 @@ describe('product identity configuration', () => {
       pdfTempPrefix: APP_PDF_TEMP_FILE_PREFIX,
       e2eTemp: APP_E2E_TEMP_DIRECTORY_NAME,
     }).toEqual({
-      name: '果铃编辑器',
-      productName: 'ittoedu Courseware Editor',
+      name: '果铃工作台',
+      productName: '果铃工作台',
       company: 'ittoedu',
       appId: 'com.ittoedu.courseware-editor',
-      executable: 'ittoedu-courseware-editor',
+      executable: 'guoling-workbench',
       userData: 'ittoedu-courseware-editor',
-      previewTemp: 'ittoedu-courseware-editor-preview',
+      previewTemp: 'guoling-workbench-preview',
       pdfTempPrefix: 'ittoedu-courseware-pdf-',
-      e2eTemp: 'ittoedu-courseware-editor-e2e',
+      e2eTemp: 'guoling-workbench-e2e',
     })
   })
 
@@ -96,7 +96,7 @@ describe('product identity configuration', () => {
       readFile(path.join(root, 'vite.renderer.config.ts'), 'utf8'),
       readFile(path.join(root, 'vite.player.config.ts'), 'utf8'),
       readFile(path.join(root, 'src', 'renderer', 'ui', 'TopToolbar.tsx'), 'utf8'),
-      readFile(path.join(root, '启动课件编辑器.cmd'), 'utf8'),
+      readFile(path.join(root, '启动果铃工作台.cmd'), 'utf8'),
     ])
 
     expect(html).toContain('<title>__APP_NAME__</title>')
@@ -106,7 +106,7 @@ describe('product identity configuration', () => {
     expect(playerConfig).not.toContain('PhaserCoursewarePlayer')
     expect(toolbar).toContain('title={APP_NAME}')
     expect(toolbar).not.toContain('Phaser 轻量交互课件编辑器')
-    expect(launcher).toContain('[ittoedu Courseware Editor]')
+    expect(launcher).toContain('[Guoling Workbench]')
     expect(launcher).not.toContain('[Courseware Editor]')
   })
 })

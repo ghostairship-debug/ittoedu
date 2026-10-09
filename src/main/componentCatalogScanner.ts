@@ -62,6 +62,10 @@ export async function scanComponentCatalogDirectory(rootPath: string, trust: Com
       const pkg = libraryCatalogPackage(archive.entry, archive.version, relative.replaceAll('\\', '/'), bytes, archive.metadata)
       for (const diagnostic of archive.diagnostics ?? []) issues.push({ sourceId, sourceLabel: label, packageId: pkg.packageId, code: 'catalog-invalid', message: `${relative}：${diagnostic.message}` })
       const extra = packageMetadata.find(item => item.packageId === pkg.packageId && item.version === pkg.version)
+      if (extra?.sha256 !== undefined && extra.sha256 !== pkg.sha256) {
+        issues.push({ sourceId, sourceLabel: label, packageId: pkg.packageId, code: 'package-hash-mismatch', message: `${relative}：组件包 SHA-256 与目录声明不一致。` })
+        continue
+      }
       if (extra) Object.assign(pkg, { description: extra.description ?? pkg.description, subject: extra.subject ?? pkg.subject, schoolStage: extra.schoolStage ?? pkg.schoolStage, tags: extra.tags ?? pkg.tags, category: extra.category, thumbnailPath: extra.thumbnailPath ?? '', license: extra.license, source: extra.source ?? pkg.source })
       let thumbnailDataUrl: string | undefined
       if (pkg.thumbnailPath) {
@@ -92,8 +96,10 @@ export async function readCatalogComponentPackage(source: ScannedComponentCatalo
   const identity = catalogPackageIdentity(packageId, version), pkg = source.packageIndex.get(identity)
   if (!pkg) throw new Error('组件目录条目已不存在，请刷新。')
   const bytes = source.memoryPackages?.get(identity) ?? await readCatalogFile(await resolveCatalogFilePath(source.rootPath, pkg.packagePath))
+  const sha256 = createHash('sha256').update(bytes).digest('hex')
+  if (sha256 !== pkg.sha256) throw new Error('组件文件 SHA-256 已改变，请刷新目录。')
   const archive = importComponentLibraryArchive(bytes)
   if (archive.entry.id !== packageId || archive.version !== version) throw new Error('组件文件身份已改变，请刷新目录。')
   return { sourceId: source.source.sourceId, sourceLabel: source.source.label, sourceTrust: source.source.trust, packageId, version,
-    sha256: createHash('sha256').update(bytes).digest('hex'), name: path.basename(pkg.packagePath), bytes: Uint8Array.from(bytes) }
+    sha256, name: path.basename(pkg.packagePath), bytes: Uint8Array.from(bytes) }
 }

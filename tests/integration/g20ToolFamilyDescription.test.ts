@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { afterEach, expect, it } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
+import { createCurrentSelectionFixture } from '../helpers/g20CurrentSelectionFixture'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
@@ -25,14 +25,13 @@ function completed(request: ModelRequest, name?: string, input?: unknown): Extra
     assistant: { role: 'assistant', content: '', ...(calls.length ? { tool_calls: calls } : {}) } }
 }
 
-it('routes object style to the authorized layout family in the first wire request, then edits style without changing content', async () => {
+it('directly exposes object styling in the first wire request and preserves frozen text, read-only and graph authority', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'g20-family-route-')); cleanup.push(directory)
   const host = new DocumentHostService(path.join(directory, 'documents'))
-  const model = new CourseV9Driver().load(new Uint8Array(await readFile('tests/fixtures/course-project-v9/mixed.h5lesson')))
-  if (model.kind !== 'course-v9') throw new Error('V9 fixture required')
-  const snapshot = await host.internalAPI.create(model, 'mixed.h5lesson')
-  const location = model.project.locations.find(item => item.kind === 'slide-scene')!
-  const selected: ToolTarget = { kind: 'course-object', locationId: location.id, itemId: 'slide-title' }
+  const { model } = createCurrentSelectionFixture()
+  const original = structuredClone(model)
+  const snapshot = await host.internalAPI.create(model, 'mixed.glx')
+  const selected: ToolTarget = { kind: 'course-instance', surfaceId: 'page', instanceId: 'scene-text' }
   const firstWire: any[] = [], requestNames: string[][] = []
   const provider: ModelProvider = { async *stream(request) {
     const index = requestNames.length
@@ -42,10 +41,8 @@ it('routes object style to the authorized layout family in the first wire reques
       firstWire.push(...wire.tools)
       const refs = JSON.parse(String(request.messages[1]!.content).split('：')[1]) as { selection: { writableTarget?: string }[] }[]
       expect(refs[0]!.selection[0]!.writableTarget).toBeTruthy()
-      yield completed(request, 'tools.load', { families: ['layout'] })
-    } else if (index === 1) {
-      const refs = JSON.parse(String(request.messages[1]!.content).split('：')[1]) as { selection: { writableTarget?: string }[] }[]
-      yield completed(request, 'object.update', { target: refs[0]!.selection[0]!.writableTarget, properties: { nativeTextStyle: { color: '#0057B8' } } })
+      yield completed(request, 'object.update', { target: refs[0]!.selection[0]!.writableTarget,
+        properties: { data: { appearance: { color: '#0057B8' } } } })
     } else yield completed(request)
   } }
   const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider,
@@ -53,61 +50,49 @@ it('routes object style to the authorized layout family in the first wire reques
   const run = await engine.wait((await engine.start({ conversationId: 'c', taskId: 'style', instruction: '把选中标题改成蓝色，文字不变', selection,
     documents: [{ documentId: snapshot.documentId, writable: [{ kind: 'document' }], selection: [selected] }] })).runId)
   expect(run.status).toBe('completed')
-  const load = firstWire.find(tool => tool.function.name === modelToolWireName('tools.load'))
-  expect(load?.function.description).toContain('layout 对象属性')
-  expect(load?.function.description).toContain('object.update')
-  expect(load?.function.description).toContain('properties.nativeTextStyle')
-  expect(load?.function.description).toContain('properties.frame')
-  expect(firstWire.find(tool => tool.function.name === modelToolWireName('text.replace'))?.function.description).toContain('只替换')
-  expect(firstWire.map(tool => tool.function.name)).not.toContain(modelToolWireName('object.update'))
-  expect(requestNames[1]).toContain('object.update')
-  expect(run.tools).toMatchObject([{ call: { name: 'tools.load' }, result: { kind: 'read' } },
-    { call: { name: 'object.update' }, result: { kind: 'document-operation', result: { status: 'applied' } } }])
+  const update = firstWire.find(tool => tool.function.name === modelToolWireName('object.update'))
+  expect(update?.function.description).toContain('data/style')
+  expect(update?.function.description).toContain('frame')
+  expect(firstWire.find(tool => tool.function.name === modelToolWireName('text.replace'))?.function.description).toContain('替换')
+  expect(firstWire.map(tool => tool.function.name)).toContain(modelToolWireName('object.update'))
+  expect(requestNames).toHaveLength(2)
+  expect(run.tools).toMatchObject([{ call: { name: 'object.update' }, result: { kind: 'document-operation', result: { status: 'applied' } } }])
   const current = host.registry.get(snapshot.documentId).read()
-  if (current.model.kind !== 'course-v9') throw new Error('V9 expected')
-  const slide = current.model.project.surfaces.find(surface => surface.type === 'slide')!
-  const title = slide.type === 'slide' ? slide.scenes[0]!.layerItems.find(item => item.layerItemId === 'slide-title') : null
-  expect(title && 'content' in title ? title.content : null).toMatchObject({ data: { text: 'Mixed 起始页', style: { color: '#0057B8' } } })
-  expect(current.model.project.surfaces.find(surface => surface.type === 'flow')).toEqual(model.project.surfaces.find(surface => surface.type === 'flow'))
+  if (current.model.kind !== 'course-v10') throw new Error('V10 expected')
+  const title = current.model.project.instances['scene-text']!
+  expect(title.data).toMatchObject({ content: (original.project.instances['scene-text']!.data as any).content,
+    appearance: { color: '#0057B8' } })
+  expect(title.frame).toEqual(original.project.instances['scene-text']!.frame)
+  expect(current.model.project.instances['scene-other']).toEqual(original.project.instances['scene-other'])
+  expect(current.model.project.surfaces.find(surface => surface.kind === 'flow')).toEqual(original.project.surfaces.find(surface => surface.kind === 'flow'))
 
-  const flow = model.project.surfaces.find(surface => surface.type === 'flow')!
-  if (flow.type !== 'flow') throw new Error('Flow required')
-  const container: ToolTarget = { kind: 'flow-container', surfaceId: flow.id, parentId: null }
-  let restrictedDescription = ''
-  const restrictedProvider: ModelProvider = { async *stream(request) {
-    const wire = JSON.parse(serializeModelRequest(request)) as { tools: any[] }
-    restrictedDescription = wire.tools.find(tool => tool.function.name === modelToolWireName('tools.load'))?.function.description ?? ''
-    yield completed(request)
-  } }
-  const restrictedEngine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider: restrictedProvider,
-    runs: new ExecutionRunStore(path.join(directory, 'restricted-runs')), events: new ExecutionEventStore({ directory: path.join(directory, 'restricted-events') }) })
-  const restricted = await restrictedEngine.wait((await restrictedEngine.start({ conversationId: 'c', taskId: 'restricted', instruction: '查看授权工具族', selection,
-    documents: [{ documentId: snapshot.documentId, writable: [container] }] })).runId)
-  expect(restricted.status).toBe('completed')
-  expect(restrictedDescription).toContain('content ')
-  expect(restrictedDescription).not.toContain('layout ')
-  expect(restrictedDescription).not.toContain('object.update')
+  // A text-field grant permits its text edit, while object-style authority stays narrower.
+  const textRange: ToolTarget = { kind: 'course-instance', surfaceId: 'flow', instanceId: 'flow-paragraph', dataPath: ['content'], from: 0, to: 2 }
+  await host.tools.beginRun({ runId: 'text-only', actor: 'agent', documents: [{ documentId: snapshot.documentId, writable: [textRange] }] })
+  const before = host.registry.get(snapshot.documentId).read()
+  const readonlyObject = await host.tools.issueTarget('text-only', snapshot.documentId,
+    { kind: 'course-instance', surfaceId: 'flow', instanceId: 'flow-paragraph' }, { readOnly: true })
+  expect(await host.tools.execute('text-only', 'no-object-style', { name: 'object.update', input: {
+    target: readonlyObject, properties: { data: { appearance: { color: '#ff0000' } } },
+  } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
+  expect(host.registry.get(snapshot.documentId).read()).toEqual(before)
+  await host.tools.beginRun({ runId: 'readonly', actor: 'agent', documents: [{ documentId: snapshot.documentId, writable: [] }] })
+  const readonlyTools = (await host.tools.describeRun('readonly')).map(tool => tool.name)
+  expect(readonlyTools).toContain('read')
+  expect(readonlyTools).not.toContain('text.replace')
+  expect(readonlyTools).not.toContain('object.update')
 
-  // A spatial graph grant can expose layout's spatial.structure without authorizing object.update.
-  const spatial = model.project.surfaces.find(surface => surface.type === 'spatial-2d')
-  const camera = model.project.locations.find(item => item.kind === 'spatial-camera')
-  if (!spatial || spatial.type !== 'spatial-2d' || !camera) throw new Error('Spatial fixture required')
-  await host.tools.beginRun({ runId: 'path-builder', actor: 'agent', documents: [{ documentId: snapshot.documentId, writable: [{ kind: 'document' }] }] })
-  await host.tools.loadToolFamilies('path-builder', ['layout'])
-  const owner = await host.tools.issueTarget('path-builder', snapshot.documentId, { kind: 'course-surface', surfaceId: spatial.id })
-  const item = await host.tools.issueTarget('path-builder', snapshot.documentId,
-    { kind: 'course-object', locationId: camera.id, itemId: spatial.world.layerItems[0]!.layerItemId }, { readOnly: true })
-  expect(await host.tools.execute('path-builder', 'add-path', { name: 'spatial.structure', input: {
-    target: owner, operation: 'add-path', path: { name: 'Route', layerItemIds: [item] },
-  } })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
-  const withPath = host.registry.get(snapshot.documentId).read()
-  if (withPath.model.kind !== 'course-v9') throw new Error('V9 expected')
-  const spatialAfter = withPath.model.project.surfaces.find(surface => surface.id === spatial.id)
-  if (!spatialAfter || spatialAfter.type !== 'spatial-2d') throw new Error('Spatial surface expected')
-  const graph: ToolTarget = { kind: 'spatial-graph', surfaceId: spatial.id, graph: 'path', graphId: spatialAfter.world.paths![0]!.id }
-  await host.tools.beginRun({ runId: 'graph-only', actor: 'agent', documents: [{ documentId: snapshot.documentId, writable: [graph] }] })
-  expect((await host.tools.describeRun('graph-only')).map(tool => tool.name)).not.toContain('object.update')
-  const graphLayout = (await host.tools.availableToolFamilies('graph-only')).find(family => family.family === 'layout')
-  expect(graphLayout).toMatchObject({ family: 'layout', count: 1 })
-  expect(graphLayout?.description).not.toContain('object.update')
+  // An existing graph grant exposes the current scoped project writer, without object authority.
+  const spatial = model.project.surfaces.find(surface => surface.id === 'spatial')!
+  if (spatial.kind !== 'spatial') throw new Error('Spatial fixture required')
+  spatial.spatial = { home: { x: 0, y: 0, zoom: 1 }, frames: [], paths: [{ id: 'route', title: 'Route', frameIds: [], instanceIds: ['spatial-label'] }] }
+  const graphDocument = await host.internalAPI.create(model, 'graph.glx')
+  const graph: ToolTarget = { kind: 'spatial-graph', surfaceId: 'spatial', graph: 'path', graphId: 'route' }
+  await host.tools.beginRun({ runId: 'graph-only', actor: 'agent', documents: [{ documentId: graphDocument.documentId, writable: [graph] }] })
+  const graphTools = (await host.tools.describeRun('graph-only')).map(tool => tool.name)
+  expect(graphTools).toContain('project.apply')
+  expect(graphTools).not.toContain('object.update')
+  expect(graphTools).not.toContain('project.save')
+  expect((await host.tools.availableToolFamilies('graph-only')).find(family => family.family === 'content')).toBeDefined()
+  expect((await host.tools.availableToolFamilies('graph-only')).find(family => family.family === 'layout')).toBeUndefined()
 })

@@ -12,14 +12,14 @@ import { inlineHtml, serializeFlowHtml } from '../../../shared/document/html'
 import { componentSourceOwnerIsShared } from '../../components/source/sourceAuthoringEdits'
 import { componentAssetIds, sourceAssetIds, sourceModuleBindings } from '../../components/library/references'
 import { isComponentVisibleAtSurface } from '../../../shared/contracts/component-platform/project'
-import { observeSpatialSource, type SpatialObservedRefs } from '../../course/courseSpatialEdits'
+import { observeSpatialSource, type SpatialObservedRefs, type SpatialGraphScope, spatialGraphItem } from '../../course/courseSpatialEdits'
 import { formulaComponentDataSchema, textComponentDataSchema } from '../../../components/text/data'
 import { formulaComponentHtml, textComponentHtml } from '../../../components/text/render'
 import { imageDataSchema } from '../../../components/image/data'
 import { clampCrop, cropGeometry } from '../../../shared/imageCrop'
 
 export type ComponentProjectFileState = { surfaceId: string; stateId: string }
-export type ComponentProjectFileScope = ({ kind: 'document' } | { kind: 'surface'; surfaceId: string } | { kind: 'instance'; instanceId: string }) & { state?: ComponentProjectFileState }
+export type ComponentProjectFileScope = ({ kind: 'document' } | { kind: 'surface'; surfaceId: string } | { kind: 'instance'; instanceId: string } | ({ kind: 'graph' } & SpatialGraphScope)) & { state?: ComponentProjectFileState }
 
 type Element = DefaultTreeAdapterTypes.Element
 type Node = DefaultTreeAdapterTypes.ChildNode
@@ -59,7 +59,7 @@ export interface ComponentProjectFile {
     | { kind: 'definition'; definitionId: string }
     | { kind: 'definition-source'; definitionId: string }
     | { kind: 'instance-source'; instanceId: string }
-    | { kind: 'spatial'; surfaceId: string; objectPaths: Record<string, string>; refs: SpatialObservedRefs }
+    | { kind: 'spatial'; surfaceId: string; objectPaths: Record<string, string>; refs: SpatialObservedRefs; graphScope?: SpatialGraphScope }
     | { kind: 'asset'; assetId: string }
     | { kind: 'flow'; surfaceId: string; format: 'html' | 'markdown'; document: MarkdownDocument; objectPaths: Record<string, string> }
   /** Initial program region comes from the observed container; never an AI-authored identity or persistent viewport. */
@@ -286,6 +286,12 @@ export function componentProjectFiles(project: CourseProjectV10, resources: Docu
 /** Resolve logical scope against the same canonical capture that produced natural file paths. */
 export function componentProjectScopeFiles(project: CourseProjectV10, files: ComponentProjectFile[], scope: ComponentProjectFileScope): ComponentProjectFile[] {
   if (scope.kind === 'document') return files
+  if (scope.kind === 'graph') {
+    spatialGraphItem(project, scope)
+    return files.flatMap(file => file.binding?.kind === 'spatial' && file.binding.surfaceId === scope.surfaceId
+      ? [{ ...file, binding: { ...file.binding, graphScope: { surfaceId: scope.surfaceId, graph: scope.graph, graphId: scope.graphId } },
+          note: `${file.note ?? ''} 本次仅所选 ${scope.graph === 'path' ? '路径' : '关系'} ${Object.entries(file.binding.refs[scope.graph === 'path' ? 'paths' : 'relations']).find(([, id]) => id === scope.graphId)?.[0]} 可修改；首页、镜头、其他图项和图项数量必须保持。` }] : [])
+  }
   const instances = new Set<string>(), definitions = new Set<string>(), assets = new Set<string>()
   const visitDefinition = (id: string) => {
     if (definitions.has(id)) return

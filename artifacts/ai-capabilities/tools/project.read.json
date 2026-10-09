@@ -1,5 +1,5 @@
 {
-  "description": "读取project.list返回的工程虚拟路径的当前正式内容与人工修改；不用file.read读取这些路径。普通Web读HTML，专业组件读data.json；正文读body.html/body.md；空间镜头读spatial.json。components/源码作用于共享定义，页面/global内源码为实例独立实现；workspace中的模块和二进制文件原样保留。很长文本将回执nextOffset传给offset并用limit续读，不使用cursor。后续project.apply固定本次观察的原目标，提交失败保留原文与诊断。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。",
+  "description": "读取project.list返回的工程虚拟路径的当前正式内容与人工修改；不用file.read读取这些路径。普通Web读HTML，专业组件读data.json；正文读body.html/body.md；空间镜头读spatial.json；单路径/关系target只可修改所选图项，保留首页、镜头与其他图项。components/源码作用于共享定义，页面/global内源码为实例独立实现；workspace中的模块和二进制文件原样保留。很长文本将回执nextOffset传给offset并用limit续读，不使用cursor。后续project.apply固定本次观察的原目标，提交失败保留原文与诊断。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,

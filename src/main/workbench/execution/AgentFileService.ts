@@ -36,7 +36,9 @@ function creationInput(raw: unknown) {
   const input = agentFileSchemas['file.create'].parse(raw)
   validateWorkspaceEntryName(input.name)
   const extension = input.kind === 'course-v10' ? '.glx' : input.kind === 'markdown' ? '.md' : input.kind === 'html' ? '.html' : ''
-  if (input.kind === 'course-v10' || !input.kind && isNativeProjectFilename(input.name)) return { ...input, name: nativeProjectFilename(input.name) }
+  if ((input.kind === 'course-v10' && path.extname(input.name) === '')
+    || ((input.kind === 'course-v10' || !input.kind) && isNativeProjectFilename(input.name)))
+    return { ...input, name: nativeProjectFilename(input.name) }
   return extension && path.extname(input.name) === '' ? { ...input, name: input.name + extension } : input
 }
 function officeFormat(filename: string): OfficeFormat {

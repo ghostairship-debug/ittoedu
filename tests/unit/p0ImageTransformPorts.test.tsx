@@ -10,7 +10,7 @@ it('P0 sends exact pixel intent to the captured resource owner and retains contr
   await act(async()=>fireEvent.click(screen.getByRole('button',{name:'裁剪原图像素'})))
   expect(transform).toHaveBeenCalledExactlyOnceWith([{kind:'crop',region:{x:10,y:0,width:80,height:60}}])
   expect(screen.getByRole('alert')).toHaveTextContent('源图片已改变')
-  expect(screen.getByLabelText('像素裁剪左边')).toHaveValue(10)
+  expect(screen.getByLabelText('像素裁剪左边')).toHaveValue('10')
   expect(screen.getByRole('button',{name:'裁剪原图像素'})).toBeEnabled()
 })
 it('P0 offers pixel color editing when source dimensions are unavailable without inventing a size',async()=>{

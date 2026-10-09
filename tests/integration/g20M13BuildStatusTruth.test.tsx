@@ -10,6 +10,7 @@ import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { MarkdownDriver } from '../../src/core/drivers/MarkdownDriver'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { createDocumentJournal } from '../../src/main/workbench/documentJournal'
+import { executionAuditWarnings } from '../../src/main/workbench/execution/executionOutcome'
 import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
@@ -69,15 +70,19 @@ async function runBuildReceipt(tool: 'build.check' | 'build.compile', result: Ex
 
 it.each([
   { key: 'check-failed', name: 'failed build.check', tool: 'build.check', result: { kind: 'read', data: { job: 'staged-job', status: 'failed' } },
-    toolStatus: 'failed', uiStatus: '失败', uiFact: '执行失败', runStatus: 'partial', runLabel: '部分完成' },
+    toolStatus: 'failed', uiStatus: '失败', uiFact: '执行失败', runStatus: 'completed', runLabel: '已完成' },
   { key: 'check-ready', name: 'ready build.check', tool: 'build.check', result: { kind: 'read', data: { job: 'staged-job', status: 'ready', prepared: true, artifact: 'candidate-artifact' } },
     toolStatus: 'completed', uiStatus: '已完成', uiFact: '已运行', runStatus: 'completed', runLabel: '已完成' },
   { key: 'compile-failed', name: 'failed build.compile', tool: 'build.compile', result: { kind: 'read', data: { ok: false, stage: 'syntax-checked', message: '语法编译失败' } },
-    toolStatus: 'failed', uiStatus: '失败', uiFact: '执行失败', runStatus: 'partial', runLabel: '部分完成' },
+    toolStatus: 'failed', uiStatus: '失败', uiFact: '执行失败', runStatus: 'completed', runLabel: '已完成' },
 ] as const)('M13-T02 projects $name as the actual tool and run outcome', async ({ key, tool, result, toolStatus, uiStatus, uiFact, runStatus, runLabel }) => {
   const { run, projection, event } = await runBuildReceipt(tool, result)
   expect(event.data.status).toBe(toolStatus)
   expect(run.status).toBe(runStatus)
+  expect(run.tools[0]!.result).toEqual(result)
+  const warnings = executionAuditWarnings(run)
+  expect(warnings).toHaveLength(toolStatus === 'failed' ? 1 : 0)
+  if (toolStatus === 'failed') expect(warnings[0]).toMatchObject({ name: tool, status: 'failed', callId: run.tools[0]!.callId })
   if (toolStatus === 'failed') expect('text' in event.data ? event.data.text : undefined).not.toBe('已收到正式结果')
   render(<ExecutionTimeline projection={projection} />)
   const card = screen.getByRole('article', { name: '工具执行' })

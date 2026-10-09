@@ -37,16 +37,16 @@ describe('application identity storage', () => {
   it('preserves an explicit user-data-dir for isolated tests and tooling', () => {
     const setPath = vi.fn()
     const getPath = vi.fn((name: 'appData' | 'userData') =>
-      name === 'userData' ? path.join('D:', 'isolated-profile') : 'unused',
+      name === 'userData' ? path.resolve('isolated-profile') : 'unused',
     )
 
     const result = configureApplicationStorage(
       { getPath, setPath },
-      ['electron', '.', '--user-data-dir=D:\\isolated-profile'],
+      ['electron', '.', `--user-data-dir=${path.resolve('isolated-profile')}`],
     )
 
-    expect(result).toBe(path.join('D:', 'isolated-profile'))
-    expect(setPath).toHaveBeenCalledExactlyOnceWith('userData', path.join('D:', 'isolated-profile'))
+    expect(result).toBe(path.resolve('isolated-profile'))
+    expect(setPath).toHaveBeenCalledExactlyOnceWith('userData', path.resolve('isolated-profile'))
     expect(getPath).not.toHaveBeenCalled()
   })
 
@@ -56,11 +56,11 @@ describe('application identity storage', () => {
 
     const result = configureApplicationStorage(
       { getPath, setPath },
-      ['electron', '.', '--user-data-dir', 'D:\\isolated-profile'],
+      ['electron', '.', '--user-data-dir', path.resolve('isolated-profile')],
     )
 
-    expect(result).toBe(path.join('D:', 'isolated-profile'))
-    expect(setPath).toHaveBeenCalledExactlyOnceWith('userData', path.join('D:', 'isolated-profile'))
+    expect(result).toBe(path.resolve('isolated-profile'))
+    expect(setPath).toHaveBeenCalledExactlyOnceWith('userData', path.resolve('isolated-profile'))
     expect(getPath).not.toHaveBeenCalled()
   })
 

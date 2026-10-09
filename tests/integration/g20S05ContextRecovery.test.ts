@@ -13,6 +13,32 @@ import type { ExecutionStart } from '../../src/shared/workbench/execution'
 import type { ModelEvent, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
 import { estimateSerializedTokens, modelContextBudget } from '../../src/core/execution/modelContextBudget'
 import { serializeModelRequest } from '../../src/main/workbench/providers/OpenAIChatProvider'
+import { serializeModelPayload } from '../../src/main/workbench/providers/ModelProviderRouter'
+
+type SummarySourcePart = { sourceId: string; role: string; offset: number; to: number; total: number; text: string }
+function expectCompleteSummarySource(requests: ModelRequest[], original: string) {
+  const helpers = requests.filter(request => !request.tools?.length)
+  expect(helpers.length).toBeGreaterThan(0)
+  const parts: SummarySourcePart[] = []
+  for (const request of helpers) {
+    expect(estimateSerializedTokens(serializeModelPayload(request))).toBeLessThanOrEqual(modelContextBudget(request.selection).inputTokens)
+    const packet = JSON.parse(String(request.messages[1]!.content)) as { sources: SummarySourcePart[] }
+    expect(packet.sources.reduce((sum, source) => sum + source.text.length, 0)).toBeLessThanOrEqual(20_000)
+    parts.push(...packet.sources.filter(source => source.role === 'assistant' && source.total >= original.length))
+  }
+  const sourceId = parts[0]!.sourceId
+  expect(parts.every(part => part.sourceId === sourceId)).toBe(true)
+  const ordered = parts.sort((a, b) => a.offset - b.offset)
+  let through = 0
+  for (const part of ordered) {
+    expect(part.offset).toBe(through)
+    expect(part.text.length).toBe(part.to - part.offset)
+    through = part.to
+  }
+  expect(through).toBe(ordered[0]!.total)
+  expect(ordered.map(part => part.text).join('')).toContain(original)
+  return helpers.length
+}
 
 const directories: string[] = []
 afterEach(async () => {
@@ -239,7 +265,9 @@ it('blocks a fresh same-name side effect when the previous tool has no recoverab
   expect(final.status).toBe('partial')
   expect(final.tools.map(tool => tool.result?.kind)).toEqual(['read', 'error'])
   expect(final.tools[1].result).toMatchObject({ kind: 'error', code: 'unresolved-prior-tool' })
-  expect(requests).toBe(4)
+  expect(final.failure?.code).toBe('model-no-progress')
+  expect(final.requests.at(-1)?.state).toBe('completed')
+  expect((await h.runs.read(started.runId))!.tools[0]!.state).toBe('executing')
   expect((await h.host.internalAPI.read(h.document.documentId))).toMatchObject({ revision: 0, undoDepth: 0, model: { source: 'AAA BBB' } })
 })
 
@@ -279,14 +307,16 @@ it('rejects oversized frozen history as initial input without treating an old as
 
 
 it('uses the declared model window and preserves semantic decisions without repeatedly compacting stale usage', async () => {
-  let turns = 0, summaries = 0
+  let turns = 0, summaries = 0, summariesBeforeStaleUsage = 0
+  const original = '采用双栏；依据 source-one。' + '内容解释。'.repeat(5000)
   const requests: ModelRequest[] = []
   const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {
     requests.push(structuredClone(request))
     if (!request.tools?.length) { summaries++; yield complete(request, [], '已确定采用双栏，依据 source-one，保留用户原有结论，剩余只需保存。'); return }
     turns++
-    if (turns === 1) yield complete(request, [{ id: 'read-once', name: 'read', input: { target: refs(request)[0]!.target } }], '采用双栏；依据 source-one。' + '内容解释。'.repeat(5000))
+    if (turns === 1) yield complete(request, [{ id: 'read-once', name: 'read', input: { target: refs(request)[0]!.target } }], original)
     else if (turns === 2) {
+      summariesBeforeStaleUsage = summaries
       expect(JSON.stringify(request.messages)).toContain('source-one')
       const event = complete(request, [{ id: 'note', name: 'task.note', input: { remaining: ['完成'] } }]); event.usage = { inputTokens: 200000, raw: {} }; yield event
     } else yield complete(request, [], '完成')
@@ -295,9 +325,11 @@ it('uses the declared model window and preserves semantic decisions without repe
   const run = await h.engine.start({ ...h.input, selection: { ...selection, contextWindow: 20000 } })
   const final = await h.engine.wait(run.runId)
   expect(final.status, JSON.stringify(final.failure)).toBe('completed')
-  expect(turns).toBe(3); expect(summaries).toBe(1)
+  expect(turns).toBe(3)
+  expect(summaries).toBe(summariesBeforeStaleUsage)
+  expect(summaries).toBe(expectCompleteSummarySource(requests, original))
   expect(final.compacted?.summary).toContain('source-one')
-  expect(final.requests.filter(request => request.kind === 'context-summary')).toHaveLength(1)
+  expect(final.requests.filter(request => request.kind === 'context-summary')).toHaveLength(summaries)
   expect(JSON.stringify(final.messages)).toContain('内容解释。'.repeat(20))
 })
 
@@ -418,8 +450,11 @@ it('reopens a cited ancestor snapshot through fresh URL permission after its tem
 
 it('summarizes native budget thinking without conflicting with the helper output window or changing the main choice', async () => {
   let turns = 0, summaries = 0
+  const requests: ModelRequest[] = []
+  const source = '根据source-budget。' + '课堂讲解。'.repeat(9000)
   const original = { temperature: 0.3, thinking: { type: 'enabled', budget_tokens: 12000 } }
   const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {
+    requests.push(structuredClone(request))
     if (!request.tools?.length) {
       summaries++
       expect(request.selection.parameters).toMatchObject({ max_tokens: 4096, thinking: { type: 'disabled' }, temperature: 0.3 })
@@ -429,7 +464,7 @@ it('summarizes native budget thinking without conflicting with the helper output
     }
     expect(request.selection.parameters).toEqual(original)
     turns++
-    if (turns === 1) yield complete(request, [{ id: 'read-budget', name: 'read', input: { target: refs(request)[0]!.target } }], '根据source-budget。' + '课堂讲解。'.repeat(9000))
+    if (turns === 1) yield complete(request, [{ id: 'read-budget', name: 'read', input: { target: refs(request)[0]!.target } }], source)
     else yield complete(request, [], '完成')
   } }
   const h = await fixture(provider)
@@ -438,6 +473,7 @@ it('summarizes native budget thinking without conflicting with the helper output
   const started = await h.engine.start({ ...h.input, selection: nativeSelection })
   const final = await h.engine.wait(started.runId)
   expect(final.status, JSON.stringify(final.failure)).toBe('completed')
-  expect(summaries).toBe(1); expect(turns).toBe(2)
+  expect(summaries).toBe(expectCompleteSummarySource(requests, source))
+  expect(turns).toBe(2)
   expect(final.input.selection.parameters).toEqual(original)
 })

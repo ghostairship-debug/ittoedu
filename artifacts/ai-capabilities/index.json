@@ -22,7 +22,7 @@
     }
   },
   "scope": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
-  "semanticVersion": "fcd051d09ad3113b17c72f47d9d883c5b729ff9d67377d057541f067ff385fd2",
+  "semanticVersion": "883c950ebc89526da39161d0e89bbfdf1ddaeb37b2237b6ee70fac4bc5114592",
   "skills": "skills/manifest.json",
   "surfaces": [
     "slide",

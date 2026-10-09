@@ -33,7 +33,9 @@ describe('M28/M29 shared service catalog and gateway', () => {
     // visible immediately; job/compute/media mutations require explicit family loading.
     await gateway.loadToolFamilies('agent-run', ['jobs', 'media'])
     const names = (await gateway.describeRun('agent-run')).map(tool => tool.name)
-    expect(names).toEqual(expect.arrayContaining(['web.open', 'mcp.discover', 'mcp.invoke', 'mcp.resource', 'media.start', 'job.status', 'compute.run']))
+    expect(names).toEqual(expect.arrayContaining(['web.open', 'mcp.discover', 'mcp.invoke', 'mcp.resource', 'media.start']))
+    expect(names).not.toContain('compute.run') // No compute backend is configured.
+    expect(names).not.toContain('job.status') // No job owner is configured.
     expect(await gateway.execute('agent-run', 'open', { name: 'web.open', input: { url: 'https://example.com/' } }))
       .toMatchObject({ kind: 'read', data: { status: 'opened', text: '真实正文' } })
     expect(await gateway.execute('agent-run', 'search', { name: 'web.search', input: { query: '叶片' } }))

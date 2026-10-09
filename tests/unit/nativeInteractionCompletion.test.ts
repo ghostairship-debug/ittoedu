@@ -34,11 +34,18 @@ it('U03-navigation-session retains causal completion across real session state a
     end: { locationId: project.startLocationId, stateId: 'revealed' },
   })
   expect(stateReport.executions?.find(run => run.ruleId === 'click')).toMatchObject({ status: 'navigation-terminal', navigation: { started: true, settled: true, matched: true, stateId: 'revealed' } })
-  expect(stateReport.executions?.find(run => run.ruleId === 'entry')).toMatchObject({ parentRunId: stateReport.executions?.[0]?.runId, chainId: stateReport.executions?.[0]?.chainId })
+  // Changing a named state keeps the current scene, so it must not rerun scene.enter.
+  expect(stateReport.executions?.find(run => run.ruleId === 'entry')).toBeUndefined()
   expect(stateReport.skipped.some(run => run.ruleId === 'entry')).toBe(true)
 
+  target.layerItems.push(sceneNodeToCourseLayerItem(createTextNode({ id: 'target-entry', text: '已到达' }), 1))
+  target.interactions = [{ ...scene.interactions[1]!, actions: [{ id: 'target-show', start: 'after-previous', delayMs: 0,
+    action: { type: 'node.enter', nodeId: 'target-entry', effect: 'none', durationMs: 0, easing: 'linear' } }] }]
   scene.interactions[0]!.actions[0]!.action = { type: 'scene.go', sceneId: target.id }
-  expect((await verifyNativeInteractions(input)).executions?.[0]?.status).toBe('navigation-terminal')
+  const sceneReport = await verifyNativeInteractions(input)
+  const parentRun = sceneReport.executions?.find(run => run.ruleId === 'click')
+  expect(parentRun?.status).toBe('navigation-terminal')
+  expect(sceneReport.executions?.find(run => run.ruleId === 'entry')).toMatchObject({ parentRunId: parentRun?.runId, chainId: parentRun?.chainId })
   scene.interactions[0]!.actions[0]!.action = { type: 'scene.go', sceneId: 'missing-scene' }
   await expect(verifyNativeInteractions(input)).rejects.toMatchObject({ nativeInteractionEvidence: [expect.objectContaining({ ruleId: 'click', status: 'failed', source: 'published-player' })] })
   expect(before.surfaces.find(surface => surface.type === 'slide')!.scenes[0]!.interactions).toEqual([])

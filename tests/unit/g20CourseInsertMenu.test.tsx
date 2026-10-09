@@ -142,7 +142,7 @@ it('M21 puts 整课预览 and 导出 in the top bar, before the editor entry, wi
   fireEvent.click(screen.getByTestId('light-export-menu-trigger'))
   const formats = screen.getByRole('menu', { name: '选择导出格式' })
   expect([...formats.querySelectorAll('[role="menuitem"] strong')].map(element => element.textContent)).toEqual(
-    ['离线便携单 HTML', '在线轻量单 HTML', '网页包', 'PowerPoint（PPTX）', 'PDF', 'DOCX 讲义'])
+    ['离线便携单 HTML', '在线单 HTML', '网页包', 'PowerPoint（PPTX）', 'PDF', 'DOCX 讲义'])
   expect(screen.getByTestId('light-export-docx')).toBeDisabled()
   fireEvent.click(screen.getByTestId('light-export-single-html'))
   expect(onExport).toHaveBeenCalledWith('single-html', 'offline-portable')

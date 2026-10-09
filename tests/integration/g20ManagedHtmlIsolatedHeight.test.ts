@@ -1,13 +1,18 @@
+// @vitest-environment node
 import { afterAll, beforeAll, expect, it } from 'vitest'
-import { execFileSync } from 'node:child_process'
-import { resolve } from 'node:path'
+import { buildSync } from 'esbuild'
 import { solidPng } from '../helpers/solidPng'
 import { chromium, type Browser, type Page } from 'playwright'
 
 let browser: Browser
 let script: string
 beforeAll(async () => {
-  script = execFileSync(process.execPath, [resolve(process.cwd(), 'node_modules/esbuild/bin/esbuild'), '--loader=ts', '--bundle', '--format=iife', '--global-name=HeightReview', '--platform=browser', '--define:process.env.NODE_ENV="test"'], { input: `export {managedHtmlStylesheetSignature} from './src/player/surfaces/runtime/managedHtmlFlowAdmissionProfile'; export {observeSurfaceRuntimeContentSize} from './src/player/surfaces/runtime/surfaceRuntimeContentSize'; export {mountPublishedSurfaceRuntime,createPublishedSurfaceRuntimeSession} from './src/player/surfaces/runtime/publishedSurfaceRuntimeMount'; export {createHtmlDocumentRuntimeSource} from './src/shared/runtime/htmlDocumentSource';`, encoding: 'utf8' })
+  script = buildSync({
+    stdin: { contents: `export {managedHtmlStylesheetSignature} from './src/player/surfaces/runtime/managedHtmlFlowAdmissionProfile'; export {observeSurfaceRuntimeContentSize} from './src/player/surfaces/runtime/surfaceRuntimeContentSize'; export {mountPublishedSurfaceRuntime,createPublishedSurfaceRuntimeSession} from './src/player/surfaces/runtime/publishedSurfaceRuntimeMount'; export {createHtmlDocumentRuntimeSource} from './src/shared/runtime/htmlDocumentSource';`,
+      resolveDir: process.cwd(), loader: 'ts' },
+    bundle: true, write: false, format: 'iife', globalName: 'HeightReview', platform: 'browser',
+    define: { 'process.env.NODE_ENV': '"test"' },
+  }).outputFiles[0]!.text
   browser = await chromium.launch({ headless: true })
 }, 15000)
 afterAll(async () => { await browser?.close() })
@@ -42,7 +47,7 @@ async function pageWith(html: string, network?: { requests: number; image?: Buff
 
 const settled = (page: Page) => page.evaluate(() => (window as any).testHeight.observer.waitForReady())
 
-const raceHtml = '<!doctype html><style>body{margin:0;font:16px sans-serif}article{height:400px}#more{height:300px}</style><article>lesson</article><div id="more" style="display:none">translation</div><p id="clock">0:00</p>'
+const raceHtml = '<!doctype html><style>body{margin:0;font:16px/21px sans-serif}article{height:400px}#more{height:300px}</style><article>lesson</article><div id="more" style="display:none">translation</div><p id="clock">0:00</p>'
 
 it.each([false, true])('retains natural Flow interaction across ten height changes with clock=%s', async clock => {
   const page = await pageWith(raceHtml, undefined, 'runtime')
@@ -73,7 +78,7 @@ it.each([false, true])('retains natural Flow interaction across ten height chang
     if (clock) expect(result.clock).not.toBe('0:00')
     expect(result.mirrors).toBe(0)
   } finally { await page.close() }
-})
+}, 10000)
 
 it('bounds a real continuously changing natural Flow page and clears its mirrors', async () => {
   const page = await pageWith('<!doctype html><style>body{margin:0}article{height:400px}</style><article>lesson</article>', undefined, 'runtime')

@@ -5,14 +5,15 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { afterEach, expect, it, vi } from 'vitest'
-import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
-import { createCourseProjectArchive, type CourseProjectArchiveData } from '../../src/core/drivers/codecs/courseProjectArchive'
-import { createTextNode } from '../../src/core/tools/nativeNodeFactories'
-import { findFlowBlockRecursive } from '../../src/core/tools/flowDocumentModel'
-import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
-import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
-import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
-import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { createCourseProjectV10Archive, type CourseProjectV10ArchiveData } from '../../src/core/drivers/codecs/courseProjectV10Archive'
+import { TEXT_DEFINITION } from '../../src/components/text/adapters'
+import { createTextComponentData, type TextComponentData } from '../../src/components/text/data'
+import { createImageData, type ImageData } from '../../src/components/image/data'
+import { WEB_DEFINITION } from '../../src/components/web/data'
+import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
+import type { ComponentEdit } from '../../src/shared/contracts/component-platform/operations'
+import type { CourseProjectV10 as CourseProjectDocument, ComponentInstance, JsonObject } from '../../src/shared/contracts/component-platform/project'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionDesktopService } from '../../src/main/workbench/execution/ExecutionDesktopService'
@@ -33,18 +34,18 @@ const reply = () => new Response(`data: ${JSON.stringify({ id: randomUUID(), mod
   delta: { role: 'assistant', content: '好的' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
 
 /** A course with texts on its first scene, open in the document host, and one ordinary session. */
-async function fixture(model: (request: { instruction: string }) => Promise<void> = async () => {}, archive?: CourseProjectArchiveData) {
+async function fixture(model: (request: { instruction: string }) => Promise<void> = async () => {}, archive?: CourseProjectV10ArchiveData) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-m15-element-')); roots.push(root)
-  const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+  const project = createBlankCourseProjectV10('卡片课件')
+  project.global.overlay = []; project.instances = {}; project.definitions = { [TEXT_DEFINITION.id]: structuredClone(TEXT_DEFINITION) }
   const surface = project.surfaces[0]
-  if (surface?.type !== 'slide') throw new Error('slide surface')
-  surface.scenes[0]!.layerItems = [
-    sceneNodeToCourseLayerItem(createTextNode({ id: 'a', text: '标题', x: 40, y: 40 }), 1),
-    sceneNodeToCourseLayerItem(createTextNode({ id: 'b', text: '要点', x: 40, y: 160 }), 2),
-    sceneNodeToCourseLayerItem(createTextNode({ id: 'c', text: '结语', x: 40, y: 280 }), 3),
-  ]
+  surface.childIds = ['a', 'b', 'c']
+  for (const [id, text, y] of [['a', '标题', 40], ['b', '要点', 160], ['c', '结语', 280]] as const) {
+    project.instances[id] = { id, definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData(text))),
+      frame: { width: 400, height: 80, transform: [1, 0, 0, 1, 40, y] } }
+  }
   const filename = path.join(root, 'lesson.h5lesson')
-  await fs.writeFile(filename, createCourseProjectArchive(archive ?? { project: courseProjectDocumentSchema.parse(project), assetFiles: {}, componentFiles: {} }))
+  await fs.writeFile(filename, createCourseProjectV10Archive(archive ?? { project, resources: { assets: {}, components: {} } }))
   const documents = new DocumentHostService(path.join(root, 'documents'))
   const opened = await documents.open(filename)
   const settings = new ExecutionSettingsStore({ directory: path.join(root, 'settings'), encryption: { isEncryptionAvailable: () => true,
@@ -72,28 +73,33 @@ async function fixture(model: (request: { instruction: string }) => Promise<void
 }
 
 const locationOf = (snapshot: DocumentSnapshot) => {
-  if (snapshot.model.kind !== 'course-v9') throw new Error('course')
-  return snapshot.model.project.locations[0]!.id
+  if (snapshot.model.kind !== 'course-v10') throw new Error('course')
+  return snapshot.model.project.surfaces[0]!.id
 }
 /** The object an element card edits, as its reference: readable and the only writable target. */
 function objectReference(snapshot: DocumentSnapshot, itemId: string): ExecutionDocumentReference {
-  const target = { kind: 'course-object' as const, locationId: locationOf(snapshot), itemId }
+  const target = { kind: 'course-instance' as const, surfaceId: locationOf(snapshot), instanceId: itemId }
   return { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, writable: [target], selection: [target] }
 }
 /** A human edit of the course that does not touch `keep`. */
 async function edit(documents: DocumentHostService, documentId: string, change: (project: CourseProjectDocument) => void) {
   const session = documents.registry.get(documentId), snapshot = await session.drain()
-  if (snapshot.model.kind !== 'course-v9') throw new Error('course')
+  if (snapshot.model.kind !== 'course-v10') throw new Error('course')
   const project = structuredClone(snapshot.model.project); change(project)
+  const edits: ComponentEdit[] = []
+  for (const [id, before] of Object.entries(snapshot.model.project.instances)) {
+    const after = project.instances[id]
+    if (!after) { edits.push({ type: 'instance.remove', instanceId: id }); continue }
+    if (JSON.stringify(before.data) !== JSON.stringify(after.data)) edits.push({ type: 'data.set', instanceId: id, path: [], value: after.data })
+    if (JSON.stringify(before.frame) !== JSON.stringify(after.frame)) edits.push({ type: 'frame.set', instanceId: id, frame: after.frame ?? null })
+    if (JSON.stringify(before.flowLayout) !== JSON.stringify(after.flowLayout)) edits.push({ type: 'instance.flowLayout.set', instanceId: id, flowLayout: after.flowLayout ?? null })
+  }
   const result = await session.execute({ documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision, operationId: randomUUID(), ...operationActor(),
-    mutation: { type: 'command', command: { type: 'course.replace', project } } })
+    mutation: { type: 'command', command: captureComponentOperation(snapshot.model.project, edits) } })
   expect(result.status).toBe('applied')
 }
-const sceneItems = (project: CourseProjectDocument) => {
-  const surface = project.surfaces[0]
-  if (surface?.type !== 'slide') throw new Error('slide surface')
-  return surface.scenes[0]!.layerItems
-}
+const textData = (instance: ComponentInstance) => instance.data as unknown as TextComponentData
+const words = (instance: ComponentInstance) => textData(instance).content.inlines.map(inline => inline.type === 'text' ? inline.text : '').join('')
 
 it('R11 unsubmitted card input survives restart as a visible draft without sending or losing frozen references', async () => {
   const f = await fixture()
@@ -165,9 +171,7 @@ it('M15 a request for an object is judged by that object: other edits do not ref
   const reference = objectReference(captured, 'a')
   // Someone changes another object after the card captured "a"; the whole document's revision moves on.
   await edit(f.documents, f.opened.documentId, project => {
-    const b = sceneItems(project).find(item => item.layerItemId === 'b')!
-    if (b.kind !== 'native' || b.content.nativeType !== 'text') throw new Error('text')
-    b.content.data.text = '要点（已改）'
+    textData(project.instances.b).content = createTextComponentData('要点（已改）').content
   })
   const accepted = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId, submissionId: randomUUID(),
     expectedRevision: card.revision, text: '改成红色', documents: [reference], attachments: [] }) as ExecutionSendResult
@@ -180,8 +184,8 @@ it('M15 a request for an object is judged by that object: other edits do not ref
   // Once "a" is gone, a request captured before is refused as changed.
   await edit(f.documents, f.opened.documentId, project => {
     const surface = project.surfaces[0]
-    if (surface?.type !== 'slide') throw new Error('slide surface')
-    surface.scenes[0]!.layerItems = surface.scenes[0]!.layerItems.filter(item => item.layerItemId !== 'a')
+    surface.childIds = surface.childIds.filter(id => id !== 'a')
+    delete project.instances.a
   })
   const latest = await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: card.conversationId })
   const refused = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId, submissionId: randomUUID(),
@@ -191,9 +195,8 @@ it('M15 a request for an object is judged by that object: other edits do not ref
 
 /** A text object's words, colour and place on the course's first scene. */
 function textOf(project: CourseProjectDocument, itemId: string) {
-  const item = sceneItems(project).find(value => value.layerItemId === itemId)!
-  if (item.kind !== 'native' || item.content.nativeType !== 'text') throw new Error('text')
-  return { text: item.content.data.text, color: item.content.data.style.color, x: item.frame.x }
+  const item = project.instances[itemId]
+  return { text: words(item), color: textData(item).appearance.color, x: item.frame!.transform[4] }
 }
 
 it('M15 a card undoes only what its request changed, asks before overwriting later edits of the same fields, and every step is one ordinary edit', async () => {
@@ -201,10 +204,9 @@ it('M15 a card undoes only what its request changed, asks before overwriting lat
   const aRunning = new Promise<void>(resolve => { releaseA = resolve })
   let f!: Awaited<ReturnType<typeof fixture>>
   const recolor = (itemId: string, color: string, text?: string) => edit(f.documents, f.opened.documentId, project => {
-    const item = sceneItems(project).find(value => value.layerItemId === itemId)!
-    if (item.kind !== 'native' || item.content.nativeType !== 'text') throw new Error('text')
-    item.content.data.style.color = color
-    if (text !== undefined) item.content.data.text = text
+    const item = project.instances[itemId]
+    textData(item).appearance.color = color
+    if (text !== undefined) textData(item).content = createTextComponentData(text).content
   })
   // What each request's run does to the course while the model works.
   f = await fixture(async ({ instruction }) => {
@@ -214,7 +216,7 @@ it('M15 a card undoes only what its request changed, asks before overwriting lat
   })
   const current = async (itemId: string) => {
     const snapshot = await f.documents.registry.get(f.opened.documentId).drain()
-    if (snapshot.model.kind !== 'course-v9') throw new Error('course')
+    if (snapshot.model.kind !== 'course-v10') throw new Error('course')
     return textOf(snapshot.model.project, itemId)
   }
   const original = { b: await current('b'), c: await current('c') }
@@ -246,7 +248,7 @@ it('M15 a card undoes only what its request changed, asks before overwriting lat
   expect(await settle(slow)).toMatchObject({ state: 'none', fields: [] })
 
   // The teacher moves B; undoing B's request restores its words and colour and keeps the move. C stays.
-  await edit(f.documents, f.opened.documentId, project => { sceneItems(project).find(value => value.layerItemId === 'b')!.frame.x = 300 })
+  await edit(f.documents, f.opened.documentId, project => { project.instances.b.frame!.transform[4] = 300 })
   expect(await revert(toB, 'undo')).toMatchObject({ status: 'applied', change: { state: 'undone' } })
   expect(await current('b')).toEqual({ ...original.b, x: 300 })
   expect(await current('c')).toEqual(original.c)
@@ -277,31 +279,30 @@ it('M15 a card undoes only what its request changed, asks before overwriting lat
 })
 
 it('M15 a document block card undoes only the fields its request changed and asks before overwriting', async () => {
-  const source = listCourseProjectV9Fixtures().find(value => value.id === 'flow')!.data
+  const project = createBlankCourseProjectV10('Flow 图片卡')
+  project.global.overlay = []; project.instances = {}; project.definitions = { image: { id: 'image', role: 'content', implementation: { kind: 'builtin', key: 'guoling.image' } } }
+  project.surfaces = [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['flow-media'] }]
+  project.assets.image = { id: 'image', path: 'assets/image.svg', mimeType: 'image/svg+xml', kind: 'image' }
+  project.instances['flow-media'] = { id: 'flow-media', definitionId: 'image', data: JSON.parse(JSON.stringify(createImageData('image', '原插图'))),
+    flowLayout: { width: 'content-width', caption: { inlines: [{ type: 'text', text: '原说明' }] } } }
+  const source = { project, resources: { assets: { image: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>') }, components: {} } }
   let f!: Awaited<ReturnType<typeof fixture>>
-  const media = (project: CourseProjectDocument) => {
-    const surface = project.surfaces.find(item => item.type === 'flow')
-    if (surface?.type !== 'flow') throw new Error('flow surface')
-    const found = findFlowBlockRecursive(surface.blocks, 'flow-media')
-    if (found?.block.type !== 'media') throw new Error('media block')
-    return { surfaceId: surface.id, block: found.block }
-  }
-  const change = (apply: (block: ReturnType<typeof media>['block']) => void) => edit(f.documents, f.opened.documentId, project => apply(media(project).block))
+  const change = (apply: (instance: ComponentInstance) => void) => edit(f.documents, f.opened.documentId, project => apply(project.instances['flow-media']))
   f = await fixture(async ({ instruction }) => {
-    if (instruction.includes('图片-改')) await change(block => { block.altText = '新插图'; block.layout = 'wide' })
+    if (instruction.includes('图片-改')) await change(instance => { (instance.data as unknown as ImageData).alt = '新插图'; instance.flowLayout!.width = 'wide' })
   }, source)
   const current = async () => {
     const snapshot = await f.documents.registry.get(f.opened.documentId).drain()
-    if (snapshot.model.kind !== 'course-v9') throw new Error('course')
-    const { block } = media(snapshot.model.project)
-    return { altText: block.altText, layout: block.layout, caption: JSON.stringify(block.caption) }
+    if (snapshot.model.kind !== 'course-v10') throw new Error('course')
+    const instance = snapshot.model.project.instances['flow-media']
+    return { altText: (instance.data as unknown as ImageData).alt, layout: instance.flowLayout!.width, caption: JSON.stringify(instance.flowLayout!.caption) }
   }
   const original = await current()
   const card = await f.service.operate({ type: 'create-conversation', workspaceId: f.workspaceId,
     element: { kind: 'element', documentId: f.opened.documentId, label: '图片' } }) as ConversationRecord
   const snapshot = await f.documents.registry.get(f.opened.documentId).drain()
-  if (snapshot.model.kind !== 'course-v9') throw new Error('course')
-  const target = { kind: 'flow-block' as const, surfaceId: media(snapshot.model.project).surfaceId, blockId: 'flow-media', parentId: null }
+  if (snapshot.model.kind !== 'course-v10') throw new Error('course')
+  const target = { kind: 'course-instance' as const, surfaceId: 'flow', instanceId: 'flow-media' }
   const sent = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId, submissionId: randomUUID(), expectedRevision: card.revision,
     text: '图片-改', documents: [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, writable: [target], selection: [target] }], attachments: [] }) as ExecutionSendResult
   if (sent.run) await f.service.engine.wait(sent.run.runId)
@@ -311,14 +312,14 @@ it('M15 a document block card undoes only the fields its request changed and ask
   expect(await read()).toMatchObject({ state: 'applied', fields: ['替代文字', '排版'] })
 
   // The teacher rewrites the caption; undoing the request restores the alt text and the layout and keeps the caption.
-  await change(block => { block.caption = { inlines: [{ type: 'text', text: '老师的说明' }] } })
+  await change(instance => { instance.flowLayout!.caption = { inlines: [{ type: 'text', text: '老师的说明' }] } })
   const caption = (await current()).caption
   const revert = (direction: 'undo' | 'redo', force?: boolean) => f.service.operate({ type: 'element-revert', submissionId: sent.submission.submissionId, direction, ...(force ? { force } : {}) }) as Promise<ElementRevertResult>
   expect(await revert('undo')).toMatchObject({ status: 'applied', change: { state: 'undone' } })
   expect(await current()).toEqual({ altText: original.altText, layout: original.layout, caption })
   // Redone, then the layout changed by hand: undo asks first.
   expect(await revert('redo')).toMatchObject({ status: 'applied' })
-  await change(block => { block.layout = 'full-width' })
+  await change(instance => { instance.flowLayout!.width = 'full-width' })
   expect(await revert('undo')).toEqual({ status: 'conflict', fields: ['排版'] })
   expect(await revert('undo', true)).toMatchObject({ status: 'applied' })
   expect(await current()).toEqual({ altText: original.altText, layout: original.layout, caption })
@@ -375,22 +376,20 @@ it('M15 a Markdown text card follows its text through follow-ups and undoes and 
 })
 
 it('M15 a Flow text card traces its range in the paragraph and undoes the paragraph text only', async () => {
-  const source = listCourseProjectV9Fixtures().find(value => value.id === 'flow')!.data
+  const project = createBlankCourseProjectV10('Flow 文字卡')
+  project.global.overlay = []; project.instances = {}; project.definitions = { [TEXT_DEFINITION.id]: structuredClone(TEXT_DEFINITION) }
+  project.surfaces = [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['flow-paragraph'] }]
+  project.instances['flow-paragraph'] = { id: 'flow-paragraph', definitionId: TEXT_DEFINITION.id,
+    data: JSON.parse(JSON.stringify(createTextComponentData('这是一段可编辑正文。'))) }
   let f!: Awaited<ReturnType<typeof fixture>>
-  const paragraph = (project: CourseProjectDocument) => {
-    const surface = project.surfaces.find(item => item.type === 'flow')
-    if (surface?.type !== 'flow') throw new Error('flow surface')
-    const found = findFlowBlockRecursive(surface.blocks, 'flow-paragraph')
-    if (found?.block.type !== 'paragraph') throw new Error('paragraph')
-    return { surfaceId: surface.id, block: found.block }
-  }
   f = await fixture(async ({ instruction }) => {
-    if (instruction.includes('一段-改')) await edit(f.documents, f.opened.documentId, project => { paragraph(project).block.content = { inlines: [{ type: 'text', text: '这是两段文字可编辑正文。' }] } })
-  }, source)
+    if (instruction.includes('一段-改')) await edit(f.documents, f.opened.documentId, project => {
+      textData(project.instances['flow-paragraph']).content = createTextComponentData('这是两段文字可编辑正文。').content
+    })
+  }, { project, resources: { assets: {}, components: {} } })
   const snapshot = await f.documents.registry.get(f.opened.documentId).drain()
-  if (snapshot.model.kind !== 'course-v9') throw new Error('course')
-  const target = { kind: 'flow-range' as const, surfaceId: paragraph(snapshot.model.project).surfaceId, blockId: 'flow-paragraph', parentId: null,
-    slot: { kind: 'field' as const, field: 'content' as const }, from: 2, to: 4 }
+  if (snapshot.model.kind !== 'course-v10') throw new Error('course')
+  const target = { kind: 'course-instance' as const, surfaceId: 'flow', instanceId: 'flow-paragraph', dataPath: ['content'], from: 2, to: 4 }
   const card = await f.service.operate({ type: 'create-conversation', workspaceId: f.workspaceId, element: { kind: 'element', documentId: f.opened.documentId, label: '一段' } }) as ConversationRecord
   const sent = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId, submissionId: randomUUID(), expectedRevision: card.revision,
     text: '一段-改', documents: [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, writable: [target], selection: [target] }], attachments: [] }) as ExecutionSendResult
@@ -404,52 +403,64 @@ it('M15 a Flow text card traces its range in the paragraph and undoes the paragr
   const undone = await f.service.operate({ type: 'element-revert', submissionId: sent.submission.submissionId, direction: 'undo' }) as ElementRevertResult
   expect(undone).toMatchObject({ status: 'applied', change: { state: 'undone', target: { from: 2, to: 4 } } })
   const after = await f.documents.registry.get(f.opened.documentId).drain()
-  if (after.model.kind !== 'course-v9') throw new Error('course')
-  expect(paragraph(after.model.project).block.content).toEqual(paragraph(snapshot.model.project).block.content)
+  if (after.model.kind !== 'course-v10') throw new Error('course')
+  expect(textData(after.model.project.instances['flow-paragraph']).content).toEqual(textData(snapshot.model.project.instances['flow-paragraph']).content)
 })
 
-it('M15 a Runtime card names the earlier text edits whose original text its request took out of the source', async () => {
-  const quiz = (heading: string) => `CoursewareRuntime.define({ runtimeApiVersion: 3, create(ctx) {
-    var question = 1;
-    ctx.dom.root.innerHTML = '<h2>${heading}</h2><p>第 ' + question + ' 题</p>';
-    return { destroy: function () { ctx.dom.root.innerHTML = ''; } };
-  } });`
+it.each([
+  { mode: 'static matched region', region: 'h2', dynamic: false, nested: false, lost: ['听录音，选图片'] },
+  { mode: 'unproven region', region: 'unmounted>h2', dynamic: false, nested: false, lost: undefined },
+  { mode: 'program-rendered content', region: 'h2', dynamic: true, nested: false, lost: undefined },
+  { mode: 'unproven child document', region: 'h2', dynamic: false, nested: true, lost: undefined },
+])('M15 a Web card reports only proved lost light edits and restores its source without losing later edits: $mode', async ({ region, dynamic, nested, lost }) => {
+  const project = createBlankCourseProjectV10('Web 卡')
+  project.global.overlay = []; project.instances = {}; project.definitions = { [WEB_DEFINITION.id]: structuredClone(WEB_DEFINITION) }
+  project.surfaces[0].childIds = ['quiz']
+  const program = dynamic ? '<script type="  text/javascript  ">window.renderLater=()=>document.querySelector("h2").textContent="听录音，选图片"</script>' : nested ? '<iframe srcdoc="&lt;h2&gt;听录音，选图片&lt;/h2&gt;"></iframe>' : ''
+  const originalHtml = '<h2>听录音，选图片</h2><p>听录音，选图片</p><p>第 1 题</p>' + program
+  const overrides: JsonObject[] = [{ original: '听录音，选图片', region, text: '人工改的标题' },
+    { original: '第 1 题', text: '第一题' }, { original: '稍后动态呈现', text: '人工动态文案' }]
+  project.instances.quiz = { id: 'quiz', definitionId: WEB_DEFINITION.id,
+    data: { html: originalHtml, textOverrides: overrides },
+    frame: { width: 640, height: 360, transform: [1, 0, 0, 1, 40, 40] } }
   let f!: Awaited<ReturnType<typeof fixture>>
-  const rewrite = (heading: string) => edit(f.documents, f.opened.documentId, project => {
-    const item = sceneItems(project).find(value => value.layerItemId === 'quiz')!
-    if (item.kind !== 'runtime') throw new Error('runtime')
-    item.runtime.source = quiz(heading)
-  })
-  f = await fixture(async ({ instruction }) => {
-    if (instruction.includes('换题目')) await rewrite('看图说话')
-    if (instruction.includes('只改样式')) await rewrite('听录音，选图片')
-  })
-  // The teacher edited the heading (text in the source) and the question number (computed by the program).
-  await edit(f.documents, f.opened.documentId, project => {
-    sceneItems(project).push({
-      layerItemId: 'quiz', label: '小测验', order: 4, visible: true, locked: false, rotation: 0, opacity: 1, hitPolicy: 'auto',
-      playbackInitialVisibility: 'inherit', frame: { mode: 'absolute', x: 40, y: 40, width: 640, height: 360 }, kind: 'runtime',
-      runtime: { protocol: 'surface-runtime', runtimeApiVersion: 3, enabled: true, renderMode: 'dom', source: quiz('听录音，选图片'), assets: {},
-        content: { values: {}, overrides: [{ original: '听录音，选图片', region: 'h2', text: '听录音，选出正确的图片' }, { original: '第 1 题', text: '第一题' }] } },
-    })
-  })
+  f = await fixture(async ({ instruction }) => edit(f.documents, f.opened.documentId, project => {
+    if (instruction.includes('只改样式')) { project.instances.quiz.frame!.width = 642; return }
+    const data = project.instances.quiz.data as { html: string }
+    data.html = '<h2>看图说话</h2><p>听录音，选图片</p><p>第 1 题</p>' + program
+  }), { project, resources: { assets: {}, components: {} } })
   const card = await f.service.operate({ type: 'create-conversation', workspaceId: f.workspaceId,
     element: { kind: 'element', documentId: f.opened.documentId, label: '小测验' } }) as ConversationRecord
-  const send = async (text: string) => {
-    const snapshot = await f.documents.registry.get(f.opened.documentId).drain()
-    const latest = await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: card.conversationId })
-    const result = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId, submissionId: randomUUID(),
-      expectedRevision: latest!.revision, text, documents: [objectReference(snapshot, 'quiz')], attachments: [] }) as ExecutionSendResult
-    if (result.run) await f.service.engine.wait(result.run.runId)
-    if (result.run) await vi.waitFor(async () => expect((await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: result.submission.conversationId }))!.messages.some(message => message.role === 'assistant' && message.runId === result.run!.runId)).toBe(true))
-    const view = () => f.service.operate({ type: 'element-change', submissionId: result.submission.submissionId }) as Promise<ElementChangeView>
-    await vi.waitFor(async () => expect((await view()).state).not.toBe('pending'))
-    return view()
-  }
-  // The new source no longer has the heading: that edit no longer applies. The computed number is not reported.
-  expect(await send('换题目')).toMatchObject({ state: 'none', lostTexts: ['听录音，选图片'] })
-  // A request that keeps the text reports nothing.
-  expect((await send('只改样式')).lostTexts).toBeUndefined()
+  const sent = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId,
+    submissionId: randomUUID(), expectedRevision: card.revision, text: '换题目', documents: [objectReference(f.opened, 'quiz')], attachments: [] }) as ExecutionSendResult
+  if (sent.run) await f.service.engine.wait(sent.run.runId)
+  const view = () => f.service.operate({ type: 'element-change', submissionId: sent.submission.submissionId }) as Promise<ElementChangeView>
+  await vi.waitFor(async () => expect((await view()).state).not.toBe('pending'))
+  expect(await view()).toMatchObject({ state: 'applied' })
+  expect((await view()).lostTexts).toEqual(lost)
+  await vi.waitFor(async () => expect((await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: card.conversationId }))!
+    .messages.some(message => message.role === 'assistant' && message.runId === sent.run?.runId)).toBe(true))
+  const latest = await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: card.conversationId })
+  const styled = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId,
+    submissionId: randomUUID(), expectedRevision: latest!.revision, text: '只改样式',
+    documents: [objectReference(await f.documents.registry.get(f.opened.documentId).drain(), 'quiz')], attachments: [] }) as ExecutionSendResult
+  if (styled.run) await f.service.engine.wait(styled.run.runId)
+  const styleView = () => f.service.operate({ type: 'element-change', submissionId: styled.submission.submissionId }) as Promise<ElementChangeView>
+  await vi.waitFor(async () => expect((await styleView()).state).not.toBe('pending'))
+  expect((await styleView()).lostTexts).toBeUndefined()
+
+  await edit(f.documents, f.opened.documentId, project => {
+    const data = project.instances.quiz.data as { textOverrides: Array<{ original: string; text: string }> }
+    data.textOverrides = data.textOverrides.map(rule => rule.original === '第 1 题' ? { ...rule, text: '人工改为第一道题' } : rule)
+  })
+  expect(await f.service.operate({ type: 'element-revert', submissionId: sent.submission.submissionId, direction: 'undo' }))
+    .toMatchObject({ status: 'applied', change: { state: 'undone' } })
+  expect((await view()).lostTexts).toBeUndefined()
+  const current = await f.documents.registry.get(f.opened.documentId).drain()
+  if (current.model.kind !== 'course-v10') throw new Error('course')
+  expect(current.model.project.instances.quiz).toMatchObject({ id: 'quiz', frame: { width: 642 }, data: {
+    html: originalHtml, textOverrides: overrides.map(rule => rule.original === '第 1 题' ? { ...rule, text: '人工改为第一道题' } : rule),
+  } })
 })
 
 
@@ -457,8 +468,7 @@ it('does not attribute human edits made during an AI request to that request', a
   let f!: Awaited<ReturnType<typeof fixture>>
   f = await fixture(async () => {
     await modelOperation.run('', () => edit(f.documents, f.opened.documentId, project => {
-      const item = sceneItems(project).find(i => i.layerItemId === 'a')!
-      if (item.kind === 'native' && item.content.nativeType === 'text') item.content.data.text = '人工重要修改'
+      textData(project.instances.a).content = createTextComponentData('人工重要修改').content
     }))
   })
   const card = await f.service.operate({ type: 'create-conversation', workspaceId: f.workspaceId,
@@ -472,5 +482,5 @@ it('does not attribute human edits made during an AI request to that request', a
   expect(await change()).toMatchObject({ state: 'none', fields: [] })
   expect(await f.service.operate({ type: 'element-revert', submissionId: sent.submission.submissionId, direction: 'undo' })).toMatchObject({ status: 'unavailable' })
   const model = (await f.documents.registry.get(f.opened.documentId).drain()).model
-  expect(model.kind === 'course-v9' && textOf(model.project, 'a').text).toBe('人工重要修改')
+  expect(model.kind === 'course-v10' && textOf(model.project, 'a').text).toBe('人工重要修改')
 })

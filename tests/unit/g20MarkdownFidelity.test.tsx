@@ -60,7 +60,7 @@ it('M05 real editor keeps source bytes on body input, retains an incomplete sour
   let position = 0; editor.view.state.doc.descendants((node, at) => { if (node.isText && node.text === '原文😀') position = at })
   act(() => editor.view.dispatch(editor.view.state.tr.insertText('新', position, position + 1)))
   expect(handle.current?.flush().source).toBe(source.replace('原文', '新文'))
-  fireEvent.click(screen.getByRole('button', { name: '源文' }))
+  fireEvent.click(screen.getByRole('button', { name: '源码' }))
   const cm = SourceView.findFromDOM(ui.container.querySelector('.cm-content')!)!
   act(() => cm.dispatch({ changes: { from: cm.state.doc.length, insert: '\n```js\nunfinished' } }))
   expect(handle.current?.flush().source).toContain('unfinished')

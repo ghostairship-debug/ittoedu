@@ -17,7 +17,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) {
     const resolved = path.resolve(root)
     if (!resolved.startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('fixture outside temp')
-    await fs.rm(resolved, { recursive: true, force: true })
+    await fs.rm(resolved, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 })
   }
 })
 const selection: ModelSelection = {
@@ -35,6 +35,13 @@ async function fixture(provider: ModelProvider) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'unified-office-engine-')); roots.push(directory)
   const workspace = path.join(directory, 'workspace'), lesson = path.join(workspace, 'lesson'); await fs.mkdir(lesson, { recursive: true })
   const host = new DocumentHostService(path.join(directory, 'owner'))
+  host.tools.configureHostServices({ office: { execute: async ({ grant, operationId, name, input, approvedPaths, assertActive }) => {
+    const access = grant.fileAccess!
+    const result = await host.agentFiles.executeOffice({ runId: grant.runId, workspaceRoot: access.workspaceRoot!,
+      permission: access.permission, conversationHome: access.conversationHome, conversationHomeRoot: access.conversationHomeRoot,
+      approvedOutsidePaths: approvedPaths, assertActive }, name, input, operationId)
+    return { kind: 'read', data: result.data }
+  } } })
   const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, files: new AgentFileService(host), provider,
     runs: new ExecutionRunStore(path.join(directory, 'runs')), events: new ExecutionEventStore({ directory: path.join(directory, 'events') }) })
   return { host, engine, workspace, lesson }
@@ -70,9 +77,9 @@ describe('Office content tools in the general execution engine', () => {
     const started = await f.engine.start({ conversationId: 'conversation', taskId: 'office-lost-reopen', instruction: '新建 Word 文档并修改其正文。',
       documents: [], workspaceRoot: f.workspace, conversationHome: { kind: 'folder', path: 'lesson' }, permission: 'workspace', selection })
     const final = await f.engine.wait(started.runId)
-    expect.soft(final.status, JSON.stringify(final.tools.map(tool => tool.result))).toBe('partial')
+    expect.soft(final.status, JSON.stringify({ failure: final.failure, tools: final.tools.map(tool => tool.result) })).toBe('partial')
     expect(final.tools[1].result).toMatchObject({ kind: 'read', data: { status: 'saved', saved: true } })
-    expect(final.tools[2].result).toMatchObject({ kind: 'error', code: 'tool-outcome-unknown' })
+    expect(final.tools[2].result, JSON.stringify(final.tools[2].result)).toMatchObject({ kind: 'error', code: 'tool-outcome-unknown' })
     expect(final.tools[2].effectPaths).toEqual([path.join(f.lesson, 'lesson.docx')])
     expect(write).toHaveBeenCalledTimes(1)
     expect(turn).toBe(3)
@@ -81,14 +88,14 @@ describe('Office content tools in the general execution engine', () => {
     expect(f.host.registry.list()).toHaveLength(0)
   })
 
-  it('loads Office only when requested, then creates and edits a saved DOCX using software-owned binding', async () => {
+  it('advertises configured Office and idempotently expands its family, then creates and edits a saved DOCX using software-owned binding', async () => {
     let turn = 0
     const provider: ModelProvider = { async *stream(request) {
       turn++
       const names = request.tools?.map(tool => tool.name) ?? []
       if (turn === 1) {
         expect(names).toContain('tools.load')
-        expect(names.some(name => name.startsWith('office.'))).toBe(false)
+        expect(names.filter(name => name.startsWith('office.'))).toEqual(expect.arrayContaining(['office.inspect', 'office.create', 'office.edit']))
         expect(request.tools?.find(tool => tool.name === 'tools.load')?.description).toContain('office')
         yield complete(request, 'load-office', 'tools.load', { families: ['office'] })
       } else if (turn === 2) {
@@ -109,7 +116,7 @@ describe('Office content tools in the general execution engine', () => {
     const started = await f.engine.start({ conversationId: 'conversation', taskId: 'office-content', instruction: '新建实验讨论 Word 文档，再完善预测问题。',
       documents: [], workspaceRoot: f.workspace, conversationHome: { kind: 'folder', path: 'lesson' }, permission: 'workspace', selection })
     const final = await f.engine.wait(started.runId)
-    expect(final.status, JSON.stringify(final.tools.map(tool => tool.result))).toBe('completed')
+    expect(final.status, JSON.stringify({ failure: final.failure, tools: final.tools.map(tool => tool.result) })).toBe('completed')
     expect(final.tools.map(tool => tool.call.name)).toEqual(['tools.load', 'office.create', 'office.edit'])
     expect(final.tools[0].result).toMatchObject({ kind: 'read', data: { loaded: ['office'] } })
     for (const tool of final.tools.slice(1)) expect(tool.result).toMatchObject({ kind: 'read', data: { status: 'saved', saved: true } })
@@ -120,13 +127,13 @@ describe('Office content tools in the general execution engine', () => {
     expect(turn).toBe(4)
   })
 
-  it('loads only inspection for a read-only task and reads the real DOCX without a text session', async () => {
+  it('advertises only inspection for a read-only task and reads the real DOCX without a text session', async () => {
     let turn = 0
     const provider: ModelProvider = { async *stream(request) {
       turn++
       const names = request.tools?.map(tool => tool.name) ?? []
       if (turn === 1) {
-        expect(names.some(name => name.startsWith('office.'))).toBe(false)
+        expect(names.filter(name => name.startsWith('office.'))).toEqual(['office.inspect'])
         yield complete(request, 'load-readonly-office', 'tools.load', { families: ['office'] })
       } else if (turn === 2) {
         expect(names.filter(name => name.startsWith('office.'))).toEqual(['office.inspect'])
@@ -139,7 +146,7 @@ describe('Office content tools in the general execution engine', () => {
     const started = await f.engine.start({ conversationId: 'conversation', taskId: 'office-readonly', instruction: '阅读现有 Word 文件。',
       documents: [], workspaceRoot: f.workspace, permission: 'read-only', selection })
     const final = await f.engine.wait(started.runId)
-    expect(final.status, JSON.stringify(final.tools.map(tool => tool.result))).toBe('completed')
+    expect(final.status, JSON.stringify({ failure: final.failure, tools: final.tools.map(tool => tool.result) })).toBe('completed')
     expect(final.tools[0].result).toMatchObject({ kind: 'read', data: { loaded: ['office'], available: expect.arrayContaining([{ family: 'office', description: expect.any(String), count: 1 }]) } })
     expect(final.tools[1].result).toMatchObject({ kind: 'read', data: { writable: false, inspection: { format: 'docx', paragraphs: [{ text: '真实只读内容' }] } } })
     expect(inspectOfficeContent(await fs.readFile(filename), 'docx')).toMatchObject({ paragraphs: [{ text: '真实只读内容' }] })

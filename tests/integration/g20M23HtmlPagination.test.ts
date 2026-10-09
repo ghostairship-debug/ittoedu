@@ -1,6 +1,6 @@
+// @vitest-environment node
 import { afterAll, beforeAll, expect, it } from 'vitest'
-import { execFileSync } from 'node:child_process'
-import { resolve } from 'node:path'
+import { buildSync } from 'esbuild'
 import { chromium, type Browser, type Page } from 'playwright'
 import { indexHtmlElements } from '../../src/shared/html/htmlSourceScanner'
 import { htmlObservationReadyScript } from '../../src/main/workbench/observation/HtmlActionDesktopPort'
@@ -9,10 +9,11 @@ let browser: Browser
 let script: string
 
 beforeAll(async () => {
-  script = execFileSync(process.execPath, [resolve(process.cwd(), 'node_modules/esbuild/bin/esbuild'),
-    '--loader=ts', '--bundle', '--format=iife', '--global-name=HtmlPages', '--platform=browser'], {
-    input: `export {mountPagination} from './src/player/htmlPreview/htmlPreviewPagination'; export {mountPlaceholders} from './src/player/htmlPreview/htmlPreviewPlaceholders';`, encoding: 'utf8',
-  })
+  script = buildSync({
+    stdin: { contents: `export {mountPagination} from './src/player/htmlPreview/htmlPreviewPagination'; export {mountPlaceholders} from './src/player/htmlPreview/htmlPreviewPlaceholders';`,
+      resolveDir: process.cwd(), loader: 'ts' },
+    bundle: true, write: false, format: 'iife', globalName: 'HtmlPages', platform: 'browser',
+  }).outputFiles[0]!.text
   browser = await chromium.launch({ headless: true })
 }, 15000)
 afterAll(async () => { await browser?.close() })

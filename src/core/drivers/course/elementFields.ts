@@ -229,6 +229,14 @@ const LABELS: Record<string, string> = {
 export function elementUnitLabel(unit: readonly string[]): string {
   const path = JSON.parse(unit[0]!) as string[]
   if (path[0] === 'block') return BLOCK_LABELS[path[1]!] ?? '内容'
+  const authoredPath = [...path]
+  while (authoredPath[0] === 'descendant') authoredPath.splice(0, 2)
+  if (authoredPath[0] === 'flowLayout') {
+    if (authoredPath[1] === 'caption') return '说明文字'
+    if (authoredPath[1] === 'width' || authoredPath[1] === 'wrap') return '排版'
+  }
+  if (authoredPath[0] === 'data' && authoredPath[1] === 'alt') return '替代文字'
+  if (authoredPath[0] === 'data' && authoredPath[1] === 'content' && authoredPath[2] === 'inlines') return '文字'
   const name = LABELS[path.at(-1)!] ?? '其他设置'
   return path[0] === 'state' ? `命名态中的${name}` : name
 }

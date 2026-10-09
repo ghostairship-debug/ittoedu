@@ -206,7 +206,7 @@ it('U05 commits real composition drags once, converts a scaled viewport, retains
       }
 
       await select('auto-a')
-      expect(await selection('auto-a').getByRole('button', { name: '缩放内容', exact: true }).count()).toBe(0)
+      expect(await selection('auto-a').getByRole('button', { name: '缩放内容', exact: true }).isEnabled()).toBe(true)
       const first = session.read(), start = await center(selection('auto-a').getByRole('button', { name: '拖动内容', exact: true }))
       const destination = await page.frameLocator('iframe[data-web-composition]').locator('[data-composition-node="auto-c"]').boundingBox()
       if (!destination) throw new Error('Missing actual automatic-layout sibling')
@@ -290,7 +290,7 @@ it('U05 commits real composition drags once, converts a scaled viewport, retains
       await transformStatus.waitFor({ state: 'visible' })
       const disabledDrag = selection('transformed').getByRole('button', { name: '拖动内容', exact: true })
       expect(await disabledDrag.isDisabled()).toBe(true)
-      expect(await selection('transformed').getByRole('button', { name: '缩放内容', exact: true }).isDisabled()).toBe(true)
+      expect(await selection('transformed').getByRole('button', { name: '缩放内容', exact: true }).count()).toBe(0)
       const transformBefore = session.read(), disabledStart = await center(disabledDrag)
       await page.mouse.move(disabledStart.x, disabledStart.y)
       await page.mouse.down()

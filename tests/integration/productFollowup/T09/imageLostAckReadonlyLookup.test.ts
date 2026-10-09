@@ -8,15 +8,16 @@ import { DocumentHostService } from '../../../../src/main/workbench/DocumentHost
 import { ImageGenerationService } from '../../../../src/main/workbench/images/ImageGenerationService'
 import { imageProvenance } from '../../../../src/main/workbench/images/imageRoute'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
-import type { ImageModelSelection } from '../../../../src/shared/workbench/images'
+import { parseGeneratedImageReference, type ImageModelSelection } from '../../../../src/shared/workbench/images'
 import type { HostToolServices } from '../../../../src/core/tools/HostToolServices'
 
 it('looks up a durable original image after its ACK is lost and document detached without another generation or renewed resource authority', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'T09-image-lost-ack-'))
   try {
-    const host = new DocumentHostService(path.join(directory, 'documents'))
+    const discardFlowRecovery = vi.fn(async () => undefined)
+    const host = new DocumentHostService(path.join(directory, 'documents'), {}, { discardFlowRecovery })
     const opened = await host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('Original image owner'),
-      resources: { assets: {}, components: {} } }, 'image-owner.h5lesson')
+      resources: { assets: {}, components: {} } }, 'image-owner.glx')
     const original = await host.internalAPI.read(opened.documentId)
     const selection: ImageModelSelection = { imageModel: 'local-image', connection: { id: 'fixture', revision: 1, provider: 'openai',
       protocol: 'chatgpt-responses', baseURL: 'https://chatgpt.com/backend-api/codex', accountId: 'fixture', auth: { kind: 'oauth', credentialRef: 'unused' },
@@ -50,13 +51,15 @@ it('looks up a durable original image after its ACK is lost and document detache
     expect(await host.internalAPI.read(opened.documentId)).toEqual(original)
     await host.tools.stopRunDocument(grant.runId, opened.documentId)
     await host.operate({ type: 'close', documentId: opened.documentId, discardDirty: true })
+    expect(discardFlowRecovery).toHaveBeenCalledWith({ projectId: original.model.kind === 'course-v10' ? original.model.project.id : '',
+      projectPath: null, epoch: original.epoch })
     await host.tools.stop(grant.runId)
     const lookup = await host.tools.lookup(grant.runId, 'original-call', call)
     expect(lookup, JSON.stringify(lookup)).toMatchObject({ kind: 'read', data: { job: originalJob, documentId: opened.documentId, status: 'ready',
       resources: [{ resourceId: expect.any(String), width: 24, height: 20 }] } })
     if (lookup?.kind !== 'read') throw new Error('Missing original durable receipt')
     const data = lookup.data as { resources: Array<{ resourceId: string; resource?: string }> }
-    expect(data.resources[0].resource).toBeUndefined()
+    expect(parseGeneratedImageReference(data.resources[0].resource!)).toEqual({ jobId: originalJob, resourceId: data.resources[0].resourceId })
     expect(provide).not.toHaveBeenCalled()
     expect(host.tools.runtimeCounts(grant.runId)).toMatchObject({ handles: 0, images: 0,
       host: { runs: 0, imageJobs: 0, imageResources: 0, reissuedImages: 0 } })

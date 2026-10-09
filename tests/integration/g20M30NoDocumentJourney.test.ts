@@ -86,7 +86,7 @@ it('M30 T1 fixture: a no-document product run reads data, delivers four real fil
       function: { name, arguments: JSON.stringify(input) } })
     if (requestCount === 1) {
       expect(payload.messages.some(message => message.role === 'system' && message.content?.includes('本次固定文档与权限'))).toBe(true)
-      sse(response, 't1-read-input', { tool_calls: [call(0, 't1-read-input', wire('读取普通 UTF-8 文件'), { path: 'sales.csv' })] }, 'tool_calls')
+      sse(response, 't1-read-input', { tool_calls: [call(0, 't1-read-input', wire('读取磁盘/工作区路径上的普通 UTF-8 文件'), { path: 'sales.csv' })] }, 'tool_calls')
     } else if (requestCount === 2) {
       expect(JSON.parse(receipts.find(item => item.tool_call_id === 't1-read-input')!.content))
         .toMatchObject({ kind: 'read', data: { text: 'month,amount\nJan,20\nFeb,22\n', truncated: false } })
@@ -101,7 +101,7 @@ it('M30 T1 fixture: a no-document product run reads data, delivers four real fil
       expect(receipts.filter(item => item.tool_call_id.startsWith('t1-write-'))).toHaveLength(4)
       for (const receipt of receipts.filter(item => item.tool_call_id.startsWith('t1-write-')))
         expect(JSON.parse(receipt.content)).toMatchObject({ kind: 'read', data: { saved: true } })
-      sse(response, 't1-read-html', { tool_calls: [call(0, 't1-read-html', wire('读取普通 UTF-8 文件'), { path: 'report.html' })] }, 'tool_calls')
+      sse(response, 't1-read-html', { tool_calls: [call(0, 't1-read-html', wire('读取磁盘/工作区路径上的普通 UTF-8 文件'), { path: 'report.html' })] }, 'tool_calls')
     } else if (requestCount === 4) {
       const htmlRead = JSON.parse(receipts.find(item => item.tool_call_id === 't1-read-html')!.content) as {
         kind: string; data: { text: string; version: string }

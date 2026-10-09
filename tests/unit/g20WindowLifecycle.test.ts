@@ -49,7 +49,7 @@ it('warns about running built-in tasks and external calls; quit continues into t
   expect(await f.lifecycle.beforeClose()).toBe('continue')
   const options = vi.mocked(f.ports.prompt).mock.calls[0]![1]
   expect(options).toMatchObject({ type: 'warning', message: '果铃还有任务正在进行' })
-  expect(options.detail).toBe(['内置 AI 正在运行 2 个任务。', '已连接的外部 AI 会话 2 个：Claude Code（正在处理 1 个调用）、Codex。',
+  expect(options.detail).toBe(['内置 AI 正在运行 2 个任务。', '外部 AI 正在处理调用的会话 1 个：Claude Code（正在处理 1 个调用）。',
     '隐藏到托盘则继续运行；退出会中止内置任务并断开外部连接。'].join('\n'))
   expect(f.ports.remember).not.toHaveBeenCalled()
   expect(f.window.hide).not.toHaveBeenCalled()

@@ -230,7 +230,8 @@ function safeDetail(value: unknown): unknown {
   if (Array.isArray(value) && value.length > 4096 && value.every(part => Number.isInteger(part) && part >= 0 && part <= 255)) return '[二进制内容已隐藏]'
   if (Array.isArray(value)) return value.map(safeDetail)
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, child]) =>
-    [key, secretField.test(key) ? '[已隐藏]' : safeDetail(child)]))
+    [key, secretField.test(key) ? '[已隐藏]' : key === 'path' && typeof child === 'string' && child.startsWith('/')
+      ? `[本地路径]/${path.posix.basename(child)}` : safeDetail(child)]))
   return value
 }
 function safeDetailJson(value: unknown, maxBytes?: number): string {

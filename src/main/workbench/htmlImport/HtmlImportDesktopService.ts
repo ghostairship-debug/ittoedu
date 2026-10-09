@@ -16,6 +16,7 @@ export class HtmlImportDesktopService {
     const input = htmlImportDesktopRequestSchema.parse(raw), host = this.options.documents
     const session = host.registry.get(input.documentId), frozen = await session.drain()
     if (frozen.epoch !== input.epoch) throw new Error('HTML 导入工程会话已变化，请重新选择导入位置')
+    if (frozen.revision !== input.revision) throw new Error('HTML 导入目标已改变，请重新选择导入位置')
     if (frozen.model.kind !== 'course-v10') throw new Error('HTML 页面只能导入 Course Project V10；原文件未修改')
     const surface = frozen.model.project.surfaces.find(surface => surface.id === input.surfaceId)
     if (!surface || !['slide', 'flow', 'spatial'].includes(surface.kind)) throw new Error('HTML 导入目标页面已不存在')

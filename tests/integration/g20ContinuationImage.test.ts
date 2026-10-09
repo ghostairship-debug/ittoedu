@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import type { AgentFileService } from '../../src/core/tools/AgentFileTools'
 import type { HostToolServices } from '../../src/core/tools/HostToolServices'
@@ -23,7 +24,7 @@ import type { ModelProvider, ModelRequest } from '../../src/shared/workbench/mod
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }) })
-const driver = new CourseV9Driver()
+const driver = new CourseV10Driver()
 const done = (request: ModelRequest, calls: { name: string; input: unknown }[] = []) => ({
   requestId: request.requestId, sequence: 1, type: 'response.completed' as const, responseId: randomUUID(), actualModel: 'free-fixture',
   nativeResponse: {}, finishReason: calls.length ? 'tool_calls' : 'stop',
@@ -33,12 +34,12 @@ const done = (request: ModelRequest, calls: { name: string; input: unknown }[] =
       function: { name: call.name, arguments: JSON.stringify(call.input) } })) } : {}) },
 })
 
-it.each([false, true])('reopens a V9 file and applies its prior ready image with a new document ID (initially frozen: %s)', async frozenInitially => {
+it.each([false, true])('reopens a V10 file and applies its prior ready image with a new document ID (initially frozen: %s)', async frozenInitially => {
   const root = await mkdtemp(path.join(tmpdir(), 'g20-continuation-image-')); roots.push(root)
-  const filePath = path.join(root, 'lesson.h5lesson')
+  const filePath = path.join(root, 'lesson.glx')
   const registry = new DocumentRegistry({ drivers: [driver], createId: randomUUID, bindingKey: binding => binding.path,
     persistence: createDocumentJournal({ directory: path.join(root, 'documents') }) })
-  writeFileSync(filePath, readFileSync('tests/fixtures/course-project-v9/slide-native.h5lesson'))
+  writeFileSync(filePath, driver.serialize({ kind: 'course-v10', project: createBlankCourseProjectV10('Continuation image'), resources: { assets: {}, components: {} } }))
   const model = driver.load(new Uint8Array(readFileSync(filePath)))
   const session = await registry.open({ kind: 'file', path: filePath, version: null, bindingVersion: 1 }, async () => model)
   const png = await sharp({ create: { width: 32, height: 24, channels: 4, background: '#4285f4' } }).png().toBuffer()
@@ -60,7 +61,7 @@ it.each([false, true])('reopens a V9 file and applies its prior ready image with
       jobs.set(request.jobId, job)
       return job
     },
-    async read(jobId) { return jobs.get(jobId)! },
+    async read(jobId) { const job = jobs.get(jobId); if (!job) throw Object.assign(new Error('Unknown image job'), { code: 'unknown-image-job' }); return job },
     async stop(jobId) { return jobs.get(jobId)! },
     async readResource() { return { bytes: png, mimeType: 'image/png', filename: 'fixture.png' } },
     async readReadyResourceFromJob({ jobId, sourceRunId, sourceDocumentId, resourceId: requested }) {
@@ -76,7 +77,7 @@ it.each([false, true])('reopens a V9 file and applies its prior ready image with
     async preflightMutation() { return { paths: [filePath], outside: false } },
     async execute(context, name, input) {
       if (name === 'file.create') return { data: { operation: { status: 'success' }, path: filePath, documentId: session.documentId },
-        opened: { documentId: session.documentId, kind: 'course-v9', name: filePath, writable: true } }
+        opened: { documentId: session.documentId, kind: 'course-v10', name: filePath, writable: true } }
       if (name === 'file.open') {
         expect(input).toEqual({ path: filePath })
         expect(context.workspaceRoot).toBe(root)
@@ -84,8 +85,8 @@ it.each([false, true])('reopens a V9 file and applies its prior ready image with
         const opened = await registry.open({ kind: 'file', path: filePath, version: null, bindingVersion: 1 },
           async () => driver.load(new Uint8Array(readFileSync(filePath))))
         reopenedDocumentId = opened.documentId
-        return { data: { path: filePath, documentId: opened.documentId, kind: 'course-v9' },
-          opened: { documentId: opened.documentId, kind: 'course-v9', name: filePath, writable: context.permission !== 'read-only' } }
+        return { data: { path: filePath, documentId: opened.documentId, kind: 'course-v10' },
+          opened: { documentId: opened.documentId, kind: 'course-v10', name: filePath, writable: context.permission !== 'read-only' } }
       }
       throw new Error(`unexpected ${name}`)
     } }
@@ -97,7 +98,7 @@ it.each([false, true])('reopens a V9 file and applies its prior ready image with
       return
     }
     turns++
-    if (turns === 1 && !frozenInitially) { yield done(request, [{ name: 'file.create', input: { name: 'lesson.h5lesson', kind: 'course-v9' } }]); return }
+    if (turns === 1 && !frozenInitially) { yield done(request, [{ name: 'file.create', input: { name: 'lesson.glx', kind: 'course-v10' } }]); return }
     if (turns === (frozenInitially ? 1 : 2)) {
       yield done(request, [{ name: 'tools.load', input: { families: ['media'] } }]); return
     }
@@ -125,9 +126,9 @@ it.each([false, true])('reopens a V9 file and applies its prior ready image with
     if (turns === (frozenInitially ? 5 : 6)) {
       try {
         await expect(gateway.readImageResource(resumedRunId, reopenedDocumentId, oldResource)).rejects.toThrow()
-        const location = (model as Extract<typeof model, { kind: 'course-v9' }>).project.locations.find(value => value.kind === 'slide-scene')!
-        const owner = await gateway.issueTarget(resumedRunId, reopenedDocumentId, { kind: 'course-owner', locationId: location.id, owner: 'scene' })
-        yield done(request, [{ name: 'media.insert', input: { target: owner, resource: newResource, properties: {} } }]); return
+        const location = (model as Extract<typeof model, { kind: 'course-v10' }>).project.surfaces.find(value => value.kind === 'slide')!
+        const owner = await gateway.issueTarget(resumedRunId, reopenedDocumentId, { kind: 'course-surface', surfaceId: location.id })
+        yield done(request, [{ name: 'media.insert', input: { target: owner, resource: newResource } }]); return
       } catch (error) { providerError = error instanceof Error ? error.message : String(error); throw error }
     }
     yield done(request)
@@ -146,7 +147,7 @@ it.each([false, true])('reopens a V9 file and applies its prior ready image with
   expect(exhausted.failure?.code).toBe('connection-lost')
   expect(exhausted.tools.map(tool => tool.call.name)).toEqual(frozenInitially
     ? ['tools.load', 'image.generate'] : ['file.create', 'tools.load', 'image.generate'])
-  expect(exhausted.tools.find(tool => tool.call.name === 'image.generate')?.result).toMatchObject({ kind: 'read' })
+  expect(exhausted.tools.find(tool => tool.call.name === 'image.generate')?.result, JSON.stringify(exhausted.tools)).toMatchObject({ kind: 'read' })
   oldResource = (exhausted.tools.find(tool => tool.call.name === 'image.generate')!.result as any).data.resources[0].resource
   await registry.close(session.documentId)
   const resumed = await engine.start({ ...input, documents: [] }, { runId: exhausted.runId, facts: '' },

@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import { BundledSkillService, type BundledSkillBundle } from '../../src/main/workbench/skills/BundledSkillService'
 
 const bundle: BundledSkillBundle = {
@@ -27,7 +28,7 @@ describe('BundledSkillService', () => {
       { name: 'build-courseware-project', description: 'Build a project.' },
     ])
     expect(await service.read({ skill: 'orchestrate-courseware', path: 'references/guide.md', offset: 0, limit: 100 }))
-      .toEqual({ status: 'read', skill: 'orchestrate-courseware', path: 'references/guide.md', version: 'sha256:one', content: 'direct reference', truncated: false })
+      .toEqual({ status: 'read', skill: 'orchestrate-courseware', path: 'references/guide.md', version: `sha256:${createHash('sha256').update('skills/orchestrate-courseware/references/guide.md').update('direct reference').digest('hex')}`, content: 'direct reference', truncated: false })
     for (const path of ['references/not-listed.md', '../build-courseware-project/SKILL.md', '/etc/passwd', 'C:/secret', 'references\\guide.md', 'references/./guide.md', 'references//guide.md', 'references/../references/guide.md']) {
       expect(await service.read({ skill: 'orchestrate-courseware', path, offset: 0, limit: 1 }))
         .toEqual({ status: 'unknown-path', skill: 'orchestrate-courseware', path })

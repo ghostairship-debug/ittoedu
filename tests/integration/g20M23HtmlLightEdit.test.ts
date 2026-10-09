@@ -17,6 +17,7 @@ import { HtmlPreviewController } from '../../src/renderer/documentFiles/html/htm
 import { HtmlLightEditOverlay } from '../../src/renderer/documentFiles/html/HtmlLightEditOverlay'
 import { HtmlTextDrafts } from '../../src/renderer/documentFiles/html/htmlTextDrafts'
 
+const imageUrl = (bytes: Uint8Array, mimeType = 'image/png') => `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}`
 const roots: string[] = []
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }) })
 afterEach(async () => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }) })
@@ -82,7 +83,7 @@ it('commits only the located text in one human History entry and supports undo',
   expect((await f.host.internalAPI.read(after.documentId)).model).toMatchObject({ source: (f.snapshot.model as { source: string }).source })
 })
 
-it('prepares selected bytes, rejects symlink assets, and replaces responsive candidates in one source commit', async () => {
+it('carries selected bytes in one source commit without writing through an unrelated asset-directory symlink', async () => {
   const f = await setup('<html><body><picture><source srcset="old.webp"><img src="old.png" srcset="other.png" alt="图"></picture></body></html>')
   const report = { handle: 'image', kind: 'image' as const, domPath: [{ name: 'html', index: 0 },
     { name: 'body', index: 1 }, { name: 'picture', index: 0 }, { name: 'img', index: 1 }], sectionOrder: null,
@@ -95,20 +96,26 @@ it('prepares selected bytes, rejects symlink assets, and replaces responsive can
     baseRevision: f.snapshot.revision, bindingVersion: f.lease.bindingVersion, leaseId: 'lease', loadId: 'load',
     target: 'image', change: { kind: 'image', name: 'selected.png', mimeType: 'image/png', bytes },
   }
-  expect(await f.service.edit(request, f.context)).toMatchObject({ status: 'applied', patch: { value: 'lesson.assets/image-op-image.png', rewroteResponsive: true } })
+  const url = imageUrl(bytes)
+  expect(await f.service.edit(request, f.context)).toMatchObject({ status: 'applied', patch: { value: url, rewroteResponsive: true } })
   const after = await f.host.internalAPI.read(f.snapshot.documentId)
-  expect(after.model).toMatchObject({ source: '<html><body><picture><source srcset="lesson.assets/image-op-image.png"><img src="lesson.assets/image-op-image.png" srcset="lesson.assets/image-op-image.png" alt="图"></picture></body></html>' })
-  expect(await fs.readFile(path.join(f.root, 'lesson.assets', 'image-op-image.png'))).toEqual(Buffer.from(bytes))
+  expect(after.model).toMatchObject({ source: `<html><body><picture><source srcset="${url}"><img src="${url}" srcset="${url}" alt="图"></picture></body></html>` })
+  await f.host.internalAPI.save(f.snapshot.documentId)
+  expect((await new DocumentHostService(path.join(f.root, 'reopen-images')).open(f.filename)).model).toEqual(after.model)
+  await expect(fs.stat(path.join(f.root, 'lesson.assets'))).rejects.toMatchObject({ code: 'ENOENT' })
 
   const other = await setup('<html><body><img src="old.png"></body></html>')
   await fs.symlink(f.root, path.join(other.root, 'lesson.assets'), 'dir')
   const otherReport = { ...report, domPath: [{ name: 'html', index: 0 }, { name: 'body', index: 1 }, { name: 'img', index: 0 }] }
   await other.service.resolveTarget({ type: 'html-preview.resolve-target', leaseId: 'lease', loadId: 'load',
     revision: other.snapshot.revision, targets: [otherReport] }, other.context)
-  const denied = await other.service.edit({ ...request, documentId: other.snapshot.documentId, epoch: other.snapshot.epoch,
+  const outsideEntries = await fs.readdir(f.root)
+  const inline = await other.service.edit({ ...request, documentId: other.snapshot.documentId, epoch: other.snapshot.epoch,
     baseRevision: other.snapshot.revision, bindingVersion: other.lease.bindingVersion }, other.context)
-  expect(denied).toMatchObject({ status: 'rejected' })
-  expect((await other.host.internalAPI.read(other.snapshot.documentId)).revision).toBe(other.snapshot.revision)
+  expect(inline).toMatchObject({ status: 'applied', patch: { value: url } })
+  expect((await other.host.internalAPI.read(other.snapshot.documentId)).model).toMatchObject({ source: `<html><body><img src="${url}"></body></html>` })
+  expect(await fs.readdir(f.root)).toEqual(outsideEntries)
+  expect(await fs.readlink(path.join(other.root, 'lesson.assets'))).toBe(f.root)
 
   const conflict = await setup('<html><body><img src="old.png"></body></html>')
   const rejected = new HtmlSourceEditService({ readDocument: id => conflict.host.internalAPI.read(id),
@@ -123,20 +130,24 @@ it('prepares selected bytes, rejects symlink assets, and replaces responsive can
   await expect(fs.stat(path.join(conflict.root, 'lesson.assets', 'image-op-conflict.png'))).rejects.toMatchObject({ code: 'ENOENT' })
 })
 
-it('encodes reserved characters in the asset URL while keeping the real filename', async () => {
+it('keeps selected bytes in the source of an HTML file with reserved filename characters', async () => {
   const f = await setup('<html><body><img src="old.png"></body></html>', 'lesson#1.html')
   const report = { handle: 'image', kind: 'image' as const,
     domPath: [{ name: 'html', index: 0 }, { name: 'body', index: 1 }, { name: 'img', index: 0 }],
     sectionOrder: null, rawText: 'old.png', attributeName: 'src', rect: { x: 0, y: 0, width: 40, height: 20 }, scriptCreated: false }
   await f.service.resolveTarget({ type: 'html-preview.resolve-target', leaseId: 'lease', loadId: 'load',
     revision: f.snapshot.revision, targets: [report] }, f.context)
+  const bytes = Uint8Array.from([137,80,78,71,13,10,26,10,0])
   const result = await f.service.edit({ type: 'html-preview.edit', operationId: 'image-1', documentId: f.snapshot.documentId,
     epoch: f.snapshot.epoch, baseRevision: f.snapshot.revision, bindingVersion: f.lease.bindingVersion,
     leaseId: 'lease', loadId: 'load', target: 'image',
-    change: { kind: 'image', name: 'photo.png', mimeType: 'image/png', bytes: Uint8Array.from([137,80,78,71,13,10,26,10,0]) } }, f.context)
-  expect(result).toMatchObject({ status: 'applied', patch: { value: 'lesson%231.assets/image-image-1.png' } })
-  expect((await f.host.internalAPI.read(f.snapshot.documentId)).model).toMatchObject({ source: expect.stringContaining('src="lesson%231.assets/image-image-1.png"') })
-  expect(await fs.readFile(path.join(f.root, 'lesson#1.assets', 'image-image-1.png'))).toBeTruthy()
+    change: { kind: 'image', name: 'photo.png', mimeType: 'image/png', bytes } }, f.context)
+  expect(result).toMatchObject({ status: 'applied', patch: { value: imageUrl(bytes) } })
+  await f.host.internalAPI.save(f.snapshot.documentId)
+  const reopened = await new DocumentHostService(path.join(f.root, 'reserved-reopen')).open(f.filename)
+  expect(reopened.model).toMatchObject({ source: `<html><body><img src="${imageUrl(bytes)}"></body></html>` })
+  expect(path.basename(reopened.binding.kind === 'file' ? reopened.binding.path : '')).toBe('lesson#1.html')
+  await expect(fs.stat(path.join(f.root, 'lesson#1.assets'))).rejects.toMatchObject({ code: 'ENOENT' })
 })
 
 it('replaces an img with no src by inserting one attribute and can undo to the original placeholder', async () => {
@@ -148,18 +159,22 @@ it('replaces an img with no src by inserting one attribute and can undo to the o
   const resolved = await f.service.resolveTarget({ type: 'html-preview.resolve-target', leaseId: 'lease', loadId: 'load',
     revision: f.snapshot.revision, targets: [report] }, f.context)
   expect(resolved.targets[0]).toMatchObject({ status: 'editable', locator: { valueSpan: null, expectedRaw: '' } })
+  const bytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>')
+  const url = imageUrl(bytes, 'image/svg+xml')
   const result = await f.service.edit({ type: 'html-preview.edit', operationId: 'no-src-image', documentId: f.snapshot.documentId,
     epoch: f.snapshot.epoch, baseRevision: f.snapshot.revision, bindingVersion: f.lease.bindingVersion,
     leaseId: 'lease', loadId: 'load', target: 'empty-image',
     change: { kind: 'image', name: 'photo.svg', mimeType: 'image/svg+xml',
-      bytes: new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>') } }, f.context)
-  expect(result).toMatchObject({ status: 'applied', patch: { kind: 'image', value: 'lesson.assets/image-no-src-image.svg' } })
+      bytes } }, f.context)
+  expect(result).toMatchObject({ status: 'applied', patch: { kind: 'image', value: url } })
   const after = await f.host.internalAPI.read(f.snapshot.documentId)
-  expect(after.model).toMatchObject({ source: '<html><body><img alt="待补图片" width="90" src="lesson.assets/image-no-src-image.svg"></body></html>' })
+  expect(after.model).toMatchObject({ source: `<html><body><img alt="待补图片" width="90" src="${url}"></body></html>` })
+  await f.host.internalAPI.save(f.snapshot.documentId)
+  expect((await new DocumentHostService(path.join(f.root, 'placeholder-reopen')).open(f.filename)).model).toEqual(after.model)
   expect((await f.host.internalAPI.dispatch({ documentId: after.documentId, epoch: after.epoch, baseRevision: after.revision,
     operationId: 'no-src-undo', actor: 'human', mutation: { type: 'undo' } })).status).toBe('applied')
   expect((await f.host.internalAPI.read(after.documentId)).model).toMatchObject({ source: '<html><body><img alt="待补图片" width="90"></body></html>' })
-  expect(await fs.readFile(path.join(f.root, 'lesson.assets', 'image-no-src-image.svg'))).toBeTruthy()
+  await expect(fs.stat(path.join(f.root, 'lesson.assets'))).rejects.toMatchObject({ code: 'ENOENT' })
 })
 
 it('rewrites responsive candidates on hot patch, restores them on undo, and rejects script changes', () => {
@@ -252,7 +267,7 @@ it('marks script replacements as dynamic even when the replacement has identical
   dispose()
 })
 
-it('offers the existing source AI card for a no-src image placeholder and a dynamic text target', () => {
+it('shows the source AI card for a no-src placeholder and disables an unbound dynamic text target', () => {
   const committed = { documentId: 'doc', epoch: 'epoch', revision: 1,
     model: { kind: 'text', source: '<html><body><img alt="图"><p>计数 1</p></body></html>', resources: { assets: {}, components: {} } },
     binding: { kind: 'file', path: '/lesson.html', version: 'v1', bindingVersion: 1 } } as DocumentSnapshot
@@ -268,7 +283,8 @@ it('offers the existing source AI card for a no-src image placeholder and a dyna
   mounted.rerender(createElement(HtmlLightEditOverlay, { ...props, target: { report: { ...image.report,
     handle: 'dynamic', kind: 'text', rawText: '计数 1', attributeName: null, scriptCreated: true },
     resolved: { handle: 'dynamic', status: 'not-editable', reason: 'script-created' } } }))
-  expect(screen.getByText('不能直接修改这个位置，可用 AI 修改 HTML 源码。')).toBeTruthy()
+  expect(screen.getByText('这个位置暂时无法定位，请重新选择要修改的文字或图片。')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'AI 修改' }).hasAttribute('disabled')).toBe(true)
   expect(screen.getByRole('button', { name: 'AI 修改' })).toBeTruthy()
   mounted.unmount()
 })
@@ -447,13 +463,15 @@ it.each([
     epoch: f.snapshot.epoch, baseRevision: f.snapshot.revision, bindingVersion: f.lease.bindingVersion,
     leaseId: 'lease', loadId: 'load', target: 'img',
     change: { kind: 'image', name: 'picked.png', mimeType: 'image/png', bytes } }, f.context)
-  const url = 'lesson.assets/image-op-responsive.png'
+  const url = imageUrl(bytes)
   expect(result).toMatchObject({ status: 'applied', patch: { value: url } })
   if (result.status !== 'applied') throw new Error('image replacement did not commit')
   expect(result.patch.rewroteResponsive).toBe(responsive ? true : undefined)
   const after = await f.host.internalAPI.read(f.snapshot.documentId)
   expect(after.model).toMatchObject({ source: `<html><body>${expectedMarkup.replaceAll('$new', url)}</body></html>` })
   expect(after.undoDepth).toBe(f.snapshot.undoDepth + 1)
+  await f.host.internalAPI.save(f.snapshot.documentId)
+  expect((await new DocumentHostService(path.join(f.root, 'responsive-reopen')).open(f.filename)).model).toEqual(after.model)
   expect((await f.host.internalAPI.dispatch({ documentId: after.documentId, epoch: after.epoch,
     baseRevision: after.revision, operationId: 'responsive-undo', actor: 'human',
     mutation: { type: 'undo' } })).status).toBe('applied')

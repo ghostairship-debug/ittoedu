@@ -21,8 +21,8 @@ it('opens a durable V10 recovery in the course bridge and preserves its saved fi
     const original = createMarkdownTestHost(journal)
     const project = createBlankCourseProjectV10('磁盘原稿')
     const draft = await original.documents.create({ kind: 'course-v10', project,
-      resources: { assets: {}, components: {} } }, '恢复课件.h5lesson')
-    const filename = path.join(directory, '恢复课件.h5lesson')
+      resources: { assets: {}, components: {} } }, '恢复课件.glx')
+    const filename = path.join(directory, '恢复课件.glx')
     const saved = await original.documents.save(draft.documentId, filename)
     expect(saved).toMatchObject({ revision: 0, dirty: false })
     expect(await original.documents.dispatch({ documentId: saved.documentId, epoch: saved.epoch,
@@ -52,8 +52,8 @@ it('opens a durable V10 recovery in the course bridge and preserves its saved fi
     }
     render(<RecoveryWorkspace />)
     fireEvent.click(await screen.findByRole('button', { name: '恢复稿（1）' }))
-    const row = (await screen.findByText('恢复课件.h5lesson')).closest('li')!
-    expect(within(row).getByText('H5 演示 · 尚未恢复')).toBeTruthy()
+    const row = (await screen.findByText('恢复课件.glx')).closest('li')!
+    expect(within(row).getByText('果铃工程 · 尚未恢复')).toBeTruthy()
     fireEvent.click(within(row).getByRole('button', { name: '恢复并打开' }))
     await waitFor(() => {
       expect(tabs.activeTab).toBe(draft.documentId)

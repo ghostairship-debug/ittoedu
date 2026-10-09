@@ -65,9 +65,8 @@ it('edits observed object paths through public Gateway direct/batch, preserves i
     expect(await tool('skills.read', { skill: 'orchestrate-courseware' })).toMatchObject({ kind: 'read' })
     await gateway.loadToolFamilies('path', ['layout'])
     const names = (await gateway.describeRun('path')).map(tool => tool.name)
-    expect(names).toEqual(expect.arrayContaining(['project.list', 'project.read', 'object.update', 'batch']))
-    expect(names).not.toContain('read')
-    expect(names).not.toContain('inspect')
+    // Project paths and authorized target handles are both current V10 read entrances.
+    expect(names).toEqual(expect.arrayContaining(['project.list', 'project.read', 'read', 'inspect', 'object.update', 'batch']))
     expect(await tool('object.update', { path: 'pages/01-第 1 页/01-文字.data.json', properties: { frame: { x: 70 } } }))
       .toMatchObject({ kind: 'error', message: expect.stringContaining('尚未观察') })
 
@@ -82,7 +81,7 @@ it('edits observed object paths through public Gateway direct/batch, preserves i
       { name: 'object.update', input: { project: '移动', path: paths[0], properties: { frame: { x: 70, width: 190 } } } },
       { name: 'object.update', input: { path: paths[1], properties: { frame: { y: 90, height: 80 } } } },
     ] } }
-    const effects = ['a', 'b'].map(instanceId => ({ documentId, target: { kind: 'course-instance', surfaceId, instanceId } }))
+    const effects = ['a', 'b'].map(instanceId => ({ documentId, epoch: initial.epoch, target: { kind: 'course-instance', surfaceId, instanceId } }))
     expect(await gateway.effectTargets('path', batch)).toEqual(effects)
     expect(await gateway.preflightBatch('path', batch.input)).toBeNull()
     await apply(batch)

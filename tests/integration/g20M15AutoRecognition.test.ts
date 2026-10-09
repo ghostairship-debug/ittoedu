@@ -73,18 +73,22 @@ it('M15 the page-text list reads a bundled page with no static text, including t
   expect(texts.some(text => text.includes('react') || text.includes('assets/'))).toBe(false)
 })
 
-it('M15 the capability guides no longer ask Runtimes or components to register what they show', () => {
-  const guide = (file: string) => readFileSync(join(root, 'artifacts/ai-capabilities/protocols', file), 'utf8')
-  for (const file of ['runtime-api2.authoring.md', 'runtime-api3.authoring.md']) {
-    const text = guide(file)
-    expect(text).toContain('## 5. 可见文字与图片：不需要登记')
-    expect(text).not.toContain('必须来自 `content.values`')
-    expect(text).not.toContain('所有人工可见文字都来自 `content.values`')
+it('M15 current API 5 creation and editing guides leave visible text and image identity to the host', () => {
+  const guide = (file: string) => readFileSync(join(root, 'artifacts/ai-capabilities/skills', file), 'utf8')
+  const html = guide('build-courseware-project/references/html-draft-contract.md')
+  const edit = guide('edit-content/SKILL.md')
+  const representation = guide('build-courseware-project/references/representation-capabilities.md')
+  expect(html).toContain('不要求私有模板、登记表或编辑编号')
+  expect(html).toContain('软件解析、包装并管理资源')
+  expect(html).toContain('文字和图片的轻编辑能力')
+  expect(edit).toContain('宿主维护目标身份、关联资源、事务和应用结果')
+  expect(edit).toContain('不手工登记对象、修订号或资源编号')
+  expect(representation).toContain('软件登记身份')
+  for (const text of [html, edit, representation]) {
+    for (const requirement of ['必须来自 `content.values`', '所有人工可见文字都来自 `content.values`',
+      '所有组件文字必须放入 `props.content`', '必须显式登记命中区域', '组件必须通过 DOM `data-courseware-edit-key`',
+      '所有可达状态的可见文案都必须出现在有效 `props.content` 中']) expect(text).not.toContain(requirement)
   }
-  const component = guide('component-api4.authoring.md')
-  expect(component).toContain('## 3. 组件文字与图片：不需要登记')
-  expect(component).not.toContain('所有组件文字必须放入 `props.content`')
-  expect(component).not.toContain('必须显式登记命中区域')
-  expect(component).not.toContain('组件必须通过 DOM `data-courseware-edit-key`')
-  expect(component).not.toContain('所有可达状态的可见文案都必须出现在有效 `props.content` 中')
+  const protocol = JSON.parse(readFileSync(join(root, 'artifacts/ai-capabilities/protocols/component-api5.json'), 'utf8'))
+  expect(protocol.apiVersion).toBe(5)
 })

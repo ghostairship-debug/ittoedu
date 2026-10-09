@@ -1,21 +1,22 @@
 // @vitest-environment node
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { MarkdownDriver } from '../../src/core/drivers/MarkdownDriver'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { EditSessionService } from '../../src/main/workbench/execution/EditSessionService'
-import { flowSurfaceIn, resolveFlowBlock } from '../../src/core/tools/flowDocumentModel'
-import { flowTextSlot } from '../../src/core/tools/flowTextSlot'
-import { locateCourseLayer } from '../../src/core/drivers/course/layerProperties'
-import type { DocumentCommand, DocumentModel, DocumentOperationResult, DurableDocumentState } from '../../src/shared/workbench/document'
+import { createCurrentSelectionFixture } from '../helpers/g20CurrentSelectionFixture'
+import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
+import { createTextComponentData } from '../../src/components/text'
+import { readCourseInstanceText } from '../../src/core/tools/ToolTargets'
+import type { JsonValue } from '../../src/shared/contracts/component-platform/project'
+import type { DocumentCommand, DocumentOperationResult, DurableDocumentState } from '../../src/shared/workbench/document'
 import type { EditEvent } from '../../src/shared/workbench/editSession'
 import type { ToolTarget, ToolResult } from '../../src/shared/workbench/tools'
 
-const markdown = new MarkdownDriver(), course = new CourseV9Driver()
+const markdown = new MarkdownDriver(), course = new CourseV10Driver()
 const md = (source: string) => markdown.load(new TextEncoder().encode(source))
-const fixture = () => course.load(new Uint8Array(readFileSync('tests/fixtures/course-project-v9/mixed.h5lesson'))) as Extract<DocumentModel, { kind: 'course-v9' }>
+const fixture = () => createCurrentSelectionFixture().model
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { resolve, promise } }
 function harness() {
   let sequence = 0
@@ -149,50 +150,41 @@ describe('S06 real EditSession/Gateway/Registry integration', () => {
     expect(restored.read().undoDepth).toBe(0)
   })
 
-  it('targets unmounted Native text while preserving unrelated Flow content and commits only through Gateway', async () => {
-    const h = harness(), model = fixture(), session = await h.registry.create(model, 'mixed.h5lesson')
-    const target: ToolTarget = { kind: 'course-object', locationId: 'location-spatial', itemId: 'spatial-label' }
-    const handle = await h.grant('r', session.documentId, target)
-    await h.edits.begin({ runId: 'r', editId: 'native', targetHandle: handle })
-    await h.edits.snapshot('native', 0, '空间正文😀')
-    const human = structuredClone(model.project)
-    flowSurfaceIn(human, 'surface-flow').blocks.push({ id: 'human-new', type: 'paragraph', content: { inlines: [{ type: 'text', text: '保留人工段落' }] } })
-    await h.human(session.documentId, { type: 'course.replace', project: human })
-    expect(await h.edits.snapshot('native', 1, '空间正文😀')).toMatchObject({ target, revision: model.project.revision + 1 })
-    const result = receipt(await h.gateway.execute('r', 'native', textCall(handle, '空间正文😀')))
-    h.edits.finish('native', result)
-    const after = session.read()
-    if (after.model.kind !== 'course-v9') throw new Error('fixture')
-    expect(locateCourseLayer(after.model.project, 'spatial-label')?.item).toMatchObject({ content: { data: { text: '空间正文😀' } } })
-    expect(flowSurfaceIn(after.model.project, 'surface-flow').blocks.at(-1)?.id).toBe('human-new')
-    expect(after.undoDepth).toBe(2)
-    expect(after.model.resources).toEqual(model.resources)
-    expect(h.events.filter(event => event.type === 'edit.finished')).toHaveLength(1)
-  })
-
-  it.each(['flow-block', 'flow-range'] as const)('supports %s while human edits to another block remain canonical and undoable', async kind => {
-    const h = harness(), model = fixture(), surface = flowSurfaceIn(model.project, 'surface-flow')
-    const paragraph = surface.blocks.find(block => block.id === 'flow-paragraph')!
-    if (paragraph.type !== 'paragraph') throw new Error('fixture')
-    paragraph.content = { inlines: [{ type: 'text', text: '甲乙丙丁' }] }
-    const target: ToolTarget = kind === 'flow-block'
-      ? { kind, surfaceId: surface.id, parentId: null, blockId: paragraph.id }
-      : { kind, surfaceId: surface.id, parentId: null, blockId: paragraph.id, slot: { kind: 'field', field: 'content' }, from: 1, to: 3 }
-    const session = await h.registry.create(model, 'flow.h5lesson'), handle = await h.grant('r', session.documentId, target)
-    await h.edits.begin({ runId: 'r', editId: 'flow', targetHandle: handle }); await h.edits.snapshot('flow', 0, '新😀')
-    const human = structuredClone(model.project)
-    flowSurfaceIn(human, surface.id).blocks.push({ id: 'other-block', type: 'paragraph', content: { inlines: [{ type: 'text', text: '人工保留' }] } })
-    await h.human(session.documentId, { type: 'course.replace', project: human })
-    expect(await h.edits.snapshot('flow', 1, '新😀')).toMatchObject({ status: 'active', target })
-    const result = receipt(await h.gateway.execute('r', 'flow', textCall(handle, '新😀')))
-    h.edits.finish('flow', result)
-    const after = session.read()
-    if (after.model.kind !== 'course-v9') throw new Error('fixture')
-    const block = resolveFlowBlock(after.model.project, target).block
-    expect(flowTextSlot(block, { kind: 'field', field: 'content' }).get()).toEqual({ inlines: [{ type: 'text', text: kind === 'flow-block' ? '新😀' : '甲新😀丁' }] })
-    expect(flowSurfaceIn(after.model.project, surface.id).blocks.at(-1)?.id).toBe('other-block')
-    expect(after.undoDepth).toBe(2)
-    expect(h.edits.list(session.documentId)).toEqual([])
-    expect(h.events.some(event => event.type === 'edit.aborted')).toBe(false)
+  it('previews Spatial text and exact Flow fields without changing canonical data, preserving concurrent neighboring edits through ACK and Undo', async () => {
+    for (const mode of ['spatial', 'flow-object', 'flow-range'] as const) {
+      const h = harness(), model = fixture()
+      model.project.instances['flow-paragraph'].data = JSON.parse(JSON.stringify(createTextComponentData('甲乙丙丁'))) as JsonValue
+      const target: ToolTarget = mode === 'spatial'
+        ? { kind: 'course-instance', surfaceId: 'spatial', instanceId: 'spatial-label', stateId: null }
+        : { kind: 'course-instance', surfaceId: 'flow', instanceId: 'flow-paragraph', stateId: null,
+          ...(mode === 'flow-range' ? { dataPath: ['content'], from: 1, to: 3 } : {}) }
+      const session = await h.registry.create(model, 'mixed.glx'), handle = await h.grant('r', session.documentId, target)
+      await h.edits.begin({ runId: 'r', editId: 'current', targetHandle: handle })
+      await h.edits.snapshot('current', 0, '新😀')
+      expect(session.read().model).toEqual(model)
+      expect(session.read().undoDepth).toBe(0)
+      const neighborData = JSON.parse(JSON.stringify(createTextComponentData('人工保留'))) as JsonValue
+      expect(await h.human(session.documentId, captureComponentOperation(model.project,
+        [{ type: 'data.set', instanceId: 'flow-neighbor', path: [], value: neighborData }]))).toMatchObject({ status: 'applied' })
+      expect(await h.edits.snapshot('current', 1, '新😀')).toMatchObject({ status: 'active', target, revision: 1 })
+      const result = receipt(await h.gateway.execute('r', 'current', textCall(handle, '新😀')))
+      expect(result.status).toBe('applied'); h.edits.finish('current', result)
+      const after = session.read()
+      if (after.model.kind !== 'course-v10') throw new Error('Expected current course')
+      const whole = { ...target, dataPath: ['content'] }; delete (whole as { from?: number }).from; delete (whole as { to?: number }).to
+      expect(readCourseInstanceText(after.model, whole)).toMatchObject({ inlines: [{ type: 'text', text: mode === 'flow-range' ? '甲新😀丁' : '新😀' }] })
+      expect(after.model.project.instances['flow-neighbor'].data).toEqual(neighborData)
+      expect(after.undoDepth).toBe(2); expect(after.model.resources).toEqual(model.resources)
+      expect(h.edits.list(session.documentId)).toEqual([])
+      expect(h.events.filter(event => event.type === 'edit.finished')).toHaveLength(1)
+      expect(h.events.some(event => event.type === 'edit.aborted')).toBe(false)
+      await session.execute({ documentId: after.documentId, epoch: after.epoch, operationId: 'undo-current', actor: 'human',
+        baseRevision: after.revision, mutation: { type: 'undo' } })
+      const undone = session.read().model
+      if (undone.kind !== 'course-v10') throw new Error('Expected current course')
+      expect(undone.project.instances[target.instanceId]).toEqual(model.project.instances[target.instanceId])
+      expect(undone.project.instances['flow-neighbor'].data).toEqual(neighborData)
+      expect(course.load(course.serialize(undone))).toEqual(undone)
+    }
   })
 })

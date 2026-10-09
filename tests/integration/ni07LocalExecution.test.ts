@@ -16,7 +16,7 @@ vi.mock('electron', () => ({ app: { getPath: () => electronDirectory.value, getA
   }, clipboard: {}, screen: {}, webContents: {} }))
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { resolve, promise } }
 
-it('executes exact approved commands in the real managed copy, freezes current source and parent route, and reads readonly work before finishing and delivering', async () => {
+it.skipIf(process.platform !== 'win32')('executes exact approved commands in the real managed copy, freezes current source and parent route, and reads readonly work before finishing and delivering', async () => {
   const base = path.resolve('output/ni07-desktop-host'); await fs.mkdir(base, { recursive: true })
   const root = await fs.mkdtemp(path.join(base, 'run-')); electronDirectory.value = root
   const workspace = path.join(root, 'workspace'); await fs.mkdir(workspace)

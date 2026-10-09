@@ -6,7 +6,7 @@ import path from 'node:path'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { residentMcpFixture } from '../helpers/residentMcpFixture'
 
-it('binds a no-UI resident to its explicit root while GUI connection facts continue to follow the existing UI owner', async () => {
+it('binds a no-UI resident to its explicit root while a later GUI cannot replace the explicit startup root', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'headless-mcp-root-'))
   let close: (() => Promise<void>) | undefined
   try {
@@ -21,7 +21,14 @@ it('binds a no-UI resident to its explicit root while GUI connection facts conti
     const client = await f.connect()
     expect((await f.service.status()).sessions[0]).toMatchObject({ workspaceId: 'second' })
     f.ui.state = { workspaceId: 'space' }
-    expect(await f.service.connectionInfo()).toMatchObject({ workspaceId: 'space', workspace: await realpath(first) })
+    expect(await f.service.connectionInfo()).toMatchObject({ workspaceId: 'second', workspace: await realpath(second) })
+    // A GUI-started host follows the existing UI owner when no CLI root was frozen.
+    const gui = await residentMcpFixture({ host: new DocumentHostService(path.join(directory, 'gui-documents')), directory: path.join(directory, 'gui'), workspaceRoot: first })
+    close = async () => { await gui.close(); await f.close() }
+    expect(await gui.service.connectionInfo()).toMatchObject({ workspaceId: 'space', workspace: await realpath(first) })
+    await gui.conversations.registerWorkspace({ workspaceId: 'second', rootPath: await realpath(second), managed: false, authorization: 'user-selected' })
+    gui.ui.state = { workspaceId: 'second' }
+    expect(await gui.service.connectionInfo()).toMatchObject({ workspaceId: 'second', workspace: await realpath(second) })
     await client.close()
     expect((await f.service.status()).state).toBe('running')
   } finally { await close?.(); await rm(directory, { recursive: true, force: true }) }

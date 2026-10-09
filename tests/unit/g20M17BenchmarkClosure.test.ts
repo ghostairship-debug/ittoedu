@@ -57,6 +57,7 @@ describe('audited framework resource closure', () => {
     expect(warnings(vendor + app() + 'k="https://example.invalid/late.mp3";')).toContain('unsupported-dynamic-url-sink')
   })
 
+  // Nine complete bundled React closure analyses share this behavioral case.
   it('warns and preserves resource inputs', () => {
     for (const [_name, src, extra] of [
       ['unknown call', 'chooseImage()', ''],
@@ -73,8 +74,9 @@ describe('audited framework resource closure', () => {
         expect(warnings(vendor + app(src, extra))).toContain('unsupported-dynamic-url-sink')
       } catch (error) { throw new Error('Resource proof input: ' + JSON.stringify([_name, src, extra]), { cause: error }) }
     }
-  })
+  }, 15_000)
 
+  // Six complete bundled React closure analyses share this behavioral case.
   it('warns and preserves props spreads and escaped framework entry functions', () => {
     expect(warnings(vendor + app('D[key]', '', '{...incoming}'))).toContain('unsupported-framework-resource-input')
     expect(warnings(vendor + app('D[key]', 'const make=T.jsx;'))).toContain('unsupported-framework-resource-input')
@@ -82,7 +84,7 @@ describe('audited framework resource closure', () => {
     expect(warnings(vendor + app('D[key]', 's=otherModule;'))).toContain('unsupported-framework-resource-input')
     expect(warnings(vendor + app('D[key]', 'const document=otherDocument;'))).toContain('unsupported-framework-resource-input')
     expect(warnings(vendor + app('D[key]', 'Object.prototype.remote="https://example.invalid/image";'))).toContain('unsupported-framework-resource-input')
-  })
+  }, 15_000)
 
   it('rewrites a shared relative literal once and leaves parseable JavaScript', () => {
     const script = vendor + app('D.a').replace(JSON.stringify(image), '"pic.png"').replace('(0,T.jsx)("audio",{src:k})', '(0,T.jsx)("img",{src:D.a})')

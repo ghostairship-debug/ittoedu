@@ -32,6 +32,6 @@ it('lists the newest HTML components of every directory and deletes one from my 
   await waitFor(() => expect(onRefresh).toHaveBeenCalledOnce())
   expect(remove).toHaveBeenCalledWith({ sourceId: 'component-catalog:mine', entry: 'html-component.a1b2c3d4@1.0.1' })
 
-  fireEvent.change(screen.getByRole('searchbox', { name: '搜索内置组件' }), { target: { value: '拼读' } })
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜索组件' }), { target: { value: '拼读' } })
   expect(within(screen.getByRole('region', { name: 'HTML 组件' })).queryByTestId('html-component-html-component.a1b2c3d4')).toBeNull()
 })
