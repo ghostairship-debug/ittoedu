@@ -1,3 +1,4 @@
+import { jsonValueSchema } from '../../../../src/shared/contracts/component-platform/schema'
 // @vitest-environment node
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -6,7 +7,7 @@ import sharp from 'sharp'
 import { expect, it, vi } from 'vitest'
 import { DocumentHostService } from '../../../../src/main/workbench/DocumentHostService'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
-import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
+import { TEXT_DEFINITION , textDataEdit } from '../../../../src/components/text/adapters'
 import { createTextComponentData } from '../../../../src/components/text/data'
 import { ComponentCatalogManager } from '../../../../src/main/componentCatalogManager'
 import { AssetLibraryService } from '../../../../src/main/workbench/assetSources/componentLibrarySearch'
@@ -19,6 +20,11 @@ vi.mock('electron', () => ({ app: { getPath: () => electronPaths.userData, getAp
 function data(result: ToolResult): any {
   expect(result, JSON.stringify(result)).toMatchObject({ kind: 'read' })
   return (result as { data: any }).data
+}
+function label(value: unknown): string {
+  const parsed = jsonValueSchema.parse(value)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || typeof parsed.label !== 'string') throw new Error('Expected a label')
+  return parsed.label
 }
 function applied(result: ToolResult) { expect(result, JSON.stringify(result)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } }) }
 
@@ -41,7 +47,7 @@ it('the public V10 asset tools save all frozen selections and retain actual cont
     source: 'export default {mount({root,instance}){root.textContent=instance.data.label;return{update(){},dispose(){}}}}' }
   project.instances.first = { id: 'first', definitionId: 'lesson', data: { label: '甲资料正文', assetId: 'photo' }, frame, style: { opacity: 0.8 }, implementationOverride: localOverride }
   project.instances.second = { id: 'second', definitionId: 'lesson', data: { label: '乙资料正文', assetId: 'photo' }, frame: { ...frame, transform: [1, 0, 0, 1, 280, 96] }, style: { opacity: 0.6 } }
-  project.instances.neighbor = { id: 'neighbor', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('未选邻居'), frame: { ...frame, transform: [1, 0, 0, 1, 510, 43] } }
+  project.instances.neighbor = { id: 'neighbor', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('未选邻居')).value, frame: { ...frame, transform: [1, 0, 0, 1, 510, 43] } }
   project.surfaces[0].childIds = ['first', 'second', 'neighbor']
   project.assets.photo = { id: 'photo', path: 'assets/photo.png', mimeType: 'image/png', width: 8, height: 6 }
   const png = await sharp({ create: { width: 8, height: 6, channels: 4, background: '#1a78b0' } }).png().toBuffer()
@@ -68,10 +74,10 @@ it('the public V10 asset tools save all frozen selections and retain actual cont
     expect(archived.status).toBe('ready')
     if (archived.status !== 'ready') throw new Error('Saved library entry required')
     const entry = archived.entry
-    expect(entry.example.rootIds.map(id => entry.example.instances[id].data.label)).toEqual(['甲资料正文', '乙资料正文'])
+    expect(entry.example.rootIds.map(id => label(entry.example.instances[id].data))).toEqual(['甲资料正文', '乙资料正文'])
     expect(entry.example.rootIds.map(id => entry.example.instances[id].frame)).toEqual([project.instances.first.frame, project.instances.second.frame])
     expect(entry.example.rootIds.map(id => entry.example.instances[id].style)).toEqual([project.instances.first.style, project.instances.second.style])
-    expect(Object.values(entry.example.instances).some(value => value.data?.label === '未选邻居')).toBe(false)
+    expect(Object.values(entry.example.instances).some(value => label(value.data) === '未选邻居')).toBe(false)
     expect(Object.values(entry.resources.components).some(files => Object.keys(files).includes('helper.ts'))).toBe(true)
     expect(await sharp(Object.values(entry.resources.assets)[0]).metadata()).toMatchObject({ width: 8, height: 6 })
     const files = data(await call('list-project', 'project.list', {})).files as Array<{ path: string }>
@@ -80,10 +86,11 @@ it('the public V10 asset tools save all frozen selections and retain actual cont
     applied(await call('use-saved', 'asset.use', { packageId: saved.packageId, path: page!.path }))
     const inserted = await host.internalAPI.read(initial.documentId)
     if (inserted.model.kind !== 'course-v10') throw new Error('V10 required')
-    const appended = inserted.model.project.surfaces[0].childIds.slice(3)
+    const insertedProject = inserted.model.project
+    const appended = insertedProject.surfaces[0].childIds.slice(3)
     expect(appended).toHaveLength(2)
     expect(appended.some(id => ['first', 'second'].includes(id))).toBe(false)
-    expect(appended.map(id => inserted.model.project.instances[id].data.label)).toEqual(['甲资料正文', '乙资料正文'])
+    expect(appended.map(id => label(insertedProject.instances[id].data))).toEqual(['甲资料正文', '乙资料正文'])
     expect(inserted.undoDepth).toBe(1)
     const revised = structuredClone(entry)
     for (const definition of Object.values(revised.definitions)) {

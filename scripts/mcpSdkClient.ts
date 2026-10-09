@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import { bootstrapInstalledMcp, type InstalledMcpBootstrapOptions } from '../src/main/workbench/external/installedMcpBootstrap'
 import { readMcpConnectionReady, type McpConnectionReady } from '../src/shared/workbench/mcpConnection'
 
@@ -39,7 +40,7 @@ export async function connectExplicitMcp(connection: ExplicitMcpConnection, name
   return {
     connection,
     client,
-    call: (name: string, args: Record<string, unknown> = {}) => client.callTool({ name, arguments: args }),
+    call: async (name: string, args: Record<string, unknown> = {}) => CallToolResultSchema.parse(await client.callTool({ name, arguments: args })),
     detach,
   }
 }

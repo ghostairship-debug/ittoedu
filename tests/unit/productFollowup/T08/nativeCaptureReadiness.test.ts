@@ -3,7 +3,7 @@ import { mountPublishedCourseV3 } from '../../../../src/player/componentPlatform
 import { prepareComponentOutputRegion } from '../../../../src/player/componentPlatform/outputCapture'
 import type { PublishedCourseV3 } from '../../../../src/shared/contracts/component-platform/published'
 import { IMAGE_DEFINITION, createImageData } from '../../../../src/components/image'
-import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
+import { TEXT_DEFINITION , textDataEdit } from '../../../../src/components/text/adapters'
 import { createTextComponentData } from '../../../../src/components/text/data'
 
 const originalDecode = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'decode')
@@ -18,7 +18,7 @@ function input(): PublishedCourseV3 {
     definitions: { [IMAGE_DEFINITION.id]: IMAGE_DEFINITION, [TEXT_DEFINITION.id]: TEXT_DEFINITION },
     instances: {
       photo: { id: 'photo', definitionId: IMAGE_DEFINITION.id, data: createImageData('current', '当前图片'), frame: { width: 320, height: 200, transform: [1, 0, 0, 1, 0, 0] } },
-      text: { id: 'text', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('后页'), frame: { width: 320, height: 200, transform: [1, 0, 0, 1, 0, 0] } },
+      text: { id: 'text', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('后页')).value, frame: { width: 320, height: 200, transform: [1, 0, 0, 1, 0, 0] } },
     }, assets: { current: { id: 'current', mimeType: 'image/png', url: 'https://current.example/image.png' }, unused: { id: 'unused', mimeType: 'image/png', url: 'https://unused.example/image.png' } },
     surfaces: [{ id: 'current-page', title: '当前', kind: 'slide', childIds: ['photo'] }, { id: 'later-page', title: '后页', kind: 'slide', childIds: ['text'] }], global: { underlay: [], overlay: [] } }
 }

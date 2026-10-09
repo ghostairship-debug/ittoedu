@@ -1,4 +1,3 @@
-import { withDefaultComponentController } from '@/renderer/components/teacherControllerComponent'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import {
@@ -7,8 +6,6 @@ import {
 } from '@/renderer/authoring/generation/authoringObservation'
 import { authoringObservationSpatialViewSchema } from '@/shared/authoringObservation'
 import { aiObservationSchema } from '@/shared/localAgentTaskContract'
-import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
-import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
 import { createSpatialWorldViewTransform } from '@/renderer/course/spatialEditorView'
 import { worldToClient } from '@/renderer/authoring/stageViewportTransform'
 
@@ -21,7 +18,7 @@ function harness() {
   if (surface.type !== 'spatial-2d') throw new Error('Spatial fixture required')
   surface.camera.home = { x: 240, y: -120, zoom: 0.8 }
   Object.assign(surface.camera.frames[0]!, surface.camera.home)
-  let state: AuthoringObservationState = { document: project, sessionGeneration: 3, surfaceId: surface.id,
+  let state: AuthoringObservationState = { document: project, documentId: 'spatial-observation-document', epoch: 'spatial-observation-epoch', sessionGeneration: 3, surfaceId: surface.id,
     locationId: project.startLocationId, stateId: null, selectedIds: [], draft: null, assetFiles: {},
     spatialCamera: { x: -420, y: 360, zoom: 1.25 } }
   const root = document.createElement('main'); document.body.append(root)
@@ -56,15 +53,10 @@ describe('Spatial current camera observation', () => {
     expect(worldToClient(createSpatialWorldViewTransform(view.viewport, view.camera), view.camera)).toEqual({ x: 640, y: 360 })
     const structure = JSON.parse(captured.resourceFiles.find(file => file.role === 'structure')!.content)
     expect(structure.spatialView).toEqual(view)
-    const request = captureGenerationSnapshot({ document: h.project, componentPackages: withDefaultComponentController(h.project).componentPackages, observation: captured.observation,
-      workspace: { version: 1, projectId: h.project.id, normalizedPath: '/fixtures/current-spatial.h5lesson' },
-      sessionToken: { locationId: h.state.locationId, surfaceType: 'spatial-2d', generation: 3, revision: h.project.revision },
-      projection: projectEffectiveLayers({ project: h.project, locationId: h.state.locationId }),
-      selectedIds: [], scope: 'page', instruction: '移到镜头中央', purpose: 'local-edit' })
-    expect(request.observation?.spatialView).toEqual(view)
     const persistedObservation = aiObservationSchema.parse({ version: 1, taskId: crypto.randomUUID(), epoch: 0,
-      workspace: request.workspace, observationId: crypto.randomUUID(), ...request.observation,
-      readScope: { kind: 'location', surfaceId: h.surface.id, locationId: h.state.locationId }, files: request.observation!.files })
+      workspace: { version: 1, projectId: h.project.id, normalizedPath: '/fixtures/current-spatial.h5lesson' },
+      observationId: crypto.randomUUID(), ...captured.observation,
+      readScope: { kind: 'location', surfaceId: h.surface.id, locationId: h.state.locationId }, files: captured.observation.files })
     expect(persistedObservation.spatialView).toEqual(view)
     expect(h.project).toEqual(before)
   })

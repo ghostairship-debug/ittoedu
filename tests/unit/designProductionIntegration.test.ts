@@ -1,117 +1,52 @@
-import { plainDocumentText } from '@/shared/document/content'
-import { beforeEach, describe, expect, it } from 'vitest'
-import { waitFor } from '@testing-library/react'
-import { useEditorStore, selectActiveCourseProjectDocument } from '../../src/renderer/store/editorStore'
-import { recipeDefaults } from '../../src/renderer/recipes/recipeCatalog'
-import { createTextReplacePreview, applyProductivityPreview } from '../../src/renderer/authoring/productivity'
-import { collectCourseProjectHealth } from '../../src/shared/courseProjectHealth'
-import { componentPackagesToArchiveFiles } from '../../src/renderer/components/componentPackageStore'
-import { createTriageT4StoreHost } from '../helpers/triage-t4-store-host'
+// @vitest-environment node
+import { afterEach, expect, it } from 'vitest'
+import { useEditorStore } from '../../src/renderer/store/editorStore'
+import { planCourseRecipeEdits, recipeDefaults, SORT_COMPONENT_ID } from '../../src/core/course/courseRecipeEdits'
+import { createTextReplacePreview, applyProductivityPreview, designProductionStep } from '../../src/renderer/authoring/productivity'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { TEXT_DEFINITION, createTextComponentData, textComponentDataSchema } from '../../src/components/text'
+import { createCourseDocumentHost } from '../helpers/courseDocumentHost'
+const store = () => useEditorStore.getState()
+afterEach(() => store().courseBridge.dispose())
 
-const document = () => selectActiveCourseProjectDocument(useEditorStore.getState())!
+it('commits a captured recipe through the active design action once, selects its new page, and preserves source bytes across save/Undo/Redo', async () => {
+  const h = await createCourseDocumentHost(); await store().connectCourseDocuments(h.api)
+  const context = store().prepareDesignProduction()!, original = structuredClone(context.document)
+  const plan = planCourseRecipeEdits(context.document, { recipeId: 'classify-sort-v1', surfaceId: context.target.surfaceId, slots: { ...recipeDefaults('classify-sort-v1'), mode: 'sort' } })
+  if (!plan.ok) throw new Error(plan.reason)
+  const step = { ...designProductionStep(context, plan.edits), createdSurfaceId: plan.createdLocationId }
+  expect(await store().commitDesignProduction(step)).toBe(true)
+  const changed = store().courseView.snapshot!, documentId = context.target.documentId
+  expect(changed.undoDepth).toBe(1); expect(store().courseView.surfaceId).toBe(plan.createdLocationId)
+  if (changed.model.kind !== 'course-v10') throw new Error('Expected V10')
+  const definition = changed.model.project.definitions[SORT_COMPONENT_ID]
+  expect(definition.implementation.kind).toBe('source')
+  expect(definition.implementation.kind === 'source' && definition.implementation.source).toContain('render')
+  expect(h.driver.load(h.driver.serialize(changed.model))).toEqual(changed.model)
+  await store().courseBridge.undo(documentId)
+  expect(store().courseView.project!.instances).toEqual(original.instances)
+  expect(store().courseView.project!.definitions).toEqual(original.definitions)
+  await store().courseBridge.redo(documentId)
+  expect(store().courseView.project!.instances).toEqual(changed.model.project.instances)
+})
 
-describe('design production through the active editor transaction', () => {
-  it('creates a Recipe with one undo and reopens the actual sorting component bytes', async () => {
-    const host = await createTriageT4StoreHost()
-    const store = useEditorStore.getState()
-    const context = store.prepareDesignProduction()!
-    const initialPackages = structuredClone(store.componentPackages)
-    const initialCount = Object.keys(initialPackages).length
-    expect(store.applyCourseRecipe({ recipeId: 'classify-sort-v1', target: {
-      projectId: context.document.id, revision: context.document.revision, locationId: context.sessionToken.locationId,
-    }, slots: { ...recipeDefaults('classify-sort-v1'), mode: 'sort' } }, context.sessionToken)).toBe(true)
-    await useEditorStore.getState().drainCourseDocument()
-    const created = document()
-    expect(Object.keys(useEditorStore.getState().componentPackages)).toHaveLength(initialCount + 1)
-    useEditorStore.getState().undo()
-    await waitFor(() => {
-      expect(document()).toEqual({
-        ...context.document,
-        revision: expect.any(Number),
-        updatedAt: expect.any(String),
-      })
-      expect(structuredClone(useEditorStore.getState().componentPackages)).toEqual(initialPackages)
-    })
-    useEditorStore.getState().redo()
-    await waitFor(() => {
-      expect(document()).toEqual({
-        ...created,
-        revision: expect.any(Number),
-        updatedAt: expect.any(String),
-      })
-    })
-    const bytes = useEditorStore.getState().exportV9SlideCandidateArchive()!
-    await useEditorStore.getState().createCourseDocument('slide')
-    await useEditorStore.getState().drainCourseDocument()
-    expect(await useEditorStore.getState().reopenV9SlideCandidateArchive(bytes)).toBe(true)
-    await useEditorStore.getState().drainCourseDocument()
-    expect(document()).toEqual({
-      ...created,
-      revision: expect.any(Number),
-      updatedAt: expect.any(String),
-    })
-    expect(Object.keys(componentPackagesToArchiveFiles(useEditorStore.getState().componentPackages))).toHaveLength(initialCount + 1)
-  })
-
-  it('commits batch edits in Flow as one history entry and rejects an old preview after an edit', async () => {
-    const host = await createTriageT4StoreHost()
-    await useEditorStore.getState().createCourseDocument('flow')
-    await useEditorStore.getState().drainCourseDocument()
-    const context = useEditorStore.getState().prepareDesignProduction()!
-    const surface = context.document.surfaces.find(s => s.type === 'flow')!
-    const block = surface.blocks.find(b => b.type === 'paragraph')!
-    if (block.type !== 'paragraph') throw new Error('expected paragraph')
-    // A fixture supplies existing user content; the action still uses the real Store.
-    const fixture = structuredClone(context.document)
-    const body = fixture.surfaces.find(s => s.type === 'flow')!
-    const paragraph = body.blocks.find(b => b.id === block.id)!
-    if (paragraph.type !== 'paragraph') throw new Error('expected paragraph')
-    paragraph.content = { inlines: [{ type: 'text', text: '旧内容 旧内容' }] }
-    await host.open(fixture)
-    const live = useEditorStore.getState().prepareDesignProduction()!
-    const preview = createTextReplacePreview(live, { scope: 'page', find: '旧内容', replacement: '新内容' })
-    const result = applyProductivityPreview(live, preview, preview.items.map(item => item.id))
-    if (!result.ok || !result.step) throw new Error('expected batch transaction')
-    expect(useEditorStore.getState().commitDesignProduction(result.step, live.sessionToken)).toBe(true)
-    await useEditorStore.getState().drainCourseDocument()
-    expect(JSON.stringify(document())).toContain('新内容 新内容')
-    expect(useEditorStore.getState().commitDesignProduction(result.step, live.sessionToken)).toBe(false)
-    useEditorStore.getState().undo()
-    await waitFor(() => {
-      expect(document()).toEqual({
-        ...live.document,
-        revision: expect.any(Number),
-        updatedAt: expect.any(String),
-      })
-    })
-  })
-
-  it('locates a malformed ordinary single-choice family and overflowing fixed text', async () => {
-    const host = await createTriageT4StoreHost()
-    const context = useEditorStore.getState().prepareDesignProduction()!
-    expect(useEditorStore.getState().applyCourseRecipe({ recipeId: 'choice-feedback-v1', target: {
-      projectId: context.document.id, revision: context.document.revision, locationId: context.sessionToken.locationId,
-    }, slots: recipeDefaults('choice-feedback-v1') }, context.sessionToken)).toBe(true)
-    await useEditorStore.getState().drainCourseDocument()
-    const fixture = structuredClone(document())
-    const surface = fixture.surfaces.find(s => s.type === 'slide')!
-    const scene = surface.scenes.at(-1)!
-    for (const rule of scene.interactions) for (const step of rule.actions) {
-      if (step.action.type === 'course-state.set' && step.action.key.startsWith('single_choice_')) step.action.value = false
-    }
-    const text = scene.layerItems.find(item => item.kind === 'native' && item.content.nativeType === 'text')!
-    if (text.kind !== 'native' || text.content.nativeType !== 'text') throw new Error('expected text')
-    text.content.data.text = '一\n二\n三\n四\n五\n六'
-    text.content.data.style.overflow = 'fixed'; text.frame.height = 30
-    const findings = collectCourseProjectHealth(fixture, { assetFiles: {}, componentFiles: {} })
-    expect(findings.find(f => f.code === 'text-capacity-overflow')?.target).toMatchObject({ kind: 'layer-item', layerItemId: text.layerItemId })
-    const option = scene.layerItems.find(item => item.label === '选项 1')!
-    expect(findings.find(f => f.code === 'interaction-single-choice-answer-inconsistent')?.target).toMatchObject({ kind: 'layer-item', owner: 'scene', sceneId: scene.id, layerItemId: option.layerItemId })
-    // The same formal option may be moved to a shared global carrier. The
-    // finding follows that object rather than assuming the rule's scene owner.
-    scene.layerItems = scene.layerItems.filter(item => item.layerItemId !== option.layerItemId)
-    fixture.globalLayerItems.push({ item: option, visibility: { mode: 'all', locationIds: [] }, plane: 'overlay' })
-    const globalFindings = collectCourseProjectHealth(fixture, { assetFiles: {}, componentFiles: {} })
-    expect(globalFindings.find(f => f.code === 'interaction-single-choice-answer-inconsistent')?.target).toMatchObject({ kind: 'layer-item', owner: 'global', layerItemId: option.layerItemId })
-  })
+it('applies a Flow batch preview in one History operation and rejects its delayed replay without touching the latest contents', async () => {
+  const h = await createCourseDocumentHost(); await store().connectCourseDocuments(h.api)
+  const project = createBlankCourseProjectV10(), surface = project.surfaces[0]
+  surface.kind = 'flow'; delete surface.designSize
+  project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
+  for (const id of ['a', 'b']) project.instances[id] = { id, definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData({ inlines: [{ type: 'text', text: '旧内容 旧内容' }] }))) }
+  surface.childIds = ['a', 'b']
+  await store().createCourseDocumentFrom(project)
+  const context = store().prepareDesignProduction()!, preview = createTextReplacePreview(context, { scope: 'page', find: '旧内容', replacement: '新内容' })
+  const result = applyProductivityPreview(context, preview, preview.items.map(item => item.id))
+  if (!result.ok || !result.step) throw new Error('Expected batch preview')
+  expect(await store().commitDesignProduction(result.step)).toBe(true)
+  expect(store().courseView.snapshot!.undoDepth).toBe(1)
+  for (const id of surface.childIds) expect(textComponentDataSchema.parse(store().courseView.project!.instances[id].data).content.inlines).toEqual([{ type: 'text', text: '新内容 新内容' }])
+  const after = store().courseView.snapshot!
+  expect(await store().commitDesignProduction(result.step)).toBe(false)
+  expect(store().courseView.snapshot).toEqual(after)
+  await store().courseBridge.undo(context.target.documentId)
+  expect(store().courseView.project!.instances).toEqual(project.instances)
 })

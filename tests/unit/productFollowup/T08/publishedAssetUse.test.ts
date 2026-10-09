@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { mountPublishedCourseV3 } from '../../../../src/player/componentPlatform/publishedPlayer'
 import type { PublishedCourseV3 } from '../../../../src/shared/contracts/component-platform/published'
-import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
+import { TEXT_DEFINITION , textDataEdit } from '../../../../src/components/text/adapters'
 import { createTextComponentData } from '../../../../src/components/text/data'
 import { IMAGE_DEFINITION, createImageData } from '../../../../src/components/image'
 
@@ -11,7 +11,7 @@ function payload(): PublishedCourseV3 {
   return { schemaVersion: 3, id: 'actual-asset-use', title: '按实际页面加载',
     definitions: { [TEXT_DEFINITION.id]: TEXT_DEFINITION, [IMAGE_DEFINITION.id]: IMAGE_DEFINITION },
     instances: {
-      title: { id: 'title', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('第一页面可用'), frame: { width: 400, height: 100, transform: [1, 0, 0, 1, 0, 0] } },
+      title: { id: 'title', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('第一页面可用')).value, frame: { width: 400, height: 100, transform: [1, 0, 0, 1, 0, 0] } },
       photo: { id: 'photo', definitionId: IMAGE_DEFINITION.id, data: createImageData('later', '第二页素材'), frame: { width: 300, height: 200, transform: [1, 0, 0, 1, 0, 0] } },
     }, assets: { later: { id: 'later', mimeType: 'image/png', url: 'https://later.example/image.png' }, unused: { id: 'unused', mimeType: 'image/png', url: 'https://unused.example/image.png' } },
     surfaces: [{ id: 'first', kind: 'slide', title: '第一页', childIds: ['title'] }, { id: 'second', kind: 'slide', title: '第二页', childIds: ['photo'] }],

@@ -1,446 +1,129 @@
-import { withDefaultComponentController } from '@/renderer/components/teacherControllerComponent'
-import { plainDocumentText } from '@/shared/document/content'
-import { beforeEach, describe, expect, it } from 'vitest'
-import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
-import type {
-  CourseProjectDocument,
-  LayerItem,
-  SlideSceneDocument,
-} from '@/shared/courseProjectTypes'
-import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
-import { insertFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
-import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { TextEncoder as NodeTextEncoder } from 'node:util'
+import { createV10StoreHost } from '../helpers/courseV10StoreHost'
+import { useEditorStore } from '@/renderer/store/editorStore'
+import { TEXT_DEFINITION, createTextData } from '@/components/text'
+import { WEB_DEFINITION } from '@/components/web/data'
+import { INTERACTIONS_DEFINITION, interactionRules } from '@/shared/componentInteractionData'
+import type { CourseProjectV10 } from '@/shared/contracts/component-platform/project'
+import type { InteractionRule } from '@/shared/interactionTypes'
 
-import {
-  selectActiveCourseProjectDocument,
-  selectSelectedNodeIds,
-  useEditorStore,
-} from '@/renderer/store/editorStore'
-import {
-  activeDocumentId,
-  connectCourseHost,
-  formalCourse,
-  openCourseOnHost,
-  settleCourse,
-  undoSettled,
-  type CourseHost,
-} from '../helpers/triage-t2-course'
-
-let host: CourseHost
-let documentId: string
-
-function activeDocument(): CourseProjectDocument {
-  const document = selectActiveCourseProjectDocument(useEditorStore.getState())
-  if (!document) throw new Error('expected active Course Project V9 document')
-  return document
+beforeEach(() => { vi.stubGlobal('Uint8Array', new NodeTextEncoder().encode('').constructor) })
+afterEach(() => { useEditorStore.getState().courseBridge.dispose(); vi.unstubAllGlobals() })
+const rule = (id: string, trigger: InteractionRule['trigger'], action: InteractionRule['actions'][number]['action']): InteractionRule => ({
+  id, enabled: true, trigger, conditions: [], actions: [{ id: `${id}-action`, start: 'after-previous', delayMs: 0, action }],
+})
+function fixture(): CourseProjectV10 {
+  const frame = { width: 160, height: 80, transform: [1, 0, 0, 1, 20, 40] as [number, number, number, number, number, number] }
+  const root = rule('root', { type: 'node.click', nodeId: 'slide-object' }, { type: 'scene.next' })
+  const follower = rule('follower', { type: 'animation.completed', actionId: 'root-action' }, { type: 'scene.next' })
+  const last = rule('last', { type: 'animation.completed', actionId: 'follower-action' }, { type: 'scene.next' })
+  const keep = rule('keep', { type: 'node.click', nodeId: 'kept' }, { type: 'node.enter', nodeId: 'spatial-object', effect: 'fade', durationMs: 200, easing: 'ease-out' })
+  keep.actions.push({ id: 'remaining-action', start: 'with-previous', delayMs: 0, action: { type: 'node.exit', nodeId: 'kept', effect: 'fade', durationMs: 200, easing: 'ease-out' } })
+  const rules = [root, follower, last, keep]
+  return { schemaVersion: 10, id: 'delete-project', revision: 0, title: '一次删除',
+    definitions: { [TEXT_DEFINITION.id]: TEXT_DEFINITION, [WEB_DEFINITION.id]: WEB_DEFINITION, [INTERACTIONS_DEFINITION.id]: INTERACTIONS_DEFINITION },
+    instances: {
+      'slide-object': { id: 'slide-object', definitionId: WEB_DEFINITION.id, data: { html: '删除的演示对象' }, frame },
+      'flow-object': { id: 'flow-object', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextData('删除的正文'))) },
+      'spatial-object': { id: 'spatial-object', definitionId: WEB_DEFINITION.id, data: { html: '删除的空间对象' }, frame },
+      'global-object': { id: 'global-object', definitionId: WEB_DEFINITION.id, data: { html: '删除的全局对象' }, frame },
+      kept: { id: 'kept', definitionId: WEB_DEFINITION.id, data: { html: '<img src="picture">', resourceBindings: { picture: 'image' } }, frame },
+      floating: { id: 'floating', definitionId: WEB_DEFINITION.id, data: { html: '保留的浮层' }, frame,
+        flowPlacement: { space: 'paper', plane: 'overlay', paragraphAnchor: { blockId: 'flow-object', offsetY: 12, xRatio: .5 } } },
+      behavior: { id: 'behavior', definitionId: INTERACTIONS_DEFINITION.id, data: JSON.parse(JSON.stringify({ rules })),
+        attachments: [{ instanceId: 'behavior', target: { kind: 'surface', surfaceId: 'slide' } }] },
+      attached: { id: 'attached', definitionId: INTERACTIONS_DEFINITION.id, data: { rules: [] }, attachments: [
+        { instanceId: 'attached', target: { kind: 'instance', instanceId: 'slide-object' } },
+        { instanceId: 'attached', target: { kind: 'instance', instanceId: 'kept' } }] },
+    },
+    surfaces: [
+      { id: 'slide', kind: 'slide', title: '演示', childIds: ['slide-object', 'behavior'], presentation: { states: [{ id: 'answer', title: '答案',
+        order: ['slide-object', 'behavior'], overrides: { 'slide-object': { visible: false }, behavior: { data: JSON.parse(JSON.stringify({ rules })) } } }] } },
+      { id: 'flow', kind: 'flow', title: '正文', childIds: ['flow-object', 'floating'] },
+      { id: 'spatial', kind: 'spatial', title: '空间', childIds: ['spatial-object', 'kept'], spatial: { home: { x: 0, y: 0, zoom: 1 },
+        frames: [{ id: 'place', pose: { x: 0, y: 0, zoom: 1 }, targetInstanceId: 'spatial-object' }],
+        paths: [{ id: 'path', frameIds: ['place'], instanceIds: ['spatial-object', 'kept'] }],
+        relations: [{ id: 'relation', sourceInstanceId: 'spatial-object', targetInstanceId: 'kept', kind: 'arrow' }],
+        semanticZoom: [{ id: 'zoom', instanceIds: ['spatial-object', 'kept'], minZoom: .5, maxZoom: 2, visible: true }] } },
+    ], global: { underlay: ['attached'], overlay: ['global-object'] }, assets: { image: { id: 'image', path: 'assets/image.png', mimeType: 'image/png' } } }
+}
+async function harness(project = fixture()) {
+  useEditorStore.getState().courseBridge.dispose()
+  const h = await createV10StoreHost(project, { assets: { image: Uint8Array.of(1, 2, 3) }, components: {} }, false)
+  await useEditorStore.getState().connectCourseDocuments(h.api)
+  return h
 }
 
-/** Renderer history is a cursor; the formal undo depth lives on the document session. */
-function formalUndoDepth(): number {
-  return formalCourse(host, documentId).undoDepth
-}
-
-function firstSlideScene(document = activeDocument()): SlideSceneDocument {
-  const surface = document.surfaces.find((candidate) => candidate.type === 'slide')
-  const scene = surface?.type === 'slide' ? surface.scenes[0] : undefined
-  if (!scene) throw new Error('expected slide scene')
-  return scene
-}
-
-function flowLayerIds(document = activeDocument()): {
-  surface: Set<string>
-  global: Set<string>
-} {
-  const surface = document.surfaces.find((candidate) => candidate.type === 'flow')
-  if (!surface || surface.type !== 'flow') throw new Error('expected Flow surface')
-  return {
-    surface: new Set(surface.surfaceLayerItems.map((entry) => entry.item.layerItemId)),
-    global: new Set(document.globalLayerItems.map((entry) => entry.item.layerItemId)),
+it('deletes a mixed surface/global selection, repairs formal references and saves it in one History item that Undo restores', async () => {
+  const h = await harness(), state = useEditorStore.getState(), before = h.first.read()
+  const ids = ['global-object', 'slide-object', 'flow-object', 'spatial-object']
+  state.selectNodes(ids)
+  expect(state.routeEditorAction('delete').ok).toBe(true)
+  await state.drainCourseDocument()
+  const after = h.first.read()
+  if (after.model.kind !== 'course-v10' || before.model.kind !== 'course-v10') throw new Error('Expected V10')
+  expect(after.revision).toBe(before.revision + 1); expect(after.undoDepth).toBe(before.undoDepth + 1)
+  expect(useEditorStore.getState().courseView.selectedInstanceIds).toEqual([])
+  ids.forEach(id => expect(after.model.kind === 'course-v10' && after.model.project.instances[id]).toBeUndefined())
+  const project = after.model.project
+  expect(project.instances.attached.attachments).toEqual([{ instanceId: 'attached', target: { kind: 'instance', instanceId: 'kept' } }])
+  expect(project.instances.floating.flowPlacement?.paragraphAnchor).toBeUndefined()
+  const stateView = project.surfaces[0].presentation!.states[0]
+  expect(stateView.order).toEqual(['behavior']); expect(stateView.overrides['slide-object']).toBeUndefined()
+  for (const data of [project.instances.behavior.data, stateView.overrides.behavior.data!]) {
+    const rules = interactionRules({ ...project.instances.behavior, data })
+    expect(rules.map(value => value.id)).toEqual(['keep'])
+    expect(rules[0].actions).toEqual([{ id: 'remaining-action', start: 'after-previous', delayMs: 0, action: { type: 'node.exit', nodeId: 'kept', effect: 'fade', durationMs: 200, easing: 'ease-out' } }])
   }
-}
-
-function spatialWorldIds(document = activeDocument()): Set<string> {
-  const surface = document.surfaces.find((candidate) => candidate.type === 'spatial-2d')
-  if (!surface || surface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
-  return new Set(surface.world.layerItems.map((item) => item.layerItemId))
-}
-
-async function openBlankCourseDocument(surface: 'slide' | 'flow' | 'spatial') {
-  await useEditorStore.getState().createCourseDocument(surface)
-  await settleCourse()
-  documentId = activeDocumentId()
-}
-
-beforeEach(async () => {
-  const connected = await connectCourseHost()
-  host = connected.host
-  documentId = connected.documentId
+  expect(project.surfaces[2].spatial).toMatchObject({ frames: [{ id: 'place', pose: { x: 0, y: 0, zoom: 1 } }],
+    paths: [{ instanceIds: ['kept'] }], relations: [], semanticZoom: [{ instanceIds: ['kept'] }] })
+  expect(project.surfaces[2].spatial!.frames[0].targetInstanceId).toBeUndefined()
+  expect(project.instances.kept).toEqual(before.model.project.instances.kept)
+  expect(after.model.resources).toEqual(before.model.resources)
+  await state.saveCourseDocument()
+  const reopened = h.driver.load(h.disk.get('saved.glx')!)
+  if (reopened.kind !== 'course-v10') throw new Error('Expected V10 archive')
+  expect(reopened.project).toEqual(after.model.project)
+  expect(Object.keys(reopened.resources.assets)).toEqual(['image'])
+  expect(Array.from(reopened.resources.assets.image)).toEqual(Array.from(after.model.resources.assets.image))
+  expect(reopened.resources.components).toEqual(after.model.resources.components)
+  await state.undo(); await state.drainCourseDocument()
+  const undone = h.first.read()
+  if (undone.model.kind !== 'course-v10') throw new Error('Expected V10')
+  expect({ ...undone.model.project, revision: 0 }).toEqual({ ...before.model.project, revision: 0 })
+  expect(undone.model.resources).toEqual(before.model.resources); expect(undone.undoDepth).toBe(before.undoDepth)
 })
 
-describe('unified Delete transaction', () => {
-  it('deletes a Slide multi-selection in one revision and one undo step', async () => {
-    const store = useEditorStore.getState()
-    store.addTextNode(80, 90)
-    store.addRectangleNode(320, 240)
-    await settleCourse()
-    const ids = firstSlideScene().layerItems.map((item) => item.layerItemId)
-    store.selectNodes(ids)
-    const before = activeDocument()
-    const depthBefore = formalUndoDepth()
-
-    const result = useEditorStore.getState().routeEditorAction('delete')
-
-    expect(result.ok).toBe(true)
-    await settleCourse()
-    const after = activeDocument()
-    const remainingIds = new Set(firstSlideScene(after).layerItems.map((item) => item.layerItemId))
-    ids.forEach((id) => expect(remainingIds.has(id)).toBe(false))
-    expect(after.revision).toBe(before.revision + 1)
-    expect(formalUndoDepth()).toBe(depthBefore + 1)
-    expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual([])
-
-    await undoSettled(host, documentId)
-    expect(firstSlideScene().layerItems.map((item) => item.layerItemId))
-      .toEqual(expect.arrayContaining(ids))
-  })
-
-  it('rejects a stale selection snapshot without changing document, history, or selection', async () => {
-    const store = useEditorStore.getState()
-    store.addTextNode(80, 90)
-    await settleCourse()
-    const nodeId = firstSlideScene().layerItems[0]!.layerItemId
-    store.selectNodes([nodeId])
-    const stale = store.createLiveEditorSelectionSnapshot('layer')
-    if (!stale) throw new Error('expected selection snapshot')
-    store.updateNode(nodeId, { x: 420 })
-    await settleCourse()
-    const beforeDocument = activeDocument()
-    const beforeDepth = formalUndoDepth()
-    const beforeSelection = selectSelectedNodeIds(useEditorStore.getState())
-
-    const result = useEditorStore.getState().routeEditorAction('delete', stale)
-
-    expect(result).toMatchObject({ ok: false, adapter: 'none' })
-    expect(activeDocument()).toBe(beforeDocument)
-    expect(formalUndoDepth()).toBe(beforeDepth)
-    expect(selectSelectedNodeIds(useEditorStore.getState())).toBe(beforeSelection)
-    expect(firstSlideScene().layerItems.some((item) => item.layerItemId === nodeId)).toBe(true)
-  })
-
-  it('keeps an unlocked plus locked Slide selection fully unchanged on failure', async () => {
-    const store = useEditorStore.getState()
-    store.addTextNode()
-    store.addRectangleNode()
-    await settleCourse()
-    const ids = firstSlideScene().layerItems.map((item) => item.layerItemId)
-    store.updateNode(ids[1]!, { locked: true })
-    store.selectNodes(ids)
-    const beforeDocument = activeDocument()
-    const beforeDepth = formalUndoDepth()
-    const beforeSelection = selectSelectedNodeIds(useEditorStore.getState())
-
-    const result = useEditorStore.getState().routeEditorAction('delete')
-
-    expect(result.ok).toBe(false)
-    expect(activeDocument()).toBe(beforeDocument)
-    expect(formalUndoDepth()).toBe(beforeDepth)
-    expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual(beforeSelection)
-    expect(firstSlideScene().layerItems.map((item) => item.layerItemId))
-      .toEqual(expect.arrayContaining(ids))
-  })
-
-  it('rejects an old Flow text-focus snapshot after the live selection becomes block focus', async () => {
-    const store = useEditorStore.getState()
-    await openBlankCourseDocument('flow')
-    const flow = useEditorStore.getState().flowSession
-    if (!flow) throw new Error('expected Flow session')
-    const surface = flow.history.present.surfaces.find((candidate) => candidate.type === 'flow')
-    if (!surface || surface.type !== 'flow') throw new Error('expected Flow surface')
-    const paragraph = surface.blocks.find((block) => block.type === 'paragraph')
-    if (!paragraph) throw new Error('expected Flow paragraph')
-    const textSelection = selectFlowEditorBlocks(
-      flow.history.present,
-      flow.selection.locationId,
-      [paragraph.id],
-      {
-        focus: 'text',
-        textRange: { blockId: paragraph.id, start: 0, end: 0 },
-      },
-    )
-    store.applyFlowSelection(textSelection)
-    const stale = useEditorStore.getState().createLiveEditorSelectionSnapshot()
-    if (!stale) throw new Error('expected Flow selection snapshot')
-    useEditorStore.getState().applyFlowSelection(selectFlowEditorBlocks(
-      activeDocument(),
-      textSelection.locationId,
-      [paragraph.id],
-    ))
-    const beforeDocument = activeDocument()
-    const beforeDepth = formalUndoDepth()
-    const beforeSelection = useEditorStore.getState().flowSession!.selection
-
-    const result = useEditorStore.getState().routeEditorAction('delete', stale)
-
-    expect(result).toMatchObject({ ok: false, adapter: 'none' })
-    expect(activeDocument()).toBe(beforeDocument)
-    expect(formalUndoDepth()).toBe(beforeDepth)
-    expect(useEditorStore.getState().flowSession!.selection).toBe(beforeSelection)
-    const remainingSurface = activeDocument().surfaces.find((candidate) => candidate.type === 'flow')
-    expect(remainingSurface?.type === 'flow'
-      && remainingSurface.blocks.some((block) => block.id === paragraph.id)).toBe(true)
-  })
-
-  it('rejects an old Flow text range after the live caret moves within the same block', async () => {
-    const store = useEditorStore.getState()
-    await openBlankCourseDocument('flow')
-    const flow = useEditorStore.getState().flowSession
-    if (!flow) throw new Error('expected Flow session')
-    const surface = flow.history.present.surfaces.find((candidate) => candidate.type === 'flow')
-    if (!surface || surface.type !== 'flow') throw new Error('expected Flow surface')
-    const heading = surface.blocks.find((block) => block.type === 'heading')
-    if (!heading || heading.type !== 'heading') throw new Error('expected Flow heading')
-    const atStart = selectFlowEditorBlocks(
-      flow.history.present,
-      flow.selection.locationId,
-      [heading.id],
-      {
-        focus: 'text',
-        textRange: { blockId: heading.id, start: 0, end: 0 },
-      },
-    )
-    store.applyFlowSelection(atStart)
-    const stale = useEditorStore.getState().createLiveEditorSelectionSnapshot()
-    if (!stale) throw new Error('expected Flow text snapshot')
-    useEditorStore.getState().applyFlowSelection(selectFlowEditorBlocks(
-      activeDocument(),
-      atStart.locationId,
-      [heading.id],
-      {
-        focus: 'text',
-        textRange: { blockId: heading.id, start: 1, end: 1 },
-      },
-    ))
-    const beforeDocument = activeDocument()
-    const beforeDepth = formalUndoDepth()
-    const beforeSelection = useEditorStore.getState().flowSession!.selection
-
-    const result = useEditorStore.getState().routeEditorAction('delete', stale)
-
-    expect(result).toMatchObject({ ok: false, adapter: 'none' })
-    expect(activeDocument()).toBe(beforeDocument)
-    expect(formalUndoDepth()).toBe(beforeDepth)
-    expect(useEditorStore.getState().flowSession!.selection).toBe(beforeSelection)
-    const remaining = activeDocument().surfaces.find((candidate) => candidate.type === 'flow')
-    expect(remaining?.type === 'flow'
-      && remaining.blocks.some((block) => (
-        block.type === 'heading' && block.id === heading.id && plainDocumentText(block.content) === plainDocumentText(heading.content)
-      )))
-      .toBe(true)
-  })
-
-  it('rebases the course authoring session when deleting the active Flow heading anchor', async () => {
-    const store = useEditorStore.getState()
-    await openBlankCourseDocument('flow')
-    const initial = useEditorStore.getState().flowSession
-    if (!initial) throw new Error('expected Flow session')
-    const initialSurface = initial.history.present.surfaces.find((candidate) => candidate.type === 'flow')
-    if (!initialSurface || initialSurface.type !== 'flow') throw new Error('expected Flow surface')
-    const inserted = insertFlowEditorBlock(initial.history.present, {
-      surfaceId: initialSurface.id,
-      parentId: null,
-      index: initialSurface.blocks.length,
-      block: { type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '第二节' }] } },
-    }, { expectedRevision: initial.history.present.revision })
-    expect(inserted.ok).toBe(true)
-    store.applyFlowCommand(inserted)
-    await settleCourse()
-    const ready = useEditorStore.getState().flowSession
-    if (!ready) throw new Error('expected updated Flow session')
-    const readySurface = ready.history.present.surfaces.find((candidate) => candidate.type === 'flow')
-    if (!readySurface || readySurface.type !== 'flow') throw new Error('expected updated Flow surface')
-    const heading = readySurface.blocks.find((block) => block.type === 'heading' && plainDocumentText(block.content) === '第二节')
-    if (!heading) throw new Error('expected inserted Flow heading')
-    const location = ready.history.present.locations.find((candidate) => (
-      candidate.kind === 'flow-block' && candidate.blockId === heading.id
-    ))
-    if (!location) throw new Error('expected inserted heading location')
-    store.applyFlowSelection(selectFlowEditorBlocks(
-      ready.history.present,
-      location.id,
-      [heading.id],
-    ))
-    const selected = useEditorStore.getState().flowSession!.selection
-
-    const result = useEditorStore.getState().deleteFlowSelection({
-      selection: selected,
-      expectedRevision: activeDocument().revision,
-    })
-
-    expect(result.ok).toBe(true)
-    await settleCourse()
-    const after = useEditorStore.getState()
-    const nextLocationId = after.flowSession!.selection.locationId
-    expect(nextLocationId).not.toBe(location.id)
-    expect(activeDocument().locations.some((candidate) => candidate.id === nextLocationId)).toBe(true)
-    expect(after.courseAuthoringSession?.token).toMatchObject({
-      locationId: nextLocationId,
-      revision: activeDocument().revision,
-    })
-    expect(after.courseAuthoringSession?.itemIds).toEqual([])
-  })
-
-  it.each([
-    ['surface then global', false],
-    ['global then surface', true],
-  ] as const)('deletes a mixed Flow overlay selection atomically: %s', async (_label, globalFirst) => {
-    const store = useEditorStore.getState()
-    await openBlankCourseDocument('flow')
-    useEditorStore.getState().addRectangleNode(80, 90)
-    const surfaceId = useEditorStore.getState().flowSession?.selection.selectedOverlayIds[0]
-    if (!surfaceId) throw new Error('expected surface overlay')
-    useEditorStore.getState().setEditingScope('global')
-    useEditorStore.getState().addRectangleNode(320, 240)
-    const globalId = useEditorStore.getState().flowSession?.selection.selectedOverlayIds[0]
-    if (!globalId) throw new Error('expected global overlay')
-    const selectedIds = globalFirst ? [globalId, surfaceId] : [surfaceId, globalId]
-    useEditorStore.getState().selectNodes(selectedIds)
-    await settleCourse()
-    const before = activeDocument()
-    const depthBefore = formalUndoDepth()
-
-    const result = useEditorStore.getState().routeEditorAction('delete')
-
-    expect(result.ok).toBe(true)
-    await settleCourse()
-    const after = activeDocument()
-    const remaining = flowLayerIds(after)
-    expect(remaining.surface.has(surfaceId)).toBe(false)
-    expect(remaining.global.has(globalId)).toBe(false)
-    expect(after.revision).toBe(before.revision + 1)
-    expect(formalUndoDepth()).toBe(depthBefore + 1)
-    expect(useEditorStore.getState().flowSession?.selection).toMatchObject({
-      focus: 'idle',
-      selectedOverlayIds: [],
-    })
-
-    await undoSettled(host, documentId)
-    const restored = flowLayerIds()
-    expect(restored.surface.has(surfaceId)).toBe(true)
-    expect(restored.global.has(globalId)).toBe(true)
-  })
-
-  it('deletes a Spatial world multi-selection in one revision and one undo step', async () => {
-    const store = useEditorStore.getState()
-    await openBlankCourseDocument('spatial')
-    useEditorStore.getState().addTextNode(40, 60)
-    useEditorStore.getState().addTextNode(360, 260)
-    await settleCourse()
-    const ids = [...spatialWorldIds()]
-    useEditorStore.getState().selectNodes(ids)
-    const before = activeDocument()
-    const depthBefore = formalUndoDepth()
-
-    const result = useEditorStore.getState().routeEditorAction('delete')
-
-    expect(result.ok).toBe(true)
-    await settleCourse()
-    const after = activeDocument()
-    const remainingIds = spatialWorldIds(after)
-    ids.forEach((id) => expect(remainingIds.has(id)).toBe(false))
-    expect(after.revision).toBe(before.revision + 1)
-    expect(formalUndoDepth()).toBe(depthBefore + 1)
-    expect(useEditorStore.getState().spatialSession?.selection.selectionIds).toEqual([])
-
-    await undoSettled(host, documentId)
-    expect([...spatialWorldIds()]).toEqual(expect.arrayContaining(ids))
-  })
-
-  it('repairs interactions and Runtime bindings before a deleted Slide document is saved and reopened', async () => {
-    const store = useEditorStore.getState()
-    store.addTextNode()
-    store.addRectangleNode()
-    await settleCourse()
-    const document = structuredClone(activeDocument())
-    const scene = firstSlideScene(document)
-    const targetId = scene.layerItems[0]!.layerItemId
-    const runtimeId = 'runtime-delete-reference'
-    const runtimeItem = {
-      layerItemId: runtimeId,
-      label: '删除引用运行时',
-      frame: { mode: 'absolute', x: 420, y: 120, width: 320, height: 180 },
-      order: allocateCourseLayerOrder(document, scene.layerItems.at(-1)!.order + 1),
-      visible: true,
-      locked: false,
-      rotation: 0,
-      opacity: 1,
-      hitPolicy: 'auto',
-      playbackInitialVisibility: 'inherit',
-      kind: 'runtime',
-      runtime: {
-        protocol: 'surface-runtime',
-        runtimeApiVersion: 3,
-        enabled: true,
-        renderMode: 'dom',
-        source: 'CoursewareRuntime.define({runtimeApiVersion:3,protocol:"surface-runtime"})',
-        content: { values: { title: '引用运行时' } },
-        assets: {},
-        nodeBindings: { target: targetId },
-      },
-    } satisfies LayerItem
-    scene.layerItems.push(runtimeItem)
-    document.globalInteractions.push(
-      {
-        id: 'delete-root-rule',
-        enabled: true,
-        trigger: { type: 'node.click', nodeId: targetId },
-        conditions: [],
-        actions: [{
-          id: 'delete-root-action',
-          start: 'after-previous',
-          delayMs: 0,
-          action: { type: 'scene.next' },
-        }],
-      },
-      {
-        id: 'delete-dependent-rule',
-        enabled: true,
-        trigger: { type: 'animation.completed', actionId: 'delete-root-action' },
-        conditions: [],
-        actions: [{
-          id: 'delete-dependent-action',
-          start: 'after-previous',
-          delayMs: 0,
-          action: { type: 'scene.next' },
-        }],
-      },
-    )
-    courseProjectDocumentSchema.parse(document)
-    const opened = await openCourseOnHost(document, {
-      componentPackages: withDefaultComponentController(document).componentPackages,
-    })
-    host = opened.host
-    documentId = opened.documentId
-    useEditorStore.getState().selectNodes([targetId])
-
-    const result = useEditorStore.getState().routeEditorAction('delete')
-
-    expect(result.ok).toBe(true)
-    await settleCourse()
-    const after = courseProjectDocumentSchema.parse(activeDocument())
-    const runtime = firstSlideScene(after).layerItems.find((item) => item.layerItemId === runtimeId)
-    expect(runtime).toMatchObject({ kind: 'runtime' })
-    if (runtime?.kind !== 'runtime') throw new Error('expected remaining Runtime')
-    expect(runtime.runtime.nodeBindings).toBeUndefined()
-    expect(after.globalInteractions).toEqual([])
-
-    const archive = useEditorStore.getState().exportV9SlideCandidateArchive()
-    expect(archive).toBeTruthy()
-    expect(await useEditorStore.getState().reopenV9SlideCandidateArchive(archive!)).toBe(true)
-    await settleCourse()
-    courseProjectDocumentSchema.parse(activeDocument())
-    const reopenedRuntime = firstSlideScene().layerItems.find((item) => item.layerItemId === runtimeId)
-    expect(reopenedRuntime).toMatchObject({ kind: 'runtime' })
-    if (reopenedRuntime?.kind !== 'runtime') throw new Error('expected reopened Runtime')
-    expect(reopenedRuntime.runtime.nodeBindings).toBeUndefined()
-  })
+it('rejects stale or mixed locked selections without changing formal content, resources, History or the held selection', async () => {
+  const h = await harness(), state = useEditorStore.getState()
+  state.selectNodes(['slide-object'])
+  const stale = state.createLiveEditorSelectionSnapshot()
+  await state.courseKernel.edit([{ type: 'data.set', instanceId: 'slide-object', path: ['html'], value: '新的正文' }])
+  const beforeStale = h.first.read(), selected = [...useEditorStore.getState().courseView.selectedInstanceIds]
+  expect(state.routeEditorAction('delete', stale)).toMatchObject({ ok: false, adapter: 'none' })
+  expect(h.first.read()).toEqual(beforeStale); expect(useEditorStore.getState().courseView.selectedInstanceIds).toEqual(selected)
+  await state.courseKernel.edit([{ type: 'instance.patch', instanceId: 'global-object', patch: { locked: true } }])
+  state.selectNodes(['slide-object', 'global-object'])
+  const beforeLocked = h.first.read(), lockedSelection = [...useEditorStore.getState().courseView.selectedInstanceIds]
+  expect(state.routeEditorAction('delete')).toMatchObject({ ok: false, adapter: 'none' })
+  expect(h.first.read()).toEqual(beforeLocked); expect(useEditorStore.getState().courseView.selectedInstanceIds).toEqual(lockedSelection)
+  const capturedDelete = state.courseKernel.capture([{ type: 'instance.remove', instanceId: 'slide-object' }])
+  const behavior = h.model().project.instances.behavior
+  await state.courseKernel.edit([{ type: 'data.set', instanceId: 'behavior', path: ['rules'], value: JSON.parse(JSON.stringify([
+    ...interactionRules(behavior), rule('new-rule', { type: 'node.click', nodeId: 'kept' }, { type: 'scene.next' }),
+  ])) }])
+  const beforeConflict = h.first.read()
+  await expect(state.courseKernel.editCaptured(capturedDelete)).rejects.toThrow(/已变化/)
+  expect(h.first.read()).toEqual(beforeConflict); expect(useEditorStore.getState().courseView.selectedInstanceIds).toEqual(lockedSelection)
+  state.courseBridge.discardDraft()
+  await state.courseKernel.edit([{ type: 'instance.patch', instanceId: 'behavior', patch: { locked: true } }])
+  const beforeLockedDependency = h.first.read()
+  await expect(state.courseKernel.edit([{ type: 'instance.remove', instanceId: 'slide-object' }])).rejects.toThrow('关联互动已锁定')
+  expect(h.first.read()).toEqual(beforeLockedDependency); expect(useEditorStore.getState().courseView.selectedInstanceIds).toEqual(lockedSelection)
+  state.courseBridge.discardDraft()
+  await state.courseKernel.edit([{ type: 'instance.patch', instanceId: 'behavior', patch: { locked: false } }])
+  expect(await state.courseKernel.edit([{ type: 'instance.remove', instanceId: 'slide-object' }])).toMatchObject({ status: 'applied' })
+  expect(h.model().project.instances['slide-object']).toBeUndefined()
+  expect(h.model().resources).toEqual(beforeLockedDependency.model.resources)
 })

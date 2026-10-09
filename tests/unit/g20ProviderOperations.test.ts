@@ -2,15 +2,16 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { waitForModelOperation } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { serverSentEvents } from '../../src/main/workbench/providers/serverSentEvents'
-import { modelGenerationRetry, waitForGenerationRetry } from '../../src/main/workbench/execution/modelGenerationRetry'
+import { modelGenerationRetry, waitForGenerationRetry, GENERATION_RETRY_DELAYS_MS, MAX_GENERATION_ATTEMPTS } from '../../src/main/workbench/execution/modelGenerationRetry'
 import type { ModelFailure } from '../../src/shared/workbench/modelProvider'
 afterEach(() => vi.useRealTimers())
 
-it('M26 retry policy requires generation-only declaration, caps three attempts and preserves long Retry-After without an early retry', () => {
+it('retries only pure generation within the current budget and honors Retry-After without an early retry', () => {
   const ordinary = { retrySafety: 'pure-generation' as const }, failed: ModelFailure = { outcome: 'unknown', kind: 'transport', code: 'transport', message: 'unknown' }
-  expect(modelGenerationRetry(ordinary, failed, 1, () => 0)).toEqual({ kind: 'retry', delayMs: 1000 })
-  expect(modelGenerationRetry(ordinary, failed, 2, () => 0)).toEqual({ kind: 'retry', delayMs: 2000 })
-  expect(modelGenerationRetry(ordinary, failed, 3)).toEqual({ kind: 'stop' })
+  for (const [index, delayMs] of GENERATION_RETRY_DELAYS_MS.entries()) {
+    expect(modelGenerationRetry(ordinary, failed, index + 1)).toEqual({ kind: delayMs > 15_000 ? 'wait' : 'retry', delayMs })
+  }
+  expect(modelGenerationRetry(ordinary, failed, MAX_GENERATION_ATTEMPTS)).toEqual({ kind: 'stop' })
   expect(modelGenerationRetry({}, failed, 1)).toEqual({ kind: 'stop' })
   expect(modelGenerationRetry({ retrySafety: 'server-side-effects' }, failed, 1)).toEqual({ kind: 'stop' })
   for (const kind of ['auth', 'configuration', 'quota', 'aborted'] as const) expect(modelGenerationRetry(ordinary, { ...failed, kind }, 1)).toEqual({ kind: 'stop' })

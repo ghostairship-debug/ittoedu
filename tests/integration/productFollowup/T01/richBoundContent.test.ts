@@ -6,8 +6,8 @@ import { expect, it } from 'vitest'
 import { DocumentHostService } from '../../../../src/main/workbench/DocumentHostService'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
 import { prepareExecutionContentOutput, readEditableTargetContent } from '../../../../src/core/tools/ToolTargets'
-import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
-import { createTextComponentData, createFormulaComponentData, type TextComponentData } from '../../../../src/components/text/data'
+import { TEXT_DEFINITION , textDataEdit } from '../../../../src/components/text/adapters'
+import { createTextComponentData, createFormulaComponentData, textComponentDataSchema } from '../../../../src/components/text/data'
 import { documentTextLength } from '../../../../src/shared/document/content'
 import { ExecutionEngine } from '../../../../src/main/workbench/execution/ExecutionEngine'
 import { ExecutionRunStore } from '../../../../src/main/workbench/execution/ExecutionRunStore'
@@ -28,7 +28,7 @@ it('a software-bound V10 rich selection preserves unselected links marks geometr
       { type: 'text', text: '尾段', style: { color: '#123456' }, link: { href: 'tel:+8612345678' } },
     ] })
     const frame = { width: 330, height: 100, transform: [1, 0, 0, 1, 41, 63] as [number, number, number, number, number, number] }
-    project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: original, frame, style: { opacity: .8 } }
+    project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', original).value, frame, style: { opacity: .8 } }
     project.surfaces[0].childIds = ['text']
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'rich.h5lesson')
     const target = { kind: 'course-instance' as const, surfaceId: project.surfaces[0].id, instanceId: 'text', dataPath: ['content'], from: 2, to: 4 }
@@ -71,7 +71,7 @@ it('a software-bound V10 rich selection preserves unselected links marks geometr
     const instance = current.model.project.instances.text
     expect(instance.frame).toEqual(frame)
     expect(instance.style).toEqual(project.instances.text.style)
-    const inlines = (instance.data as TextComponentData).content.inlines
+    const inlines = textComponentDataSchema.parse(instance.data).content.inlines
     expect(inlines[0]).toEqual(original.content.inlines[0])
     expect(inlines.at(-1)).toEqual(original.content.inlines.at(-1))
     expect(inlines).toContainEqual({ type: 'text', text: '新', style: { bold: true }, link: { href: 'https://example.org/new' } })
@@ -105,9 +105,9 @@ it('offline replays the first actual live rich tool input through the formal wri
     const literalCode = '\\\\(x^2\\\\)', ordinary = 'C:\\课程\\素材'
     const guard = createTextComponentData({ inlines: [{ type: 'text', text: '旧样例：' }, { type: 'text', text: literalCode, code: true },
       { type: 'text', text: '；' }, createFormulaComponentData('kept-fraction', '\\frac{1}{2}').formula, { type: 'text', text: `；${ordinary}` }] })
-    project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: original, frame: bodyFrame, style: { opacity: .9 } }
-    project.instances.guard = { id: 'guard', definitionId: TEXT_DEFINITION.id, data: guard }
-    project.instances.untouched = { id: 'untouched', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('未选正文保持原样'),
+    project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', original).value, frame: bodyFrame, style: { opacity: .9 } }
+    project.instances.guard = { id: 'guard', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', guard).value }
+    project.instances.untouched = { id: 'untouched', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('未选正文保持原样')).value,
       frame: { width: 280, height: 90, transform: [1, 0, 0, 1, 83, 147] } }
     project.surfaces = [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['body', 'guard', 'untouched'] }]
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'captured.h5lesson')
@@ -125,11 +125,11 @@ it('offline replays the first actual live rich tool input through the formal wri
     const current = await host.internalAPI.read(initial.documentId)
     if (current.model.kind !== 'course-v10') throw new Error('V10 required')
     const body = current.model.project.instances.body
-    const inlines = (body.data as TextComponentData).content.inlines
+    const inlines = textComponentDataSchema.parse(body.data).content.inlines
     expect(inlines.find(value => value.type === 'math')).toEqual(original.content.inlines[2])
     expect(inlines).toContainEqual(original.content.inlines[0])
     expect(inlines.some(value => value.type === 'text' && value.text.includes('3') && value.text.includes('9'))).toBe(true)
-    const guarded = (current.model.project.instances.guard.data as TextComponentData).content.inlines
+    const guarded = textComponentDataSchema.parse(current.model.project.instances.guard.data).content.inlines
     expect(guarded.filter(value => value.type === 'math')).toEqual([guard.content.inlines[3]])
     expect(guarded).toContainEqual({ type: 'text', text: literalCode, code: true })
     expect(guarded.some(value => value.type === 'text' && value.text.includes(ordinary))).toBe(true)
@@ -157,7 +157,7 @@ it('roundtrips the actual initial model message as rich content without escaping
       { type: 'text', text: '尾段', link: { href: 'tel:+8612345678' } },
     ] })
     const frame = { width: 330, height: 100, transform: [1, 0, 0, 1, 41, 63] as [number, number, number, number, number, number] }
-    project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: original, frame }
+    project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', original).value, frame }
     project.surfaces[0].childIds = ['text']
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'roundtrip.h5lesson')
     const target = { kind: 'course-instance' as const, surfaceId: project.surfaces[0].id, instanceId: 'text', dataPath: ['content'], from: 2, to: 4 }
@@ -199,7 +199,7 @@ it('roundtrips the actual initial model message as rich content without escaping
     const current = await host.internalAPI.read(initial.documentId)
     if (current.model.kind !== 'course-v10') throw new Error('V10 required')
     const instance = current.model.project.instances.text
-    const inlines = (instance.data as TextComponentData).content.inlines
+    const inlines = textComponentDataSchema.parse(instance.data).content.inlines
     expect(inlines.find(value => value.type === 'math')).toEqual(original.content.inlines[2])
     expect(inlines[0]).toEqual(original.content.inlines[0])
     expect(inlines.at(-1)).toEqual(original.content.inlines.at(-1))

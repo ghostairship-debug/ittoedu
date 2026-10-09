@@ -6,7 +6,7 @@ import { expect, it } from 'vitest'
 import { DocumentHostService } from '../../../../src/main/workbench/DocumentHostService'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
 import { componentProjectFiles } from '../../../../src/core/projectFiles/componentPlatform'
-import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
+import { TEXT_DEFINITION , textDataEdit } from '../../../../src/components/text/adapters'
 import { createTextComponentData } from '../../../../src/components/text/data'
 
 it('software-produced long V10 object paths remain readable and editable without caller-owned IDs', async () => {
@@ -17,7 +17,7 @@ it('software-produced long V10 object paths remain readable and editable without
     project.surfaces[0].title = '教学页面'.repeat(70)
     project.definitions.text = { ...TEXT_DEFINITION, id: 'text', title: '课堂文本'.repeat(70) }
     const frame = { width: 200, height: 80, transform: [1, 0, 0, 1, 25, 30] as [number, number, number, number, number, number] }
-    project.instances.content = { id: 'content', definitionId: 'text', data: createTextComponentData('保留正文'), frame }
+    project.instances.content = { id: 'content', definitionId: 'text', data: textDataEdit('fixture', createTextComponentData('保留正文')).value, frame }
     project.surfaces[0].childIds = ['content']
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'source.h5lesson')
     await host.tools.beginRun({ runId: 'paths', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }] })
@@ -44,7 +44,7 @@ it('phone and ordinary relative links survive a local Flow content revision and 
       { type: 'text', text: ' 原稿 ' },
       { type: 'text', text: '参考', link: { href: './资料/讲义.html#练习', title: '课内参考' } },
     ] })
-    project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data }
+    project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', data).value }
     project.surfaces.push({ id: 'flow', kind: 'flow', title: '讲义', childIds: ['body'] })
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'links.h5lesson')
     await host.tools.beginRun({ runId: 'links', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }] })

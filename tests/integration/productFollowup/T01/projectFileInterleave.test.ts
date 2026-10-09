@@ -7,7 +7,7 @@ import { DocumentHostService } from '../../../../src/main/workbench/DocumentHost
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
 import { captureComponentOperation } from '../../../../src/core/drivers/courseV10Operations'
 import { componentProjectFiles } from '../../../../src/core/projectFiles/componentPlatform'
-import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
+import { TEXT_DEFINITION , textDataEdit } from '../../../../src/components/text/adapters'
 import { createTextComponentData } from '../../../../src/components/text/data'
 import type { DocumentSnapshot } from '../../../../src/shared/workbench/document'
 
@@ -56,7 +56,7 @@ it('Flow literal dollars and markerless rewrite preserve opaque interaction and 
     const frame = { width: 280, height: 95, transform: [1, 0, 0, 1, 43, 27] as [number, number, number, number, number, number] }
     project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
     project.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
-    project.instances.paragraph = { id: 'paragraph', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('旧正文'), frame, style: { opacity: .8 } }
+    project.instances.paragraph = { id: 'paragraph', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('旧正文')).value, frame, style: { opacity: .8 } }
     project.instances.interaction = { id: 'interaction', definitionId: 'web', data: { html: '<button onclick="this.textContent=\'已点击\'">互动</button>' }, frame }
     project.surfaces.push({ id: 'flow', kind: 'flow', title: '讲义', childIds: ['paragraph', 'interaction'] })
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'flow.h5lesson')

@@ -1,9 +1,10 @@
+import { jsonValueSchema } from '../../src/shared/contracts/component-platform/schema'
 import assert from 'node:assert/strict'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { TEXT_DEFINITION } from '../../src/components/text/adapters'
-import { createFormulaComponentData, createTextComponentData, type TextComponentData } from '../../src/components/text/data'
+import { createFormulaComponentData, createTextComponentData, textComponentDataSchema } from '../../src/components/text/data'
 import { documentTextLength, plainDocumentText } from '../../src/shared/document/content'
 import { prepareExecutionContentOutput } from '../../src/core/tools/ToolTargets'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
@@ -43,8 +44,8 @@ async function run() {
     { type: 'text', text: '正方形面积', link: { href: 'https://example.org/area' }, style: { bold: true } },
     { type: 'text', text: '：待按教师材料解释。' }, createFormulaComponentData('kept-area-formula', 'x^2').formula,
   ] })
-  project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: original, style: { opacity: 0.9 } }
-  project.instances.untouched = { id: 'untouched', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('未选正文保持原样') }
+  project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(original), style: { opacity: 0.9 } }
+  project.instances.untouched = { id: 'untouched', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(createTextComponentData('未选正文保持原样')) }
   project.surfaces = [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['body', 'untouched'] }]
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, '代表课件.h5lesson')
   const target = { kind: 'course-instance' as const, surfaceId: 'flow', instanceId: 'body', dataPath: ['content'], from: 0, to: documentTextLength(original.content) }
@@ -74,13 +75,13 @@ async function run() {
       documents: [{ documentId: initial.documentId, writable: [target], selection: [target] }], contentOutput, workspaceRoot: workspace, permission: 'workspace' })
     runId = started.runId
     const ended = await engine.wait(runId), current = await host.internalAPI.read(initial.documentId)
-    Object.assign(facts, { runId, status: ended.status, failure: ended.failure ? { code: ended.failure.code, kind: ended.failure.kind, outcome: ended.failure.outcome } : null,
+    Object.assign(facts, { runId, status: ended.status, failure: ended.failure ? { code: ended.failure.code, outcome: ended.failure.outcome } : null,
       tools: ended.tools.map(tool => ({ name: tool.call.name, state: tool.state, resultKind: tool.result?.kind,
         ...(tool.result?.kind === 'document-operation' ? { receiptStatus: tool.result.result.status } : {}) })), undoDepth: current.undoDepth })
     assert.equal(ended.status, 'completed')
     assert.equal(current.model.kind, 'course-v10')
     if (current.model.kind !== 'course-v10') throw new Error('V10 required')
-    const content = (current.model.project.instances.body.data as TextComponentData).content
+    const content = textComponentDataSchema.parse(current.model.project.instances.body.data).content
     const body = plainDocumentText(content)
     assert(body.includes('3') && body.includes('9'), 'New prose must consume the material numbers')
     assert(content.inlines.some(inline => inline.link?.href === 'https://example.org/area'), 'Existing link must survive')

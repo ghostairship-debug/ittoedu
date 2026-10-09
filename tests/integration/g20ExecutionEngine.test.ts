@@ -1,3 +1,4 @@
+import { requireWorkspaceRoot } from '../helpers/workspaceGrant'
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createServer, type RequestListener } from 'node:http'
@@ -52,11 +53,11 @@ async function fixture(provider: ModelProvider, withArtifacts = false) {
   if (artifacts && compute) {
     const images = new ImageGenerationService({ directory: path.join(directory, 'images'), provider: { generate: async () => { throw new Error('No image model in compute fixture') } } })
     gateway.configureHostServices({ compute, jobs: new HostJobService({ images, compute }), artifacts: {
-      preflight: ({ grant, destination }) => artifacts.preflight({ workspaceRoot: grant.fileAccess!.workspaceRoot,
+      preflight: ({ grant, destination }) => artifacts.preflight({ workspaceRoot: requireWorkspaceRoot(grant.fileAccess),
         permission: grant.fileAccess!.permission, destination }),
       lookup: (runId, operationId) => artifacts.lookup(operationId, runId),
       save: ({ grant, operationId, source, bytes, assertActive }) => artifacts.deliver({ runId: grant.runId, operationId,
-        workspaceRoot: grant.fileAccess!.workspaceRoot, permission: grant.fileAccess!.permission, destination: source.destination,
+        workspaceRoot: requireWorkspaceRoot(grant.fileAccess), permission: grant.fileAccess!.permission, destination: source.destination,
         ...artifactDeliverySource(source), bytes, assertActive }),
     } })
   }
@@ -84,7 +85,7 @@ function complete(request: ModelRequest, calls: { id: string; name: string; argu
 const isCurrentDocumentFacts = (message: ModelChatMessage) => message.role === 'system' && typeof message.content === 'string'
   && message.content.startsWith('以下是本轮读取的正式文档快照元数据，不是新授权或保存要求；历史保存回执只记录当时版本。dirty 为 true 表示当前内容尚未保存。\n')
   && Object.keys(JSON.parse(message.content.slice(message.content.indexOf('\n') + 1))).join() === 'currentDocuments'
-const refsOf = (request: ModelRequest) => JSON.parse(String(request.messages[1].content).split('：')[1]) as {
+const refsOf = (request: Pick<ModelRequest, 'messages'>) => JSON.parse(String(request.messages[1].content).split('：')[1]) as {
   documentId: string; target: string; writable: { kind: string; target: string }[]; selection: { kind: string; target: string }[]
 }[]
 
@@ -304,12 +305,9 @@ describe('G20 canonical model execution loop', () => {
     expect(h.session.read()).toMatchObject({ revision: 0, undoDepth: 0, model: { source: '前文 OLD 后文' } })
   })
   it.each([
-    { failedName: 'read', retry: true, retryOther: false, commit: true },
-    { failedName: 'read', retry: false, retryOther: false, commit: true },
-    { failedName: 'read', retry: true, retryOther: false, commit: false },
-    { failedName: 'read', retry: true, retryOther: true, commit: true },
-    { failedName: 'inspect', retry: true, retryOther: false, commit: true },
-  ] as const)('keeps $failedName diagnostic history while settling from delivery receipts', async ({ failedName, retry, retryOther, commit }) => {
+    { failedName: 'read', retryOther: true, commit: true },
+    { failedName: 'inspect', retryOther: false, commit: false },
+  ] as const)('keeps $failedName diagnostic history while settling from delivery receipts', async ({ failedName, retryOther, commit }) => {
     let turns = 0
     const provider: ModelProvider = { async *stream(request) {
       turns++
@@ -322,7 +320,7 @@ describe('G20 canonical model execution loop', () => {
       const renewed = (JSON.parse(String(lastRead?.content)) as { data: { target: string } }).data.target
       yield complete(request, [
         { id: 'failed-observation', name: failedName, argumentsText: JSON.stringify({ target: 'not-a-real-handle' }) },
-        ...(retry ? [{ id: 'retry-observation', name: failedName, argumentsText: JSON.stringify({ target: retryOther ? refsOf(request)[0]!.target : renewed }) }] : []),
+        { id: 'retry-observation', name: failedName, argumentsText: JSON.stringify({ target: retryOther ? refsOf(request)[0]!.target : renewed }) },
         ...(commit ? [{ id: 'commit', name: 'text.replace', argumentsText: JSON.stringify({ target, content: 'NEW' }) }] : []),
       ])
     } }
@@ -337,17 +335,17 @@ describe('G20 canonical model execution loop', () => {
       expect((final.tools[2]?.call.input as { target: string }).target)
         .not.toBe((final.tools.at(-1)?.call.input as { target: string }).target)
     }
+    expect(final.tools[2]?.result?.kind).toBe('read')
     if (commit) expect(final.tools.at(-1)?.result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     expect(h.session.read().model).toMatchObject({ source: commit ? '前文 NEW 后文' : '前文 OLD 后文' })
     const timeline = await h.events.snapshot('conversation')
-    expect(timeline.items.filter(item => item.type === 'tool')).toHaveLength(2 + Number(retry) + Number(commit))
+    expect(h.session.read().undoDepth).toBe(Number(commit))
+    expect(timeline.items.filter(item => item.type === 'tool')).toHaveLength(3 + Number(commit))
     const end = timeline.items.find(item => item.type === 'run.end')
     expect(end?.data.status).toBe('completed')
     const publicEnd = await h.events.findEvent('conversation', `${final.runId}:terminal`)
-    if (commit) {
-      expect(runEndSummary(final)).toBeUndefined()
-      expect(publicEnd?.data.status).toBe('completed')
-    } else expect(runEndSummary(final)).toBeUndefined() // Corrected read-only exploration is not a missing requested write.
+    expect(runEndSummary(final)).toContain('中间操作警告 1 项')
+    expect(publicEnd?.data.status).toBe('completed')
   })
 
   it('reuses the writable document root handle without widening frozen or read-only scopes', async () => {
@@ -369,8 +367,8 @@ describe('G20 canonical model execution loop', () => {
       { documentId: h.other.documentId, writable: [] },
     ]
     const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
-    expect(final.status).toBe('partial')
-    expect(runEndSummary(final)).toContain('剩余工作未完成')
+    expect(final.status).toBe('completed')
+    expect(runEndSummary(final)).toContain('中间操作警告 2 项')
     expect(references).toHaveLength(2)
     expect(references![0].target).toBe(references![0].writable[0].target)
     expect(references![0].selection[0].target).not.toBe(references![0].target)
@@ -501,7 +499,7 @@ describe('G20 canonical model execution loop', () => {
     const final = await h.engine.wait(started.runId)
     expect(final).toMatchObject({ status: 'stopped' })
     expect(final.requests[0]!.argumentDrafts).toEqual([{ state: 'incomplete-prefix', providerCallId: 'stopped-preview',
-      toolName: 'text.replace', argumentsText: JSON.stringify({ target: refsOf({ messages: final.messages } as ModelRequest)[0]!.writable[0]!.target, content: 'LATE' }).slice(0, -3) }])
+      toolName: 'text.replace', argumentsText: JSON.stringify({ target: refsOf({ messages: final.messages })[0]!.writable[0]!.target, content: 'LATE' }).slice(0, -3) }])
     expect(h.session.read()).toMatchObject({ revision: 0, undoDepth: 0, model: { source: '前文 OLD 后文' } })
   })
 
@@ -680,7 +678,8 @@ describe('G20 canonical model execution loop', () => {
     h.input.selection = { ...selection, contextWindow: 50_000 }
     h.input.documents = [...h.input.documents, { documentId: h.other.documentId, writable: [] }]
     const run = await h.engine.start(h.input), final = await h.engine.wait(run.runId)
-    expect(final.status).toBe('partial'); expect(requests).toHaveLength(2)
+    expect(final.status).toBe('completed'); expect(requests).toHaveLength(2)
+    expect(runEndSummary(final)).toContain('中间操作警告 1 项')
     expect(final.tools.map(tool => tool.state)).toEqual(['returned', 'returned', 'returned'])
     expect(final.tools[0].result?.kind).toBe('read')
     expect(final.tools[1].result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })

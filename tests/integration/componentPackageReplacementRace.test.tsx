@@ -1,507 +1,157 @@
-import { createHash, webcrypto } from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { strToU8, zipSync } from 'fflate'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
+import { promises as fs } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { TextEncoder as NodeTextEncoder } from 'node:util'
+import { unzipSync, zipSync } from 'fflate'
+import path from 'node:path'
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
+import { afterEach, expect, it, vi } from 'vitest'
+import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
+import { scanComponentCatalogDirectory, readCatalogComponentPackage } from '../../src/main/componentCatalogScanner'
+import { CourseV10DocumentBridge } from '../../src/renderer/documents/CourseV10DocumentBridge'
+import { createEditorStoreKernel } from '../../src/renderer/store/editorStoreKernel'
+import { useComponentLibrary, type ComponentLibraryPorts } from '../../src/renderer/app/useComponentLibrary'
+import { exportComponentLibraryArchive } from '../../src/core/components/library/archive'
+import type { ComponentLibraryEntry } from '../../src/shared/contracts/component-platform/library'
+import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
+import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
+import type { AvailableComponentCatalogPackage } from '../../src/shared/componentCatalog'
+import type { OpenBinaryFileResult } from '../../src/shared/ipcTypes'
 
-vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/pdf.worker.min.mjs' }))
-import type {
-  AvailableComponentCatalogPackage,
-  ComponentCatalogPackageFile,
-  ComponentCatalogSnapshot,
-} from '../../src/shared/componentCatalog'
-import type { ComponentManifest, ComponentPackageData } from '../../src/shared/componentTypes'
-import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
-import type { DesktopAPI, OpenBinaryFileResult } from '../../src/shared/ipcTypes'
-import { componentPackagesFromArchive } from '../../src/renderer/components/componentPackageStore'
-import { importComponentPackage } from '../../src/core/drivers/codecs/importComponentPackage'
-import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
-import {
-  selectActiveCourseProjectDocument,
-  useEditorStore,
-} from '../../src/renderer/store/editorStore'
-import type {
-  ComponentPackageReplacementCommitResult,
-  ComponentPackageReplacementTarget,
-} from '../../src/renderer/components/commitComponentPackageAuthoring'
-import {
-  bootTriageCourseHost,
-  formalCourse,
-  openAppCourse,
-  settleCourse,
-  waitForAppDocuments,
-  withAppDocuments,
-  type TriageCourseHost,
-} from '../helpers/triage-t7-appHost'
-
-vi.mock('../../src/renderer/ui/Workspace', () => ({
-  Workspace: () => <div data-testid="workspace-stub" />,
-}))
-
-vi.mock('../../src/renderer/ui/ScenePanel', () => ({
-  ScenePanel: () => <div data-testid="scene-panel-stub" />,
-}))
-
-vi.mock('../../src/renderer/ui/SceneStateStrip', () => ({
-  SceneStateStrip: () => null,
-}))
-
-vi.mock('../../src/renderer/ui/ProjectHealthPanel', () => ({
-  ProjectHealthPanel: () => null,
-}))
-
-vi.mock('../../src/renderer/ui/RightSidebar', () => ({
-  RightSidebar: (props: {
-    onReplaceComponent?: (packageId: string) => void
-    onUpdateCatalogComponent?: (entry: AvailableComponentCatalogPackage) => void
-  }) => (
-    <div>
-      <button
-        type="button"
-        data-testid="replace-component-manually"
-        onClick={() => props.onReplaceComponent?.(PACKAGE_ID)}
-      >
-        手动替换组件
-      </button>
-      <button
-        type="button"
-        data-testid="update-component-from-catalog"
-        onClick={() => props.onUpdateCatalogComponent?.(CATALOG_ENTRY)}
-      >
-        目录更新组件
-      </button>
-    </div>
-  ),
-}))
-
-vi.mock('../../src/renderer/ui/TopToolbar', () => ({
-  TopToolbar: (props: { busy: boolean }) => (
-    <button type="button" data-testid="busy-state" disabled={props.busy}>
-      {props.busy ? '正在处理' : '就绪'}
-    </button>
-  ),
-}))
-
-vi.mock('../../src/renderer/export/loadPlayerBundle', () => ({
-  loadPlayerBundle: () => '/* component replacement race test player bundle */',
-}))
-
-vi.mock('../../src/renderer/ui/coursePlayerTryRun', () => ({
-  attachPublishedCourseStageFit: vi.fn(() => () => undefined),
-  mountPublishedCourseTryRun: vi.fn(async () => ({
-    destroy: async () => undefined,
-  })),
-}))
-
-import App from '../../src/renderer/App'
-
-const FIXTURE_PATH = join(
-  process.cwd(),
-  'tests',
-  'fixtures',
-  'architecture-baseline',
-  'slide-heavy.h5lesson',
-)
-const PACKAGE_ID = 'com.example.arch2-race'
-const INITIAL_VERSION = '4.0.0'
-const REPLACEMENT_VERSION = '4.1.0'
-const INITIAL_PROVENANCE_SHA256 = '1'.repeat(64)
-
-function manifest(version: string): ComponentManifest {
-  return {
-    schemaVersion: 4,
-    runtimeApiVersion: 4,
-    id: PACKAGE_ID,
-    name: 'ARCH-2 替换竞态组件',
-    version,
-    description: '用于 App 组件包替换竞态的合法 Component API 4 包',
-    entry: 'runtime.js',
-    defaultSize: { width: 320, height: 180 },
-    minSize: { width: 160, height: 90 },
-    preserveAspectRatio: false,
-    assets: {},
-    defaultProps: { label: `v${version}` },
-    supportedScopes: ['scene', 'global'],
-    renderMode: 'dom',
-  }
+const disposers: (() => Promise<unknown>)[] = []
+afterEach(async () => { cleanup(); for (const dispose of disposers.splice(0).reverse()) await dispose(); vi.unstubAllGlobals() })
+const bytes = (source: string) => new TextEncoder().encode(source)
+function project(id = 'course'): CourseProjectV10 {
+  return { schemaVersion: 10, id, revision: 0, title: id, definitions: {
+    widget: { id: 'widget', version: '1.0.0', role: 'content', title: '共享组件', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'old', entry: 'main.js' } } },
+  }, instances: { a: { id: 'a', definitionId: 'widget', data: { text: '用户正文', authorField: 7 }, frame: { width: 300, height: 120, transform: [1, .2, 0, 1, 21, 34] } },
+    b: { id: 'b', definitionId: 'widget', data: { text: '另一实例' }, implementationOverride: { kind: 'source', language: 'javascript', source: 'export default {}' } } },
+    surfaces: [{ id: 'page', kind: 'slide', title: '页面', childIds: ['a', 'b'] }], global: { underlay: [], overlay: [] }, assets: {} }
+}
+function entry(version = '2.0.0'): ComponentLibraryEntry {
+  return { schemaVersion: 1, id: 'widget', title: '新版组件', definitions: {
+    widget: { id: 'widget', version, role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'new-source', entry: 'main.js' }, resourceBindings: { icon: 'new-asset' } } },
+  }, example: { rootIds: ['sample'], instances: { sample: { id: 'sample', definitionId: 'widget', data: { text: '示例内容' } } } },
+    assets: { 'new-asset': { id: 'new-asset', path: 'assets/icon.bin', mimeType: 'application/octet-stream' } },
+    resources: { assets: { 'new-asset': new Uint8Array([8, 9]) }, components: { 'new-source': { 'main.js': bytes('export default { mount() { return {update(){}, dispose(){}} } }') } } } }
+}
+const catalogEntry = (): AvailableComponentCatalogPackage => ({ packageId: 'widget', version: '2.0.0', name: '新版组件', description: '', subject: [], schoolStage: [], tags: [],
+  packagePath: 'widget.h5component', thumbnailPath: '', sha256: 'a'.repeat(64), componentSchemaVersion: 1, runtimeApiVersion: 5, renderMode: 'dom', supportedScopes: ['scene', 'global'],
+  quality: 'experimental', maintainer: 'fixture', verifiedCases: [], sourceId: 'fixture', sourceLabel: '组件库', sourceTrust: 'built-in' })
+function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(accept => { resolve = accept }); return { promise, resolve } }
+async function fixture() {
+  vi.stubGlobal('Uint8Array', new NodeTextEncoder().encode('').constructor)
+  const directory = await fs.mkdtemp(path.join(tmpdir(), 'guoling-library-race-')); disposers.push(() => fs.rm(directory, { recursive: true, force: true }))
+  const host = new DocumentHostService(path.join(directory, 'recovery')), initial = await host.internalAPI.create({ kind: 'course-v10', project: project(),
+    resources: { assets: {}, components: { old: { 'main.js': bytes('export default {}') } } } }, '课件.h5lesson')
+  const unavailable = async (): Promise<never> => { throw new Error('Fixture has no save dialog') }
+  const api: DocumentHostAPI = { ...host.internalAPI, bootstrapCourse: async () => initial, saveWithDialog: unavailable, closeWithDialog: unavailable, discardRecovery: unavailable,
+    close: async (documentId, discardDirty) => { await host.operate({ type: 'close', documentId, discardDirty }) }, subscribe: listener => host.subscribeEvents(listener) }
+  const bridge = new CourseV10DocumentBridge(); disposers.push(async () => bridge.dispose()); await bridge.connect(api)
+  bridge.selectInstances(initial.documentId, ['a'], 'page')
+  const kernel = createEditorStoreKernel({ bridge, commit: vi.fn() }), pending: Promise<unknown>[] = [], errors: string[] = [], item = catalogEntry()
+  const archive = exportComponentLibraryArchive(entry()), file = { path: '/fixture/widget.h5component', name: 'widget.h5component', bytes: archive }
+  const ports: ComponentLibraryPorts = { kernel, desktopAvailable: () => true, loadCatalog: async () => ({ sources: [], packages: [item], issues: [] }),
+    selectComponentPackage: vi.fn(async () => file), selectComponentPackages: async () => null,
+    readCatalogPackage: vi.fn(async () => ({ bytes: archive, sha256: createHash('sha256').update(archive).digest('hex') })),
+    runBusy<T>(operation: () => Promise<T>, fallback: string) {
+      const operationPromise = operation().catch(error => { errors.push(`${fallback} ${error instanceof Error ? error.message : String(error)}`); return undefined })
+      pending.push(operationPromise); return operationPromise
+    }, commitStatus: vi.fn(), reportError: message => errors.push(message) }
+  const hook = renderHook(() => useComponentLibrary(ports)); await act(async () => { await pending[0] })
+  return { host, initial, bridge, kernel, ports, hook, pending, errors, item, file, directory }
 }
 
-function packageBytes(version: string): Uint8Array {
-  const componentManifest = manifest(version)
-  return zipSync({
-    'manifest.json': strToU8(JSON.stringify(componentManifest)),
-    'runtime.js': strToU8(
-      `window.CoursewareComponent.define({
-        id: ${JSON.stringify(PACKAGE_ID)},
-        runtimeApiVersion: 4,
-        create: function () { return { destroy: function () {} } }
-      })`,
-    ),
-  })
-}
-
-const INITIAL_BYTES = packageBytes(INITIAL_VERSION)
-const REPLACEMENT_BYTES = packageBytes(REPLACEMENT_VERSION)
-const REPLACEMENT_SHA256 = createHash('sha256')
-  .update(REPLACEMENT_BYTES)
-  .digest('hex')
-
-const CATALOG_ENTRY: AvailableComponentCatalogPackage = {
-  packageId: PACKAGE_ID,
-  version: REPLACEMENT_VERSION,
-  name: 'ARCH-2 替换竞态组件',
-  description: '目录中的 4.1 更新包',
-  subject: [],
-  schoolStage: [],
-  tags: ['arch-2', 'race'],
-  packagePath: 'packages/arch2-race.h5component',
-  thumbnailPath: 'thumbnails/arch2-race.svg',
-  sha256: REPLACEMENT_SHA256,
-  componentSchemaVersion: 4,
-  runtimeApiVersion: 4,
-  renderMode: 'dom',
-  supportedScopes: ['scene', 'global'],
-  quality: 'experimental',
-  maintainer: 'architecture-tests',
-  verifiedCases: [],
-  sourceId: 'source:arch2-race',
-  sourceLabel: 'ARCH-2 测试目录',
-  sourceTrust: 'built-in',
-}
-
-const CATALOG: ComponentCatalogSnapshot = {
-  sources: [{
-    sourceId: CATALOG_ENTRY.sourceId,
-    label: CATALOG_ENTRY.sourceLabel,
-    trust: CATALOG_ENTRY.sourceTrust,
-    packageCount: 1,
-  }],
-  packages: [CATALOG_ENTRY],
-  issues: [],
-}
-
-interface Deferred<T> {
-  readonly promise: Promise<T>
-  resolve(value: T): void
-}
-
-interface ReplacementWriteSnapshot {
-  readonly project: CourseProjectDocument
-  readonly componentPackages: Readonly<Record<string, ComponentPackageData>>
-  readonly undoDepth: number
-  readonly redoDepth: number
-  readonly sidecarPast: unknown
-  readonly sidecarFuture: unknown
-  readonly componentPast: unknown
-  readonly componentFuture: unknown
-}
-
-let host: TriageCourseHost
-
-type CaptureSpy = ReturnType<typeof vi.fn<
-  (packageId: string) => ComponentPackageReplacementTarget | null
->>
-type ReplaceSpy = ReturnType<typeof vi.fn<
-  (
-    target: ComponentPackageReplacementTarget,
-    packageData: ComponentPackageData,
-  ) => ComponentPackageReplacementCommitResult
->>
-
-const originalCaptureTarget =
-  useEditorStore.getState().captureComponentPackageReplacementTarget
-const originalReplaceAtTarget =
-  useEditorStore.getState().replaceComponentPackageAtTarget
-
-function deferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((next) => { resolve = next })
-  return { promise, resolve }
-}
-
-function replacementFile(): OpenBinaryFileResult {
-  return {
-    path: 'test-fixtures/arch2-race-4.1.0.h5component',
-    name: 'arch2-race-4.1.0.h5component',
-    bytes: Uint8Array.from(REPLACEMENT_BYTES),
-  }
-}
-
-function catalogFile(): ComponentCatalogPackageFile {
-  return {
-    sourceId: CATALOG_ENTRY.sourceId,
-    sourceLabel: CATALOG_ENTRY.sourceLabel,
-    sourceTrust: CATALOG_ENTRY.sourceTrust,
-    packageId: PACKAGE_ID,
-    version: REPLACEMENT_VERSION,
-    sha256: REPLACEMENT_SHA256,
-    name: 'arch2-race-4.1.0.h5component',
-    bytes: Uint8Array.from(REPLACEMENT_BYTES),
-  }
-}
-
-function componentApi(options: {
-  selectComponentPackage?: () => Promise<OpenBinaryFileResult | null>
-  readComponentCatalogPackage?: () => Promise<ComponentCatalogPackageFile>
-} = {}): DesktopAPI & {
-  selectComponentPackage: ReturnType<typeof vi.fn>
-  readComponentCatalogPackage: ReturnType<typeof vi.fn>
-} {
-  const selectComponentPackage = vi.fn(
-    options.selectComponentPackage ?? (async () => null),
-  )
-  const readComponentCatalogPackage = vi.fn(
-    options.readComponentCatalogPackage
-      ?? (async () => { throw new Error('not used') }),
-  )
-  return {
-    legacyPpt: vi.fn(async () => null),
-    materials: vi.fn(async () => []),
-    openProject: vi.fn(async () => null),
-    listRecentProjects: vi.fn(async () => []),
-    openRecentProject: vi.fn(async () => { throw new Error('not used') }),
-    confirmProjectOpen: vi.fn(async () => undefined),
-    saveProject: vi.fn(async () => null),
-    writeRecoveryProject: vi.fn(async () => undefined),
-    readRecoveryProject: vi.fn(async () => null),
-    clearRecoveryProject: vi.fn(async () => undefined),
-    selectImage: vi.fn(async () => null),
-    selectImages: vi.fn(async () => null),
-    selectAudio: vi.fn(async () => null),
-    selectAudios: vi.fn(async () => null),
-    selectVideo: vi.fn(async () => null),
-    selectVideos: vi.fn(async () => null),
-    selectComponentPackage,
-    selectComponentPackages: vi.fn(async () => null),
-    loadComponentCatalog: vi.fn(async () => CATALOG),
-    deleteComponentCatalogHtmlComponent: vi.fn(async () => { throw new Error('not used') }),
-    selectComponentCatalogSource: vi.fn(async () => null),
-    setComponentCatalogSourceTrust: vi.fn(async () => CATALOG),
-    readComponentCatalogPackage,
-    exportHtml: vi.fn(async () => null),
-    exportWebPackage: vi.fn(async () => null),
-    peekProjectArchive: vi.fn(async () => null),
-    exportBinary: vi.fn(async () => null),
-    exportPdf: vi.fn(async () => null),
-    setPreviewNetworkPolicy: vi.fn(async () => undefined),
-    releasePreviewNetworkPolicy: vi.fn(async () => undefined),
-    setDirtyState: vi.fn(async () => undefined),
-    onRequestSave: vi.fn(() => () => undefined),
-    onRequestSaveAndClose: vi.fn(() => () => undefined),
-    reportDiagnostic: vi.fn(async () => undefined),
-    exportDiagnostics: vi.fn(async () => null),
-  }
-}
-
-async function loadFixtureWithComponent(): Promise<void> {
-  const source = openCourseProjectArchive(new Uint8Array(readFileSync(FIXTURE_PATH)))
-  await openAppCourse(
-    host,
-    source.project,
-    source.assetFiles,
-    componentPackagesFromArchive(source.project, source.componentFiles),
-  )
-  useEditorStore.getState().activateCourseLocation('slide-location-intro')
-  const initialPackage = importComponentPackage(INITIAL_BYTES, {
-    provenance: {
-      sha256: INITIAL_PROVENANCE_SHA256,
-      importedAt: '2026-08-24T00:00:00.000Z',
-      sourceLabel: 'ARCH-2 初始包',
-    },
-  })
-  useEditorStore.getState().importComponentPackage(initialPackage)
-  useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
-  // Component packages and the instance are formal document writes, so the
-  // replacement target only exists once DocumentSession has accepted them.
-  await settleCourse()
-}
-
-function activeProject(): CourseProjectDocument {
-  const project = selectActiveCourseProjectDocument(useEditorStore.getState())
-  if (!project) throw new Error('Expected an active Course Project V9')
-  return project
-}
-
-function writeSnapshot(): ReplacementWriteSnapshot {
-  const state = useEditorStore.getState()
-  if (state.slideBackend?.kind !== 'slide-authoring') {
-    throw new Error('Expected an active Slide authoring backend')
-  }
-  const course = formalCourse(host)
-  return structuredClone({
-    project: activeProject(),
-    componentPackages: state.componentPackages,
-    // History belongs to DocumentSession; the renderer backend is only a projection.
-    undoDepth: course.undoDepth,
-    redoDepth: course.redoDepth,
-    sidecarPast: state.courseAssetSidecarPast,
-    sidecarFuture: state.courseAssetSidecarFuture,
-    componentPast: state.courseComponentPackagesPast,
-    componentFuture: state.courseComponentPackagesFuture,
-  })
-}
-
-function installTargetSpies(): {
-  captureTarget: CaptureSpy
-  replaceAtTarget: ReplaceSpy
-} {
-  const captureTarget: CaptureSpy = vi.fn((packageId: string) => (
-    originalCaptureTarget(packageId)
-  ))
-  const replaceAtTarget: ReplaceSpy = vi.fn((target, packageData) => (
-    originalReplaceAtTarget(target, packageData)
-  ))
-  useEditorStore.setState({
-    captureComponentPackageReplacementTarget: captureTarget,
-    replaceComponentPackageAtTarget: replaceAtTarget,
-  })
-  return { captureTarget, replaceAtTarget }
-}
-
-async function renderWithApi(api: DesktopAPI): Promise<void> {
-  window.desktopAPI = withAppDocuments(api, host)
-  render(<App />)
-  await waitForAppDocuments()
-  await loadFixtureWithComponent()
-  await waitFor(() => {
-    expect(screen.getByTestId('replace-component-manually')).toBeVisible()
-    expect(screen.getByTestId('update-component-from-catalog')).toBeVisible()
-  })
-}
-
-async function resolveDeferred<T>(result: Deferred<T>, value: T): Promise<void> {
-  await act(async () => {
-    result.resolve(value)
-    await Promise.resolve()
-  })
-}
-
-beforeEach(async () => {
-  vi.stubGlobal('crypto', webcrypto)
-  vi.stubGlobal('ResizeObserver', class {
-    observe() {}
-    disconnect() {}
-  })
-  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:arch2-component-race')
-  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
-  host = await bootTriageCourseHost()
+it('freezes manual replacement before the picker and rejects a stale shared definition without writing bytes or the newly active document', async () => {
+  const h = await fixture(), selection = deferred<OpenBinaryFileResult | null>()
+  h.ports.selectComponentPackage = () => selection.promise
+  act(() => h.hook.result.current.replacePackage('widget'))
+  await act(async () => { await h.kernel.edit([{ type: 'definition.set', definition: { ...h.kernel.readDocument().definitions.widget, title: '人工修改' } }]) })
+  const before = await h.host.internalAPI.read(h.initial.documentId)
+  const other = await h.host.internalAPI.create({ kind: 'course-v10', project: project('other'), resources: before.model.resources }, 'other.h5lesson')
+  await act(async () => { await h.bridge.activate(other.documentId); selection.resolve(h.file); await h.pending.at(-1) })
+  expect(h.hook.result.current.replacementRequest?.target.captured.documentId).toBe(h.initial.documentId)
+  await act(async () => { h.hook.result.current.confirmReplacement(); await h.pending.at(-1) })
+  expect(h.errors).toHaveLength(1)
+  expect(await h.host.internalAPI.read(h.initial.documentId)).toEqual(before)
+  expect(await h.host.internalAPI.read(other.documentId)).toEqual(other)
 })
 
-afterEach(() => {
-  cleanup()
-  useEditorStore.setState({
-    captureComponentPackageReplacementTarget: originalCaptureTarget,
-    replaceComponentPackageAtTarget: originalReplaceAtTarget,
-  })
-  vi.restoreAllMocks()
-  vi.unstubAllGlobals()
-  delete (window as Partial<Window>).desktopAPI
-  useEditorStore.getState().clearV9SlideCandidateBackend()
+it('keeps deferred catalog update and cancelled/manual malformed selection at zero writes after target revision changes', async () => {
+  const h = await fixture(), read = deferred<{ bytes: Uint8Array; sha256: string }>()
+  h.ports.readCatalogPackage = () => read.promise
+  act(() => h.hook.result.current.requestCatalogUpdate(h.item))
+  act(() => h.hook.result.current.confirmCatalogUpdate())
+  const update = h.pending.at(-1)
+  await act(async () => { await h.kernel.edit([{ type: 'definition.set', definition: { ...h.kernel.readDocument().definitions.widget, version: '3.0.0' } }]) })
+  const before = await h.host.internalAPI.read(h.initial.documentId)
+  await act(async () => { read.resolve({ bytes: h.file.bytes, sha256: h.item.sha256 }); await update })
+  expect(h.errors).toHaveLength(1)
+  expect(await h.host.internalAPI.read(h.initial.documentId)).toEqual(before)
+  h.ports.selectComponentPackage = async () => null
+  await act(async () => { h.hook.result.current.replacePackage('widget'); await h.pending.at(-1) })
+  expect(h.hook.result.current.replacementRequest).toBeNull()
+  h.ports.selectComponentPackage = async () => ({ ...h.file, bytes: bytes('not an archive') })
+  await act(async () => { h.hook.result.current.replacePackage('widget'); await h.pending.at(-1) })
+  expect(h.errors).toHaveLength(2)
+  expect(await h.host.internalAPI.read(h.initial.documentId)).toEqual(before)
 })
 
-describe('ARCH-2 App component-package replacement race', () => {
-  it('captures the manual target before file selection and rejects the confirmed stale package without writes', async () => {
-    const selection = deferred<OpenBinaryFileResult | null>()
-    const api = componentApi({ selectComponentPackage: () => selection.promise })
-    const { captureTarget, replaceAtTarget } = installTargetSpies()
-    await renderWithApi(api)
+it('replaces a shared implementation once while retaining instance data, affine frames and private source, then undoes/redoes and cold reopens its resources', async () => {
+  const h = await fixture(), before = h.kernel.captureTarget()
+  await act(async () => { h.hook.result.current.replacePackage('widget'); await h.pending.at(-1) })
+  await act(async () => { h.hook.result.current.confirmReplacement(); await h.pending.at(-1) })
+  expect(h.errors).toEqual([])
+  const current = await h.host.internalAPI.read(h.initial.documentId)
+  expect(current.undoDepth).toBe(1)
+  if (current.model.kind !== 'course-v10') throw new Error('Expected V10')
+  expect(current.model.project.instances).toEqual(before.project.instances)
+  expect(current.model.project.definitions.widget.version).toBe('2.0.0')
+  const implementation = current.model.project.definitions.widget.implementation
+  if (implementation.kind !== 'source' || !implementation.workspace) throw new Error('Expected source workspace')
+  expect(current.model.resources.components[implementation.workspace.ownerId]['main.js']).toEqual(entry().resources.components['new-source']['main.js'])
+  expect(Object.values(current.model.resources.assets)).toContainEqual(new Uint8Array([8, 9]))
+  await act(async () => { await h.bridge.undo(h.initial.documentId) })
+  expect(h.kernel.readDocument().definitions).toEqual(before.project.definitions)
+  expect(h.kernel.readDocument().instances).toEqual(before.project.instances)
+  expect(h.kernel.readResources()).toEqual(before.resources)
+  await act(async () => { await h.bridge.redo(h.initial.documentId) })
+  const saved = h.kernel.captureTarget(), filename = path.join(h.directory, 'saved.h5lesson')
+  await h.host.internalAPI.save(h.initial.documentId, filename)
+  const fresh = new DocumentHostService(path.join(h.directory, 'fresh-host')), reopened = await fresh.open(filename)
+  if (reopened.model.kind !== 'course-v10') throw new Error('Expected V10')
+  expect(reopened.model.project).toEqual(saved.project)
+  expect(reopened.model.resources).toEqual(saved.resources)
+})
 
-    const beforeDialog = activeProject()
-    fireEvent.click(screen.getByTestId('replace-component-manually'))
-    await waitFor(() => expect(api.selectComponentPackage).toHaveBeenCalledOnce())
+it('prepares current archives without a transaction and rejects wrong identity/version and corrupt bytes while preserving the original course', async () => {
+  const h = await fixture(), before = await h.host.internalAPI.read(h.initial.documentId)
+  await act(async () => { expect(await h.hook.result.current.prepareCatalogPackage(h.item)).toEqual(entry()) })
+  const wrongId = { ...entry(), id: 'other' }
+  for (const archive of [exportComponentLibraryArchive(wrongId), exportComponentLibraryArchive(entry(), '99.0.0'), bytes('corrupt')]) {
+    h.ports.readCatalogPackage = async () => ({ bytes: archive, sha256: 'unused metadata' })
+    await act(async () => { expect(await h.hook.result.current.prepareCatalogPackage(h.item)).toBeNull() })
+  }
+  expect(h.errors).toHaveLength(3)
+  expect(await h.host.internalAPI.read(h.initial.documentId)).toEqual(before)
+})
 
-    expect(captureTarget).toHaveBeenCalledOnce()
-    expect(captureTarget.mock.invocationCallOrder[0])
-      .toBeLessThan(api.selectComponentPackage.mock.invocationCallOrder[0]!)
-    expect(captureTarget.mock.results[0]?.value).toEqual({
-      projectId: beforeDialog.id,
-      documentRevision: beforeDialog.revision,
-      packageId: PACKAGE_ID,
-    })
-    expect(screen.getByTestId('busy-state')).toBeDisabled()
-
-    useEditorStore.getState().renameProject('ARCH-2 manual replacement intervening edit')
-    await settleCourse()
-    const afterRename = writeSnapshot()
-    await resolveDeferred(selection, replacementFile())
-    await waitFor(() => expect(screen.getByRole('button', { name: '确认替换' })).toBeVisible())
-    fireEvent.click(screen.getByRole('button', { name: '确认替换' }))
-
-    await waitFor(() => {
-      expect(useEditorStore.getState().errorMessage).toMatch(/revision.*失效/)
-      expect(useEditorStore.getState().errorMessage).toMatch(/重新开始替换/)
-    })
-    expect(replaceAtTarget).toHaveBeenCalledOnce()
-    expect(writeSnapshot()).toEqual(afterRename)
-  })
-
-  it('captures the catalog target before its deferred read and rejects a stale 4.1 package without writes', async () => {
-    const catalogRead = deferred<ComponentCatalogPackageFile>()
-    const api = componentApi({
-      readComponentCatalogPackage: () => catalogRead.promise,
-    })
-    const { captureTarget, replaceAtTarget } = installTargetSpies()
-    await renderWithApi(api)
-
-    const beforeRead = activeProject()
-    fireEvent.click(screen.getByTestId('update-component-from-catalog'))
-    await waitFor(() => expect(screen.getByRole('button', { name: '确认更新' })).toBeVisible())
-    fireEvent.click(screen.getByRole('button', { name: '确认更新' }))
-    await waitFor(() => expect(api.readComponentCatalogPackage).toHaveBeenCalledOnce())
-
-    expect(captureTarget).toHaveBeenCalledOnce()
-    expect(captureTarget.mock.invocationCallOrder[0])
-      .toBeLessThan(api.readComponentCatalogPackage.mock.invocationCallOrder[0]!)
-    expect(captureTarget.mock.results[0]?.value).toEqual({
-      projectId: beforeRead.id,
-      documentRevision: beforeRead.revision,
-      packageId: PACKAGE_ID,
-    })
-    expect(screen.getByTestId('busy-state')).toBeDisabled()
-
-    useEditorStore.getState().renameProject('ARCH-2 catalog update intervening edit')
-    await settleCourse()
-    const afterRename = writeSnapshot()
-    await resolveDeferred(catalogRead, catalogFile())
-
-    await waitFor(() => {
-      expect(useEditorStore.getState().errorMessage).toMatch(/revision.*失效/)
-      expect(useEditorStore.getState().errorMessage).toMatch(/刷新组件目录后重试/)
-    })
-    expect(replaceAtTarget).toHaveBeenCalledOnce()
-    expect(writeSnapshot()).toEqual(afterRename)
-  })
-
-  it('routes a normal manual 4.1 replacement through replaceComponentPackageAtTarget once', async () => {
-    const api = componentApi({
-      selectComponentPackage: async () => replacementFile(),
-    })
-    const { captureTarget, replaceAtTarget } = installTargetSpies()
-    await renderWithApi(api)
-    const before = writeSnapshot()
-
-    fireEvent.click(screen.getByTestId('replace-component-manually'))
-    await waitFor(() => expect(screen.getByRole('button', { name: '确认替换' })).toBeVisible())
-    fireEvent.click(screen.getByRole('button', { name: '确认替换' }))
-
-    await waitFor(() => {
-      expect(activeProject().componentPackages[PACKAGE_ID]?.version)
-        .toBe(REPLACEMENT_VERSION)
-    })
-    await settleCourse()
-    const after = writeSnapshot()
-    expect(captureTarget).toHaveBeenCalledOnce()
-    expect(replaceAtTarget).toHaveBeenCalledOnce()
-    expect(replaceAtTarget.mock.calls[0]?.[0]).toEqual(captureTarget.mock.results[0]?.value)
-    expect(after.project.revision).toBe(before.project.revision + 1)
-    expect(after.undoDepth).toBe(before.undoDepth + 1)
-    expect(after.redoDepth).toBe(before.redoDepth)
-    expect(after.componentPackages[PACKAGE_ID]?.manifest.version)
-      .toBe(REPLACEMENT_VERSION)
-    expect(after.sidecarPast).toEqual(before.sidecarPast)
-    expect(after.sidecarFuture).toEqual(before.sidecarFuture)
-    expect(after.componentPast).toEqual(before.componentPast)
-    expect(after.componentFuture).toEqual(before.componentFuture)
-  })
+it('reads the actual current catalog bytes and hash, then diagnoses identity changes, missing resources and damaged packages', async () => {
+  const h = await fixture(), root = path.join(h.directory, 'catalog'); await fs.mkdir(root)
+  const filename = path.join(root, 'widget.h5component'); await fs.writeFile(filename, h.file.bytes)
+  const source = await scanComponentCatalogDirectory(root, 'built-in')
+  const read = await readCatalogComponentPackage(source, 'widget', '2.0.0')
+  expect(Array.from(read.bytes)).toEqual(Array.from(h.file.bytes))
+  expect(read.sha256).toBe(createHash('sha256').update(h.file.bytes).digest('hex'))
+  await fs.writeFile(filename, exportComponentLibraryArchive({ ...entry(), id: 'other' }))
+  await expect(readCatalogComponentPackage(source, 'widget', '2.0.0')).rejects.toThrow('身份已改变')
+  const incomplete = unzipSync(h.file.bytes); delete incomplete['assets/new-asset']
+  await fs.writeFile(filename, zipSync(incomplete))
+  await expect(readCatalogComponentPackage(source, 'widget', '2.0.0')).rejects.toThrow('组件资源缺失')
+  await fs.writeFile(filename, bytes('corrupt'))
+  await expect(readCatalogComponentPackage(source, 'widget', '2.0.0')).rejects.toThrow()
+  const corrupted = await scanComponentCatalogDirectory(root, 'built-in')
+  expect(corrupted.packages).toEqual([])
+  expect(corrupted.issues).toContainEqual(expect.objectContaining({ code: 'package-unreadable' }))
+  expect((await h.host.internalAPI.read(h.initial.documentId)).undoDepth).toBe(0)
 })

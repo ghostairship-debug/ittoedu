@@ -1,11 +1,20 @@
 // @vitest-environment node
 import { expect, it } from 'vitest'
+import { z } from 'zod'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { InMemoryComponentCompilation } from '../../src/core/components/compilation/InMemoryComponentCompilation'
 import { createEsbuildComponentCompiler } from '../../src/main/workbench/contentApply/compilation/esbuildComponentCompiler'
-import { projectWebModuleGraph, type WebRuntimeData } from '../../src/components/web/moduleGraph'
+import { projectWebModuleGraph } from '../../src/components/web/moduleGraph'
+import { webDataSchema } from '../../src/components/web/data'
 import { buildPublishedCourseV3 } from '../../src/core/publish/componentPlatform/buildPublishedCourseV3'
 import { extractHtmlResources } from '../../src/main/workbench/htmlImport/extractHtmlResources'
+
+const webRuntimeDataSchema = webDataSchema.extend({
+  moduleGraph: z.object({
+    modules: z.record(z.string(), z.object({ code: z.string(), imports: z.array(z.object({ start: z.number(), end: z.number(), path: z.string() })) })),
+    entries: z.record(z.string(), z.string()),
+  }).optional(),
+})
 
 it('prepares only reachable HTML modules and retains unused author files without blocking offline output', async () => {
   const project = createBlankCourseProjectV10('Reachable HTML modules')
@@ -23,11 +32,11 @@ it('prepares only reachable HTML modules and retains unused author files without
   const before = structuredClone(project)
   const compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
   const runtime = await projectWebModuleGraph(project.instances.web, input => compilation.compile(input))
-  expect(Object.keys((runtime.data as WebRuntimeData).moduleGraph!.modules).sort()).toEqual(['main.js', 'shared.js'])
+  expect(Object.keys(webRuntimeDataSchema.parse(runtime.data).moduleGraph!.modules).sort()).toEqual(['main.js', 'shared.js'])
   const published = await buildPublishedCourseV3({ project, assetBytes: {} }, { compilation })
   expect(published.diagnostics).toEqual([])
   expect(published.offlineComplete).toBe(true)
-  expect(published.payload.instances.web.data.modules).toEqual(before.instances.web.data.modules)
+  expect(webRuntimeDataSchema.parse(published.payload.instances.web.data).modules).toEqual(webDataSchema.parse(before.instances.web.data).modules)
   expect(project).toEqual(before)
 })
 
@@ -44,9 +53,9 @@ it('reports a missing reachable HTML import while retaining source and usable si
   const published = await buildPublishedCourseV3({ project, assetBytes: {} }, { compilation })
   expect(published.offlineComplete).toBe(false)
   expect(published.diagnostics).toEqual([expect.objectContaining({ code: 'source-compile-failed', message: expect.stringContaining('missing.js') })])
-  const data = published.payload.instances.web.data as WebRuntimeData
+  const data = webRuntimeDataSchema.parse(published.payload.instances.web.data)
   expect(data.moduleGraph!.modules['healthy.js'].code).toContain('42')
-  expect(data.modules).toEqual(before.instances.web.data.modules)
+  expect(data.modules).toEqual(webDataSchema.parse(before.instances.web.data).modules)
   expect(project).toEqual(before)
 })
 
@@ -73,7 +82,7 @@ it('prepares recursive srcdoc entries with their actual local base and CSS modul
   expect(closure.diagnostics.filter(item => item.code === 'missing-relative-resource')).toEqual([])
   expect(closure.resources).toHaveLength(1)
   const compiled = await projectWebModuleGraph({ id: 'nested', definitionId: 'web', data: { html: closure.html, modules: closure.modules! } }, input => new InMemoryComponentCompilation(createEsbuildComponentCompiler()).compile(input))
-  const graph = (compiled.data as WebRuntimeData).moduleGraph!
+  const graph = webRuntimeDataSchema.parse(compiled.data).moduleGraph!
   expect(graph.entries).toEqual({ '0:0': 'child/assets/main.js', '0/0:0': 'child/assets/main.js', '1:0': 'child/assets/main.js' })
   expect(graph.modules['child/assets/main.js']!.imports[0]!.path).toBe('child/assets/theme.css')
   expect(graph.modules['child/assets/theme.css']!.code).toContain('cw-resource:')

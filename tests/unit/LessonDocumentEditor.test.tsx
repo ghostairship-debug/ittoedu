@@ -2,7 +2,7 @@ import { attachMarkdownRendererHost } from '../helpers/markdownRendererHost'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { TextDriver } from '../../src/core/drivers/TextDriver'
 import type { DocumentEvent, DocumentModel } from '../../src/shared/workbench/document'
-import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
+import { authoringDraftRecoverySchema, type AuthoringDraftRecovery, type DocumentHostAPI } from '../../src/shared/workbench/desktop'
 import type { DocumentFileRef } from '../../src/shared/document/ports'
 import { EditorView } from '@codemirror/view'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -14,6 +14,7 @@ import type { OpenDocumentResult } from '../../src/shared/document/ports'
 
 function attachTextRendererHost(port: RecoverableDocumentFilePort, fixedRef: DocumentFileRef) {
   const listeners = new Set<(event: DocumentEvent) => void>()
+  const authoringDrafts = new Map<string, AuthoringDraftRecovery>()
   const model = (source: string): DocumentModel => ({ kind: 'text', source, resources: { assets: {}, components: {} } })
   const registry = new DocumentRegistry({
     createId: () => crypto.randomUUID(), drivers: [new TextDriver()], bindingKey: binding => binding.path.replace(/\\/g, '/').toLowerCase(),
@@ -38,6 +39,9 @@ function attachTextRendererHost(port: RecoverableDocumentFilePort, fixedRef: Doc
       return (await registry.open({ kind: 'file', path: filename, version: disk.version.contentVersion, bindingVersion: 1 }, async () => model(disk.source))).read()
     },
     read: async id => registry.get(id).read(),
+    readAuthoringDrafts: async id => { registry.get(id); return structuredClone(authoringDrafts.get(id) ?? null) },
+    writeAuthoringDrafts: async (id, drafts) => { registry.get(id); authoringDrafts.set(id, structuredClone(authoringDraftRecoverySchema.parse(drafts))) },
+    clearAuthoringDrafts: async id => { registry.get(id); authoringDrafts.delete(id) },
     dispatch: operation => registry.get(operation.documentId).execute(operation),
     lookup: async (id, operationId) => registry.get(id).lookupOperation(operationId),
     save: id => registry.save(id),
@@ -50,7 +54,7 @@ function attachTextRendererHost(port: RecoverableDocumentFilePort, fixedRef: Doc
       return { bindingVersion: current.binding.bindingVersion, version: disk.version.contentVersion, model: model(disk.source) }
     },
     reconcileFile: input => registry.get(input.documentId).reconcileFile(input, async () => { throw new Error('unused') }),
-    close: async (id, discardDirty) => { await registry.close(id, { discardDirty }) },
+    close: async (id, discardDirty) => { await registry.close(id, { discardDirty }); authoringDrafts.delete(id) },
     recoverable: async () => [],
     restore: async () => { throw new Error('unused') },
     discardRecovery: async () => {},
@@ -78,7 +82,7 @@ describe('LessonDocumentEditor mounted shared core', () => {
     const stop = vi.fn()
     const port: RecoverableDocumentFilePort = {
       openDocument: vi.fn(async () => ({ ref, source: '严格模式真实正文', version: { contentVersion: 'v1', attachments: [] }, diagnostics: [] })),
-      watchDocument: vi.fn(() => stop), saveDocument: vi.fn(), 
+      watchDocument: vi.fn(() => stop), saveDocument: vi.fn(),
     }
     const host = attachMarkdownRendererHost(port, ref)
     const open = vi.spyOn(host.documents, 'open')
@@ -93,7 +97,7 @@ describe('LessonDocumentEditor mounted shared core', () => {
     const ref = { kind: 'file' as const, path: '/lesson/plan.md' }
     let disk: OpenDocumentResult = { ref, source: '原稿', version: { contentVersion: 'v1', attachments: [] }, diagnostics: [] }
     const port: RecoverableDocumentFilePort = {
-      openDocument: async () => disk, watchDocument: () => () => {}, saveDocument: vi.fn(), 
+      openDocument: async () => disk, watchDocument: () => () => {}, saveDocument: vi.fn(),
     }
     attachMarkdownRendererHost(port, ref)
     const handle = createRef<LessonDocumentEditorHandle>()

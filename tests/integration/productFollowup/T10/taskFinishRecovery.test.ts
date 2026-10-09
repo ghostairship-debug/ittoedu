@@ -5,7 +5,7 @@ import path from 'node:path'
 import { expect, it } from 'vitest'
 import { DocumentHostService } from '../../../../src/main/workbench/DocumentHostService'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
-import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
+import { TEXT_DEFINITION , textDataEdit } from '../../../../src/components/text/adapters'
 import { createTextComponentData } from '../../../../src/components/text/data'
 import { prepareExecutionContentOutput } from '../../../../src/core/tools/ToolTargets'
 import { ExecutionEngine } from '../../../../src/main/workbench/execution/ExecutionEngine'
@@ -30,7 +30,7 @@ it.each([false, true])('recovering a finish-executing crash slice keeps the comm
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'followup-finish-recovery-'))
   const host = new DocumentHostService(path.join(directory, 'documents')), project = createBlankCourseProjectV10('finish恢复')
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
-  project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('原稿') }
+  project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('原稿')).value }
   project.surfaces = [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body'] }]
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'finish.h5lesson')
   const target = { kind: 'course-instance' as const, surfaceId: 'flow', instanceId: 'body', dataPath: ['content'] }
@@ -82,9 +82,9 @@ it.each([false, true])('recovering a finish-executing crash slice keeps the comm
     if (unknownWrite) {
       crash.tools.splice(crash.tools.indexOf(finish), 0, { callId: 'unknown-second-body', providerCallId: 'unknown-second-body', requestId: crash.requests[0].requestId,
         state: 'executing', call: { name: 'text.replace', input: { content: '结果未知的另一次写入' } }, effectTargets: structuredClone(crash.tools[0].effectTargets) })
-      const assistant = crash.messages.find(message => message.role === 'assistant' && message.tool_calls?.some(call => call.id === finish.providerCallId))
-      if (!assistant || assistant.role !== 'assistant' || !assistant.tool_calls) throw new Error('Actual paired tool-call response required')
-      assistant.tool_calls.splice(assistant.tool_calls.findIndex(call => call.id === finish.providerCallId), 0,
+      const assistant = crash.messages.find(message => message.role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.some(call => call !== null && typeof call === 'object' && !Array.isArray(call) && call.id === finish.providerCallId))
+      if (!assistant || assistant.role !== 'assistant' || !Array.isArray(assistant.tool_calls)) throw new Error('Actual paired tool-call response required')
+      assistant.tool_calls.splice(assistant.tool_calls.findIndex(call => call !== null && typeof call === 'object' && !Array.isArray(call) && call.id === finish.providerCallId), 0,
         { id: 'unknown-second-body', type: 'function', function: { name: 'text.replace', arguments: JSON.stringify({ content: '结果未知的另一次写入' }) } })
     }
     // The positive crash slice and event prefix are captured from the real checkpoint, not rewound from a terminal run.

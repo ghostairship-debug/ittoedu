@@ -23,6 +23,15 @@ export interface SlideLightEditingOwner {
 }
 export function createSlideLightEditingPort(owner: SlideLightEditingOwner) {
   const { kernel } = owner
+  const assertCurrentSelection = (target: CapturedCourseTarget) => {
+    const view = kernel.readView()
+    if (view.pending || view.activeDocumentId !== target.documentId || view.snapshot?.epoch !== target.epoch
+      || view.surfaceId !== target.surfaceId || view.activeStateId !== target.activeStateId
+      || view.selectedInstanceIds.length !== target.instanceIds.length
+      || view.selectedInstanceIds.some((id, index) => id !== target.instanceIds[index])) {
+      throw new Error('选择或文档已改变，请重新打开当前操作。')
+    }
+  }
   const capturePage = (): SlideLightPageTarget | null => {
     if (!kernel.readView().project || kernel.readView().pending) return null
     const target = kernel.captureTarget()
@@ -55,11 +64,13 @@ export function createSlideLightEditingPort(owner: SlideLightEditingOwner) {
   }
   const commit = (target: CapturedCourseTarget, edits: ComponentEdit[]) => kernel.editCaptured(kernel.capture(edits, target)).then(() => {})
   const placeAudio = async (target: SlideLightPageTarget) => {
+    assertCurrentSelection(target)
     if (!owner.chooseAudio || !owner.placeAudio) throw new Error('音频放置入口尚未接入')
     const selected = await owner.chooseAudio()
-    if (selected) await owner.placeAudio(target, selected)
+    if (selected) { assertCurrentSelection(target); await owner.placeAudio(target, selected) }
   }
   const runPage = async (target: SlideLightPageTarget, command: SlideLightCommand) => {
+    assertCurrentSelection(target)
     const available = viewPage(target).commands.find(value => value.id === command.id)
     if (!available || available.disabledReason) throw new Error(available?.disabledReason ?? '当前页面操作不可用')
     if (available.kind === 'audio-import') await placeAudio(target)
@@ -69,6 +80,7 @@ export function createSlideLightEditingPort(owner: SlideLightEditingOwner) {
     }
   }
   const runObject = async (target: SlideLightObjectTarget, command: SlideLightCommand) => {
+    assertCurrentSelection(target)
     const available = viewObject(target).commands.find(value => value.id === command.id)
     if (!available || available.disabledReason) throw new Error(available?.disabledReason ?? '当前对象操作不可用')
     const id = target.instanceId, value = available.value, item = target.editingProject.instances[id]

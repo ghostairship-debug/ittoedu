@@ -52,6 +52,6 @@ export async function residentMcpFixture(input: {
 
 /** Tool reply envelope as returned by the resident server. */
 export interface ResidentToolReply { content: { type: string; text?: string }[]; structuredContent: { result: any; ticket?: string; replayed?: boolean }; isError: boolean }
-export async function callTool(client: Client, name: string, args: unknown = {}, ticket?: string): Promise<ResidentToolReply> {
+export async function callTool(client: Client, name: string, args: Record<string, unknown> = {}, ticket?: string): Promise<ResidentToolReply> {
   return await client.callTool({ name, arguments: args, ...(ticket ? { _meta: { 'guoling/ticket': ticket } } : {}) }) as unknown as ResidentToolReply
 }

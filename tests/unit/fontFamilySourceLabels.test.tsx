@@ -11,14 +11,13 @@ import {
   BUNDLED_FONT_FAMILIES,
   BUNDLED_TEXT_FONT_FAMILY,
 } from '@/shared/fonts/bundledFontFamilies'
-import { selectActiveScene, useEditorStore } from '@/renderer/store/editorStore'
 import {
   detectFontAvailability,
   FONT_FAMILY_OPTIONS,
   FONT_FAMILY_SOURCE_TAGS,
   fontFamilySource,
 } from '@/renderer/ui/properties/PropertyControls'
-import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
+import { FontFamilyPicker } from '@/renderer/ui/properties/PropertyControls'
 
 /** A system family every option list carries, used as the `system` control. */
 const SYSTEM_FAMILY = 'Microsoft YaHei'
@@ -37,17 +36,8 @@ function stubFontFaceSet(check: (font: string, text?: string) => boolean) {
   return spy
 }
 
-import { createBlankCourseProject } from '@/core/course/createCourseProject'
-import { createCourseStoreHost } from '../helpers/courseStoreHost'
-
 let originalFonts: PropertyDescriptor | undefined
-let host: Awaited<ReturnType<typeof createCourseStoreHost>>
-
-beforeEach(async () => {
-  originalFonts = Object.getOwnPropertyDescriptor(document, 'fonts')
-  host = await createCourseStoreHost()
-  await host.open(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }))
-})
+beforeEach(() => { originalFonts = Object.getOwnPropertyDescriptor(document, 'fonts') })
 
 afterEach(() => {
   cleanup()
@@ -64,16 +54,12 @@ describe('font family source classification', () => {
     expect(fontFamilySource(SYSTEM_FAMILY)).toBe('system')
     expect(fontFamilySource('sans-serif')).toBe('system')
     expect(fontFamilySource('Custom Legacy Font, sans-serif')).toBe('system')
-  })
 
-  it('states a cost for both classes', () => {
     expect(FONT_FAMILY_SOURCE_TAGS.bundled.cost).toMatch(/嵌入/)
     expect(FONT_FAMILY_SOURCE_TAGS.bundled.cost).toMatch(/文件更大/)
     expect(FONT_FAMILY_SOURCE_TAGS.system.cost).toMatch(/不嵌入/)
     expect(FONT_FAMILY_SOURCE_TAGS.system.cost).toMatch(/变样/)
-  })
 
-  it('offers the bundled families before the system ones', () => {
     const bundledCount = FONT_FAMILY_OPTIONS.filter(
       (option) => fontFamilySource(option.family) === 'bundled',
     ).length
@@ -99,21 +85,15 @@ describe('font family availability probe', () => {
       `16px "${BUNDLED_TEXT_FONT_FAMILY}"`,
       '中文字体预览 Aa 123',
     )
-  })
 
-  it('keeps reporting an unloaded bundled family as unavailable', () => {
     stubFontFaceSet(() => false)
     expect(detectFontAvailability(BUNDLED_TEXT_FONT_FAMILY)).toBe('unavailable')
   })
 })
 
 describe('font family picker labelling', () => {
-  async function openFontList() {
-    const store = useEditorStore.getState()
-    store.addTextNode()
-    await store.drainCourseDocument()
-    expect(selectActiveScene(useEditorStore.getState()).nodes).toHaveLength(1)
-    render(<PropertiesTab onReplaceImage={() => undefined} />)
+  function openFontList() {
+    render(<FontFamilyPicker value={BUNDLED_TEXT_FONT_FAMILY} onCommit={() => {}} />)
     fireEvent.focus(screen.getByRole('combobox', { name: '字体' }))
     return screen.getByRole('listbox', { name: '常用字体' })
   }
@@ -148,11 +128,7 @@ describe('font family picker labelling', () => {
     // Each class is announced once, not per option.
     expect(screen.getAllByTestId('font-family-group-bundled')).toHaveLength(1)
     expect(screen.getAllByTestId('font-family-group-system')).toHaveLength(1)
-  })
 
-  it('repeats the cost of whichever class survives filtering', async () => {
-    stubFontFaceSet(() => true)
-    await openFontList()
     fireEvent.change(screen.getByRole('combobox', { name: '字体' }), {
       target: { value: 'Kai' },
     })

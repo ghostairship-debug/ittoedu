@@ -1,3 +1,4 @@
+/// <reference path="../virtual-player-bundle.d.ts" />
 import playerBundle from 'virtual:player-bundle'
 
 export function loadPlayerBundle(): string {

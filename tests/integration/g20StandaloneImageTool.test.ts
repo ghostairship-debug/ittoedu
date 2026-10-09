@@ -57,7 +57,7 @@ function fixture(images: ImageGenerationService, workspaceRoot: string) {
     stop: images.stop.bind(images), readResource: images.readResource.bind(images),
     readReadyResourceFromJob: images.readReadyResourceFromJob.bind(images) } }
   const coordinator = new HostToolCoordinator(services, registry, {
-    resolve: never, resolveImage: never, active: never, applied: never, actor: () => 'agent', ownsDocument: () => false,
+    resolveImage: never, active: never, ownsDocument: () => false,
     provideImage: never, readImage: never,
   })
   const grant: ToolRunGrant = { runId: 'run', actor: 'agent', documents: [],

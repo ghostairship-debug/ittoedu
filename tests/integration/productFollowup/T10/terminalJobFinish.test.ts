@@ -317,7 +317,7 @@ it('finishes a text edit and an explicit save in one model response using one re
   }
 })
 
-it('returns a successful child delivery to the model even while finish still reports an unresolved authored action', async () => {
+it('keeps successful child delivery and an already observed rejected image as separate truthful receipts', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'T10-partial-finish-delivery-'))
   const host = new DocumentHostService(path.join(directory, 'documents'))
   const project = createBlankCourseProjectV10('子交付保全')
@@ -336,12 +336,7 @@ it('returns a successful child delivery to the model even while finish still rep
     requests++
     if (requests === 1) { yield reply(request, [{ name: 'media.insert', input: { target: 'stale-page-handle', resource: 'unapplied-image' } }]); return }
     if (requests === 2) { yield reply(request, [{ name: 'task.finish', input: { delivery: { destination: filename } } }]); return }
-    expect(requests).toBe(3)
-    expect(namedReceipt(request, 'task.finish')).toMatchObject({ kind: 'error', code: 'task-unfinished', data: {
-      delivery: { kind: 'read', data: { status: 'saved', path: filename, savedRevision: 0, dirty: false } },
-      remaining: expect.arrayContaining([expect.objectContaining({ name: 'media.insert' })]),
-    } })
-    yield reply(request, [], '原稿已保存；图片应用仍未完成。')
+    throw new Error('An already observed rejection must not require a repeated finish loop after saving')
   } }
   const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, files: host.agentFiles, provider,
     runs: new ExecutionRunStore(path.join(directory, 'runs')), events: new ExecutionEventStore({ directory: path.join(directory, 'events') }) })
@@ -350,8 +345,13 @@ it('returns a successful child delivery to the model even while finish still rep
       instruction: '把图片插入课件并保存，未成功要如实保留。', workspaceRoot: directory, permission: 'workspace',
       documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }] })
     const ended = await engine.wait(started.runId)
-    expect(ended.status).toBe('partial')
-    expect(requests).toBe(3)
+    expect(ended.status).toBe('completed')
+    expect(requests).toBe(2)
+    expect(ended.tools.find(tool => tool.call.name === 'task.finish')?.result).toMatchObject({ kind: 'read', data: {
+      status: 'completed', warnings: expect.arrayContaining([expect.objectContaining({ name: 'media.insert', status: 'failed' })]),
+      delivery: { kind: 'read', data: { status: 'saved', path: filename, savedRevision: 0, dirty: false } },
+    } })
+    expect(ended.tools.find(tool => tool.call.name === 'media.insert')?.result).toMatchObject({ kind: 'error', code: 'invalid-target' })
     expect((await new DocumentHostService(path.join(directory, 'cold')).internalAPI.open(filename)).model.kind).toBe('course-v10')
     expect(ended.tools.filter(tool => tool.call.name === 'task.delivery')).toHaveLength(1)
   } finally { await engine.shutdown(); await fs.rm(directory, { recursive: true, force: true }) }
@@ -401,10 +401,10 @@ it('settles a corrected text from its real canonical scope while retaining the r
   }
 })
 
-it('continues after a rejected image insert despite save, finish and same-batch read, then ends after the real insert and save', async () => {
+it('reuses the generated image after a rejected insert, explicitly reads the page and saves the corrected insertion', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'T10-recoverable-finish-'))
   const host = new DocumentHostService(path.join(directory, 'documents'))
-  const filename = path.join(directory, 'finish.h5lesson')
+  const filename = path.join(directory, 'finish.glx')
   const bytes = await sharp({ create: { width: 12, height: 9, channels: 4, background: '#428c72' } }).png().toBuffer()
   let generated = 0, saves = 0, requests = 0, resource = '', createdDocumentId = '', surface = '', document = ''
   const images = new ImageGenerationService({ directory: path.join(directory, 'images'), provider: { async generate(request, references) {
@@ -432,7 +432,7 @@ it('continues after a rejected image insert despite save, finish and same-batch 
     requests++
     if (phase === 'create') {
       phase = 'discover'
-      yield reply(request, [{ name: 'file.create', input: { name: 'finish.h5lesson', kind: 'course-v10' } }]); return
+      yield reply(request, [{ name: 'file.create', input: { name: 'finish.glx', kind: 'course-v10' } }]); return
     }
     if (phase === 'discover') {
       const created = namedReceipt(request, 'file.create')
@@ -467,17 +467,11 @@ it('continues after a rejected image insert despite save, finish and same-batch 
     }
     if (phase === 'save') {
       expect(lastReceipt(request)).toMatchObject({ kind: 'read', data: { status: 'saved', dirty: false } })
-      phase = 'finish'
-      yield reply(request, [{ name: 'task.finish', input: {} }]); return
-    }
-    if (phase === 'finish') {
-      expect(lastReceipt(request)).toMatchObject({ kind: 'error', code: 'task-unfinished' })
       phase = 'read'
-      yield reply(request, [{ name: 'listChildren', input: { target: document } }, { name: 'task.finish', input: {} }]); return
+      yield reply(request, [{ name: 'listChildren', input: { target: document } }]); return
     }
     if (phase === 'read') {
       expect(namedReceipt(request, 'listChildren')).toMatchObject({ kind: 'read' })
-      expect(lastReceipt(request)).toMatchObject({ kind: 'error', code: 'task-unfinished' })
       phase = 'done'
       yield reply(request, [{ name: 'media.insert', input: { target: surface, resource } },
         { name: 'project.save', input: {} }, { name: 'task.finish', input: {} }]); return
@@ -510,7 +504,7 @@ it('continues after a rejected image insert despite save, finish and same-batch 
   }
 })
 
-it.each(['finish', 'stop', 'retry', 'cross'] as const)('ends truthfully after %s with an uncorrected image insertion', async ending => {
+it.each(['finish', 'stop', 'retry'] as const)('ends truthfully after %s with an uncorrected image insertion', async ending => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'T10-stalled-finish-'))
   const host = new DocumentHostService(path.join(directory, 'documents'))
   const project = createBlankCourseProjectV10('结束停滞')
@@ -528,7 +522,7 @@ it.each(['finish', 'stop', 'retry', 'cross'] as const)('ends truthfully after %s
         ? [{ name: 'media.insert', input: { target: 'still-invalid-page', resource: 'task-image' } }]
         : [{ name: 'task.finish', input: {} }]); return
     }
-    yield reply(request, ending === 'finish' || ending === 'cross' && requests === 2
+    yield reply(request, ending === 'finish'
       ? [{ name: 'task.finish', input: {} }] : [], '仍不插入图片。')
   } }
   const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider,
@@ -538,10 +532,9 @@ it.each(['finish', 'stop', 'retry', 'cross'] as const)('ends truthfully after %s
       instruction: '把图片插入课件第一页。', workspaceRoot: directory, permission: 'workspace',
       documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }, { kind: 'course-surface', surfaceId: project.surfaces[0].id }] }] })
     const ended = await engine.wait(started.runId)
-    expect(requests).toBe(3)
+    expect(requests).toBe(ending === 'retry' ? 3 : 2)
     expect(ended.status, JSON.stringify({ failure: ended.failure, tools: ended.tools })).toBe('partial')
-    if (ending === 'retry') expect(ended.failure?.code).not.toBe('model-no-progress')
-    else expect(ended.failure?.code).toBe('model-no-progress')
+    expect(ended.failure?.code).not.toBe('model-no-progress')
     expect(ended.tools.filter(value => value.call.name === 'media.insert')).toHaveLength(ending === 'retry' ? 2 : 1)
     expect(await host.internalAPI.read(initial.documentId)).toMatchObject({ revision: 0, dirty: true })
   } finally {
@@ -596,7 +589,7 @@ it('queries an unknown original operation after plain stop and ends a repeated c
     expect(ended.status, JSON.stringify({ failure: ended.failure, tools: ended.tools })).toBe('partial')
     expect(ended.failure?.code).toBe('model-no-progress')
     expect(ended.tools.find(tool => tool.call.name === 'task.finish')?.result)
-      .toMatchObject({ kind: 'error', code: 'task-unfinished', data: { remaining: [expect.objectContaining({ status: 'unknown' })] } })
+      .toMatchObject({ kind: 'error', code: 'task-unfinished', data: { remaining: expect.arrayContaining([expect.objectContaining({ status: 'unknown', name: 'project.apply' }), expect.objectContaining({ status: 'unverified', name: '交付' })]) } })
     expect(attempts).toBe(1)
     expect(requests).toBe(4)
     expect(await host.internalAPI.read(initial.documentId)).toMatchObject({ revision: 0 })

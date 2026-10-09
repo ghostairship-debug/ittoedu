@@ -189,7 +189,7 @@ it('inspects remix slots without form-required issues and preserves genuine stru
   const before = structuredClone(project), observed = inspectCourseRemixSlots(project, surface.id)
   expect(observed.slots).toHaveLength(1)
   expect(observed.slots[0]).toMatchObject({ instanceId: 'text', original: '旧头强调旧尾' })
-  expect(observed.slots[0].issue).toBeUndefined()
+  expect(observed.slots[0]).not.toHaveProperty('issue')
   expect(observed.issues).toEqual(['混合公式：保留公式混排，请在原页局部精修'])
   expect(previewCourseStyleRemix(project, surface.id, {}).slots[0].issue).toBe('请填写此槽位')
   expect(project).toEqual(before)

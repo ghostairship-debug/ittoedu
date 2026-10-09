@@ -207,6 +207,7 @@ it('records IPC receipt, submission preparation and only observation of an appen
   await service.appendExternalEvent({ eventId: 'save-fact', conversationId: conversation.conversationId, taskId: submissionId,
     runId: result.run!.runId, itemId: 'save', time: sourceTime, source: 'builtin', type: 'document.save', update: 'snapshot',
     data: { documentId: 'document', saveStatus: 'saved', status: 'completed', label: '已保存' } })
+  await service.events.flushPending()
   const afterSave = await service.events.readTiming(conversation.conversationId, submissionId)
   expect(mark(afterSave, 'save.fact-observed')).toMatchObject({ sourceWallTimeMs: sourceTime,
     detail: { documentId: 'document', saveStatus: 'saved' } })
@@ -214,6 +215,7 @@ it('records IPC receipt, submission preparation and only observation of an appen
   await service.appendExternalEvent({ eventId: 'failed-save-fact', conversationId: conversation.conversationId, taskId: submissionId,
     runId: result.run!.runId, itemId: 'failed-save', time: Date.now(), source: 'builtin', type: 'document.save', update: 'snapshot',
     data: { documentId: 'document', saveStatus: 'failed', status: 'failed', label: '保存失败' } })
+  await service.events.flushPending()
   expect((await service.events.readTiming(conversation.conversationId, submissionId))
     .filter(value => value.stage === 'save.fact-observed').map(value => value.detail?.saveStatus)).toEqual(['saved', 'failed'])
 })
@@ -236,7 +238,7 @@ it('stamps a real DocumentSession disk ACK before the later timeline projection,
     data: { documentId: document.documentId, revision: edit.result.revision, operationId: edit.result.operationId,
       applicationStatus: 'applied', status: 'applied' } })
   const projection = installDocumentSaveEvents({ documents, execution: { events, conversations,
-    appendExternalEvent: input => events.append(input) } })
+    appendExternalEvent: async input => { await events.append(input) } } })
   try {
     const filename = path.join(directory, 'timed.md')
     expect((await events.readTiming(conversation.conversationId, taskId)).some(value => value.stage === 'save.finished')).toBe(false)

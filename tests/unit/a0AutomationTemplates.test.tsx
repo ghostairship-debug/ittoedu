@@ -1,3 +1,4 @@
+import { documentHostAPI } from '../helpers/documentHostAPI'
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -65,8 +66,7 @@ async function fixture(scope: 'scene' | 'global' = 'scene', teacherSource?: bool
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-a0-automation-'))
   const host = new DocumentHostService(directory), bridge = new CourseV10DocumentBridge()
   fixtures.push({ bridge, directory })
-  const api: DocumentHostAPI = { ...host.internalAPI, bootstrapCourse: () => host.bootstrapCourse(),
-    subscribe: listener => host.subscribeEvents(listener) } as DocumentHostAPI
+  const api = documentHostAPI(host)
   await bridge.connect(api)
   await bridge.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } })
   const documentId = bridge.read().activeDocumentId!

@@ -29,7 +29,7 @@ async function fixture() {
   const entries = async (directoryEntryId = workspace.rootEntryId) => (await host.files.listChildren({ workspaceId: workspace.workspaceId, directoryEntryId })).entries
   const entry = async (name: string, directoryEntryId?: string) => {
     const item = (await entries(directoryEntryId)).find(item => item.name === name && item.status === 'accessible')
-    if (!item) throw new Error(`missing fixture entry ${name}`)
+    if (!item || item.status !== 'accessible') throw new Error(`missing fixture entry ${name}`)
     return item.entryId
   }
   const open = async (filename: string) => {

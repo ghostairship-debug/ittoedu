@@ -23,7 +23,7 @@ function harness(options: Pick<AuthoringObservationPorts, 'prepareImageResources
   const surface = project.surfaces[0]!
   if (surface.type !== 'flow') throw new Error('Flow fixture required')
   surface.blocks.push({ id: 'observation-paragraph', type: 'paragraph', content: { inlines: [{ type: 'text', text: '已提交的正文' }] } })
-  let state: AuthoringObservationState = { document: project, sessionGeneration: 3, surfaceId: surface.id,
+  let state: AuthoringObservationState = { document: project, documentId: 'observation-document', epoch: 'observation-epoch', sessionGeneration: 3, surfaceId: surface.id,
     locationId: project.startLocationId, stateId: null, selectedIds: ['observation-paragraph'], draft: null, assetFiles: {} }
   const root = document.createElement('main')
   document.body.append(root)
@@ -283,18 +283,19 @@ describe('current authoring observation', () => {
 
   it('describes a current style preview for discussion but does not silently commit it for editing', async () => {
     const h = harness()
-    h.replace({ previewBackgroundColor: { color: '#112233', target: { projectId: h.state.document.id,
-      revision: h.state.document.revision, generation: h.state.sessionGeneration, locationId: h.state.locationId,
-      stateId: null, owner: 'flow-surface' } } })
+    h.replace({ previewBackgroundColor: { edits: [{ type: 'surface.background.set', surfaceId: h.state.surfaceId, background: { color: '#112233' } }], target: { documentId: h.state.documentId,
+      epoch: h.state.epoch, surfaceId: h.state.surfaceId, stateId: null, owner: 'surface' } } })
     const result = await h.controller.capture({ intent: 'discuss' })
     expect(result.resourceFiles.find(file => file.role === 'structure')!.content).toContain('#112233')
     await expect(h.controller.capture({ intent: 'edit' })).rejects.toThrow('样式预览尚未正式提交')
   })
 
-  it.each(['document', 'session', 'draft', 'selection', 'view', 'asset'] as const)('discards an observation when %s changes during the native capture', async change => {
+  it.each(['document', 'documentId', 'epoch', 'session', 'draft', 'selection', 'view', 'asset'] as const)('discards an observation when %s changes during the native capture', async change => {
     const h = harness()
     h.captureImage.mockImplementation(async () => {
       if (change === 'document') h.replace({ document: { ...h.state.document, revision: h.state.document.revision + 1 } })
+      if (change === 'documentId') h.replace({ documentId: 'another-document' })
+      if (change === 'epoch') h.replace({ epoch: 'another-epoch' })
       if (change === 'session') h.replace({ sessionGeneration: h.state.sessionGeneration + 1 })
       if (change === 'draft') h.replace({ draft: { text: '捕获中继续输入' } })
       if (change === 'selection') h.replace({ selectedIds: [] })

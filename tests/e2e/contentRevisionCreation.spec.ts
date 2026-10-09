@@ -195,7 +195,7 @@ test('T10 small V10 creation uses actual local compute, editable table/chart, re
           delete (globalThis as any).__contentRevisionCreationDiagnosticStop
       }
       await events.flushPending()
-      const failure = input.liveMode && ended.failure ? { code: ended.failure.code, kind: ended.failure.kind, outcome: ended.failure.outcome } : ended.failure
+      const failure = input.liveMode && ended.failure ? { code: ended.failure.code, outcome: ended.failure.outcome } : ended.failure
       checkpoint('engine.ended', { runId: started.runId, status: ended.status, failure })
       const sourceTools = [...previous?.tools ?? [], ...ended.tools]
       const sourceRequests = [...originalFacts?.requests ?? [], ...requests]
@@ -264,13 +264,13 @@ test('T10 small V10 creation uses actual local compute, editable table/chart, re
       const mean = (label: RegExp) => Number(rows.slice(1).find(row => row.some(cell => label.test(cell)))?.[meanColumn])
       expect(mean(/^一班$/)).toBe(90); expect(mean(/^二班$/)).toBe(80); expect(mean(/^(总体|全体|整体|overall)$/i)).toBe(85)
     }
-    expect(facts.tools.some(tool => ['image.generate', 'image.edit'].includes(tool.call.name))).toBe(false)
+    expect(facts.tools.some((tool: import('../../src/shared/workbench/execution').ExecutionToolRecord) => ['image.generate', 'image.edit'].includes(tool.call.name))).toBe(false)
     expect(facts.evidence.catalogs[0]).toEqual(expect.arrayContaining(['file.list', 'file.read', 'file.create', 'compute.run',
       'project.list', 'project.read', 'project.apply', 'project.save']))
     for (const load of facts.optionalLoadCatalogs) expect(load.visibleBeforeLoad).toEqual(expect.arrayContaining([
       'project.apply', 'project.save', 'text.replace', 'object.update', 'media.insert', 'document.export']))
     expect(facts.saved!.dirty).toBe(false)
-    expect(facts.saved!.project.surfaces.map(surface => surface.kind)).toEqual(['flow'])
+    expect(facts.saved!.project.surfaces.map((surface: import('../../src/shared/contracts/component-platform/project').ComponentSurface) => surface.kind)).toEqual(['flow'])
     const instances: any[] = Object.values(facts.saved!.project.instances)
     const tables = instances.filter(instance => instance.definitionId === 'guoling.table')
     const charts = instances.filter(instance => instance.definitionId === 'guoling.chart')
@@ -325,8 +325,8 @@ test('T10 small V10 creation uses actual local compute, editable table/chart, re
     else { expect(computeImage.format).toBe('png'); expect(computeImage.width).toBeGreaterThan(0); expect(computeImage.height).toBeGreaterThan(0) }
     expect(await sharp(bell).metadata()).toMatchObject({ format: 'png', width: 1254, height: 1254 })
     await info.attach('Actual local compute Chinese chart', { path: computed, contentType: 'image/png' })
-    const docxReceipt = facts.evidence.exports.find(receipt => receipt.format === 'docx')
-    const htmlReceipt = facts.evidence.exports.find(receipt => receipt.format === 'html-offline')
+    const docxReceipt = facts.evidence.exports.find((receipt: { format: string }) => receipt.format === 'docx')
+    const htmlReceipt = facts.evidence.exports.find((receipt: { format: string }) => receipt.format === 'html-offline')
     const outputPath = (receipt: any, extension: string) => receipt.path ?? receipt.files?.find((file: any) => (file.path ?? file.suggestedName).endsWith(extension))?.path
     const docxPath = outputPath(docxReceipt, '.docx'), htmlPath = outputPath(htmlReceipt, '.html')
     expect(docxPath, JSON.stringify(docxReceipt)).toBeTruthy(); expect(htmlPath, JSON.stringify(htmlReceipt)).toBeTruthy()

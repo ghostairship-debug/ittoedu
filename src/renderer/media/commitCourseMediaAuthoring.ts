@@ -4,6 +4,7 @@ import type { ComponentAsset, ComponentDefinition, ComponentInstance } from '../
 import { componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { flowBodyLayoutEdits } from '../../core/course/courseFlowEdits'
+import { equalComponentValue } from '../../core/drivers/courseV10Operations'
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import type { CapturedCourseTarget, CourseV10ViewState } from '../documents/CourseV10DocumentBridge'
 import { IMAGE_DEFINITION, createImageData, imageDataSchema, planImageTransform, replaceImageSource } from '../../components/image'
@@ -47,9 +48,37 @@ export async function insertCourseElement(kernel: EditorStoreKernel, target: Cap
   return { instanceIds, documentId: target.documentId, surfaceId: target.surfaceId! }
 }
 
+function mediaAssetKind(asset: ComponentAsset): AssetMeta['kind'] | null {
+  const mimeType = (asset.mimeType ?? 'application/octet-stream').toLowerCase()
+  const filename = asset.filename ?? asset.path.split(/[\\/]/).at(-1) ?? asset.id
+  const font = mimeType.startsWith('font/') || /^application\/(?:x-)?font/.test(mimeType)
+    || mimeType === 'application/vnd.ms-fontobject' || /\.(?:woff2?|ttf|otf|eot)$/i.test(filename)
+  return asset.kind ?? (mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('video/') ? 'video' : mimeType.startsWith('audio/') ? 'audio' : font ? 'font' : null)
+}
 function assetEdits(target: CapturedCourseTarget, items: readonly ImportedAssetBatchItem[]): ComponentEdit[] {
-  return items.filter(item => !target.project.assets[item.meta.id]).map(item => ({ type: 'asset.add' as const,
-    asset: { ...item.meta }, bytes: item.bytes }))
+  const additions = new Map<string, ImportedAssetBatchItem>()
+  const metadata = (asset: ComponentAsset, bytes: Uint8Array, baseline: ComponentAsset) => ({
+    id: asset.id, path: asset.path, mimeType: asset.mimeType ?? 'application/octet-stream',
+    filename: asset.filename ?? asset.path.split(/[\\/]/).at(-1) ?? asset.id,
+    kind: mediaAssetKind(asset),
+    byteLength: asset.byteLength ?? bytes.byteLength,
+    // Older admitted assets can omit decoded dimensions; library placement derives them from the same bytes.
+    width: baseline.width === undefined ? undefined : asset.width, height: baseline.height === undefined ? undefined : asset.height,
+    duration: baseline.duration === undefined ? undefined : asset.duration, source: asset.source,
+  })
+  for (const item of items) {
+    const existing = Object.hasOwn(target.project.assets, item.meta.id) ? target.project.assets[item.meta.id] : additions.get(item.meta.id)?.meta
+    const bytes = Object.hasOwn(target.project.assets, item.meta.id) ? target.resources.assets[item.meta.id] : additions.get(item.meta.id)?.bytes
+    if (existing) {
+      if (!bytes || !equalComponentValue(metadata(existing, bytes, existing), metadata(item.meta, item.bytes, existing))
+        || bytes.byteLength !== item.bytes.byteLength || !bytes.every((value, index) => value === item.bytes[index])) {
+        throw new Error('素材身份已存在，元数据或字节不同；请使用新的素材身份')
+      }
+      continue
+    }
+    additions.set(item.meta.id, { meta: structuredClone(item.meta), bytes: Uint8Array.from(item.bytes) })
+  }
+  return [...additions.values()].map(item => ({ type: 'asset.add', asset: item.meta, bytes: item.bytes }))
 }
 export async function importCourseMediaLibrary(kernel: EditorStoreKernel, target: CapturedCourseTarget,
   items: readonly ImportedAssetBatchItem[]): Promise<void> {
@@ -130,10 +159,7 @@ export function readCourseMediaLibrary(view: CourseV10ViewState): { assets: Reco
   for (const asset of Object.values(project?.assets ?? {})) {
     const mimeType = asset.mimeType ?? 'application/octet-stream'
     const filename = asset.filename ?? asset.path.split(/[\\/]/).at(-1) ?? asset.id
-    const mediaMime = mimeType.toLowerCase()
-    const font = mediaMime.startsWith('font/') || /^application\/(?:x-)?font/.test(mediaMime)
-      || mediaMime === 'application/vnd.ms-fontobject' || /\.(?:woff2?|ttf|otf|eot)$/i.test(filename)
-    const kind = asset.kind ?? (mediaMime.startsWith('image/') ? 'image' : mediaMime.startsWith('video/') ? 'video' : mediaMime.startsWith('audio/') ? 'audio' : font ? 'font' : null)
+    const kind = mediaAssetKind(asset)
     if (!kind) continue
     assets[asset.id] = { ...asset, id: asset.id, filename, mimeType, kind, path: asset.path, byteLength: files[asset.id]?.byteLength ?? asset.byteLength ?? 0 }
   }

@@ -4,8 +4,8 @@ import type { TeacherControllerData, TeacherControllerRuntimeContext } from './t
 
 /** The mature editable UI and the preloaded implementation share this module. */
 export function mount(context: TeacherControllerRuntimeContext): MountedComponent<TeacherControllerData> {
+  if (!context.root) throw new Error('教师控制台需要全局 Overlay 容器')
   const root = context.root
-  if (!root) throw new Error('教师控制台需要全局 Overlay 容器')
   const doc = root.ownerDocument, host = context.teacherController
   let current = context.instance, disposed = false, open: 'directory' | 'zoom' | null = null
   const css = doc.createElement('style'), panel = doc.createElement('nav')

@@ -3,13 +3,14 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createElement } from 'react'
+import { z } from 'zod'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { TextSelection } from 'prosemirror-state'
 import { afterEach, expect, it, vi } from 'vitest'
 import { DocumentHostService } from '../../../../src/main/workbench/DocumentHostService'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
 import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
-import { createTextComponentData, createFormulaComponentData, type TextComponentData } from '../../../../src/components/text/data'
+import { createTextComponentData, createFormulaComponentData, textComponentDataSchema } from '../../../../src/components/text/data'
 import { SelectionContextController, captureFlowSelection, selectionReference, type ContextualEditRequest } from '../../../../src/renderer/workbench/SelectionContextController'
 import { SharedDocumentEditor } from '../../../../src/renderer/document/SharedDocumentEditor'
 import * as editorSession from '../../../../src/renderer/document/editorSession'
@@ -20,9 +21,10 @@ import { ExecutionEventStore } from '../../../../src/main/workbench/execution/Ex
 import { EditSessionService } from '../../../../src/main/workbench/execution/EditSessionService'
 import type { ModelEvent, ModelProvider, ModelRequest, ModelSelection } from '../../../../src/shared/workbench/modelProvider'
 import type { DocumentSnapshot } from '../../../../src/shared/workbench/document'
-import { CHART_DEFINITION, createChartData, type ChartData } from '../../../../src/components/chart'
+import { CHART_DEFINITION, createChartData, chartDataSchema, type ChartData } from '../../../../src/components/chart'
 import { TABLE_DEFINITION } from '../../../../src/components/table/adapters'
-import { createTableData, type TableData } from '../../../../src/components/table/data'
+import { createTableData, parseTableData } from '../../../../src/components/table/data'
+import { jsonValueSchema } from '../../../../src/shared/contracts/component-platform/schema'
 import { captureComponentOperation } from '../../../../src/core/drivers/courseV10Operations'
 
 const roots: string[] = []
@@ -41,7 +43,8 @@ function offered(request: ModelRequest, name: string) {
   expect(tool, `Actual model catalog must offer ${name}`).toBeTruthy()
   return tool!.name
 }
-function lastTool(request: ModelRequest): any {
+const sourceReceiptSchema = z.object({ kind: z.literal('read'), data: z.object({ content: z.string() }) })
+function lastTool(request: ModelRequest): unknown {
   const message = request.messages.filter(value => value.role === 'tool').at(-1)
   expect(typeof message?.content).toBe('string')
   return JSON.parse(message!.content as string)
@@ -54,14 +57,14 @@ async function fixture(provider: ModelProvider, rich = true, basis = false) {
     { type: 'text', text: '原说明', link: { href: 'https://example.org/source' }, style: { bold: true } },
     createFormulaComponentData('kept-formula', 'x^2').formula,
   ] : [{ type: 'text', text: '简单原稿' }] })
-  project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data }
+  project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(data) }
   project.surfaces.push({ id: 'flow', kind: 'flow', title: '讲义', childIds: ['body'] })
   if (basis) {
     project.definitions[TABLE_DEFINITION.id] = TABLE_DEFINITION
     project.definitions[CHART_DEFINITION.id] = CHART_DEFINITION
     const table = createTableData({ rows: 2, columns: 1 }); table.rows[0].cells[0].text = '2'; table.rows[1].cells[0].text = '5'
     const frame = { width: 300, height: 150, transform: [1, 0, 0, 1, 45, 70] as [number, number, number, number, number, number] }
-    project.instances.table = { id: 'table', definitionId: TABLE_DEFINITION.id, data: table, frame }
+    project.instances.table = { id: 'table', definitionId: TABLE_DEFINITION.id, data: jsonValueSchema.parse(table), frame }
     project.instances.chart = { id: 'chart', definitionId: CHART_DEFINITION.id, data: createChartData(), frame: { ...frame, transform: [1, 0, 0, 1, 390, 70] } }
     project.surfaces[0].childIds = ['table', 'chart']
   }
@@ -83,7 +86,7 @@ async function card(h: Awaited<ReturnType<typeof fixture>>, instruction: string)
   const factory = vi.spyOn(editorSession, 'createLayoutEditor')
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, right: 900, bottom: 700, width: 900, height: 700, x: 0, y: 0, toJSON() {} })
   const document = projectFlowDocument(h.project, 'flow')
-  render(createElement(SharedDocumentEditor, { document, revision: String(h.snapshot.revision), initialMode: 'layout', target: 'project',
+  render(createElement(SharedDocumentEditor, { document, revision: String(h.snapshot.revision), initialMode: 'layout', target: 'flow',
     onChange: () => true, onDraft() {}, onUndo() {}, onRedo() {}, onContextualCommand: async (text, target) => {
       const snapshot = await controller.prepare(h.snapshot.documentId)
       await controller.request(captureFlowSelection(snapshot, 'flow', target), text, true)
@@ -108,7 +111,7 @@ it('a simple card rewrite explicitly applies and finishes in one real tool-call 
   } }, false)
   const sent = await card(h, '将所选正文改写得简洁')
   const ended = await h.engine.wait(sent.started.runId)
-  expect(ended.status).toBe('completed')
+  expect(ended.status, JSON.stringify({ failure: ended.failure, tools: ended.tools })).toBe('completed')
   expect(turns).toBe(1)
   expect(ended.tools.map(value => value.call.name)).toEqual(['text.replace', 'task.finish'])
   expect(ended.tools[0]).toMatchObject({ call: { name: 'text.replace', input: { content: '简单修订正文' } }, result: { kind: 'document-operation', result: { status: 'applied' } } })
@@ -152,7 +155,7 @@ it('the actual rich card reads teacher material in the same task, keeps dialogue
   const current = await h.host.internalAPI.read(h.snapshot.documentId)
   expect(current.undoDepth).toBe(1)
   if (current.model.kind !== 'course-v10') throw new Error('V10 required')
-  const inlines = (current.model.project.instances.body.data as TextComponentData).content.inlines
+  const inlines = textComponentDataSchema.parse(current.model.project.instances.body.data).content.inlines
   expect(inlines).toContainEqual({ type: 'text', text: '平方关系说明', style: { bold: true }, link: { href: 'https://example.org/source' } })
   expect(inlines.find(value => value.type === 'math')?.formulaId).toBe('kept-formula')
   expect(inlines.some(value => value.type === 'text' && value.text.includes('结果说明'))).toBe(false)
@@ -174,15 +177,16 @@ it('a card query with a real read tool returns progress and explanation without 
   expect(await h.host.internalAPI.read(h.snapshot.documentId)).toMatchObject({ revision: 0, undoDepth: 0, model: { project: { instances: { body: { data: h.data } } } } })
 })
 
-it('a failed bound application returns current facts and is repaired in the same task without replaying the rejected content', async () => {
+it('reads and repairs a failed bound application despite another completed write in the same response, without replaying rejected content', async () => {
   let turns = 0
   const h = await fixture({ async *stream(request) {
     if (++turns === 1) { yield finish(request, '', [
+      { name: offered(request, 'file.write'), args: { mode: 'create', path: '附加说明.md', content: '独立说明' } },
       { name: offered(request, 'text.replace'), args: { content: '<table><tr><td>此正文无法承载表格</td></tr></table>' } },
       { name: offered(request, 'task.finish'), args: {} },
     ]); return }
     if (turns === 2) {
-      expect(lastTool(request).kind).toBe('error')
+      expect(lastTool(request)).toMatchObject({ kind: 'error' })
       expect(JSON.stringify(request.messages)).toContain('https://example.org/source')
       yield finish(request, '', [
         { name: offered(request, 'text.replace'), args: { content: '<a href="https://example.org/source"><strong>修正后的说明</strong></a>\\(x^2\\)' } },
@@ -193,11 +197,12 @@ it('a failed bound application returns current facts and is repaired in the same
   } })
   const sent = await card(h, '改写正文；如果目标不支持返回的内容，请在本任务内修正。')
   const ended = await h.engine.wait(sent.started.runId)
-  expect(ended.status).toBe('completed')
+  expect(ended.status, JSON.stringify({ failure: ended.failure, tools: ended.tools })).toBe('completed')
   expect(ended.tools.filter(value => value.result?.kind === 'document-operation')).toHaveLength(1)
   expect(ended.tools.filter(value => value.result?.kind === 'error')).toHaveLength(2)
   expect(turns).toBe(2)
   expect(await h.host.internalAPI.read(h.snapshot.documentId)).toMatchObject({ undoDepth: 1 })
+  expect(await fs.readFile(path.join(h.directory, '附加说明.md'), 'utf8')).toBe('独立说明')
 })
 
 it('a complex bound task continues after its first successful write when the actual tool response does not request task.finish', async () => {
@@ -229,25 +234,25 @@ it.each(['table-data', 'unrelated-layout'] as const)('a chart derived from an ac
     turns++
     if (turns === 1) { yield finish(request, '', { name: offered(request, 'project.list'), args: {} }); return }
     if (turns === 2) {
-      const files = lastTool(request).data.files as Array<{ path: string }>
+      const files = z.object({ kind: z.literal('read'), data: z.object({ files: z.array(z.object({ path: z.string() })) }) }).parse(lastTool(request)).data.files
       tablePath = files.find(value => /表格.*\.data\.json$/.test(value.path))!.path
       chartPath = files.find(value => /图表.*\.data\.json$/.test(value.path))!.path
       yield finish(request, '', { name: offered(request, 'project.read'), args: { path: tablePath } }); return
     }
     if (turns === 3) {
-      const table = JSON.parse(lastTool(request).data.content) as TableData
+      const table = parseTableData(JSON.parse(sourceReceiptSchema.parse(lastTool(request)).data.content))
       values = table.rows.map(row => Number(row.cells[0].text))
       yield finish(request, '', { name: offered(request, 'project.read'), args: { path: chartPath } }); return
     }
     if (turns === 4) {
-      chart = JSON.parse(lastTool(request).data.content)
+      chart = chartDataSchema.parse(JSON.parse(sourceReceiptSchema.parse(lastTool(request)).data.content))
       reached(); await delayed
       yield finish(request, '依据已读取表格更新图表', { name: offered(request, 'object.update'), args: { path: chartPath, properties: { data: derive() } } }); return
     }
     if (turns === 5 && change === 'table-data') {
       const failed = lastTool(request)
       expect(failed).toMatchObject({ kind: 'error', code: 'read-basis-changed' })
-      expect(failed.data.current).toContainEqual(expect.objectContaining({ exists: true, value: expect.objectContaining({
+      expect(z.object({ kind: z.literal('error'), data: z.object({ current: z.array(jsonValueSchema) }) }).parse(failed).data.current).toContainEqual(expect.objectContaining({ exists: true, value: expect.objectContaining({
         rows: [expect.objectContaining({ cells: [expect.objectContaining({ text: '9' })] }), expect.objectContaining({ cells: [expect.objectContaining({ text: '5' })] })],
       }) }))
       const current = await h.host.internalAPI.read(h.snapshot.documentId)
@@ -255,7 +260,7 @@ it.each(['table-data', 'unrelated-layout'] as const)('a chart derived from an ac
       yield finish(request, '重新读取当前表格', { name: offered(request, 'project.read'), args: { path: tablePath } }); return
     }
     if (turns === 6 && change === 'table-data') {
-      const table = JSON.parse(lastTool(request).data.content) as TableData
+      const table = parseTableData(JSON.parse(sourceReceiptSchema.parse(lastTool(request)).data.content))
       values = table.rows.map(row => Number(row.cells[0].text))
       yield finish(request, '', { name: offered(request, 'object.update'), args: { path: chartPath, properties: { data: derive() } } }); return
     }
@@ -277,7 +282,7 @@ it.each(['table-data', 'unrelated-layout'] as const)('a chart derived from an ac
     mutation: { type: 'command', command: captureComponentOperation(before.model.project, [edit]) } })).toMatchObject({ status: 'applied' })
   release()
   const ended = await ending
-  expect(ended.status).toBe('completed')
+  expect(ended.status, JSON.stringify({ failure: ended.failure, tools: ended.tools })).toBe('completed')
   const current = await h.host.internalAPI.read(h.snapshot.documentId)
   if (current.model.kind !== 'course-v10') throw new Error('V10 required')
   expect((current.model.project.instances.chart.data as ChartData).series[0].points.map(point => point.value)).toEqual(change === 'table-data' ? [9, 5] : [2, 5])

@@ -1,3 +1,4 @@
+import { documentHostAPI } from '../helpers/documentHostAPI'
 // @vitest-environment node
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -24,8 +25,8 @@ async function fixture() {
   const host = new DocumentHostService(path.join(root, 'recovery'), {}, { discardFlowRecovery: async () => {} })
   const project = createBlankCourseProjectV10(), instanceId = project.global.overlay[0]!
   project.instances[instanceId]!.data = { text: '原文' }
-  const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } })
-  const api = { ...host.internalAPI, bootstrapCourse: async () => snapshot, subscribe: host.subscribeEvents.bind(host) } as DocumentHostAPI
+  const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'input.glx')
+  const api: DocumentHostAPI = { ...documentHostAPI(host), bootstrapCourse: async () => snapshot }
   const bridge = new CourseV10DocumentBridge(); bridges.push(bridge); await bridge.connect(api)
   let records: AuthoringDraftRecovery = { advanced: [], properties: [] }
   const error = vi.fn(), drain = vi.fn(async () => { await bridge.drain([snapshot.documentId]) })

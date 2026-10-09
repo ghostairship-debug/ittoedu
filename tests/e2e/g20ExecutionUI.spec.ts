@@ -73,8 +73,8 @@ test('G20 default assistant settings and real HTTP loop read unsaved Markdown, s
     await page.getByRole('button', { name: '选择其他工作空间文件夹…', exact: true }).click()
     await page.locator('.lesson-directory-tree').getByRole('button', { name: '教案.md', exact: true }).dblclick()
     const document = await page.evaluate(async filename => window.desktopAPI!.documents!.open(filename), filename)
-    await page.evaluate(async snapshot => { await window.desktopAPI!.documents!.dispatch({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision,
-      operationId: 'human-unsaved-before-input', actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: '# 未保存的复习内容\n\n先预测。\n' } } }) }, document)
+    await page.evaluate(async (snapshot: Pick<import('../../src/shared/workbench/document').DocumentSnapshot, 'documentId' | 'epoch' | 'revision'>) => { await window.desktopAPI!.documents!.dispatch({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision,
+      operationId: 'human-unsaved-before-input', actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: '# 未保存的复习内容\n\n先预测。\n' } } }) }, { documentId: document.documentId, epoch: document.epoch, revision: document.revision })
     await page.getByLabel('给创作助手发消息').fill('完善课堂引入，保留先复习后提问的顺序')
     await expect(page.getByLabel('本条消息的引用', { exact: true })).toContainText('教案.md')
     await page.getByRole('button', { name: '发送', exact: true }).click()

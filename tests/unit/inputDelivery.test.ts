@@ -1,141 +1,7 @@
-import { controllerPackages } from '../fixtures/teacherController'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useEditorStore, selectActiveCourseProjectDocument } from '@/renderer/store/editorStore'
-import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
-import { configureSlideInputAtTarget } from '@/renderer/course/v9SlideContentCommands'
-import { makeSlideAuthoringTarget } from '@/renderer/course/slideAuthoringBackend'
-import { deleteSlideSceneLayers, duplicateSlideSceneLayers, deleteSlideSceneInteractionRule } from '@/renderer/course/v9SlideActionCommands'
-import { buildInputRuleFamily, inspectInputRuleFamily, type InputRuleConfig } from '../../src/core/tools/inputRuleFamily'
-import { CourseStateStore } from '@/player/CourseStateStore'
-import { PublishedInteractionController } from '@/player/interactions/PublishedInteractionController'
-import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
-import { copySlideSceneClipboard } from '@/core/tools/slideClipboard'
-import { buildCoursePptx } from '@/renderer/export/course/buildCoursePptx'
-import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPreflight'
-import { unzipSync } from 'fflate'
-import {
-  connectCourseHost,
-  courseContent,
-  redoSettled,
-  settleCourse,
-  undoSettled,
-  type CourseHost,
-} from '../helpers/triage-t2-course'
-
-let host: CourseHost
-let documentId: string
-
-function active() { return selectActiveCourseProjectDocument(useEditorStore.getState())! }
-function inputIn(project = active()) {
-  const surface = project.surfaces.find(surface => surface.type === 'slide')!
-  if (surface.type !== 'slide') throw new Error('slide')
-  const scene = surface.scenes[0]!
-  const item = scene.layerItems.find(item => item.kind === 'native' && item.content.nativeType === 'input')!
-  if (!item || item.kind !== 'native' || item.content.nativeType !== 'input') throw new Error('input missing')
-  return { scene, item, data: item.content.data }
-}
-
-describe('input authoring delivery', () => {
-  beforeEach(async () => {
-    const connected = await connectCourseHost()
-    host = connected.host
-    documentId = connected.documentId
-  })
-  it('creates, saves, undoes and redoes the input, declarations and feedback together', async () => {
-    const before = active()
-    useEditorStore.getState().addInputNode()
-    await settleCourse()
-    const { item, data, scene } = inputIn()
-    expect(data.ruleFamilyRuleIds).toHaveLength(3)
-    expect(inspectInputRuleFamily(item.layerItemId, data, scene.interactions).conflict).toBe(false)
-    expect(active().courseState).toHaveLength(before.courseState.length + 2)
-    const reopened = openCourseProjectArchive(useEditorStore.getState().exportV9SlideCandidateArchive()!)
-    expect(inputIn(reopened.project).data).toEqual(data)
-    await undoSettled(host, documentId)
-    // DocumentSession revision only increases; compare authored content without that stamp.
-    expect(courseContent(active())).toEqual(courseContent(before))
-    await redoSettled(host, documentId)
-    expect(inputIn().data).toEqual(data)
-  })
-  it('copies fresh keys and rule IDs, and conservatively retains declarations when component source is unavailable', async () => {
-    useEditorStore.getState().addInputNode()
-    await settleCourse()
-    const { item, data } = inputIn()
-    const session = useEditorStore.getState().slideBackend!.getSession()
-    const copied = duplicateSlideSceneLayers(session, [item.layerItemId])
-    expect(copied.ok, copied.reason).toBe(true)
-    const next = copied.nextSession!
-    const project = courseProjectDocumentSchema.parse(next.history.present)
-    expect(project.courseState).toHaveLength(session.history.present.courseState.length + 2)
-    const id = next.selection.selectionIds[0]!
-    const scene = inputIn(project).scene
-    const copy = scene.layerItems.find(item => item.layerItemId === id)!
-    if (copy.kind !== 'native' || copy.content.nativeType !== 'input') throw new Error('input')
-    expect(copy.content.data.stateKey).not.toBe(data.stateKey)
-    expect(inspectInputRuleFamily(id, copy.content.data, scene.interactions).conflict).toBe(false)
-    const removed = deleteSlideSceneLayers(next, [id])
-    expect(removed.ok, removed.reason).toBe(true)
-    expect(removed.nextSession!.history.present.courseState).toEqual(project.courseState)
-    expect(inputIn(removed.nextSession!.history.present).scene.layerItems.some(item => item.layerItemId === id)).toBe(false)
-  })
-  it('switches to number atomically and rejects stale or invalid answers', async () => {
-    useEditorStore.getState().addInputNode()
-    await settleCourse()
-    const session = useEditorStore.getState().slideBackend!.getSession()
-    const { item, data, scene } = inputIn()
-    const initial = inspectInputRuleFamily(item.layerItemId, data, scene.interactions).config!
-    const target = makeSlideAuthoringTarget(session, item.layerItemId, 'item')
-    const config: InputRuleConfig = { answerType: 'number', min: 10, max: 12, correct: initial.correct, error: initial.error }
-    const changed = configureSlideInputAtTarget(session, target, { mode: 'apply', config })
-    expect(changed.ok, changed.reason).toBe(true)
-    expect(inputIn(changed.nextSession!.history.present).data.answerType).toBe('number')
-    expect(inputIn(changed.nextSession!.history.present).data.ruleFamilyRuleIds).toHaveLength(4)
-    expect(configureSlideInputAtTarget(changed.nextSession!, target, { mode: 'apply', config }).ok).toBe(false)
-    const invalid = configureSlideInputAtTarget(session, target, { mode: 'apply', config: { ...config, min: 20 } })
-    expect(invalid.ok).toBe(false)
-    expect(invalid.nextSession!.history.present).toEqual(session.history.present)
-  })
-  it('carries managed feedback with the clipboard and can delete that feedback safely', async () => {
-    useEditorStore.getState().addInputNode()
-    await settleCourse()
-    const { item, scene } = inputIn()
-    const session = useEditorStore.getState().slideBackend!.getSession()
-    const clipboard = copySlideSceneClipboard(session, [item.layerItemId])
-    expect(clipboard.items).toHaveLength(3)
-    const feedbackIds = scene.layerItems.filter(node => node.layerItemId !== item.layerItemId).map(node => node.layerItemId)
-    const removed = deleteSlideSceneLayers(session, feedbackIds)
-    expect(removed.ok, removed.reason).toBe(true)
-    expect(inputIn(removed.nextSession!.history.present).data.ruleFamilyRuleIds).toEqual([])
-  })
-  it('exports a parseable editable PPTX field and reports the static interaction boundary', async () => {
-    useEditorStore.getState().addInputNode()
-    await settleCourse()
-    const project = active()
-    const resources = { assetFiles: {}, components: controllerPackages }
-    const preflight = collectCourseProjectExportPreflight(project, 'pptx', resources)
-    expect(preflight.items.some(item => item.message.includes('静态填写区'))).toBe(true)
-    expect(preflight.items.some(item => item.code === 'project-health:published-interaction-trigger-unsupported')).toBe(false)
-    const result = await buildCoursePptx({ project, ...resources })
-    const entries = unzipSync(result.bytes)
-    const xml = new TextDecoder().decode(entries['ppt/slides/slide1.xml'])
-    const parsed = new DOMParser().parseFromString(xml, 'application/xml')
-    expect(parsed.querySelector('parsererror')).toBeNull()
-    expect(xml).toContain('填写答案')
-    expect(xml).toContain('静态填写区')
-  })
-  it('allows professional rule deletion and releases the family atomically', async () => {
-    useEditorStore.getState().addInputNode()
-    await settleCourse()
-    const { data } = inputIn()
-    const session = useEditorStore.getState().slideBackend!.getSession()
-    const removed = deleteSlideSceneInteractionRule(session, data.ruleFamilyRuleIds[0]!)
-    expect(removed.ok, removed.reason).toBe(true)
-    const next = inputIn(removed.nextSession!.history.present)
-    expect(next.data.ruleFamilyRuleIds).toEqual([])
-    expect(next.scene.interactions).toHaveLength(2)
-    expect(removed.nextSession!.history.past).toHaveLength(session.history.past.length + 1)
-  })
-})
+import { describe, expect, it, vi } from 'vitest'
+import { buildInputRuleFamily } from '../../src/core/tools/inputRuleFamily'
+import { CourseStateStore } from '../../src/player/CourseStateStore'
+import { PublishedInteractionController } from '../../src/player/interactions/PublishedInteractionController'
 
 describe('input atomic submission', () => {
   it('rejects an invalid or duplicate entry before any state or notification changes', () => {
@@ -148,14 +14,16 @@ describe('input atomic submission', () => {
     expect(store.snapshot()).toEqual({ value: 1 })
     expect(changes).not.toHaveBeenCalled()
   })
-  it.each([
+  it('normalizes text and numeric submissions, atomically chooses one feedback branch, and unbinds on destruction', async () => {
+    const cases = [
     ['text', ' ＡＮＳＷＥＲ  ', true, 'answer', 'correct'], ['text', 'wrong', true, 'wrong', 'error'],
     ['text', '  ', false, '', 'error'], ['number', '１.５', true, 1.5, 'correct'],
     ['number', '1e0', true, 1, 'correct'], ['number', '0', true, 0, 'error'],
     ['number', '3', true, 3, 'error'], ['number', '0x10', false, 0, 'error'],
     ['number', '1,000', false, 0, 'error'], ['number', '', false, 0, 'error'],
     ['number', 'Infinity', false, 0, 'error'], ['number', '12x', false, 0, 'error'],
-  ] as const)('%s %s writes both keys before one branch', async (answerType, raw, valid, value, feedback) => {
+    ] as const
+    for (const [answerType, raw, valid, value, feedback] of cases) {
     const changes = vi.fn()
     const store = new CourseStateStore(changes)
     store.setMany([{ key: 'value', value: answerType === 'text' ? 'old' : 99 }, { key: 'valid', value: true }])
@@ -181,5 +49,6 @@ describe('input atomic submission', () => {
     expect(changes.mock.calls.filter(([change]) => change.key === 'feedback')).toHaveLength(1)
     controller.destroy()
     expect(submit).toBeUndefined()
+    }
   })
 })

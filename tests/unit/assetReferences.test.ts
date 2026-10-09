@@ -1,435 +1,48 @@
-import { describe, expect, it, vi } from 'vitest'
-import { strToU8 } from 'fflate'
-import { createBlankCourseProject } from '@/core/course/createCourseProject'
-import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
-import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
-import { planCourseMediaLibraryImport } from '@/renderer/media/courseMediaLibraryImport'
-import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
-import type { ComponentPackageData } from '@/shared/componentTypes'
-import type { AssetMeta } from '@/shared/contracts/media-v1/types'
-import type {
-  ComponentLayerItem,
-  CourseProjectDocument,
-  NativeLayerItem,
-  RuntimeLayerItem,
-  SlideSceneDocument,
-} from '@/shared/courseProjectTypes'
-import { listCourseAssetReferences } from '@/renderer/project/v9AssetAdapter'
-import {
-  selectActiveCourseProjectDocument,
-  useEditorStore,
-} from '@/renderer/store/editorStore'
-import { connectCourseHost, openCourseOnHost, settleCourse } from '../helpers/triage-t2-course'
+// @vitest-environment node
+import { expect, it } from 'vitest'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { createV10StoreHost } from '../helpers/courseV10StoreHost'
+import { IMAGE_DEFINITION, createImageData } from '../../src/components/image'
+import { VIDEO_DEFINITION, createVideoData } from '../../src/components/media'
+import { courseAudioSettings } from '../../src/core/course/courseMediaEdits'
+import { courseAuthorData, removeCourseAsset } from '../../src/renderer/media/commitCourseMediaAuthoring'
+import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
 
-function asset(id: string, kind: AssetMeta['kind'] = 'image'): AssetMeta {
-  return {
-    id,
-    filename: `${id}.${kind === 'audio' ? 'mp3' : kind === 'video' ? 'mp4' : 'png'}`,
-    mimeType: kind === 'audio' ? 'audio/mpeg' : kind === 'video' ? 'video/mp4' : 'image/png',
-    kind,
-    path: `assets/${id}`,
-    byteLength: 10,
+it('protects the live image originals, posters, named states, backgrounds, sounds, themes and declared source graph while deleting only unreferenced bytes', async () => {
+  const cases: [string, (project: CourseProjectV10) => void][] = [
+    ['image current', project => { project.instances.image.data = courseAuthorData({ ...createImageData('other'), assetId: 'used' }) }],
+    ['image original', project => { project.instances.image.data = courseAuthorData({ ...createImageData('used'), assetId: 'other' }) }],
+    ['image named state', project => { project.surfaces[0].presentation = { states: [{ id: 'state', title: '呈现', overrides: { image: { data: courseAuthorData(createImageData('used')) } } }] } }],
+    ['video image poster', project => { project.definitions[VIDEO_DEFINITION.id] = VIDEO_DEFINITION; project.instances.image.definitionId = VIDEO_DEFINITION.id;
+      project.instances.image.data = courseAuthorData({ ...createVideoData('other'), poster: { mode: 'image', time: 0, assetId: 'used' } }) }],
+    ['course background', project => { project.background = { assetId: 'used' } }],
+    ...(['slide', 'flow', 'spatial'] as const).map(kind => [kind + ' background', (project: CourseProjectV10) => { project.surfaces.push({ id: kind + '-background', title: kind, kind, childIds: [], background: { assetId: 'used' } }) }] as [string, (project: CourseProjectV10) => void]),
+    ['named-state background', project => { project.surfaces[0].presentation = { states: [{ id: 'state', title: '呈现', overrides: {}, background: { assetId: 'used' } }] } }],
+    ['course sound', project => { project.media = { audio: { ...courseAudioSettings(project), sounds: { sound: { id: 'sound', name: '提示', assetId: 'used', channel: 'sfx', defaultLoop: false, defaultVolume: 1 } } } } }],
+    ['theme asset', project => { project.theme = { css: 'body { background: url(paper) }', assets: { paper: { assetId: 'used' } } } }],
+    ['definition source binding', project => { project.definitions.source = { id: 'source', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default { mount() {} }', resourceBindings: { picture: 'used' } } };
+      project.instances.image.definitionId = 'source'; project.instances.image.data = {} }],
+  ]
+  for (const [name, setup] of cases) {
+    const project = createBlankCourseProjectV10(name)
+    project.definitions[IMAGE_DEFINITION.id] = IMAGE_DEFINITION
+    project.instances.image = { id: 'image', definitionId: IMAGE_DEFINITION.id, data: courseAuthorData(createImageData('other')) }
+    project.surfaces[0].childIds.push('image')
+    for (const id of ['used', 'other', 'unused']) project.assets[id] = { id, path: `assets/${id}`, mimeType: 'image/png' }
+    setup(project)
+    const resources = { assets: Object.fromEntries(['used', 'other', 'unused'].map(id => [id, new TextEncoder().encode(id)])), components: {} }
+    const h = await createV10StoreHost(project, resources)
+    try {
+      const before = structuredClone(h.first.read())
+      await expect(removeCourseAsset(h.kernel, 'used'), name).rejects.toThrow('素材仍被工程内容使用')
+      expect(h.first.read(), name).toEqual(before)
+      await removeCourseAsset(h.kernel, 'unused')
+      expect(h.model().project.assets.unused, name).toBeUndefined(); expect(h.model().resources.assets.unused, name).toBeUndefined()
+      expect(h.first.read().undoDepth).toBe(1)
+      await h.bridge.undo(); expect(h.model().project.assets.unused).toEqual(project.assets.unused)
+      expect(h.model().resources.assets).toEqual(resources.assets)
+      await h.bridge.redo(); expect(h.driver.load(h.driver.serialize(h.model()))).toEqual(h.model())
+      expect(h.model().resources.assets.used).toEqual(resources.assets.used)
+    } finally { h.bridge.dispose() }
   }
-}
-
-function firstSlideScene(project: CourseProjectDocument): SlideSceneDocument {
-  const surface = project.surfaces.find((candidate) => candidate.type === 'slide')
-  const scene = surface?.type === 'slide' ? surface.scenes[0] : undefined
-  if (!scene) throw new Error('Expected a V9 Slide scene')
-  return scene
-}
-
-function layerBase(layerItemId: string, order: number) {
-  return {
-    layerItemId,
-    label: layerItemId,
-    frame: { mode: 'absolute' as const, x: 40, y: 40, width: 320, height: 180 },
-    order,
-    visible: true,
-    locked: false,
-    rotation: 0,
-    opacity: 1,
-    hitPolicy: 'auto' as const,
-    playbackInitialVisibility: 'inherit' as const,
-  }
-}
-
-function imageLayer(layerItemId: string, assetId: string, order = 0): NativeLayerItem {
-  return {
-    ...layerBase(layerItemId, order),
-    kind: 'native',
-    content: {
-      nativeType: 'image',
-      data: {
-        assetId,
-        preserveAspectRatio: true,
-        fit: 'contain',
-        crop: { left: 0, top: 0, right: 0, bottom: 0 },
-        cropX: 0.5,
-        cropY: 0.5,
-        flipX: false,
-        flipY: false,
-        cornerRadius: 0,
-        feather: { amount: 0, mode: 'rectangle' },
-        safeAreas: [],
-      },
-    },
-  }
-}
-
-function videoLayer(
-  layerItemId: string,
-  assetId: string,
-  posterAssetId: string,
-): NativeLayerItem {
-  return {
-    ...layerBase(layerItemId, 5),
-    kind: 'native',
-    content: {
-      nativeType: 'video',
-      data: {
-        assetId,
-        fit: 'contain',
-        autoplay: false,
-        loop: false,
-        muted: false,
-        volume: 1,
-        playbackRate: 1,
-        showControls: true,
-        clickToToggle: true,
-        startTime: 0,
-        endTime: null,
-        poster: { mode: 'video-frame', time: 0, assetId: posterAssetId },
-        backgroundAudioMode: 'none',
-      },
-    },
-  }
-}
-
-function runtimeLayer(layerItemId: string, contentId: string, sourceId: string): RuntimeLayerItem {
-  return {
-    ...layerBase(layerItemId, 10),
-    kind: 'runtime',
-    runtime: {
-      protocol: 'canvas-runtime',
-      runtimeApiVersion: 2,
-      enabled: false,
-      renderMode: 'dom',
-      source: `CoursewareRuntime.define({create(ctx){ctx.projectAssetUrl('${sourceId}')}})`,
-      content: { values: { nested: contentId } },
-      assets: {},
-    },
-  }
-}
-
-function componentLayer(packageId: string): ComponentLayerItem {
-  return {
-    ...layerBase('component-layer', 20),
-    kind: 'component',
-    component: { packageId, version: '4.0.0' },
-    props: { cover: 'component-base' },
-  }
-}
-
-function componentPackage(packageId: string): ComponentPackageData {
-  const manifest = {
-    schemaVersion: 4,
-    runtimeApiVersion: 4,
-    id: packageId,
-    name: 'Asset component',
-    version: '4.0.0',
-    entry: 'runtime.js',
-    defaultSize: { width: 320, height: 180 },
-    minSize: { width: 80, height: 45 },
-    preserveAspectRatio: false,
-    supportedScopes: ['scene' as const],
-    renderMode: 'dom' as const,
-    assets: {},
-    defaultProps: { defaultCover: 'component-default' },
-    editor: {
-      properties: [
-        { key: 'cover', label: 'Cover', type: 'image' as const },
-        { key: 'defaultCover', label: 'Default cover', type: 'image' as const },
-      ],
-    },
-  }
-  // The document host only ingests packages with real executable bytes.
-  return parseComponentPackageFiles({
-    'manifest.json': strToU8(JSON.stringify(manifest)),
-    'runtime.js': strToU8(
-      "CoursewareComponent.define({create(ctx){ctx.projectAssetUrl('component-source')}})",
-    ),
-  })
-}
-
-function addAssets(project: CourseProjectDocument, ...ids: string[]): void {
-  ids.forEach((id) => { project.assets[id] = asset(id) })
-}
-
-async function loadProject(
-  project: CourseProjectDocument,
-  componentPackages: Record<string, ComponentPackageData> = {},
-): Promise<void> {
-  const files = Object.fromEntries(Object.values(project.assets).map((meta) => [
-    meta.id,
-    new Uint8Array(meta.byteLength),
-  ]))
-  await openCourseOnHost(project, { assetFiles: files, componentPackages })
-}
-
-describe('project asset reference graph', () => {
-  it('keeps V9 deletion aligned with referenced assets', async () => {
-    const referenced = asset('referenced')
-    const unused = asset('unused')
-    await connectCourseHost()
-    const store = useEditorStore.getState()
-    store.addImageNode(referenced, new Uint8Array(referenced.byteLength))
-    store.importAsset(unused, new Uint8Array(unused.byteLength))
-    await settleCourse()
-
-    const project = selectActiveCourseProjectDocument(useEditorStore.getState())
-    if (!project) throw new Error('Expected a live V9 project')
-    expect(listCourseAssetReferences(project, referenced.id, { componentPackages: useEditorStore.getState().componentPackages })).toEqual([
-      expect.objectContaining({ kind: 'native-image', assetId: referenced.id }),
-    ])
-    expect(listCourseAssetReferences(project, unused.id, { componentPackages: useEditorStore.getState().componentPackages })).toEqual([])
-
-    const deleteBlocked = new Set(['referenced', 'unused'].filter((assetId) => (
-      !useEditorStore.getState().deleteAsset(assetId)
-    )))
-    expect(deleteBlocked).toEqual(new Set(['referenced']))
-  })
-
-  it('uses only the declared background image for bundled controller source and retains edited dynamic source conservatively', async () => {
-    await connectCourseHost()
-    const project = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
-    const packages = structuredClone(useEditorStore.getState().componentPackages)
-    addAssets(project, 'controller-background', 'unused')
-    const controller = project.globalLayerItems.find(entry => entry.item.kind === 'component' && entry.item.role === 'teacher-controller')!.item
-    if (controller.kind !== 'component') throw new Error('Expected controller')
-    controller.props.backgroundAssetId = 'controller-background'
-    expect(listCourseAssetReferences(project, 'controller-background', { componentPackages: packages })).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'component-prop' })]))
-    expect(listCourseAssetReferences(project, 'unused', { componentPackages: packages })).toEqual([])
-    const pkg = Object.values(packages).find(value => value.manifest.id === controller.component.packageId)!
-    pkg.runtimeSource += '\nfunction extra(ctx, id) { return ctx.projectAssetUrl(id) }'
-    expect(listCourseAssetReferences(project, 'unused', { componentPackages: packages })).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'component-runtime-source' })]))
-  })
-
-  it('protects assets materialized only by a named-state native override', async () => {
-    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-    addAssets(project, 'base-image', 'state-image')
-    const scene = firstSlideScene(project)
-    const image = imageLayer('stateful-image', 'base-image')
-    scene.layerItems.push(image)
-    scene.presentation!.states[0]!.layerItemOverrides[image.layerItemId] = {
-      nativeData: { assetId: 'state-image' },
-    }
-    await loadProject(project)
-
-    expect(useEditorStore.getState().deleteAsset('state-image')).toBe(false)
-    expect(useEditorStore.getState().errorMessage).toContain('nativeData.assetId')
-  })
-
-  it('protects a persisted video poster asset regardless of poster capture mode', async () => {
-    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-    addAssets(project, 'video-asset', 'video-poster')
-    firstSlideScene(project).layerItems.push(videoLayer(
-      'video-with-persisted-poster',
-      'video-asset',
-      'video-poster',
-    ))
-    await loadProject(project)
-
-    expect(listCourseAssetReferences(project, 'video-poster')).toContainEqual(
-      expect.objectContaining({
-        kind: 'video-poster',
-        path: expect.arrayContaining(['poster', 'assetId']),
-      }),
-    )
-    expect(useEditorStore.getState().deleteAsset('video-poster')).toBe(false)
-  })
-
-  it('protects known ids in disabled Runtime content and quoted source', async () => {
-    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-    addAssets(project, 'runtime-content', 'runtime-source')
-    firstSlideScene(project).layerItems.push(runtimeLayer(
-      'runtime-layer',
-      'runtime-content',
-      'runtime-source',
-    ))
-    await loadProject(project)
-
-    expect(useEditorStore.getState().deleteAsset('runtime-content')).toBe(false)
-    expect(useEditorStore.getState().errorMessage).toContain('content.values')
-    expect(useEditorStore.getState().deleteAsset('runtime-source')).toBe(false)
-    expect(useEditorStore.getState().errorMessage).toContain('source')
-  })
-
-  it('protects component props, defaults, state overrides, and runtime source', async () => {
-    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-    const packageId = 'com.test.asset-closure'
-    addAssets(
-      project,
-      'component-base',
-      'component-default',
-      'component-state',
-      'component-source',
-    )
-    const packages = { [packageId]: componentPackage(packageId) }
-    project.componentPackages[packageId] = {
-      packageId,
-      version: '4.0.0',
-      name: 'Asset component',
-      manifestPath: `components/${packageId}@4.0.0/manifest.json`,
-      runtimePath: `components/${packageId}@4.0.0/runtime.js`,
-      contentSha256: packages[packageId]!.contentSha256!,
-    }
-    const scene = firstSlideScene(project)
-    const component = componentLayer(packageId)
-    scene.layerItems.push(component)
-    scene.presentation!.states[0]!.layerItemOverrides[component.layerItemId] = {
-      componentProps: { cover: 'component-state' },
-    }
-    expect(listCourseAssetReferences(project, 'component-state', {
-      componentPackages: packages,
-    })).toContainEqual(expect.objectContaining({
-      kind: 'component-prop',
-      path: expect.arrayContaining(['componentProps', 'cover']),
-    }))
-    await loadProject(project, packages)
-
-    for (const id of [
-      'component-base',
-      'component-default',
-      'component-state',
-      'component-source',
-    ]) {
-      expect(useEditorStore.getState().deleteAsset(id), id).toBe(false)
-    }
-  })
-
-  it('fails closed when a V9 component lacks matching executable context', async () => {
-    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-    const packageId = 'com.test.missing-context'
-    addAssets(project, 'possibly-referenced')
-    project.componentPackages[packageId] = {
-      packageId,
-      version: '4.0.0',
-      name: 'Missing context',
-      manifestPath: `components/${packageId}/manifest.json`,
-      runtimePath: `components/${packageId}/runtime.js`,
-      contentSha256: '0'.repeat(64),
-    }
-    const component = componentLayer(packageId)
-    component.props = {}
-    firstSlideScene(project).layerItems.push(component)
-
-    // The document host fails closed at load: a component without executable
-    // bytes can never become the active document (componentPackagesFromArchive).
-    await connectCourseHost()
-    const files = Object.fromEntries(Object.values(project.assets).map((meta) => [
-      meta.id,
-      new Uint8Array(meta.byteLength),
-    ]))
-    useEditorStore.getState().loadCourseProject(project, null, files)
-    await vi.waitFor(() => {
-      if (!useEditorStore.getState().errorMessage?.includes(packageId)) {
-        throw new Error('waiting for rejection')
-      }
-    })
-    expect(useEditorStore.getState().errorMessage).toContain(packageId)
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())?.id).not.toBe(project.id)
-  })
-
-  it('preserves existing V9 remote delivery metadata while importing local media', () => {
-    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-    project.assets.remote = {
-      ...asset('remote'),
-      remote: { url: 'https://cdn.example.test/remote.png' },
-    }
-    const imported = asset('imported')
-    const result = planCourseMediaLibraryImport({
-      project,
-      sidecar: { files: { remote: new Uint8Array(project.assets.remote.byteLength) } },
-      items: [{ meta: imported, bytes: new Uint8Array(imported.byteLength) }],
-      projectId: project.id,
-      baseRevision: project.revision,
-      now: '2026-09-03T00:00:00.000Z',
-    })
-
-    expect(result.ok).toBe(true)
-    if (!result.ok || result.status !== 'planned') {
-      throw new Error('Expected a media import transaction plan')
-    }
-    expect(result.plan.nextDocument.assets.remote?.remote).toEqual({
-      url: 'https://cdn.example.test/remote.png',
-    })
-    expect(project.assets.remote.remote).toEqual({
-      url: 'https://cdn.example.test/remote.png',
-    })
-  })
-
-  it('protects a Course-wide background asset the same way Scene/State backgrounds are protected', async () => {
-    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-    addAssets(project, 'course-cover')
-    project.backgroundAssetId = 'course-cover'
-    await loadProject(project)
-
-    expect(listCourseAssetReferences(project, 'course-cover')).toContainEqual(
-      expect.objectContaining({ kind: 'course-background', path: ['backgroundAssetId'] }),
-    )
-    expect(useEditorStore.getState().deleteAsset('course-cover')).toBe(false)
-  })
-
-  it('protects a Slide surface background asset', async () => {
-    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-    addAssets(project, 'surface-cover')
-    const surface = project.surfaces[0]
-    if (surface?.type !== 'slide') throw new Error('expected slide surface')
-    surface.backgroundMode = 'own'
-    surface.backgroundAssetId = 'surface-cover'
-    await loadProject(project)
-
-    expect(listCourseAssetReferences(project, 'surface-cover')).toContainEqual(
-      expect.objectContaining({ kind: 'slide-surface-background' }),
-    )
-    expect(useEditorStore.getState().deleteAsset('surface-cover')).toBe(false)
-  })
-
-  it('protects a Flow surface background asset', async () => {
-    const project = createBlankFlowCourseProject({ includeDefaultController: false, controls: 'none' })
-    addAssets(project, 'flow-cover')
-    const surface = project.surfaces[0]
-    if (surface?.type !== 'flow') throw new Error('expected flow surface')
-    surface.backgroundAssetId = 'flow-cover'
-    await loadProject(project)
-
-    expect(listCourseAssetReferences(project, 'flow-cover')).toContainEqual(
-      expect.objectContaining({ kind: 'flow-surface-background' }),
-    )
-    expect(useEditorStore.getState().deleteAsset('flow-cover')).toBe(false)
-  })
-
-  it('protects a Spatial surface background asset', async () => {
-    const project = createBlankSpatialCourseProject({ includeDefaultController: false, controls: 'none' })
-    addAssets(project, 'spatial-cover')
-    const surface = project.surfaces[0]
-    if (surface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
-    surface.backgroundAssetId = 'spatial-cover'
-    await loadProject(project)
-
-    expect(listCourseAssetReferences(project, 'spatial-cover')).toContainEqual(
-      expect.objectContaining({ kind: 'spatial-surface-background' }),
-    )
-    expect(useEditorStore.getState().deleteAsset('spatial-cover')).toBe(false)
-  })
-
-  it('leaves an unset Course/surface background asset slot unreferenced', async () => {
-    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-    addAssets(project, 'unused-cover')
-    await loadProject(project)
-
-    expect(listCourseAssetReferences(project, 'unused-cover')).toEqual([])
-    expect(useEditorStore.getState().deleteAsset('unused-cover')).toBe(true)
-  })
 })

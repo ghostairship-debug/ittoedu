@@ -2,13 +2,14 @@ import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { MarkdownDriver } from '../../src/core/drivers/MarkdownDriver'
 import type { DocumentSession } from '../../src/core/documents/DocumentSession'
 import type { DocumentEvent, DocumentModel, DurableDocumentState } from '../../src/shared/workbench/document'
-import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
+import { authoringDraftRecoverySchema, type AuthoringDraftRecovery, type DocumentHostAPI } from '../../src/shared/workbench/desktop'
 import type { DocumentFileRef } from '../../src/shared/document/ports'
 import type { RecoverableDocumentFilePort } from '../../src/renderer/documentFiles/documentFileSession'
 
 /** Real canonical writer and History, with a controllable file transport for mounted UI tests. */
 export function attachMarkdownRendererHost(port: RecoverableDocumentFilePort, fixedRef?: DocumentFileRef) {
   const states = new Map<string, DurableDocumentState>()
+  const authoringDrafts = new Map<string, AuthoringDraftRecovery>()
   const listeners = new Set<(event: DocumentEvent) => void>()
   const attached = new Set<string>()
   const refFor = (filename: string): DocumentFileRef => fixedRef ?? { kind: 'file', path: filename }
@@ -43,6 +44,18 @@ export function attachMarkdownRendererHost(port: RecoverableDocumentFilePort, fi
       return attach(await registry.open({ kind: 'file', path: filename, version: disk.version.contentVersion, bindingVersion: 1 }, async () => model(disk.source)))
     },
     read: async id => registry.get(id).read(),
+    readAuthoringDrafts: async id => {
+      registry.get(id)
+      return structuredClone(authoringDrafts.get(id) ?? null)
+    },
+    writeAuthoringDrafts: async (id, drafts) => {
+      registry.get(id)
+      authoringDrafts.set(id, structuredClone(authoringDraftRecoverySchema.parse(drafts)))
+    },
+    clearAuthoringDrafts: async id => {
+      registry.get(id)
+      authoringDrafts.delete(id)
+    },
     dispatch: operation => registry.get(operation.documentId).execute(operation),
     lookup: async (id, operationId) => registry.get(id).lookupOperation(operationId),
     save: (id, filename) => registry.save(id, filename ? { kind: 'file', path: filename, version: null, bindingVersion: 2 } : undefined),
@@ -60,10 +73,10 @@ export function attachMarkdownRendererHost(port: RecoverableDocumentFilePort, fi
       const next = input.choice === 'disk' ? disk.model : input.source === undefined ? current.model : { ...current.model, source: input.source }
       return { model: next, version: disk.version, matchesDisk: next.kind === 'markdown' && disk.model.kind === 'markdown' && next.source === disk.model.source }
     }),
-    close: async (id, discardDirty) => { await registry.close(id, { discardDirty }); states.delete(id) },
+    close: async (id, discardDirty) => { await registry.close(id, { discardDirty }); states.delete(id); authoringDrafts.delete(id) },
     recoverable: async () => [],
     restore: async id => { const state = states.get(id); if (!state) throw new Error('Missing recovery'); return attach(await registry.restore(state)) },
-    discardRecovery: async id => { states.delete(id) },
+    discardRecovery: async id => { states.delete(id); authoringDrafts.delete(id) },
     subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener) } },
   }
   port.documents = documents

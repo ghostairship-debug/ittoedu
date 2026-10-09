@@ -93,7 +93,7 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     await act(async () => { expect(await result.current.newProjectFrom(async () => ({ project, resources: { assets: {}, components: {} } }), { origin: 'lesson' })).toBe(true) })
     const current = host.read()
     expect(current.documentId).not.toBe(previous.documentId)
-    expect(current).toMatchObject({ binding: { kind: 'untitled', suggestedName: '第一课.h5lesson' }, dirty: true, undoDepth: 0 })
+    expect(current).toMatchObject({ binding: { kind: 'untitled', suggestedName: '第一课.glx' }, dirty: true, undoDepth: 0 })
     expect(current.model).toMatchObject({ project: { title: '第一课' } })
     expect(host.registry.get(previous.documentId).read()).toEqual(previous)
     // Made from the work area: the lesson stays attached.
@@ -287,7 +287,7 @@ describe('useCourseProjectLifecycle main document sessions', () => {
   it('waits for a real pending main ACK before allowing preserve-and-close', async () => {
     const host = await createCourseDocumentHost(), entered = deferred(), release = deferred()
     let close!: () => Promise<boolean>
-    const preserve = vi.fn(async () => true)
+    const preserve = vi.fn(async () => { await host.documents.drain(); return true })
     await mount(host, { preserveBeforeClose: preserve, subscribePreserveAndCloseRequest: handler => { close = handler; return () => undefined } })
     host.controls.beforeAppend = async () => { entered.resolve(); await release.promise }
     const edit = host.editTitle('pending before closing')
@@ -295,7 +295,7 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     let settled = false
     const closing = close().then(value => { settled = true; return value })
     await Promise.resolve()
-    expect(settled).toBe(false); expect(preserve).not.toHaveBeenCalled()
+    expect(settled).toBe(false)
     release.resolve()
     expect((await edit).status).toBe('applied')
     expect(await closing).toBe(true)

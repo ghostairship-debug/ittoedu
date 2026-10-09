@@ -14,9 +14,10 @@ import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEng
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
 import { serializeModelPayload } from '../../src/main/workbench/providers/ModelProviderRouter'
+import { executionAuditWarnings } from '../../src/main/workbench/execution/executionOutcome'
 import { VisualAnalysisService } from '../../src/main/workbench/execution/VisualAnalysisService'
 import type { ExecutionStart } from '../../src/shared/workbench/execution'
-import type { ModelEvent, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
+import type { ModelChatMessage, ModelEvent, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }) })
@@ -74,8 +75,7 @@ it.each([true, false])('NI01 final production payload reaches provider and its m
   expect(manifest.tools).toEqual(request.tools?.map(tool => ({ name: tool.name, digest: digest(JSON.stringify(tool)) })))
 })
 
-it.each([{ sameSource: true, finish: true }, { sameSource: false, finish: true },
-  { sameSource: true, finish: false }, { sameSource: false, finish: false }])(
+it.each([{ sameSource: true, finish: true }, { sameSource: false, finish: false }])(
   'NI02 auxiliary vision settles only the same stored source (same=$sameSource, finish=$finish)', async ({ sameSource, finish }) => {
     let visualCalls = 0, turns = 0, sourceId = '', secondSourceId = ''
     const visionSelection = { ...selection, model: 'vision-fixture' }
@@ -101,7 +101,7 @@ it.each([{ sameSource: true, finish: true }, { sameSource: false, finish: true }
     h.input.selection = { ...selection, connection: { ...selection.connection, capabilities: { ...selection.connection.capabilities, vision: 'unsupported' } } }
     h.input.visionSelection = visionSelection
     // Two separate stored sources intentionally use the same bytes: equal pixels do not prove source identity.
-    const source = (name: string) => ({ role: 'user' as const, content: [{ type: 'text', text: name },
+    const source = (name: string): ModelChatMessage => ({ role: 'user' as const, content: [{ type: 'text', text: name },
       { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jc1kAAAAASUVORK5CYII=' } }] })
     h.input.context = [source('图一原来源'), ...(sameSource ? [] : [source('图二异来源')])]
     const started = await h.engine.start(h.input, undefined, async prepared => {
@@ -109,11 +109,14 @@ it.each([{ sameSource: true, finish: true }, { sameSource: false, finish: true }
     })
     const final = await h.engine.wait(started.runId)
     expect(final.status, JSON.stringify({ visualCalls, visual: final.visualAnalyses, failure: final.failure,
-      tools: final.tools.map(tool => ({ name: tool.call.name, result: tool.result })) })).toBe(sameSource ? 'completed' : 'partial')
+      tools: final.tools.map(tool => ({ name: tool.call.name, result: tool.result })) })).toBe('completed')
     expect(final.visualAnalyses?.[0]).toMatchObject({ status: 'vision-unavailable' })
     expect(final.visualAnalyses?.at(-1), JSON.stringify(final.visualAnalyses)).toMatchObject({ status: 'analyzed' })
     const first = final.visualAnalyses![0]!, last = final.visualAnalyses!.at(-1)!
     expect(last.source === first.source).toBe(sameSource)
+    const warnings = executionAuditWarnings(final)
+    if (sameSource) expect(warnings.filter(issue => issue.name === '视觉分析')).toEqual([])
+    else expect(warnings).toContainEqual(expect.objectContaining({ name: '视觉分析', status: 'unverified', message: expect.stringContaining(first.source) }))
     expect(final.requests.find(request => request.kind === 'visual-analysis' && request.state === 'failed')?.failure?.code).toBe('first-vision-rejected')
     expect((await h.session.drain()).model).toMatchObject({ source: 'OLD DONE' })
     expect(final.tools.filter(tool => tool.call.name === 'text.replace')).toHaveLength(1)

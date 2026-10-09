@@ -517,7 +517,10 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
         {block.type === 'course-component' ? (
           <div data-testid="flow-course-component-properties">
             <p className="property-hint">组件：components/{block.name}.html</p>
-            <BufferedInput label="标题" value={block.title ?? ''} onCommit={(title) => commands.patchSelectedBlock({ title })} />
+            <BufferedInput label="标题" value={block.title ?? ''} onCommit={(title) => {
+              const error = commands.patchSelectedBlock({ title })
+              if (error) throw new Error(error)
+            }} />
             <BufferedInput label="高度" type="number" min={80} max={4000} value={block.height ?? FLOW_COMPONENT_BLOCK_HEIGHT}
               onCommit={(value) => { const height = Number(value); if (height >= 80 && height <= 4000) commands.patchSelectedBlock({ height }) }} />
             <SelectField<'none' | 'left' | 'right'>
@@ -776,7 +779,10 @@ export function FlowPropertiesPanel({ context }: { context: FlowPropertiesContex
             <SelectField<'none' | 'left' | 'right'> label="文字环绕" value={context.flowLayout?.wrap ?? 'none'} disabled={Boolean(context.structureDisabledReason)}
               options={[{ value: 'none', label: '不环绕（独占一行）' }, { value: 'left', label: '居左环绕' }, { value: 'right', label: '居右环绕' }]}
               onChange={wrap => context.commands.patchSelectedBlock({ wrap })} />
-            {context.block?.type === 'media' && <BufferedInput label="替代文本" value={context.block.altText ?? ''} onCommit={altText => context.commands.patchSelectedBlock({ altText })} />}
+            {context.block?.type === 'media' && <BufferedInput label="替代文本" value={context.block.altText ?? ''} onCommit={altText => {
+              const error = context.commands.patchSelectedBlock({ altText })
+              if (error) throw new Error(error)
+            }} />}
             {(context.block?.type === 'media' || context.block?.type === 'table') && <>
               {!context.block.caption && <button type="button" onClick={() => context.commands.patchSelectedBlock({ caption: { inlines: [] } })}>{context.block.type === 'table' ? '添加表格标题说明' : '添加题注'}</button>}
               <p className="property-hint">在正文中直接编辑{context.block.type === 'table' ? '表头、单元格和表格标题说明' : '题注'}；选中文字可设置格式。</p>

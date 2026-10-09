@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { promises as fs, readFileSync } from 'node:fs'
+import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
@@ -11,7 +11,7 @@ import { ExecutionEventStore } from '../../src/main/workbench/execution/Executio
 import { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
 import { ImageResultsDesktopService } from '../../src/main/workbench/images/ImageResultsDesktopService'
 import { imageProvenance } from '../../src/main/workbench/images/ChatGPTImageProvider'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import type { ImageModelSelection, ImageGenerationRequest } from '../../src/shared/workbench/images'
 import type { ImageResultView } from '../../src/shared/workbench/imageResultsDesktop'
 
@@ -21,7 +21,7 @@ const selection: ImageModelSelection = { imageModel: 'fixture-image', connection
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-image-results-')); roots.push(root)
   const documents = new DocumentHostService(path.join(root, 'documents'))
-  const model = new CourseV9Driver().load(new Uint8Array(readFileSync('tests/fixtures/course-project-v9/slide-native.h5lesson')))
+  const model = { kind: 'course-v10' as const, project: createBlankCourseProjectV10('Image results'), resources: { assets: {}, components: {} } }
   const snapshot = await documents.internalAPI.create(model, 'images.h5lesson')
   const conversations = new ConversationStore({ directory: path.join(root, 'conversations') })
   await conversations.registerWorkspace({ workspaceId: 'workspace', rootPath: root, managed: false, authorization: 'user-selected' })
@@ -38,7 +38,7 @@ async function fixture() {
     if (request.jobId === 'late') { entered?.(); await new Promise<void>(resolve => { release = resolve }) }
     return { status: 'completed', images: [{ bytes: request.operation === 'edit' ? edited : original, mimeType: 'image/png', filename: 'image.png' }], provenance: imageProvenance(request, refs) }
   } } })
-  const options = { directory: path.join(root, 'actions'), images, documents, execution: { conversations, runs, appendExternalEvent: events.append.bind(events) }, selection: async () => ({ ...selection, imageModel: 'current-edit-model' }) }
+  const options = { directory: path.join(root, 'actions'), images, documents, execution: { conversations, runs, appendExternalEvent: async (input: Parameters<typeof events.append>[0]) => { await events.append(input) } }, selection: async () => ({ ...selection, imageModel: 'current-edit-model' }) }
   const service = new ImageResultsDesktopService(options); services.push(service)
   const owner = { workspaceId: 'workspace', conversationId: 'conversation', runId: 'external-run', jobId: 'original' }
   const request = (jobId: string): ImageGenerationRequest => ({ jobId, runId: owner.runId, documentId: snapshot.documentId, operation: 'generate', prompt: 'fixture', selection })
@@ -67,13 +67,12 @@ it('S14 results enforce conversation/job/resource ownership and retain real stop
 
 it('S14 explicit apply uses a fresh grant with one atomic History and idempotent receipt; edit keeps original and freezes current model', async () => {
   const h = await fixture()
-  if (h.model.kind !== 'course-v9') throw new Error('fixture')
-  const location = h.model.project.locations.find(value => value.kind === 'slide-scene')!
+  if (h.model.kind !== 'course-v10') throw new Error('fixture')
+  const surface = h.model.project.surfaces[0]
   const frame = { x: 812, y: 356, width: 360, height: 270 }
   const input = { type: 'apply' as const, ...h.owner, actionId: crypto.randomUUID(), resourceId: h.resourceId,
     frame,
-    target: { documentId: h.snapshot.documentId, epoch: h.snapshot.epoch, revision: h.snapshot.revision, label: location.label, address: { kind: 'course-owner' as const, locationId: location.id, owner: 'scene' as const } } }
-  await expect(h.service.operate({ ...input, frame: undefined })).rejects.toThrow('明确画布位置与尺寸')
+    target: { documentId: h.snapshot.documentId, epoch: h.snapshot.epoch, revision: h.snapshot.revision, label: surface.title, address: { kind: 'course-surface' as const, surfaceId: surface.id } } }
   await expect(h.service.operate({ ...input, frame: { ...frame, width: 0 } })).rejects.toThrow()
   expect(h.documents.registry.get(h.snapshot.documentId).read().revision).toBe(h.snapshot.revision)
   const result = await h.service.operate(input)
@@ -95,12 +94,12 @@ it('S14 explicit apply uses a fresh grant with one atomic History and idempotent
   expect(h.documents.registry.get(h.snapshot.documentId).read().revision).toBe(current.revision)
   await h.documents.internalAPI.dispatch({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision, operationId: crypto.randomUUID(), actor: 'human', mutation: { type: 'redo' } })
   const beforeReplace = h.documents.registry.get(h.snapshot.documentId).read()
-  if (beforeReplace.model.kind !== 'course-v9') throw new Error('fixture')
-  const oldIds = new Set(h.model.project.surfaces.flatMap(surface => surface.type === 'slide' ? surface.scenes.flatMap(scene => scene.layerItems.map(item => item.layerItemId)) : []))
-  const inserted = beforeReplace.model.project.surfaces.flatMap(surface => surface.type === 'slide' ? surface.scenes.flatMap(scene => scene.layerItems) : []).find(item => !oldIds.has(item.layerItemId))!
-  expect(inserted.frame).toMatchObject({ mode: 'absolute', ...frame })
+  if (beforeReplace.model.kind !== 'course-v10') throw new Error('fixture')
+  const oldIds = new Set(Object.keys(h.model.project.instances))
+  const inserted = Object.values(beforeReplace.model.project.instances).find(item => !oldIds.has(item.id))!
+  expect(inserted.frame).toEqual({ width: frame.width, height: frame.height, transform: [1, 0, 0, 1, frame.x, frame.y] })
   const replace = { type: 'apply' as const, ...h.owner, jobId: child.job.jobId, runId: child.runId, actionId: crypto.randomUUID(), resourceId: child.job.resources[0]!.resourceId,
-    target: { documentId: current.documentId, epoch: current.epoch, revision: beforeReplace.revision, label: '刚插入的图片', address: { kind: 'course-object' as const, locationId: location.id, itemId: inserted.layerItemId } } }
+    target: { documentId: current.documentId, epoch: current.epoch, revision: beforeReplace.revision, label: '刚插入的图片', address: { kind: 'course-instance' as const, surfaceId: surface.id, instanceId: inserted.id } } }
   expect(await h.service.operate(replace)).toMatchObject({ status: 'applied' })
   const replaced = h.documents.registry.get(current.documentId).read()
   expect(replaced.undoDepth).toBe(beforeReplace.undoDepth + 1)
@@ -114,12 +113,12 @@ it('S14 explicit apply uses a fresh grant with one atomic History and idempotent
 
 it('S14 releases deleted-conversation image cache after durable deletion while shared results and document History survive', async () => {
   const h = await fixture()
-  if (h.model.kind !== 'course-v9') throw new Error('fixture')
-  const location = h.model.project.locations.find(value => value.kind === 'slide-scene')!
+  if (h.model.kind !== 'course-v10') throw new Error('fixture')
+  const surface = h.model.project.surfaces[0]
   expect(await h.service.operate({ type: 'apply', ...h.owner, actionId: crypto.randomUUID(), resourceId: h.resourceId,
     frame: { x: 720, y: 330, width: 320, height: 240 },
     target: { documentId: h.snapshot.documentId, epoch: h.snapshot.epoch, revision: h.snapshot.revision,
-      label: location.label, address: { kind: 'course-owner', locationId: location.id, owner: 'scene' } } })).toMatchObject({ status: 'applied' })
+      label: surface.title, address: { kind: 'course-surface', surfaceId: surface.id } } })).toMatchObject({ status: 'applied' })
   let current = h.documents.registry.get(h.snapshot.documentId).read()
   await h.documents.internalAPI.dispatch({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision,
     operationId: crypto.randomUUID(), actor: 'human', mutation: { type: 'undo' } })

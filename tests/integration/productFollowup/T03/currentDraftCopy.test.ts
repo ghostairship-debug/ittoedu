@@ -27,7 +27,9 @@ it('public workspaceFiles defaults to disk and explicitly copies current V10 dra
     desktop = new WorkspaceFilesDesktopService(host.files)
     const root = await desktop.authorizeRoot(workspace)
     const listing = await desktop.operate({ type: 'list', workspaceId: root.workspaceId, directoryEntryId: root.rootEntryId })
-    const sourceEntryId = listing.entries.find(entry => entry.name === 'lesson.h5lesson')!.entryId
+    const sourceEntry = listing.entries.find(entry => entry.name === 'lesson.h5lesson')
+    if (!sourceEntry || sourceEntry.status !== 'accessible') throw new Error('Expected accessible course file')
+    const sourceEntryId = sourceEntry.entryId
     const diskFolder = await desktop.operate({ type: 'mkdir', operationId: 'disk-folder', workspaceId: root.workspaceId, targetDirectoryId: root.rootEntryId, name: 'disk' })
     const currentFolder = await desktop.operate({ type: 'mkdir', operationId: 'current-folder', workspaceId: root.workspaceId, targetDirectoryId: root.rootEntryId, name: 'current' })
     const disk = await desktop.operate({ type: 'copy', operationId: 'default-disk', workspaceId: root.workspaceId,

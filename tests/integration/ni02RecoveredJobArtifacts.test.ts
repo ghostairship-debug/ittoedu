@@ -1,3 +1,4 @@
+import { requireWorkspaceRoot } from '../helpers/workspaceGrant'
 // @vitest-environment node
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -75,7 +76,7 @@ async function fixture(pending = false) {
       readResource: images.readResource.bind(images), readReadyResourceFromJob: images.readReadyResourceFromJob.bind(images) },
     artifacts: { lookup: (runId, operationId) => deliveries.lookup(operationId, runId),
       save: ({ grant, operationId, source, bytes: supplied, assertActive }) => deliveries.deliver({
-        runId: grant.runId, operationId, workspaceRoot: grant.fileAccess!.workspaceRoot, permission: grant.fileAccess!.permission,
+        runId: grant.runId, operationId, workspaceRoot: requireWorkspaceRoot(grant.fileAccess), permission: grant.fileAccess!.permission,
         destination: source.destination, ...artifactDeliverySource(source),
         bytes: supplied, assertActive,
       }) },

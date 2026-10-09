@@ -1,3 +1,4 @@
+import { imageDataSchema } from '../../src/components/image/data'
 // @vitest-environment node
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -80,7 +81,7 @@ it('recovers a ready document image after cold restore and applies a fresh autho
   expect(await host.tools.execute('outside', 'denied-recovery', { name: 'image.status', input: { job: ready.job } }))
     .toMatchObject({ kind: 'error', message: expect.stringContaining('已授权文档') })
   await begin('continuation')
-  expect(data(await host.tools.execute('continuation', 'job-read', { name: 'job.status', input: { kind: 'image', job: ready.job } })))
+  expect(data(await host.tools.execute('continuation', 'job-read', { name: 'job.status', input: { job: ready.job } })))
     .toMatchObject({ status: 'ready', terminal: true })
   const recovered = data(await host.tools.execute('continuation', 'recover-image', { name: 'image.status', input: { job: ready.job } }))
   expect(recovered).toMatchObject({ job: ready.job, documentId: document.documentId, status: 'ready', stopped: false })
@@ -108,7 +109,7 @@ it('recovers a ready document image after cold restore and applies a fresh autho
   const picture = current.model.project.instances.picture
   expect(picture.frame).toEqual(frame)
   expect(current.undoDepth).toBe(1)
-  const source = current.model.resources.assets[picture.data.assetId as string]
+  const source = current.model.resources.assets[imageDataSchema.parse(picture.data).assetId]
   expect(await sharp(source).raw().toBuffer()).toEqual(await sharp(replacement).raw().toBuffer())
   expect(await images.read(ready.job)).toMatchObject({ runId: 'original', documentId: document.documentId, status: 'ready', stopped: false })
   expect(calls).toBe(1)

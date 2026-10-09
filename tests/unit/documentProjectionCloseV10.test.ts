@@ -7,7 +7,7 @@ import { DocumentHostService } from '../../src/main/workbench/DocumentHostServic
 import { DocumentProjection } from '../../src/renderer/documents/DocumentProjection'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
-import type { DocumentEvent } from '../../src/shared/workbench/document'
+import type { DocumentDriver, DocumentEvent } from '../../src/shared/workbench/document'
 import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
 
 const roots: string[] = [], projections: DocumentProjection[] = []
@@ -24,13 +24,23 @@ describe('V10 composition during discard confirmation', () => {
     const host = new DocumentHostService(root, {}, { discardFlowRecovery: async () => undefined })
     const listeners = new Set<(event: DocumentEvent) => void>()
     host.setEventSink(event => { for (const listener of listeners) listener(event) })
-    const api = { ...host.internalAPI, subscribe: (listener: (event: DocumentEvent) => void) => { listeners.add(listener); return () => { listeners.delete(listener) } } } as DocumentHostAPI
+    const api: DocumentHostAPI = { ...host.internalAPI, bootstrapCourse: () => host.bootstrapCourse(),
+      saveWithDialog: id => host.internalAPI.save(id, path.join(root, 'course.h5lesson')),
+      close: async (id, discardDirty) => { await host.operate({ type: 'close', documentId: id, discardDirty }) },
+      closeWithDialog: async id => { await host.operate({ type: 'close', documentId: id }); return true },
+      discardRecovery: async id => { await host.operate({ type: 'discard-recovery', documentId: id }) },
+      subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener) } } }
     const project = createBlankCourseProjectV10(), id = project.global.overlay[0]!
     project.instances[id]!.data = { text: 'old' }
-    const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } })
-    const driver = new CourseV10Driver(), apply = driver.apply.bind(driver)
+    const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'course.h5lesson')
+    const courseDriver = new CourseV10Driver()
     let wait: Promise<void> | undefined, release!: () => void
-    driver.apply = (model, command) => wait ? wait.then(() => apply(model, command)) : apply(model, command)
+    const driver: DocumentDriver = { kind: courseDriver.kind,
+      validate: model => courseDriver.validate(model),
+      apply: (model, command) => wait ? wait.then(() => courseDriver.apply(model, command)) : courseDriver.apply(model, command),
+      withRevision: (model, revision) => courseDriver.withRevision(model, revision),
+      load: bytes => courseDriver.load(bytes), serialize: model => courseDriver.serialize(model),
+      describeChanges: (before, after) => courseDriver.describeChanges(before, after) }
     const projection = await DocumentProjection.attach(api, snapshot.documentId, driver); projections.push(projection)
     projection.beginComposition(id, ['text'])
     await projection.updateComposition('中间输入')

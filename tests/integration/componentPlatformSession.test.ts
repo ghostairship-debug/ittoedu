@@ -132,7 +132,7 @@ it('adds a professional definition, owned instance and immutable resource in one
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'component-platform-producer-'))
   temporaryDirectories.push(directory)
   const host = new DocumentHostService(path.join(directory, 'recovery'))
-  const initial = await host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('图片'), resources: { assets: {}, components: {} } })
+  const initial = await host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('图片'), resources: { assets: {}, components: {} } }, '图片.h5lesson')
   if (initial.model.kind !== 'course-v10') throw new Error('expected V10')
   const edits: ComponentEdit[] = [
     { type: 'definition.set', definition: { id: 'guoling.image', role: 'content', implementation: { kind: 'builtin', key: 'guoling.image' } } },

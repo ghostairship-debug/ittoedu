@@ -144,7 +144,7 @@ it('confirms optional GUI settings into the drained snapshot and retains them th
   fireEvent.click(dialog.getByLabelText('上移 c'))
   fireEvent.change(dialog.getByLabelText('导出纸型'), { target: { value: 'letter' } })
   fireEvent.change(dialog.getByLabelText('导出方向'), { target: { value: 'landscape' } })
-  fireEvent.click(dialog.getByRole('button', { name: '导出', exact: true }))
+  fireEvent.click(dialog.getByRole('button', { name: /^导出$/ }))
   await waitFor(() => expect(hook.result.current.exportPreflightReport).not.toBeNull())
   expect(captureSnapshot).toHaveBeenCalledTimes(1)
   expect(calls).toEqual(['c', 'a'])

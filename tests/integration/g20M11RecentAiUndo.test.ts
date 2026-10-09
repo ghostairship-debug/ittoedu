@@ -6,9 +6,6 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { documentHostRequestSchema } from '../../src/shared/workbench/desktop'
 import { createLessonDocumentFiles } from '../../src/main/lessonDocumentFiles'
 import { DocumentFileSession } from '../../src/renderer/documentFiles/documentFileSession'
-import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
-import { useEditorStore } from '../../src/renderer/store/editorStore'
-import { createCourseStoreHost } from '../helpers/courseStoreHost'
 import { createMarkdownTestHost } from '../helpers/markdownDocumentHost'
 
 const roots: string[] = []
@@ -322,38 +319,4 @@ it('M11 typing during the undo preflight becomes a human edit before the AI-head
     expect(actual.model).toMatchObject({ kind: 'markdown', source: 'AI 改稿\n教师续写' })
     expect(actual.undoHead?.actor).toBe('human')
   } finally { releaseRead(); session.dispose() }
-})
-
-it('M11 course button action uses the existing Bridge History and refuses to skip a later human edit', async () => {
-  const h = await createCourseStoreHost()
-  const initial = await h.open(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }))
-  const id = initial.documentId
-  const store = () => useEditorStore.getState()
-  const title = () => {
-    const snapshot = h.registry.get(id).read()
-    if (snapshot.model.kind !== 'course-v9') throw new Error('Course fixture required')
-    return snapshot.model.project.title
-  }
-  const aiTitle = async (value: string, operationId: string) => {
-    const before = h.registry.get(id).read()
-    if (before.model.kind !== 'course-v9') throw new Error('Course fixture required')
-    expect((await h.api.dispatch({ documentId: id, epoch: before.epoch, baseRevision: before.revision,
-      actor: 'agent', operationId, mutation: { type: 'command', command: {
-        type: 'course.replace', project: { ...before.model.project, title: value }, resources: before.model.resources,
-      } } })).status).toBe('applied')
-  }
-  await aiTitle('AI A', 'course-ai-a')
-  store().renameProject('人工 B'); await store().drainCourseDocument()
-  await aiTitle('AI C', 'course-ai-c')
-  await vi.waitFor(() => expect(store().courseDocument.snapshot?.undoHead).toEqual({ operationId: 'course-ai-c', actor: 'agent' }))
-  expect(await store().undoLatestAgentCourseDocument()).toBe(true)
-  expect(title()).toBe('人工 B')
-  store().redo(); await vi.waitFor(() => expect(title()).toBe('AI C'))
-  store().renameProject('人工 D'); await store().drainCourseDocument()
-  const beforeRefusal = h.registry.get(id).read()
-  await expect(store().undoLatestAgentCourseDocument()).rejects.toThrow('最近一次操作不是 AI 修改')
-  expect(h.registry.get(id).read()).toMatchObject({ revision: beforeRefusal.revision, undoDepth: beforeRefusal.undoDepth, model: beforeRefusal.model })
-  store().undo(); await vi.waitFor(() => expect(title()).toBe('AI C'))
-  expect(await store().undoLatestAgentCourseDocument()).toBe(true)
-  expect(title()).toBe('人工 B')
 })

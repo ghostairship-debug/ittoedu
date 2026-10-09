@@ -11,8 +11,12 @@ import type { ExecutionRunRecord, ExecutionToolRecord } from '../../../../src/sh
 
 function run(root: string, tool: ExecutionToolRecord): ExecutionRunRecord {
   return { schemaVersion: 1, runId: 'office-run', version: 1, input: { conversationId: 'conversation', taskId: 'task',
-    instruction: 'Revise a paragraph', documents: [], workspaceRoot: root }, status: 'completed', createdAt: 1,
-    updatedAt: 2, messages: [], initialMessageCount: 0, requests: [], tools: [tool] } as ExecutionRunRecord
+    instruction: 'Revise a paragraph', documents: [], workspaceRoot: root,
+    selection: { model: 'fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
+      baseURL: 'http://127.0.0.1:1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture' },
+      billing: { kind: 'unknown' }, capabilities: { tools: 'supported', vision: 'unknown', stream: 'unknown', reasoning: 'unknown' } } }
+  }, status: 'completed', createdAt: 1,
+    updatedAt: 2, messages: [], initialMessageCount: 0, requests: [], tools: [tool] }
 }
 
 it('reviews a real DOCX edit as saved binary content, restores the original paragraphs and refuses to overwrite a later human edit', async () => {

@@ -12,12 +12,20 @@ const { JSDOM } = require('jsdom') as { JSDOM: new (source: string) => {
 } }
 // Match @napi-rs/canvas's loadImage data-URI path: SVG goes to the native decoder as actual bytes.
 class PixelImage extends CanvasImage {
-  get src(): string | Uint8Array { return super.src }
-  set src(value: string | Uint8Array) {
-    if (typeof value === 'string' && value.startsWith('data:')) {
-      const comma = value.indexOf(','), header = value.slice(0, comma), payload = value.slice(comma + 1)
-      super.src = header.includes(';base64') ? Buffer.from(payload, 'base64') : Buffer.from(decodeURIComponent(payload), 'utf8')
-    } else super.src = value
+  constructor(width = 0, height = 0, attributes?: ConstructorParameters<typeof CanvasImage>[2]) {
+    super(width, height, attributes)
+    const source = Object.getOwnPropertyDescriptor(CanvasImage.prototype, 'src')
+    if (!source?.get || !source.set) throw new Error('Native canvas Image source accessors are unavailable')
+    Object.defineProperty(this, 'src', {
+      get: () => source.get!.call(this),
+      set: (value: string | Uint8Array) => {
+        if (typeof value === 'string' && value.startsWith('data:')) {
+          const comma = value.indexOf(','), header = value.slice(0, comma), payload = value.slice(comma + 1)
+          value = header.includes(';base64') ? Buffer.from(payload, 'base64') : Buffer.from(decodeURIComponent(payload), 'utf8')
+        }
+        source.set!.call(this, value)
+      },
+    })
   }
 }
 let completed = false, stage = 'initial'

@@ -29,6 +29,7 @@ const descriptors = geometry.map(key => Object.getOwnPropertyDescriptor(Range.pr
 beforeAll(() => {
   Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value: () => [] })
   Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect() })
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 100, 400, 30))
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('DragEvent', MouseEvent)
 })
@@ -65,7 +66,7 @@ it('uses the Flow toolbar, inserts at the selected middle block, drags through f
     await bridge.connect(api); await bridge.activate(created.documentId)
     probe.state = { courseBridge: bridge, courseKernel: bridge, flowDocumentDrafts: {}, setFlowDocumentDraft: () => {},
       setFlowContextSelection: () => {}, flowEditingInstance: null, slideContentEdit: null }
-    probe.runtime = { resources, selectedInstanceIds: [], selectInstances: () => {}, onElement: () => {}, onTargetElement: () => {},
+    probe.runtime = { documentId: created.documentId, setPlaying: vi.fn(), resources, selectedInstanceIds: [], selectInstances: () => {}, onElement: () => {}, onTargetElement: () => {},
       world: { beforeProjectionMutation: () => {}, afterProjectionMutation: () => {} }, renderInstance: () => null,
       registerObservation: () => () => {}, navigation: { changed: () => {} } }
     function Workspace() {
@@ -90,16 +91,14 @@ it('uses the Flow toolbar, inserts at the selected middle block, drags through f
     })
     const settle = async () => { await act(async () => { expect(await drainFlowWorkspace(created.documentId)).toEqual({ ok: true }) }) }
 
-    expect(ui.getByTestId('flow-workspace-toolbar-host')).toContainElement(ui.getByRole('button', { name: '粗体', exact: true }))
-    expect(ui.queryByRole('button', { name: '撤销', exact: true })).toBeNull()
-    expect(ui.queryByRole('button', { name: '重做', exact: true })).toBeNull()
-    fireEvent.click(ui.getByLabelText('更多正文操作'))
-    expect(ui.getByRole('button', { name: '源文', exact: true })).toBeInTheDocument()
-    fireEvent.click(ui.getByLabelText('更多正文操作'))
+    expect(ui.getByTestId('flow-workspace-toolbar-host')).toContainElement(ui.getByRole('button', { name: '粗体' }))
+    expect(ui.queryByRole('button', { name: '撤销' })).toBeNull()
+    expect(ui.queryByRole('button', { name: '重做' })).toBeNull()
+    expect(ui.getByRole('button', { name: '源码' })).toBeInTheDocument()
 
     focus('a')
-    fireEvent.click(ui.getByRole('button', { name: '插入段落', exact: true }))
-    await act(async () => fireEvent.click(ui.getByRole('menuitem', { name: '下方插入正文', exact: true })))
+    fireEvent.click(ui.getByRole('button', { name: '插入段落' }))
+    await act(async () => fireEvent.click(ui.getByRole('menuitem', { name: '下方插入正文' })))
     await settle()
     const inserted = body()[1]
     expect(body()).toEqual(['a', inserted, 'b', 'c', 'table'])
@@ -111,7 +110,7 @@ it('uses the Flow toolbar, inserts at the selected middle block, drags through f
     const values = new Map<string, string>()
     const transfer = { types: [DOCUMENT_BLOCK_DRAG_MIME], effectAllowed: 'none', dropEffect: 'none',
       setData: (type: string, value: string) => values.set(type, value), getData: (type: string) => values.get(type) ?? '' }
-    fireEvent.dragStart(ui.getByRole('button', { name: '段落操作', exact: true }), { dataTransfer: transfer })
+    fireEvent.dragStart(ui.getByRole('button', { name: '段落操作' }), { dataTransfer: transfer })
     expect(transfer.getData(DOCUMENT_BLOCK_DRAG_MIME)).toBe('b')
     const beforeDrag = (await service.internalAPI.read(created.documentId)).undoDepth
     const destination = ui.container.querySelector<HTMLElement>('[data-flow-block-id="a"]')!
@@ -133,11 +132,11 @@ it('uses the Flow toolbar, inserts at the selected middle block, drags through f
     expect(textComponentDataSchema.parse(current().instances[afterTable].data).content.inlines).toEqual([{ type: 'text', text: '表格后的正文' }])
 
     focus(afterTable)
-    fireEvent.click(ui.getByRole('button', { name: '插入段落', exact: true }))
-    await act(async () => fireEvent.click(ui.getByRole('menuitem', { name: '下方插入分隔线', exact: true })))
+    fireEvent.click(ui.getByRole('button', { name: '插入段落' }))
+    await act(async () => fireEvent.click(ui.getByRole('menuitem', { name: '下方插入分隔线' })))
     await settle()
     expect(projectFlowDocument(current(), 'flow').content.blocks.at(-1)!.type).toBe('divider')
-    await act(async () => fireEvent.click(ui.getByRole('button', { name: '继续输入正文', exact: true })))
+    await act(async () => fireEvent.click(ui.getByRole('button', { name: '继续输入正文' })))
     await act(async () => editor.view.dispatch(editor.view.state.tr.insertText('分隔线后的正文')))
     await settle()
     const finalBody = projectFlowDocument(current(), 'flow').content.blocks

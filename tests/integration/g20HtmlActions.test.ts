@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-// @ts-expect-error jsdom is a Vitest-only fixture and does not ship declarations here.
 import { JSDOM } from 'jsdom'
 import { HtmlActionService } from '../../src/main/workbench/observation/HtmlActionService'
 import { htmlActionModelMessage } from '../../src/main/workbench/observation/HtmlActionModelInput'

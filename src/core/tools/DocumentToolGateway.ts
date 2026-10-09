@@ -33,7 +33,7 @@ import { componentDataPropertyPaths, componentTableDataEdits, componentChartData
 import { componentInputRuleEdits } from '../../components/input/authoring'
 import { executeCourseLogicAuthoringCommand, replaceCourseNetworkDeclaration } from '../course/courseLogicAuthoringCommands'
 import { courseAudioSettingsEdits, courseSoundEdits, courseSoundImportEdits } from '../course/courseMediaEdits'
-import { interactionBehavior, interactionRules, componentRuleEdits, componentClickInteractionEdits, componentRevealSequenceEdits, duplicateComponentRule } from '../../shared/componentInteractionData'
+import { interactionBehavior, interactionRules, componentRuleEdits, componentClickInteractionEdits, componentRevealSequenceEdits, duplicateComponentRule, removeComponentRule } from '../../shared/componentInteractionData'
 import { coursePresentationEdits } from './coursePresentationEdits'
 import { captureComponentOperation, componentValueAt, presentationComponentEdits, componentFieldIdentityPaths, equalComponentValue } from '../drivers/courseV10Operations'
 import { imageDataSchema } from '../../components/image/data'
@@ -1904,7 +1904,7 @@ export class DocumentToolGateway implements ToolGateway {
                 const index = rules.findIndex(rule => rule.id === ruleId)
                 if (index < 0) throw new ToolError('invalid-target', '规则已不存在')
                 if (change.kind === 'duplicate') rules.splice(index + 1, 0, duplicateComponentRule(rules[index]))
-                else rules.splice(index, 1)
+                else rules.splice(0, rules.length, ...removeComponentRule(rules, ruleId))
                 edits = componentRuleEdits(project, owner, rules, references)
               }
             }

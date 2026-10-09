@@ -1,122 +1,124 @@
-import { describe, expect, it, vi } from 'vitest'
-import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
-import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
-import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
-import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
-import type { HistoryResourceState } from '../../src/renderer/store/courseResourceState'
-import { applyEditorTransactionStep } from '../../src/renderer/authoring/editorTransaction'
-import {
-  FLOW_MENU_COMPONENT_CANCELLED_REASON,
-  prepareFlowMenuComponentInsertion,
-} from '../../src/renderer/course/flowMenuComponentInsertion'
+import { act, cleanup, renderHook } from '@testing-library/react'
+import { TextEncoder as NodeTextEncoder } from 'node:util'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { createV10StoreHost, deferred } from '../helpers/courseV10StoreHost'
+import { DOCUMENT_BLOCK_DEFINITION, documentBlockData } from '../../src/components/document-block'
+import { TEXT_DEFINITION, createTextData } from '../../src/components/text'
+import { exportComponentLibraryArchive } from '../../src/core/components/library/archive'
+import { insertComponentPackagesAtTarget } from '../../src/renderer/components/insertComponentPackages'
+import { useComponentLibrary, type ComponentLibraryPorts } from '../../src/renderer/app/useComponentLibrary'
+import { registerFlowMenuCapture, type FlowMenuPageCapture } from '../../src/renderer/document/flowWorkspaceRegistry'
+import { captureFlowMenuTarget, resolveFlowMenuInsertionOptions } from '../../src/renderer/ui/flow/flowInsertCommands'
+import type { AvailableComponentCatalogPackage } from '../../src/shared/componentCatalog'
+import type { ComponentLibraryEntry } from '../../src/shared/contracts/component-platform/library'
+import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
 
-const png64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6ZAAAAABJRU5ErkJggg=='
-const png = Uint8Array.from(atob(png64), char => char.charCodeAt(0))
-const now = '2026-09-27T10:00:00.000Z'
-const packageId = 'com.example.menu-flow'
+const dispose: (() => void)[] = []
+beforeEach(() => { vi.stubGlobal('Uint8Array', new NodeTextEncoder().encode('').constructor) })
+afterEach(() => { cleanup(); for (const action of dispose.splice(0)) action(); vi.unstubAllGlobals() })
 
-function fixture() {
-  const data = parseComponentPackageFiles({
-    'manifest.json': new TextEncoder().encode(JSON.stringify({
-      schemaVersion: 4, runtimeApiVersion: 4, renderMode: 'dom', supportedScopes: ['scene'],
-      id: packageId, name: '菜单组件', version: '1.0.0', entry: 'runtime.js',
-      defaultSize: { width: 320, height: 180 }, minSize: { width: 100, height: 80 },
-      preserveAspectRatio: false, assets: {}, defaultProps: { title: '默认', content: { a: 'default-a', b: 'default-b' } },
-      presets: [{ id: 'blue', label: '蓝色', props: { title: '预设', content: { a: 'preset-a' } } }],
-    })),
-    'runtime.js': new TextEncoder().encode(`CoursewareComponent.define({id:'${packageId}',runtimeApiVersion:4,create(ctx){const el=document.createElement('div');el.textContent='hello';ctx.dom.root.append(el);return{destroy(){el.remove()}}}})`),
+it('inserts an API 5 library example into the captured nested Flow slot with private resources and one History entry after a late choice', async () => {
+  const text = (id: string) => ({ id, definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextData(id))) })
+  const project: CourseProjectV10 = { schemaVersion: 10, id: 'original-flow', revision: 0, title: '讲义',
+    definitions: { [TEXT_DEFINITION.id]: TEXT_DEFINITION, [DOCUMENT_BLOCK_DEFINITION.id]: DOCUMENT_BLOCK_DEFINITION },
+    instances: { before: text('before'), after: text('after'), section: { id: 'section', definitionId: DOCUMENT_BLOCK_DEFINITION.id,
+      data: documentBlockData({ id: 'section', type: 'section', title: { inlines: [] }, collapsedByDefault: false, blocks: [] }), childIds: ['before', 'after'] } },
+    surfaces: [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['section'] }], global: { underlay: [], overlay: [] },
+    assets: { logo: { id: 'logo', path: 'assets/logo.svg', mimeType: 'image/svg+xml' } } }
+  const resources = { assets: { logo: new TextEncoder().encode('<svg>original</svg>') },
+    components: { files: { 'main.js': new TextEncoder().encode('export default 99') } } }
+  const h = await createV10StoreHost(project, resources)
+  dispose.push(() => h.bridge.dispose())
+  h.kernel.selectInstances(['before'], 'flow')
+  let page: FlowMenuPageCapture = { ok: true, documentId: h.first.documentId, projectId: project.id, revision: 0,
+    locationId: 'flow', surfaceId: 'flow', generation: 1, selectedBlockId: 'before', selectionSignature: 'before', paperWidth: 800, bodyWidth: 728,
+    paragraphRects: [{ blockId: 'before', depth: 1, x: 36, y: 150, width: 728, height: 50 }] }
+  dispose.push(registerFlowMenuCapture(() => page))
+  const target = captureFlowMenuTarget(h.kernel)
+  const command = { kind: 'component' as const, destination: 'document' as const, label: '组件' }
+  const options = resolveFlowMenuInsertionOptions(target, command, { width: 420, height: 240 })
+  const entry: ComponentLibraryEntry = { schemaVersion: 1, id: 'com.example.menu-flow', title: '视觉卡片',
+    definitions: { visual: { id: 'visual', role: 'content', implementation: { kind: 'source', language: 'javascript',
+      workspace: { ownerId: 'files', entry: 'main.js' }, resourceBindings: { logo: 'logo' } } } },
+    example: { rootIds: ['visual'], instances: { visual: { id: 'visual', definitionId: 'visual',
+      data: { title: '自定义', content: { a: '作者正文', b: '作者说明' } }, flowLayout: { width: 'content-width', wrap: 'left' },
+      frame: { width: 320, height: 180, transform: [1, 0, 0, 1, 0, 0] } } } },
+    assets: { logo: { id: 'logo', path: 'assets/logo.svg', mimeType: 'image/svg+xml' } },
+    resources: { assets: { logo: new TextEncoder().encode('<svg>library</svg>') }, components: { files: {
+      'main.js': new TextEncoder().encode("import { label } from './part.js'; export default { mount(ctx) { const el = document.createElement('img'); el.alt = label; el.src = ctx.resources.url('logo'); ctx.root.append(el); return { dispose() { el.remove() } } } }"),
+      'part.js': new TextEncoder().encode("export const label = '库组件'"),
+    } } } }
+  const catalog: AvailableComponentCatalogPackage = { packageId: entry.id, version: '1.0.0', name: entry.title, description: '当前组件',
+    sourceId: 'built-in', sourceLabel: '内置', sourceTrust: 'built-in', subject: [], schoolStage: [], tags: [], packagePath: 'card.h5component',
+    thumbnailPath: 'card.png', sha256: '0'.repeat(64), componentSchemaVersion: 1, runtimeApiVersion: 5, renderMode: 'dom', supportedScopes: ['scene'],
+    quality: 'experimental', maintainer: 'fixture', verifiedCases: [] }
+  const choosing = deferred(), read = vi.fn(async () => { await choosing.promise; return { bytes: exportComponentLibraryArchive(entry), sha256: catalog.sha256 } })
+  const ports: ComponentLibraryPorts = { kernel: h.kernel, desktopAvailable: () => false,
+    loadCatalog: async () => ({ sources: [], packages: [], issues: [] }), readCatalogPackage: read,
+    selectComponentPackage: async () => null, selectComponentPackages: async () => null,
+    runBusy: async operation => operation(), commitStatus: vi.fn(), reportError: vi.fn() }
+  const hook = renderHook(() => useComponentLibrary(ports))
+  // Cancelling a chooser and an empty choice do not enter the document writer.
+  hook.result.current.importExternalPackages()
+  await act(async () => {})
+  expect(await insertComponentPackagesAtTarget(h.kernel, target, [], options)).toMatchObject({ ok: false })
+  const original = h.first.read()
+  expect(h.operations).toEqual([])
+  const pending = hook.result.current.prepareCatalogPackage(catalog)
+  expect(read).toHaveBeenCalledWith({ sourceId: catalog.sourceId, packageId: catalog.packageId, version: catalog.version })
+  h.kernel.selectInstances(['after'], 'flow')
+  page = { ...page, selectedBlockId: 'after', selectionSignature: 'after' }
+  await h.bridge.create({ kind: 'course-v10', project: { ...structuredClone(project), id: 'other-flow' }, resources: structuredClone(resources) })
+  const other = h.bridge.read().snapshot!
+  h.kernel.selectInstances(['after'], 'flow')
+  const otherBefore = h.registry.get(other.documentId).read(), otherSelection = [...h.bridge.read().selectedInstanceIds]
+  expect(h.first.read()).toEqual(original)
+  let inserted: Awaited<ReturnType<typeof insertComponentPackagesAtTarget>> | undefined
+  await act(async () => {
+    choosing.resolve()
+    const prepared = await pending
+    if (!prepared) throw new Error('Current catalog read failed')
+    inserted = await insertComponentPackagesAtTarget(h.kernel, target, [prepared], options)
   })
-  const base = createBlankCourseProject({ id: 'menu-flow', title: '讲义', now, includeDefaultController: false, controls: 'none' })
-  const project = courseProjectDocumentSchema.parse({
-    ...base,
-    locations: [{ id: 'heading', label: '标题', kind: 'flow-block', surfaceId: 'flow', blockId: 'heading' }],
-    startLocationId: 'heading',
-    surfaces: [{ id: 'flow', type: 'flow', title: '讲义',
-      layout: { readingWidth: 760, wideContentWidth: 1120 }, surfaceLayerItems: [],
-      blocks: [{ id: 'heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题' }] } },
-        { id: 'body', type: 'paragraph', content: { inlines: [{ type: 'text', text: '正文' }] } }],
-    }],
-  })
-  const resources: HistoryResourceState = { assetFiles: {}, componentPackages: {} }
-  const input = { project, resources, target: { projectId: project.id, documentRevision: project.revision,
-    locationId: 'heading', surfaceId: 'flow' }, destination: { parentBlockId: null, index: 1, wrap: 'left' as const },
-    packageId, packageData: data, presetId: 'blue', props: { title: '自定义', content: { b: 'custom-b' } }, width: 420, height: 240, now }
-  return { input, project, resources, data }
-}
-
-function flow(project: CourseProjectDocument) {
-  const result = project.surfaces.find(surface => surface.id === 'flow')
-  if (!result || result.type !== 'flow') throw new Error('missing Flow surface')
-  return result
-}
-
-describe('Flow menu component preparation', () => {
-  it('admits only a temporary paper instance and commits a captured body component in one undoable step', async () => {
-    const { input, project, resources, data } = fixture()
-    const admit = vi.fn(async (candidate: CourseProjectDocument, candidateResources: HistoryResourceState,
-      targets: readonly { locationId: string; stateId?: string | null; instanceIds: readonly string[] }[], _signal?: AbortSignal, captureInstances?: boolean) => {
-      expect(captureInstances).toBe(true)
-      expect(candidateResources.componentPackages[packageId]?.manifest).toEqual(data.manifest)
-      expect(candidate.componentPackages[packageId]).toBeDefined()
-      expect(flow(candidate).surfaceLayerItems).toHaveLength(1)
-      const item = flow(candidate).surfaceLayerItems[0]!.item
-      expect(item.kind).toBe('component')
-      expect(item.paperSpace).toBe('paper')
-      expect(item.frame).toMatchObject({ width: 420, height: 240 })
-      expect(targets).toEqual([{ locationId: 'heading', stateId: null, instanceIds: [item.layerItemId] }])
-      return [{ instanceId: item.layerItemId, locationId: 'heading', width: 1, height: 1,
-        dataUrl: `data:image/png;base64,${png64}` }]
-    })
-    const step = await prepareFlowMenuComponentInsertion(input, undefined, { admit })
-    expect(admit).toHaveBeenCalledOnce()
-    expect(project.revision).toBe(0)
-    expect(flow(project).surfaceLayerItems).toHaveLength(0)
-    expect(step.baseRevision).toBe(0)
-    expect(step.nextDocument.revision).toBe(1)
-    expect(flow(step.nextDocument).surfaceLayerItems).toHaveLength(0)
-    const block = flow(step.nextDocument).blocks[1]
-    expect(block).toMatchObject({ type: 'component', props: { title: '自定义', content: { a: 'preset-a', b: 'custom-b' } }, wrap: 'left',
-      component: { packageId, version: '1.0.0' } })
-    if (block?.type !== 'component') throw new Error('missing component')
-    expect(step.nextDocument.assets[block.staticFallbackAssetId]).toMatchObject({ mimeType: 'image/png', width: 1, height: 1 })
-    expect(step.resourceChanges.assetFileChanges).toEqual([{ assetId: block.staticFallbackAssetId, after: png }])
-    expect(step.resourceChanges.componentPackageChanges).toHaveLength(1)
-    expect(step.resourceChanges.componentPackageChanges?.[0]?.packageId).toBe(packageId)
-    expect(step.resourceChanges.componentPackageChanges?.[0]?.after?.manifest).toEqual(data.manifest)
-    expect(Array.from(step.resourceChanges.componentPackageChanges?.[0]?.after?.files['runtime.js'] ?? [])).toEqual(Array.from(data.files['runtime.js'] ?? []))
-    const committed = applyEditorTransactionStep({ document: project, resources }, step, 'forward')
-    expect(committed.resources.assetFiles[block.staticFallbackAssetId]).toEqual(png)
-    expect(applyEditorTransactionStep(committed, step, 'inverse')).toEqual({ document: project, resources })
-  })
-
-  it('rejects wrong capture, invalid PNG, cancellation and stale destination without changing the base', async () => {
-    const { input, project, resources } = fixture()
-    const before = structuredClone(project)
-    const capture = { instanceId: 'wrong', locationId: 'heading', width: 1, height: 1, dataUrl: `data:image/png;base64,${png64}` }
-    await expect(prepareFlowMenuComponentInsertion(input, undefined, { admit: async () => [capture] })).rejects.toThrow('唯一真实后备图面')
-    await expect(prepareFlowMenuComponentInsertion(input, undefined, { admit: async (_project, _resources, targets) => [{
-      ...capture, instanceId: targets[0]!.instanceIds[0]!, width: 2,
-    }] })).rejects.toThrow('尺寸不一致')
-    const controller = new AbortController()
-    await expect(prepareFlowMenuComponentInsertion(input, controller.signal, { admit: async () => {
-      controller.abort(); return []
-    } })).rejects.toThrow(FLOW_MENU_COMPONENT_CANCELLED_REASON)
-    await expect(prepareFlowMenuComponentInsertion({ ...input, destination: { parentBlockId: null, index: 99 } }, undefined,
-      { admit: vi.fn(async () => []) })).rejects.toThrow('插入位置已经失效')
-    expect(project).toEqual(before)
-    expect(resources).toEqual({ assetFiles: {}, componentPackages: {} })
-  })
-
-  it('uses the initial input snapshot when the caller changes selection and props during admission', async () => {
-    const { input } = fixture()
-    const step = await prepareFlowMenuComponentInsertion(input, undefined, { admit: async (_project, _resources, targets) => {
-      Object.assign(input.destination, { index: 2 })
-      input.props!.title = '迟到修改'
-      Object.assign(input.target, { locationId: 'other' })
-      return [{ instanceId: targets[0]!.instanceIds[0]!, locationId: 'heading', width: 1, height: 1,
-        dataUrl: `data:image/png;base64,${png64}` }]
-    } })
-    expect(flow(step.nextDocument).blocks[1]).toMatchObject({ type: 'component', props: { title: '自定义' } })
-    expect(flow(step.nextDocument).blocks[2]).toMatchObject({ type: 'paragraph' })
-  })
+  expect(inserted?.ok).toBe(true)
+  const id = inserted!.layerItemIds![0], model = h.model(), instance = model.project.instances[id]
+  expect(model.project.instances.section.childIds).toEqual(['before', id, 'after'])
+  expect(model.project.surfaces[0].childIds).toEqual(['section'])
+  expect(instance.data).toEqual(entry.example.instances.visual.data)
+  expect(instance.flowLayout).toEqual(entry.example.instances.visual.flowLayout)
+  expect(instance.flowPlacement).toBeUndefined()
+  expect(instance.frame).toMatchObject({ width: 420, height: 240 })
+  const implementation = model.project.definitions[instance.definitionId].implementation
+  if (implementation.kind !== 'source' || !implementation.workspace) throw new Error('Lost private source owner')
+  const owner = implementation.workspace.ownerId, asset = implementation.resourceBindings!.logo
+  expect(owner).not.toBe('files'); expect(asset).not.toBe('logo')
+  expect(model.resources.components[owner]).toEqual(entry.resources.components.files)
+  expect(model.resources.assets[asset]).toEqual(entry.resources.assets.logo)
+  expect(model.resources.components.files).toEqual(resources.components.files)
+  expect(model.resources.assets.logo).toEqual(resources.assets.logo)
+  expect(Object.keys(model.project.assets)).toHaveLength(2)
+  expect(h.first.read().undoDepth).toBe(original.undoDepth + 1)
+  expect(h.operations).toHaveLength(1)
+  expect(h.registry.get(other.documentId).read()).toEqual(otherBefore)
+  expect(h.bridge.read().activeDocumentId).toBe(other.documentId)
+  expect(h.bridge.read().selectedInstanceIds).toEqual(otherSelection)
+  await h.bridge.undo(h.first.documentId)
+  expect({ ...h.model().project, revision: 0 }).toEqual({ ...project, revision: 0 })
+  expect(h.model().resources).toEqual(resources)
+  await h.bridge.redo(h.first.documentId)
+  await h.api.save(h.first.documentId, 'flow-component.glx')
+  const reopened = h.driver.load(h.disk.get('flow-component.glx')!)
+  if (reopened.kind !== 'course-v10') throw new Error('Expected V10 archive')
+  expect(reopened.project).toEqual(h.model().project)
+  for (const [key, bytes] of Object.entries(model.resources.assets)) expect(Array.from(reopened.resources.assets[key])).toEqual(Array.from(bytes))
+  for (const [key, files] of Object.entries(model.resources.components)) for (const [name, bytes] of Object.entries(files)) {
+    expect(Array.from(reopened.resources.components[key][name])).toEqual(Array.from(bytes))
+  }
+  expect(await h.bridge.close(h.first.documentId)).toBe(true)
+  const closedOriginal = h.first.read(), operations = h.operations.length
+  expect(await insertComponentPackagesAtTarget(h.kernel, target, [entry], options)).toMatchObject({ ok: false })
+  expect(h.operations).toHaveLength(operations)
+  expect(h.first.read()).toEqual(closedOriginal)
+  expect(h.registry.get(other.documentId).read()).toEqual(otherBefore)
+  expect(h.bridge.read().selectedInstanceIds).toEqual(otherSelection)
 })

@@ -10,7 +10,7 @@ import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { prepareDocumentWindowClose } from '../../src/main/workbench/documentCloseCoordinator'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform'
 import type { DocumentEvent } from '../../src/shared/workbench/document'
-import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
+import { authoringDraftRecoverySchema, type AuthoringDraftRecovery, type DocumentHostAPI } from '../../src/shared/workbench/desktop'
 
 type TestDOM = { window: Window & typeof globalThis }
 const { JSDOM } = createRequire(import.meta.url)('jsdom') as { JSDOM: new (html: string, options: { url: string }) => TestDOM }
@@ -61,16 +61,19 @@ it('retains unapplied source on native close and deferred composition until expl
   const nativeClose = vi.fn(async (id: string) => { await registry.close(id); return true })
   bridge = new CourseV10DocumentBridge()
   const guard = (ids?: readonly string[]) => {
-    // Optional lookup lets the same fixture demonstrate the old close behavior before the owner port exists.
-    const issue = sourceEditor.componentSourceCloseIssue?.(bridge!, ids)
+    const issue = sourceEditor.componentSourceCloseIssue(bridge!, ids)
     if (!issue) return true
     reports.push(issue.message); return false
   }
+  const authoringDrafts = new Map<string, AuthoringDraftRecovery>()
   const api: DocumentHostAPI = { bootstrapCourse: async () => session.read(), list: async () => registry.list(),
     read: async id => registry.get(id).read(), dispatch: operation => registry.get(operation.documentId).execute(operation),
+    readAuthoringDrafts: async id => { registry.get(id); return structuredClone(authoringDrafts.get(id) ?? null) },
+    writeAuthoringDrafts: async (id, drafts) => { registry.get(id); authoringDrafts.set(id, structuredClone(authoringDraftRecoverySchema.parse(drafts))) },
+    clearAuthoringDrafts: async id => { registry.get(id); authoringDrafts.delete(id) },
     lookup: async (id, operationId) => registry.get(id).lookupOperation(operationId),
     create: unavailable, open: unavailable, save: unavailable, saveWithDialog: unavailable,
-    close: async id => { await registry.close(id) },
+    close: async id => { await registry.close(id); authoringDrafts.delete(id) },
     // The App's closeWithDialog wrapper runs after the Bridge/Store drains.
     closeWithDialog: async id => guard([id]) && await nativeClose(id),
     observeFile: unavailable, reconcileFile: unavailable, recoverable: unavailable, restore: unavailable, discardRecovery: unavailable,
@@ -86,7 +89,7 @@ it('retains unapplied source on native close and deferred composition until expl
     runBusy: async work => work(), commitStatus: () => {}, reportError: message => reports.push(message),
     desktopAvailable: () => true, openProjectFile: unavailable, openRecentProjectFile: unavailable,
     confirmProjectOpen: unavailable, listRecentProjects: async () => [], setWindowDirtyState: async () => {},
-    prepareBeforeClose: () => guard(), preserveBeforeClose: async () => true,
+    prepareBeforeClose: () => guard(), preserveBeforeClose: async (_mode, ids) => { await bridge!.drain(ids); return true },
     subscribeSaveAndCloseRequest: () => () => {},
     subscribePreserveAndCloseRequest: handler => { preserve = handler; return () => {} },
   }
@@ -103,7 +106,7 @@ it('retains unapplied source on native close and deferred composition until expl
   expect(session.read()).toEqual(before)
   editor = testing.render(<Source bridge={bridge} />)
   expect(screen.getByRole('textbox', { name: '组件实现源码' })).toHaveProperty('value', value)
-  expect(reports.at(-1)).toMatch(/Original.*保存实现.*放弃草稿/)
+  expect(reports.at(-1)).toMatch(/original.*Original.*待修输入.*原输入与原目标已保留/)
   testing.fireEvent.click(screen.getByRole('button', { name: '放弃草稿' }))
   expect(await closeWindow()).toBe(true)
 

@@ -1,3 +1,4 @@
+import { jsonValueSchema } from '../../../../src/shared/contracts/component-platform/schema'
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -56,7 +57,7 @@ test('T03 real GUI preserves half JSON and numeric raw at normal close and resto
     source: "export default {mount({root,instance,authoring}) {root.textContent=instance.data.label;const release=authoring?.register({kind:'text',dataPath:['label'],initialValue:instance.data.label,localBounds:{width:180,height:80,transform:[1,0,0,1,0,0]}});return {update(next){root.textContent=next.data.label},dispose(){release?.();root.replaceChildren()}}}}" } }
   project.definitions.text = { ...TEXT_DEFINITION, id: 'text' }
   project.instances.source = { id: 'source', name: 'Source target', definitionId: 'custom', data: {}, frame: { width: 160, height: 80, transform: [1, 0, 0, 1, 30, 40] } }
-  project.instances.text = { id: 'text', name: 'Teacher text', definitionId: 'text', data: createTextComponentData('Keep teacher text'), frame: { width: 200, height: 80, transform: [1, 0, 0, 1, 250, 40] } }
+  project.instances.text = { id: 'text', name: 'Teacher text', definitionId: 'text', data: jsonValueSchema.parse(createTextComponentData('Keep teacher text')), frame: { width: 200, height: 80, transform: [1, 0, 0, 1, 250, 40] } }
   project.instances.canvas = { id: 'canvas', name: 'Canvas teacher target', definitionId: 'canvas', data: { label: 'Canvas teacher original' }, frame: { width: 180, height: 80, transform: [1, 0, 0, 1, 250, 190] } }
   project.surfaces[0].childIds = ['source', 'text', 'canvas']
   const filename = join(workspace, 'drafts.h5lesson')

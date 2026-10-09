@@ -7,7 +7,7 @@ import { DocumentHostService } from '../../../../src/main/workbench/DocumentHost
 import { closeDocumentFlow } from '../../../../src/main/workbench/documentCloseFlow'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
 import { captureComponentOperation } from '../../../../src/core/drivers/courseV10Operations'
-import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
+import { TEXT_DEFINITION , textDataEdit } from '../../../../src/components/text/adapters'
 import { createTextComponentData } from '../../../../src/components/text/data'
 import { connectExplicitMcp, readExplicitMcpConnection } from '../../../../scripts/mcpSdkClient'
 import { residentMcpFixture } from '../../../helpers/residentMcpFixture'
@@ -22,7 +22,7 @@ it('cancelled close can reopen A for a real edit while old A authority remains s
     const make = async (name: string) => {
       const project = createBlankCourseProjectV10(name)
       project.definitions.text = { ...TEXT_DEFINITION, id: 'text' }
-      project.instances.content = { id: 'content', definitionId: 'text', data: createTextComponentData(name) }
+      project.instances.content = { id: 'content', definitionId: 'text', data: textDataEdit('fixture', createTextComponentData(name)).value }
       project.surfaces[0].childIds = ['content']
       const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, `${name}.h5lesson`)
       await host.saveToPath(snapshot.documentId, path.join(workspace, `${name}.h5lesson`))

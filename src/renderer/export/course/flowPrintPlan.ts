@@ -374,6 +374,8 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
         blockId: block.id,
         fallbackLabel: block.title || block.name,
       }]
+    case 'course-instance':
+      throw new Error(`正文实例 ${block.id} 需要组件阅读投影或实际捕获，不能使用 Published V2 正文打印投影`)
   }
 }
 

@@ -1,26 +1,22 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
-import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
-import { useEditorStore,
-  selectActiveCourseProjectDocument,
-} from '../../src/renderer/store/editorStore'
+import { courseProjectV10Schema } from '../../src/shared/contracts/component-platform/schema'
+import { projectDesignTokensSchema } from '../../src/shared/contracts/design-v1/schema'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { useEditorStore } from '../../src/renderer/store/editorStore'
 import { PropertiesTab } from '../../src/renderer/ui/PropertiesTab'
-import { createCourseStoreHost } from '../helpers/courseStoreHost'
-
-afterEach(cleanup)
-
-let host: Awaited<ReturnType<typeof createCourseStoreHost>>
-
+import { createCourseDocumentHost } from '../helpers/courseDocumentHost'
+const store = () => useEditorStore.getState()
+const project = () => store().courseView.project!
+let host: Awaited<ReturnType<typeof createCourseDocumentHost>>
 beforeEach(async () => {
-  host = await createCourseStoreHost()
-  await host.open(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }))
-  await act(async () => {
-    useEditorStore.getState().setEditingScope('global')
-    await useEditorStore.getState().drainCourseDocument()
-  })
-  useEditorStore.getState().selectNode(null)
+  host = await createCourseDocumentHost()
+  await store().connectCourseDocuments(host.api)
+  const fixture = createBlankCourseProjectV10(); fixture.designTokens = projectDesignTokensSchema.parse(undefined)
+  await store().createCourseDocumentFrom(fixture)
+  store().setEditingScope('global'); store().selectNode(null)
 })
+afterEach(() => { cleanup(); store().cancelTextEdit(); store().courseBridge.dispose() })
 
 describe('minimal project design tokens', () => {
   it('edits font and color tokens through undoable project commands', async () => {
@@ -30,19 +26,19 @@ describe('minimal project design tokens', () => {
       fireEvent.click(screen.getByRole('button', { name: '添加字体' }))
       await useEditorStore.getState().drainCourseDocument()
     })
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.designTokens.fonts).toHaveLength(2)
+    expect(project().designTokens!.fonts).toHaveLength(2)
 
     await act(async () => {
       useEditorStore.getState().undo()
       await useEditorStore.getState().drainCourseDocument()
     })
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.designTokens.fonts).toHaveLength(1)
+    expect(project().designTokens!.fonts).toHaveLength(1)
 
     await act(async () => {
       useEditorStore.getState().redo()
       await useEditorStore.getState().drainCourseDocument()
     })
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.designTokens.fonts).toHaveLength(2)
+    expect(project().designTokens!.fonts).toHaveLength(2)
 
     const idInput = await screen.findByLabelText('字体 Token 2 ID')
     await act(async () => {
@@ -50,13 +46,13 @@ describe('minimal project design tokens', () => {
       fireEvent.blur(idInput)
       await useEditorStore.getState().drainCourseDocument()
     })
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.designTokens.fonts[1]!.id).toBe('display')
+    expect(project().designTokens!.fonts[1]!.id).toBe('display')
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '添加颜色' }))
       await useEditorStore.getState().drainCourseDocument()
     })
-    const colors = selectActiveCourseProjectDocument(useEditorStore.getState())!.designTokens.colors
+    const colors = project().designTokens!.colors
     expect(colors).toHaveLength(4)
     const colorInput = await screen.findByLabelText('颜色 Token 4 色值')
     await act(async () => {
@@ -64,23 +60,23 @@ describe('minimal project design tokens', () => {
       fireEvent.blur(colorInput)
       await useEditorStore.getState().drainCourseDocument()
     })
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.designTokens.colors[3]!.color)
+    expect(project().designTokens!.colors[3]!.color)
       .toBe('#123456')
   })
 
-  it('does not let add controls exceed schema token limits', async () => {
-    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-    project.designTokens.fonts = Array.from({ length: 16 }, (_, index) => ({
+  it('disables the bounded design-token UI without writing a disabled add', async () => {
+    const fixture = createBlankCourseProjectV10(); fixture.designTokens = projectDesignTokensSchema.parse(undefined)
+    fixture.designTokens!.fonts = Array.from({ length: 16 }, (_, index) => ({
       id: `font_${index}`,
       label: `字体 ${index + 1}`,
       fontFamily: 'sans-serif',
     }))
-    project.designTokens.colors = Array.from({ length: 32 }, (_, index) => ({
+    fixture.designTokens!.colors = Array.from({ length: 32 }, (_, index) => ({
       id: `color_${index}`,
       label: `颜色 ${index + 1}`,
       color: '#123456',
     }))
-    await host.open(project)
+    await store().createCourseDocumentFrom(fixture)
     useEditorStore.getState().setEditingScope('global')
     await useEditorStore.getState().drainCourseDocument()
 
@@ -92,9 +88,9 @@ describe('minimal project design tokens', () => {
     fireEvent.click(addFont)
     fireEvent.click(addColor)
     await useEditorStore.getState().drainCourseDocument()
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.designTokens.fonts).toHaveLength(16)
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.designTokens.colors).toHaveLength(32)
-    expect(courseProjectDocumentSchema.safeParse(selectActiveCourseProjectDocument(useEditorStore.getState())!).success)
+    expect(project().designTokens!.fonts).toHaveLength(16)
+    expect(project().designTokens!.colors).toHaveLength(32)
+    expect(courseProjectV10Schema.safeParse(project()).success)
       .toBe(true)
   })
 })

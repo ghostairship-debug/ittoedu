@@ -154,15 +154,15 @@ it('keeps click action types and order, respects ancestor locks, and assembles r
   const base = fixture(), target = { documentId: 'd', epoch: 'e', project: base.project, editingProject: base.project,
     resources: { assets: {}, components: {} }, surfaceId: base.surface.id, activeStateId: null, instanceId: 'item', instanceIds: ['item'] }
   let project = apply(base.project, componentClickInteractionEdits(target, 'audio-play', 'ding'))
-  project = apply(project, componentClickInteractionEdits({ ...target, project, editingProject: project }, 'location-go', base.surface.id))
+  project = apply(project, componentClickInteractionEdits({ ...target, project }, 'location-go', base.surface.id))
   const before = interactionRules(interactionBehavior(project, base.target))[0]
-  project = apply(project, componentClickInteractionEdits({ ...target, project, editingProject: project }, 'audio-play', 'ding2'))
+  project = apply(project, componentClickInteractionEdits({ ...target, project }, 'audio-play', 'ding2'))
   const after = interactionRules(interactionBehavior(project, base.target))[0]
   expect(after.actions.map(step => step.id)).toEqual(before.actions.map(step => step.id))
   expect(after.actions.map(step => step.action)).toEqual([{ type: 'audio.play', soundId: 'ding2' }, { type: 'location.go', locationId: base.surface.id }])
   project.instances.group = { id: 'group', definitionId: 'content', data: {}, locked: true, childIds: ['item'] }
   project.surfaces[0].childIds = project.surfaces[0].childIds.filter(id => id !== 'item'); project.surfaces[0].childIds.push('group')
-  expect(() => componentClickInteractionEdits({ ...target, project, editingProject: project }, 'audio-play', 'ding')).toThrow('锁定')
+  expect(() => componentClickInteractionEdits({ ...target, project }, 'audio-play', 'ding')).toThrow('锁定')
   const changed = structuredClone(interactionRules(interactionBehavior(project, base.target))); changed[0].name = '改名'
   expect(() => componentRuleEdits(project, base.target, changed)).toThrow('锁定')
   project.instances.group.locked = false

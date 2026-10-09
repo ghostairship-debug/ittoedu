@@ -55,7 +55,7 @@ it('local ready image applies to captured V10 image and surface despite neighbor
     const job = await images.run({ jobId: 'ready-job', runId: 'local-run', documentId: initial.documentId, operation: 'generate', prompt: 'local fixture', selection })
     expect(job.status).toBe('ready')
     results = new ImageResultsDesktopService({ directory: path.join(directory, 'actions'), images, documents,
-      execution: { conversations, runs, appendExternalEvent: events.append.bind(events) }, selection: () => selection })
+      execution: { conversations, runs, appendExternalEvent: async event => { await events.append(event) } }, selection: () => selection })
     const unavailable = async (): Promise<never> => { throw new Error('No fixture dialog') }
     const api: DocumentHostAPI = { ...documents.internalAPI, bootstrapCourse: async () => initial, saveWithDialog: unavailable, closeWithDialog: unavailable, discardRecovery: unavailable,
       readAuthoringDrafts: id => documents.readAuthoringDrafts(id), writeAuthoringDrafts: (id, drafts) => documents.writeAuthoringDrafts(id, drafts), clearAuthoringDrafts: id => documents.clearAuthoringDrafts(id),

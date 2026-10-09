@@ -6,16 +6,16 @@ import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseP
 import { TEXT_DEFINITION } from '../../src/components/text/adapters'
 import { createTextComponentData } from '../../src/components/text/data'
 import { prepareExecutionContentOutput } from '../../src/core/tools/ToolTargets'
-import type { DocumentSnapshot } from '../../src/shared/workbench/document'
+import type { DocumentSnapshot, DocumentEvent } from '../../src/shared/workbench/document'
 import type { ConversationRecord } from '../../src/shared/workbench/conversations'
 import type { ExecutionDesktopAPI, ExecutionSendInput } from '../../src/shared/workbench/executionDesktop'
 import type { ExecutionSettingsAPI } from '../../src/shared/workbench/executionSettingsDesktop'
 
 function fixture() {
-  let snapshot = { documentId: 'doc', epoch: 'original', revision: 1,
-    model: { kind: 'markdown', source: 'same END', resources: { attachments: [] } } } as DocumentSnapshot
+  let snapshot: DocumentSnapshot = { binding: { kind: 'untitled', suggestedName: 'card.md' }, dirty: false, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0, documentId: 'doc', epoch: 'original', revision: 1,
+    model: { kind: 'markdown', source: 'same END', resources: { assets: {}, components: {} } } }
   let conversation: ConversationRecord | undefined
-  let closed: ((event: { type: 'closed'; documentId: string }) => void) | undefined
+  let closed: ((event: DocumentEvent) => void) | undefined
   const api = {
     createConversation: vi.fn(async () => conversation = { conversationId: 'card', workspaceId: 'workspace', title: 'text',
       revision: 1, inputDraft: '', frozenContextRefs: [], messages: [], inputAttachments: [], attachmentIds: [],
@@ -40,8 +40,8 @@ function fixture() {
   const key = cards.openText({ documentId: 'doc', target, capture,
     contentOutput: prepareExecutionContentOutput(snapshot, target), content: 'same', label: 'text', anchor: { left: 10, top: 10 } })
   return { cards, api, key, capture, setSnapshot: (next: DocumentSnapshot) => { snapshot = next },
-    closeDocument: () => closed?.({ type: 'closed', documentId: 'doc' }), move: (source: string, epoch = 'original') => {
-    snapshot = { ...snapshot, epoch, revision: snapshot.revision + 1, model: { kind: 'markdown', source, resources: { attachments: [] } } }
+    closeDocument: () => closed?.({ type: 'closed', documentId: 'doc', epoch: snapshot.epoch }), move: (source: string, epoch = 'original') => {
+    snapshot = { ...snapshot, epoch, revision: snapshot.revision + 1, model: { kind: 'markdown', source, resources: { assets: {}, components: {} } } }
   } }
 }
 
@@ -63,12 +63,12 @@ it('captures a visible Flow range across two text instances through the producti
     project.instances[id] = { id, definitionId: TEXT_DEFINITION.id,
       data: JSON.parse(JSON.stringify(createTextComponentData(source))), frame: { width: 400, height: 40, transform: [1, 0, 0, 1, 0, 0] } }
   }
-  const snapshot = { documentId: 'doc', epoch: 'original', revision: 0,
-    model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } } } as DocumentSnapshot
+  const snapshot: DocumentSnapshot = { binding: { kind: 'untitled', suggestedName: 'card.glx' }, dirty: false, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0, documentId: 'doc', epoch: 'original', revision: 0,
+    model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } } }
   const f = fixture(); f.setSnapshot(snapshot)
   const unregister = workbenchSelection.register('doc', async () => snapshot)
   try {
-    const start = await prepareDocumentTextEdit('doc', { mode: 'layout', revision: '0', source: '', label: '连续正文',
+    const start = await prepareDocumentTextEdit('doc', { mode: 'layout', revision: '0', source: '', ranges: null, label: '连续正文',
       selection: { kind: 'text', revision: '0', anchor: { blockId: 'first', slot: { kind: 'field', field: 'content' }, offset: 5, affinity: 'after' },
         head: { blockId: 'second', slot: { kind: 'field', field: 'content' }, offset: 5, affinity: 'before' } } },
     (current, selection) => captureFlowSelection(current, 'flow', selection))

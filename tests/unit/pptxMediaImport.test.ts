@@ -5,8 +5,20 @@ import { pptxMediaFixture } from '../fixtures/pptxMedia'
 import { pptxImportFixture } from '../fixtures/pptxImport'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { planPptxImportTransaction } from '@/renderer/project/pptxImportTransaction'
-import { createBlankCourseProject } from '@/core/course/createCourseProject'
-import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import { createBlankCourseProjectV10 } from '@/core/course/createCourseProjectV10'
+import { CourseV10Driver } from '@/core/drivers/CourseV10Driver'
+import { interactionRules } from '@/shared/componentInteractionData'
+import { courseProjectV10Schema } from '@/shared/contracts/component-platform/schema'
+
+
+function importProject(draft: Awaited<ReturnType<typeof parsePptxImport>>) {
+  const project = createBlankCourseProjectV10('媒体'), resources = { assets: {}, components: {} }
+  const step = planPptxImportTransaction({ documentId: 'media', epoch: 'epoch', project, resources, editingProject: project,
+    activeStateId: null, surfaceId: project.surfaces[0].id, instanceIds: [], instanceId: null }, draft, '媒体')
+  const model = new CourseV10Driver().apply({ kind: 'course-v10', project, resources }, { type: step.type, edits: step.edits, expected: step.expected })
+  if (model.kind !== 'course-v10') throw new Error('V10 required')
+  return { original: project, project: model.project }
+}
 
 vi.mock('@/renderer/project/assetManager', async importOriginal => ({
   ...await importOriginal<typeof import('@/renderer/project/assetManager')>(),
@@ -53,13 +65,17 @@ it('connects embedded audio to an editable click target and the canonical sound 
   expect(sound.assetId).toBe(draft.assets[0].meta.id)
   const rule = draft.slides[0].interactions![0]
   expect(rule.actions[0].action).toMatchObject({ type: 'audio.play', soundId: sound.id, lifetime: 'scene' })
-  const original = createBlankCourseProject()
-  const step = planPptxImportTransaction(original, draft, '媒体')
-  const project = courseProjectDocumentSchema.parse(step.nextDocument)
-  expect(project.media.audio.sounds[sound.id]).toEqual(sound)
-  expect(Object.keys(original.media.audio.sounds)).not.toContain(sound.id)
-  const imported = project.surfaces.find(surface => surface.type === 'slide' && surface.scenes.some(scene => scene.interactions.some(item => item.id === rule.id)))
+  const { original, project } = importProject(draft)
+  expect(project.media!.audio!.sounds[sound.id]).toEqual(sound)
+  expect(original.media?.audio?.sounds ?? {}).not.toHaveProperty(sound.id)
+  const imported = Object.values(project.instances).find(instance => {
+    return instance.definitionId === 'guoling.interactions' && interactionRules(instance).some(candidate => candidate.actions.some(step => step.action.type === 'audio.play' && step.action.soundId === sound.id))
+  })
   expect(imported).toBeDefined()
+  const importedRule = interactionRules(imported)[0]
+  if (importedRule.trigger.type !== 'node.click') throw new Error('Audio needs an editable click target')
+  expect(project.instances[importedRule.trigger.nodeId]).toBeDefined()
+
 })
 
 function visibilityFixture(value: 'visible' | 'hidden', complex = false) {
@@ -79,7 +95,7 @@ it.each(['visible', 'hidden'] as const)('maps independent object-click %s to exi
   expect(slide.interactions![0].actions[0].action).toMatchObject({ type: value === 'visible' ? 'node.enter' : 'node.exit', nodeId: target.layerItemId, durationMs: 0, effect: 'none' })
   expect(target.playbackInitialVisibility).toBe(value === 'visible' ? 'hidden' : 'inherit')
   expect(draft.issues.some(issue => issue.type === '动画')).toBe(false)
-  courseProjectDocumentSchema.parse(planPptxImportTransaction(createBlankCourseProject(), draft, '显隐').nextDocument)
+  courseProjectV10Schema.parse(importProject(draft).project)
 })
 
 it('retains static visibility for the whole timing tree when any effect is unsupported', async () => {

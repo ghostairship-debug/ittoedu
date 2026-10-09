@@ -1,12 +1,13 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createTeacherControllerData, createTeacherControllerRuntimeImplementation, TEACHER_CONTROLLER_DEFINITION } from '../../src/components/teacher-controller'
-import type { ComponentRuntimeScope, CourseProjectV10, MountedComponent } from '../../src/shared/contracts/component-platform'
+import type { ComponentEdit, ComponentRuntimeScope, CourseProjectV10, MountedComponent } from '../../src/shared/contracts/component-platform'
+import type { CapturedCourseTarget } from '../../src/renderer/documents/CourseV10DocumentBridge'
 import { ComponentNavigationOwner } from '../../src/renderer/components/ComponentNavigationOwner'
 
-const probe = vi.hoisted(() => ({ state: {} as any, runtime: {} as any }))
+const probe = vi.hoisted(() => ({ state: {} as Record<string, unknown>, runtime: {} as Record<string, unknown> }))
 vi.mock('../../src/renderer/store/editorStore', () => {
-  const store = Object.assign((select: (state: any) => unknown) => select(probe.state), { getState: () => probe.state })
+  const store = Object.assign((select: (state: typeof probe.state) => unknown) => select(probe.state), { getState: () => probe.state })
   return { useEditorStore: store }
 })
 vi.mock('../../src/renderer/components/CourseV10RuntimeView', () => ({ useCourseV10Runtime: () => probe.runtime }))
@@ -30,10 +31,10 @@ it('selects, drags and resizes Flow through the shared affine handles while enab
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400)
   const project: CourseProjectV10 = { schemaVersion: 10, id: 'flow-controller', revision: 0, title: 'Mixed',
     definitions: { [TEACHER_CONTROLLER_DEFINITION.id]: TEACHER_CONTROLLER_DEFINITION },
-    instances: { teacher: { id: 'teacher', definitionId: TEACHER_CONTROLLER_DEFINITION.id, data: { ...createTeacherControllerData(), defaultCollapsed: false },
+    instances: { teacher: { id: 'teacher', definitionId: TEACHER_CONTROLLER_DEFINITION.id, data: JSON.parse(JSON.stringify({ ...createTeacherControllerData(), defaultCollapsed: false, hudReferenceSize: { width: 800, height: 400 } })),
       frame: { width: 880, height: 64, transform: [1, 0, 0, 1, 200, 638] } } }, global: { underlay: [], overlay: ['teacher'] }, assets: {},
     surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: [] }, { id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }, { id: 'spatial', kind: 'spatial', title: 'Spatial', childIds: [] }] }
-  const before = structuredClone(project), selected = vi.fn(), nextSurface = vi.fn(), write = vi.fn(async () => {})
+  const before = structuredClone(project), selected = vi.fn(), nextSurface = vi.fn(), write = vi.fn(async (_operation: { edits: ComponentEdit[]; target: CapturedCourseTarget }) => {})
   const target = { documentId: 'doc', epoch: 'activation', project, editingProject: project, resources: { assets: {}, components: {} }, surfaceId: 'flow', activeStateId: null }
   const bridge = { captureTarget: () => target, capture: (edits: unknown) => ({ edits, target }), editCaptured: write }
   let playing = false, mounted: MountedComponent | undefined
@@ -71,7 +72,11 @@ it('selects, drags and resizes Flow through the shared affine handles while enab
   fireEvent.pointerDown(east, { button: 0, clientX: 800, clientY: 350, pointerId: 2 })
   fireEvent.pointerMove(handles, { clientX: 720, clientY: 350, pointerId: 2 })
   await act(async () => fireEvent.pointerUp(handles, { clientX: 720, clientY: 350, pointerId: 2 }))
-  const resized = write.mock.calls[1][0].edits[0].frame
+  const resizeEdit = write.mock.calls[1][0].edits[0]
+  expect(resizeEdit.type).toBe('frame.set')
+  if (resizeEdit.type !== 'frame.set') throw new Error('Expected shared frame edit')
+  const resized = resizeEdit.frame
+  if (!resized) throw new Error('Expected resized frame')
   expect(resized.width).toBe(880); expect(resized.height).toBe(64)
   expect(resized.transform[0] * resized.width).toBeCloseTo(720)
   expect(resized.transform[4]).toBe(0); expect(resized.transform[5]).toBe(638)
@@ -85,7 +90,7 @@ it('selects, drags and resizes Flow through the shared affine handles while enab
   ui.rerender(<FlowLocationWorkspace {...props} canvasMode="run" />)
   await waitFor(() => expect(ui.container.querySelector<HTMLButtonElement>('[data-control="next-scene"]')).not.toBeDisabled())
   await act(async () => fireEvent.click(ui.container.querySelector<HTMLButtonElement>('[data-control="next-scene"]')!))
-  expect(nextSurface).toHaveBeenCalledWith('spatial')
+  expect(nextSurface).toHaveBeenCalledWith('spatial', expect.any(AbortSignal))
   expect(project).toEqual(before)
   ui.unmount(); abort.abort(); navigation.dispose()
   expect(probe.runtime.setPlaying).toHaveBeenLastCalledWith(false)

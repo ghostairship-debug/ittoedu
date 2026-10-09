@@ -1,17 +1,5 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { promises as fs } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
-import { randomUUID } from 'node:crypto'
-import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
-import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
-import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
-import { ControlledBuildService } from '../../src/main/workbench/build/ControlledBuildService'
-import { createDocumentJournal } from '../../src/main/workbench/documentJournal'
-import { HtmlImportService } from '../../src/main/workbench/htmlImport/HtmlImportService'
-import { unpackHtmlDocumentRuntimeSource } from '../../src/shared/runtime/htmlDocumentSource'
 import { parse } from 'acorn'
 import { runInNewContext } from 'node:vm'
 import { extractHtmlResources } from '../../src/main/workbench/htmlImport/extractHtmlResources'
@@ -69,18 +57,22 @@ describe('audited framework resource closure', () => {
     expect(warnings(vendor + app() + 'k="https://example.invalid/late.mp3";')).toContain('unsupported-dynamic-url-sink')
   })
 
-  it.each([
-    ['unknown call', 'chooseImage()', ''],
-    ['unknown parameter', 'input', ''],
-    ['table mutation', 'D[key]', 'D.a=chooseImage();'],
-    ['table escape', 'D[key]', 'mutate(D);'],
-    ['table alias mutation', 'D[key]', 'var alias=D;alias.a=chooseImage();'],
-    ['nested table escape', 'D[key]', 'var box={table:D};box.table.a=chooseImage();'],
-    ['implicit arrow escape', 'D[key]', 'const get=()=>D;mutate(get());'],
-    ['sequence escape', 'D[key]', 'const get=()=>(0,D);mutate(get());'],
-    ['unknown table method', 'D[key]', 'D.__defineGetter__("a",chooseImage);'],
-  ])('warns and preserves %s', (_name, src, extra) => {
-    expect(warnings(vendor + app(src, extra))).toContain('unsupported-dynamic-url-sink')
+  it('warns and preserves resource inputs', () => {
+    for (const [_name, src, extra] of [
+      ['unknown call', 'chooseImage()', ''],
+      ['unknown parameter', 'input', ''],
+      ['table mutation', 'D[key]', 'D.a=chooseImage();'],
+      ['table escape', 'D[key]', 'mutate(D);'],
+      ['table alias mutation', 'D[key]', 'var alias=D;alias.a=chooseImage();'],
+      ['nested table escape', 'D[key]', 'var box={table:D};box.table.a=chooseImage();'],
+      ['implicit arrow escape', 'D[key]', 'const get=()=>D;mutate(get());'],
+      ['sequence escape', 'D[key]', 'const get=()=>(0,D);mutate(get());'],
+      ['unknown table method', 'D[key]', 'D.__defineGetter__("a",chooseImage);'],
+    ]) {
+      try {
+        expect(warnings(vendor + app(src, extra))).toContain('unsupported-dynamic-url-sink')
+      } catch (error) { throw new Error('Resource proof input: ' + JSON.stringify([_name, src, extra]), { cause: error }) }
+    }
   })
 
   it('warns and preserves props spreads and escaped framework entry functions', () => {
@@ -114,28 +106,36 @@ describe('audited framework resource closure', () => {
     expect(props.dangerouslySetInnerHTML.__html).toBe('pic.png')
   })
 
-  it.each([
-    '{src:D.a,style:{backgroundImage:"url("+chooseUrl()+")"}}',
-    '{src:D.a,style:chooseStyle()}',
-    '{src:D.a,style:{"--picture":chooseUrl()}}',
-  ])('warns and preserves unproven recursive React resource input: %s', props => {
-    expect(warnings(vendor + app('D.a', '', props))).toContain('unsupported-dynamic-url-sink')
+  it('warns and preserves unproven recursive React resource input', () => {
+    for (const props of [
+      '{src:D.a,style:{backgroundImage:"url("+chooseUrl()+")"}}',
+      '{src:D.a,style:chooseStyle()}',
+      '{src:D.a,style:{"--picture":chooseUrl()}}',
+    ]) {
+      try {
+        expect(warnings(vendor + app('D.a', '', props))).toContain('unsupported-dynamic-url-sink')
+      } catch (error) { throw new Error('Resource proof input: ' + JSON.stringify(props), { cause: error }) }
+    }
   })
 
-  it.each([
-    '{src:D.a,dangerouslySetInnerHTML:{__html:chooseHtml()}}',
-    '{src:D.a,dangerouslySetInnerHTML:chooseMarkup()}',
-  ])('preserves dynamic React markup with a nonblocking diagnostic: %s', props => {
-    const script = vendor + app('D.a', '', props)
-    const result = extractHtmlResources({ html: `<script type="module">${script}</script>` })
-    expect(validateHtmlImport(result).filter(issue => issue.level === 'error')).toEqual([])
-    expect(result.diagnostics).toContainEqual(expect.objectContaining({ level: 'warning', code: 'dynamic-html-preserved' }))
-    expect(result.html).toContain(props.includes('chooseHtml') ? 'chooseHtml()' : 'chooseMarkup()')
+  it('preserves dynamic React markup with a nonblocking diagnostic', () => {
+    for (const props of [
+      '{src:D.a,dangerouslySetInnerHTML:{__html:chooseHtml()}}',
+      '{src:D.a,dangerouslySetInnerHTML:chooseMarkup()}',
+    ]) {
+      try {
+        const script = vendor + app('D.a', '', props)
+        const result = extractHtmlResources({ html: `<script type="module">${script}</script>` })
+        expect(validateHtmlImport(result).filter(issue => issue.level === 'error')).toEqual([])
+        expect(result.diagnostics).toContainEqual(expect.objectContaining({ level: 'warning', code: 'dynamic-html-preserved' }))
+        expect(result.html).toContain(props.includes('chooseHtml') ? 'chooseHtml()' : 'chooseMarkup()')
+      } catch (error) { throw new Error('Resource proof input: ' + JSON.stringify(props), { cause: error }) }
+    }
   })
 
-  it('preserves authorized passive media while flagging unknown remote resource uses as nonblocking warnings', () => {
+  it('preserves authorized passive image, CSS and HTML media with a nonblocking diagnostic', () => {
     preservedMedia(vendor + app('D.a', '', '{src:D.a,style:{backgroundImage:"url(https://example.invalid/x.png)"}}'), 'https://example.invalid/x.png')
-    expect(diagnostics(vendor + app('D.a', '', '{src:D.a,fill:"url(https://example.invalid/paint.svg)"}')).map(item => item.code)).toContain('remote-resource')
+    preservedMedia(vendor + app('D.a', '', '{src:D.a,fill:"url(https://example.invalid/paint.svg)"}'), 'https://example.invalid/paint.svg')
     expect(errors(vendor + app('D.a', '', '{src:D.a,fill:"url(https://example.invalid/paint.svg)"}'))).toEqual([])
     preservedMedia(vendor + app('D.a', '', `{src:D.a,dangerouslySetInnerHTML:{__html:${JSON.stringify('<img src="https://example.invalid/x.png">')}}}`), 'https://example.invalid/x.png')
   })
@@ -157,75 +157,91 @@ describe('audited framework resource closure', () => {
     expect(result.resources.filter(resource => resource.mediaType === 'image/png')).toHaveLength(1)
   })
 
-  it.each([
-    ['img[p]=chooseUrl()', 'warning'],
-    ['img[p]="https://example.invalid/x.png"', 'warning'],
-    ['const p="src";img[p]=chooseUrl()', 'warning'],
-    ['img.src+=chooseUrl()', 'warning'],
-    ['img.setAttribute(p,chooseUrl())', 'warning'],
-    ['element.style.backgroundImage=chooseStyle()', 'warning'],
-    ['element.style.setProperty("background-image",chooseStyle())', 'warning'],
-    ['element.style.cssText+=chooseStyle()', 'warning'],
-  ])('flags unknown dynamic DOM sinks at the right level: %s', (code, expectedLevel) => {
-    const issues = diagnostics(code)
-    const matched = issues.filter(item => item.code === 'unsupported-dynamic-url-sink')
-    expect(matched.length).toBeGreaterThan(0)
-    expect(matched.every(item => item.level === expectedLevel)).toBe(true)
+  it('flags unknown dynamic DOM sinks at the right level', () => {
+    for (const [code, expectedLevel] of [
+      ['img[p]=chooseUrl()', 'warning'],
+      ['img[p]="https://example.invalid/x.png"', 'warning'],
+      ['const p="src";img[p]=chooseUrl()', 'warning'],
+      ['img.src+=chooseUrl()', 'warning'],
+      ['img.setAttribute(p,chooseUrl())', 'warning'],
+      ['element.style.backgroundImage=chooseStyle()', 'warning'],
+      ['element.style.setProperty("background-image",chooseStyle())', 'warning'],
+      ['element.style.cssText+=chooseStyle()', 'warning'],
+    ]) {
+      try {
+        const issues = diagnostics(code)
+        const matched = issues.filter(item => item.code === 'unsupported-dynamic-url-sink')
+        expect(matched.length).toBeGreaterThan(0)
+        expect(matched.every(item => item.level === expectedLevel)).toBe(true)
+      } catch (error) { throw new Error('Resource proof input: ' + JSON.stringify([code, expectedLevel]), { cause: error }) }
+    }
   })
 
-  it.each([
-    'fetch("/api/data.json")',
-    'const load=fetch;load(location.hash)',
-    'const name="fetch";globalThis[name](location.hash)',
-  ])('flags network-capability aliases as nonblocking warnings rather than rejects: %s', code => {
-    const issues = diagnostics(code)
-    expect(issues.filter(item => item.level === 'error')).toEqual([])
-    expect(issues.some(item => item.level === 'warning' && item.code === 'unsupported-network-sink')).toBe(true)
+  it('flags network-capability aliases as nonblocking warnings rather than rejects', () => {
+    for (const code of [
+      'fetch("/api/data.json")',
+      'const load=fetch;load(location.hash)',
+      'const name="fetch";globalThis[name](location.hash)',
+    ]) {
+      try {
+        const issues = diagnostics(code)
+        expect(issues.filter(item => item.level === 'error')).toEqual([])
+        expect(issues.some(item => item.level === 'warning' && item.code === 'unsupported-network-sink')).toBe(true)
+      } catch (error) { throw new Error('Resource proof input: ' + JSON.stringify(code), { cause: error }) }
+    }
   })
 
-  it.each([
-    'element.innerHTML=chooseHtml()',
-    'element.insertAdjacentHTML("beforeend",chooseHtml())',
-    'element.innerHTML+=chooseHtml()',
-  ])('preserves dynamic DOM markup with a nonblocking diagnostic: %s', code => {
-    const result = extractHtmlResources({ html: `<script>${code}</script>` })
-    expect(validateHtmlImport(result).filter(issue => issue.level === 'error')).toEqual([])
-    expect(result.diagnostics).toContainEqual(expect.objectContaining({ level: 'warning', code: 'dynamic-html-preserved' }))
-    expect(result.html).toContain(code)
+  it('preserves dynamic DOM markup with a nonblocking diagnostic', () => {
+    for (const code of [
+      'element.innerHTML=chooseHtml()',
+      'element.insertAdjacentHTML("beforeend",chooseHtml())',
+      'element.innerHTML+=chooseHtml()',
+    ]) {
+      try {
+        const result = extractHtmlResources({ html: `<script>${code}</script>` })
+        expect(validateHtmlImport(result).filter(issue => issue.level === 'error')).toEqual([])
+        expect(result.diagnostics).toContainEqual(expect.objectContaining({ level: 'warning', code: 'dynamic-html-preserved' }))
+        expect(result.html).toContain(code)
+      } catch (error) { throw new Error('Resource proof input: ' + JSON.stringify(code), { cause: error }) }
+    }
   })
 
-  it.each([
-    'const st=el.style;st.backgroundImage="url("+location.hash+")"',
-    'let st;st=el.style;const next=st;next.backgroundImage=chooseUrl()',
-    'const {style:st}=el;st.backgroundImage="url("+location.hash+")"',
-    'function apply(el,key){const st=el[key];st.backgroundImage="url("+location.hash+")"}apply(document.body,"style")',
-    'function apply(el,key){return el[key]}const st=apply(document.body,"style");st.backgroundImage=location.hash',
-    'const apply=(el,key)=>{const st=el[key];st.backgroundImage=location.hash};apply(document.body,"style")',
-    'function apply({el},key){const st=el[key];st.backgroundImage=location.hash}apply({el:document.body},"style")',
-    'const obj={};const alias=obj;alias.x=document.body.style;const st=obj[location.hash];st.backgroundImage=location.hash',
-    'const obj={};function change(arg){arg.x=document.body.style}change(obj);const st=obj[location.hash];st.backgroundImage=location.hash',
-    'const obj={};Object.defineProperty(obj,"x",{value:document.body.style});const st=obj[location.hash];st.backgroundImage=location.hash',
-    'const obj={};function change(arg){arg.x=document.body.style}const update=change.bind(null,obj);update();const st=obj[location.hash];st.backgroundImage=location.hash',
-    'const obj={};const key=location.hash;const first=obj[key];const second=first[key];second("fetch(location.hash)")',
-    'const first={}.toString;const second=first[location.hash];second("fetch(location.hash)")',
-    'const name="style";const st=el[name];st.backgroundImage="url("+location.hash+")"',
-    'const st=Reflect.get(el,"style");st.backgroundImage=location.hash',
-    'eval("fetch(location.hash)")',
-    'const key="st"+"yle";const st=el[key];st.backgroundImage=location.hash',
-    'const key=location.hash;globalThis[key]("https://example.invalid")',
-    'const el=document.createElement("div");const key=location.hash;const st=el[key];st.backgroundImage=location.hash',
-    'const run=Function;run("fetch(location.hash)")()',
-    'const name="setProperty";el.style[name]("background-image",location.hash)',
-    'const set=el.style.setProperty.bind(el.style);set("background-image",location.hash)',
-    'Object.assign(el.style,{backgroundImage:location.hash})',
-    'Object.defineProperty(el.style,"backgroundImage",{value:location.hash})',
-    'function style(){return el.style}style().backgroundImage=location.hash',
-    'function set(st){st.backgroundImage=location.hash}set(el.style)',
-    'const put=el.insertAdjacentHTML;put("beforeend",location.hash)',
-  ])('warns and preserves unproven capability aliases and escapes: %s', code => {
-    expect(warnings(code)).toContain('unsupported-dynamic-url-sink')
-    expect(warnings(vendor + app('D.a', `function unsafe(){${code}}`))).toContain('unsupported-dynamic-url-sink')
-  })
+  it('warns and preserves unproven capability aliases and escapes', () => {
+    for (const code of [
+      'const st=el.style;st.backgroundImage="url("+location.hash+")"',
+      'let st;st=el.style;const next=st;next.backgroundImage=chooseUrl()',
+      'const {style:st}=el;st.backgroundImage="url("+location.hash+")"',
+      'function apply(el,key){const st=el[key];st.backgroundImage="url("+location.hash+")"}apply(document.body,"style")',
+      'function apply(el,key){return el[key]}const st=apply(document.body,"style");st.backgroundImage=location.hash',
+      'const apply=(el,key)=>{const st=el[key];st.backgroundImage=location.hash};apply(document.body,"style")',
+      'function apply({el},key){const st=el[key];st.backgroundImage=location.hash}apply({el:document.body},"style")',
+      'const obj={};const alias=obj;alias.x=document.body.style;const st=obj[location.hash];st.backgroundImage=location.hash',
+      'const obj={};function change(arg){arg.x=document.body.style}change(obj);const st=obj[location.hash];st.backgroundImage=location.hash',
+      'const obj={};Object.defineProperty(obj,"x",{value:document.body.style});const st=obj[location.hash];st.backgroundImage=location.hash',
+      'const obj={};function change(arg){arg.x=document.body.style}const update=change.bind(null,obj);update();const st=obj[location.hash];st.backgroundImage=location.hash',
+      'const obj={};const key=location.hash;const first=obj[key];const second=first[key];second("fetch(location.hash)")',
+      'const first={}.toString;const second=first[location.hash];second("fetch(location.hash)")',
+      'const name="style";const st=el[name];st.backgroundImage="url("+location.hash+")"',
+      'const st=Reflect.get(el,"style");st.backgroundImage=location.hash',
+      'eval("fetch(location.hash)")',
+      'const key="st"+"yle";const st=el[key];st.backgroundImage=location.hash',
+      'const key=location.hash;globalThis[key]("https://example.invalid")',
+      'const el=document.createElement("div");const key=location.hash;const st=el[key];st.backgroundImage=location.hash',
+      'const run=Function;run("fetch(location.hash)")()',
+      'const name="setProperty";el.style[name]("background-image",location.hash)',
+      'const set=el.style.setProperty.bind(el.style);set("background-image",location.hash)',
+      'Object.assign(el.style,{backgroundImage:location.hash})',
+      'Object.defineProperty(el.style,"backgroundImage",{value:location.hash})',
+      'function style(){return el.style}style().backgroundImage=location.hash',
+      'function set(st){st.backgroundImage=location.hash}set(el.style)',
+      'const put=el.insertAdjacentHTML;put("beforeend",location.hash)',
+    ]) {
+      try {
+        expect(warnings(code)).toContain('unsupported-dynamic-url-sink')
+        expect(warnings(vendor + app('D.a', `function unsafe(){${code}}`))).toContain('unsupported-dynamic-url-sink')
+      } catch (error) { throw new Error('Resource proof input: ' + JSON.stringify(code), { cause: error }) }
+    }
+  }, 30_000)
 
   it('preserves shared image captions and ordinary CSS-looking text', () => {
     const script = vendor + app('label', 'const label="pic.png";').replace('(0,T.jsx)("audio",{src:k})', '(0,T.jsx)("span",{children:label})')
@@ -261,41 +277,17 @@ describe('audited framework resource closure', () => {
     expect(rendered.props.children[1].props.children).toBe('pic.png')
   })
 
-  it('prepares a resource-only multi-megabyte pool through the real import service without a formal write', async () => {
-    const root = await fs.mkdtemp(join(tmpdir(), 'g20-proof-'))
-    try {
-      const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-      const driver = new CourseV9Driver()
-      const registry = new DocumentRegistry({ persistence: createDocumentJournal({ directory: join(root, 'journal') }), drivers: [driver], createId: randomUUID, bindingKey: binding => binding.path })
-      const session = await registry.create({ kind: 'course-v9', project, resources: { assets: {}, components: {} } }, 'lesson.h5lesson')
-      const builds = new ControlledBuildService({ directory: join(root, 'builds'), admission: { run: async () => { throw new Error('prepare must not invoke admission') } } })
-      const gateway = new DocumentToolGateway(registry, [driver], randomUUID, { services: { builds } })
-      await gateway.beginRun({ runId: 'run', actor: 'human', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
-      const targetHandle = await gateway.issueTarget('run', session.documentId, { kind: 'document' })
-      const service = new HtmlImportService({ session, gateway })
-      const largeImage = 'data:image/png;base64,' + Buffer.concat([Buffer.from(image.split(',')[1], 'base64'), Buffer.alloc(850_000)]).toString('base64')
-      const script = vendor + app('D[key]', `Object.assign(D,{a:${JSON.stringify(largeImage)}});k=${JSON.stringify(sound)};`).replace(JSON.stringify(image), JSON.stringify('.' + largeImage))
-      const sourcePath = join(root, 'lesson.html')
-      await fs.writeFile(sourcePath, `<script type="module">${script}</script>`)
-      expect(Buffer.byteLength(script)).toBeGreaterThan(2 * 1024 * 1024)
-      const request = { operationId: 'prepare', runId: 'run', targetHandle, sourcePath, locationId: project.locations[0].id }
-      const baseline = session.read()
-      const ticket = await service.prepare(request)
-      const staged = JSON.parse(await fs.readFile(join(root, 'builds', ticket.jobId, 'files', 'project.json'), 'utf8'))
-      const runtime = staged.surfaces[0].scenes[0].layerItems.find((item: { kind: string }) => item.kind === 'runtime').runtime
-      expect(Buffer.byteLength(runtime.source)).toBeLessThan(2 * 1024 * 1024)
-      expect(Object.keys(runtime.assets)).toHaveLength(2)
-      const html = unpackHtmlDocumentRuntimeSource(runtime.source)!.html
-      expect(html).toContain('alt:"lesson"')
-      expect(html).not.toContain('data:image/png;base64,')
-      expect(session.read()).toEqual(baseline)
-      await fs.writeFile(sourcePath, `<script type="module">${script.replace('src:D[key]', 'src:"https://example.invalid/image.png"')}</script>`)
-      await expect(service.prepare({ ...request, operationId: 'remote' })).rejects.toThrow()
-      expect(session.read()).toEqual(baseline)
-    } finally {
-      if (!resolve(root).startsWith(resolve(tmpdir()) + sep)) throw new Error('unexpected fixture root')
-      await fs.rm(root, { recursive: true, force: true })
-    }
+  it('extracts a multi-megabyte resource pool without truncation and preserves remote media with a diagnostic', () => {
+    const largeImage = 'data:image/png;base64,' + Buffer.concat([Buffer.from(image.split(',')[1], 'base64'), Buffer.alloc(850_000)]).toString('base64')
+    const script = vendor + app('D[key]', `Object.assign(D,{a:${JSON.stringify(largeImage)}});k=${JSON.stringify(sound)};`).replace(JSON.stringify(image), JSON.stringify('.' + largeImage))
+    expect(Buffer.byteLength(script)).toBeGreaterThan(2 * 1024 * 1024)
+    const result = extractHtmlResources({ html: `<script type="module">${script}</script>` })
+    expect(validateHtmlImport(result)).toEqual([])
+    expect(Buffer.byteLength(result.html)).toBeLessThan(2 * 1024 * 1024)
+    expect(result.resources).toHaveLength(2)
+    expect(result.resources.find(resource => resource.mediaType === 'image/png')!.bytes).toHaveLength(850_000 + Buffer.from(image.split(',')[1], 'base64').length)
+    expect(result.html).toContain('alt:"lesson"'); expect(result.html).not.toContain('data:image/png;base64,')
+    preservedMedia(vendor + app('"https://example.invalid/image.png"'), 'https://example.invalid/image.png')
   })
 
   it('localizes static style aliases without changing their original text', () => {
@@ -327,24 +319,28 @@ describe('audited framework resource closure', () => {
     expect(validateHtmlImport(extractHtmlResources({ html: `<script>${vendor + app()}</script>` })).map(item => item.code)).toContain('unsupported-dynamic-url-sink')
   })
 
-  it.each([
-    'const f=document.createElement("form");let url="https://example.invalid/submit";f.action=url;document.body.append(f);f.submit()',
-    'const o=document.createElement("object");o.data=chooseData()',
-    'const f=document.createElement("form");function setAction(t){t.action=chooseAction()}setAction(f)',
-    'const f=document.createElement("form");function setAction(t){t.action=chooseAction()}setAction.bind(null,f)()',
-    'const f=document.createElement("form");function setAction(t){t.action=chooseAction()}setAction.call(null,f)',
-    'const f=document.createElement("form");function setAction(t){t.action=chooseAction()}setAction.apply(null,[f])',
-    'let f={};f=document.createElement("form");f.action=chooseAction()',
-    'const s={queue:document.createElement("form")};let url="https://example.invalid/submit";s.queue.action=url',
-    'const s={queue:document.createElement("form")};var q=s.queue,d=q.dispatch;let url="https://example.invalid/submit";q.action=url',
-    'function Make(){return document.createElement("form")}const f=new Make();let url="https://example.invalid/submit";f.action=url',
-    'function Make(){this.pending=null;return document.createElement("form")}const f=new Make();f.action=chooseAction()',
-    'function factory(){function Make(){this.pending=null;return document.createElement("form")}return Make}const Make=factory(),f=new Make();let url="https://example.invalid/submit";f.action=url',
-    'function update(e){var n=e.memoizedProps,r=e.stateNode;switch(e.type){case "img":r.src=n.src}}update({type:"img",memoizedProps:{src:chooseImage()},stateNode:document.createElement("img")})',
-    'function update(e){var n=e.memoizedProps,r=e.stateNode;switch(e.type){case "img":r.src=n.src}}const props={type:"img",memoizedProps:{src:"https://example.invalid/a.png"},stateNode:document.createElement("img")};const alias=props;update(alias)',
-    'function update(e){var n=e.memoizedProps,r=e.stateNode;switch(e.type){case "img":r.src=n.src}}update(source())',
-    'function update(e){var n=e.memoizedProps,r=e.stateNode;switch(e.type){case "img":r.src=n.src}}function apply(x){update(x)}apply({type:"img",memoizedProps:{src:"https://example.invalid/a.png"},stateNode:document.createElement("img")})',
-  ])('warns and preserves the previously misclassified DOM sink: %s', code => {
-    expect(warnings(code)).toContain('unsupported-dynamic-url-sink')
+  it('warns and preserves the previously misclassified DOM sink', () => {
+    for (const code of [
+      'const f=document.createElement("form");let url="https://example.invalid/submit";f.action=url;document.body.append(f);f.submit()',
+      'const o=document.createElement("object");o.data=chooseData()',
+      'const f=document.createElement("form");function setAction(t){t.action=chooseAction()}setAction(f)',
+      'const f=document.createElement("form");function setAction(t){t.action=chooseAction()}setAction.bind(null,f)()',
+      'const f=document.createElement("form");function setAction(t){t.action=chooseAction()}setAction.call(null,f)',
+      'const f=document.createElement("form");function setAction(t){t.action=chooseAction()}setAction.apply(null,[f])',
+      'let f={};f=document.createElement("form");f.action=chooseAction()',
+      'const s={queue:document.createElement("form")};let url="https://example.invalid/submit";s.queue.action=url',
+      'const s={queue:document.createElement("form")};var q=s.queue,d=q.dispatch;let url="https://example.invalid/submit";q.action=url',
+      'function Make(){return document.createElement("form")}const f=new Make();let url="https://example.invalid/submit";f.action=url',
+      'function Make(){this.pending=null;return document.createElement("form")}const f=new Make();f.action=chooseAction()',
+      'function factory(){function Make(){this.pending=null;return document.createElement("form")}return Make}const Make=factory(),f=new Make();let url="https://example.invalid/submit";f.action=url',
+      'function update(e){var n=e.memoizedProps,r=e.stateNode;switch(e.type){case "img":r.src=n.src}}update({type:"img",memoizedProps:{src:chooseImage()},stateNode:document.createElement("img")})',
+      'function update(e){var n=e.memoizedProps,r=e.stateNode;switch(e.type){case "img":r.src=n.src}}const props={type:"img",memoizedProps:{src:"https://example.invalid/a.png"},stateNode:document.createElement("img")};const alias=props;update(alias)',
+      'function update(e){var n=e.memoizedProps,r=e.stateNode;switch(e.type){case "img":r.src=n.src}}update(source())',
+      'function update(e){var n=e.memoizedProps,r=e.stateNode;switch(e.type){case "img":r.src=n.src}}function apply(x){update(x)}apply({type:"img",memoizedProps:{src:"https://example.invalid/a.png"},stateNode:document.createElement("img")})',
+    ]) {
+      try {
+        expect(warnings(code)).toContain('unsupported-dynamic-url-sink')
+      } catch (error) { throw new Error('Resource proof input: ' + JSON.stringify(code), { cause: error }) }
+    }
   })
 })

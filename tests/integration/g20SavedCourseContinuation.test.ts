@@ -4,10 +4,10 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionDesktopService } from '../../src/main/workbench/execution/ExecutionDesktopService'
 import { installDocumentSaveEvents } from '../../src/main/workbench/execution/DocumentSaveEvents'
-import { DisplayEventBuffer } from '../../src/main/workbench/execution/DisplayEventBuffer'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
@@ -42,11 +42,17 @@ async function fixture(mode: 'surface' | 'range' = 'surface', saveProjection = t
   await settings.saveProfile({ roles: { conversation: { connectionId: connection.connection.id, model: 'fixture-model' },
     vision: null, imageGenerate: null, imageEdit: null } })
   let calls = 0
-  const localFetch: typeof fetch = async () => {
+  const localFetch: typeof fetch = async (_url, init) => {
     calls++
     if (calls === 1) return new Response('', { status: 401 })
+    if (mode === 'range' && calls === 2) {
+      const advertised = z.object({ tools: z.array(z.object({ function: z.object({ name: z.string() }) })) }).parse(JSON.parse(String(init?.body)))
+      expect(advertised.tools.map(tool => tool.function.name)).toContain('text_replace')
+    }
+    const boundCalls = mode === 'range' && calls === 2 ? [{ index: 0, id: 'continue-bound-range', type: 'function',
+      function: { name: 'text_replace', arguments: JSON.stringify({ content: 'continued' }) } }] : []
     const chunk = { id: `response-${calls}`, model: 'fixture-model', choices: [{ index: 0,
-      delta: { role: 'assistant', content: 'continued' }, finish_reason: 'stop' }] }
+      delta: { role: 'assistant', content: boundCalls.length ? '' : 'continued', ...(boundCalls.length ? { tool_calls: boundCalls } : {}) }, finish_reason: boundCalls.length ? 'tool_calls' : 'stop' }] }
     if (heldContinuation && calls === 2) {
       const encode = (text: string, finish: string | null = null) => new TextEncoder().encode(`data: ${JSON.stringify({
         ...chunk, choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: finish }],
@@ -95,6 +101,7 @@ async function fixture(mode: 'surface' | 'range' = 'surface', saveProjection = t
     expect(result.status).toBe('applied')
   }
   const retry = async (submissionId = randomUUID(), retryOfRunId = failed.runId) => {
+    await service.events.flushPending()
     const current = await service.operate({ type: 'conversation', workspaceId: send.workspaceId, conversationId: send.conversationId }) as ConversationRecord
     return service.operate({ ...send, submissionId, expectedRevision: current.revision, retryOfRunId }) as Promise<ExecutionSendResult>
   }
@@ -127,8 +134,8 @@ it('retries a normally saved and reopened V10 work with the original scope and f
   const sent = await continuing, completed = await f.service.engine.wait(sent.run!.runId)
   expect(completed.status).toBe('completed')
   expect(f.calls()).toBe(2)
-  expect(completed.input.documents).toEqual([{ documentId: reopened.documentId,
-    writable: f.reference.writable, selection: f.reference.selection }])
+  expect(completed.input.documents).toEqual([{ documentId: reopened.documentId, epoch: reopened.epoch,
+    revision: reopened.revision + 1, writable: f.reference.writable, selection: f.reference.selection }])
   expect((await f.service.submissions.read(submissionId))?.documents).toEqual(f.send.documents)
   expect((await f.service.engine.read(f.failed.runId))?.documentBindings?.[f.document.documentId])
     .toMatchObject({ path: f.filename, kind: 'course-v10', projectId: f.project.id, epoch: f.document.epoch, savedRevision: 1 })
@@ -160,8 +167,8 @@ it('continues the original saved scope after a formal file rename and cold reope
     retryOfRunId: f.failed.runId }) as ExecutionSendResult
   const completed = await cold.service.engine.wait(retried.run!.runId)
   expect(completed.status, JSON.stringify(completed.failure)).toBe('completed')
-  expect(completed.input.documents).toEqual([{ documentId: reopened.documentId,
-    writable: f.reference.writable, selection: f.reference.selection }])
+  expect(completed.input.documents).toEqual([{ documentId: reopened.documentId, epoch: reopened.epoch,
+    revision: reopened.revision, writable: f.reference.writable, selection: f.reference.selection }])
   expect((await cold.service.runs.read(f.failed.runId))?.documentBindings?.[f.document.documentId])
     .toMatchObject({ path: renamedPath, projectId: f.project.id })
   expect((await cold.service.submissions.read(retried.submission.submissionId))?.documents).toEqual(f.send.documents)
@@ -194,8 +201,8 @@ it('continues a clean closed saved target after a formal rename without manual r
   const reopened = f.documents.registry.list().find(snapshot => snapshot.binding.kind === 'file' && snapshot.binding.path === renamedPath)!
   expect(reopened).toMatchObject({ dirty: false, undoDepth: 0, model: { project: { id: f.project.id } } })
   expect(reopened.documentId).not.toBe(f.document.documentId)
-  expect(completed.input.documents).toEqual([{ documentId: reopened.documentId,
-    writable: f.reference.writable, selection: f.reference.selection }])
+  expect(completed.input.documents).toEqual([{ documentId: reopened.documentId, epoch: reopened.epoch,
+    revision: reopened.revision, writable: f.reference.writable, selection: f.reference.selection }])
   expect((await f.service.runs.read(f.failed.runId))?.documentBindings?.[f.document.documentId])
     .toEqual({ ...savedBinding, path: renamedPath })
   expect((await f.service.submissions.read(retried.submission.submissionId))?.documents).toEqual(f.send.documents)
@@ -203,11 +210,11 @@ it('continues a clean closed saved target after a formal rename without manual r
   expect(f.calls()).toBe(2)
 })
 
-it('keeps saved binding durable when display flush fails and continues the reopened original scope without replay', async () => {
+it('keeps saved binding durable when display persistence fails and idempotently restores its completed child after cold reopen', async () => {
   const held = { next: deferred(), finish: deferred() }, f = await fixture('surface', true, held)
   const firstDisplayed = deferred(), displayRejected = deferred()
   const append = f.service.events.batchAppend.bind(f.service.events)
-  let rejectDisplay = false, rejectedDisplay = false, displayFailures = 0, failedFlushes = 0
+  let rejectDisplay = false, rejectedDisplay = false, displayFailures = 0
   vi.spyOn(f.service.events, 'batchAppend').mockImplementation(async inputs => {
     const display = inputs.some(input => input.type === 'text' && input.data.status === 'running')
     if (display && rejectDisplay && !rejectedDisplay) {
@@ -218,18 +225,13 @@ it('keeps saved binding durable when display flush fails and continues the reope
     if (display) firstDisplayed.resolve()
     return events
   })
-  const flush = DisplayEventBuffer.prototype.flush
-  vi.spyOn(DisplayEventBuffer.prototype, 'flush').mockImplementation(async function () {
-    try { await flush.call(this) }
-    catch (error) { failedFlushes++; throw error }
-  })
   await f.edit(f.document.documentId, [{ type: 'project.title.set', title: 'Saved despite display failure' }])
   const streamed = await f.retry()
   try {
     await firstDisplayed.promise
     rejectDisplay = true; held.next.resolve()
     await displayRejected.promise
-    // The real buffer records the rejected display batch; the provider stream remains held.
+    // Display persistence is allowed to fail while the provider stream remains held.
     await f.documents.saveToPath(f.document.documentId, f.filename)
     await f.documents.settleSaveObservations()
     const stored = await f.service.runs.read(streamed.run!.runId)
@@ -239,21 +241,23 @@ it('keeps saved binding durable when display flush fails and continues the reope
     expect((await f.service.runs.read(f.failed.runId))?.documentBindings?.[f.document.documentId]).toMatchObject(expected)
     expect((await f.documents.internalAPI.read(f.document.documentId)).dirty).toBe(false)
   } finally { held.next.resolve(); held.finish.resolve() }
-  await f.service.engine.wait(streamed.run!.runId)
-  expect(displayFailures).toBe(1); expect(failedFlushes).toBeGreaterThan(0)
+  const streamedResult = await f.service.engine.wait(streamed.run!.runId)
+  expect(displayFailures).toBe(1)
+  expect(streamedResult.status).toBe('completed')
   await f.documents.operate({ type: 'close', documentId: f.document.documentId })
   const reopened = await f.documents.open(f.filename)
   expect(reopened.documentId).not.toBe(f.document.documentId)
   expect(reopened.epoch).not.toBe(f.document.epoch)
-  const retried = await f.retry(randomUUID(), streamed.run!.runId)
-  expect(retried.run!.runId).not.toBe(streamed.run!.runId)
+  await expect(f.retry(randomUUID(), streamed.run!.runId)).rejects.toThrow('原任务尚不可继续')
+  expect(f.calls()).toBe(2)
+  const retried = await f.retry()
+  expect(retried.run!.runId).toBe(streamed.run!.runId)
+  expect(retried.submission.submissionId).toBe(streamed.submission.submissionId)
   const completed = await f.service.engine.wait(retried.run!.runId)
-  expect(completed.status, JSON.stringify({ failure: completed.failure, providerCalls: f.calls(),
-    displayFailures, failedFlushes })).toBe('completed')
-  expect(completed.input.documents).toEqual([{ documentId: reopened.documentId,
-    writable: f.reference.writable, selection: f.reference.selection }])
+  expect(completed.status).toBe('completed')
+  expect(completed.input.documents).toEqual(streamedResult.input.documents)
   expect(completed.tools).toEqual([])
-  expect(f.calls()).toBe(3)
+  expect(f.calls()).toBe(2)
   expect((await f.service.submissions.read(retried.submission.submissionId))?.documents).toEqual(f.send.documents)
   const snapshot = await f.documents.internalAPI.read(reopened.documentId)
   expect(snapshot).toMatchObject({ undoDepth: 0, model: { project: { id: f.project.id, title: 'Saved despite display failure' } } })

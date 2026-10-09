@@ -55,7 +55,7 @@ describe('try-run interaction diagnostics', () => {
     vi.spyOn(root, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 700, bottom: 500,
       width: 700, height: 500, toJSON: () => ({}) })
     const session = await mountPublishedCourseTryRun({ container: root, project, assetFiles: {}, components: {}, onInteractionDiagnostic() {} })
-    const state = { document: project, sessionGeneration: 1, surfaceId: project.surfaces[0]!.id, locationId: project.startLocationId,
+    const state = { document: project, documentId: 'try-run-document', epoch: 'try-run-epoch', sessionGeneration: 1, surfaceId: project.surfaces[0]!.id, locationId: project.startLocationId,
       stateId: null, selectedIds: [], draft: null, assetFiles: {} }
     const controller = createAuthoringObservationController({ read: () => state, prepareForEdit: () => ({ ok: true }),
       materializeDraft: () => ({ ok: true, snapshot: { project } }), waitForPaint: async () => {},

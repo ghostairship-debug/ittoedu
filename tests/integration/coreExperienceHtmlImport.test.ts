@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { AgentFileService } from '../../src/main/workbench/execution/AgentFileService'
 import { createCourseFromHtml, type CreateCourseFromHtmlPorts } from '../../src/main/workbench/htmlImport/CreateCourseFromHtml'
@@ -21,7 +22,7 @@ import { chromium } from 'playwright'
 import { buildPublishedCourseV3 } from '../../src/core/publish/componentPlatform/buildPublishedCourseV3'
 import { resolveWebResourceBindings } from '../../src/components/web/resources'
 import { authoredDocumentBootstrap, installAuthoredDocumentPrograms } from '../../src/components/web/authoredDocumentBootstrap'
-import type { WebRuntimeData } from '../../src/components/web/moduleGraph'
+import { webDataSchema } from '../../src/components/web/data'
 
 // The disposable measurement window is unrelated to source capture, pagination
 // and archive closure. Use its real supported retained-program result here.
@@ -60,13 +61,63 @@ async function fixture(html: string) {
       children.set(id, result); return result
     },
   }
-  return { root, host, sourcePath, ports, context: { callId: 'create', permission: 'workspace' as const, assertActive() {} } }
+  return { root, host, sourcePath, ports, children, context: { callId: 'create', permission: 'workspace' as const, assertActive() {} } }
 }
+
+it('continues an acknowledged V10 import without replay and keeps rejected saves and unknown import outcomes honest', async () => {
+  const f = await fixture('<p>恢复导入正文</p>')
+  const execute = f.ports.executeChild
+  let loseAck = true
+  const tracked = vi.fn<CreateCourseFromHtmlPorts['executeChild']>(async (id, call) => {
+    const result = await execute(id, call)
+    if (id === 'create:import' && loseAck) { loseAck = false; throw new Error('Lost import acknowledgement') }
+    return result
+  })
+  f.ports.executeChild = tracked
+  await expect(createCourseFromHtml({ sourcePath: f.sourcePath }, f.context, f.ports)).rejects.toThrow('Lost import acknowledgement')
+  const beforeSave = f.host.registry.list().find(snapshot => snapshot.model.kind === 'course-v10')!
+  expect(beforeSave.undoDepth).toBe(1)
+  const saveError: ToolResult = { kind: 'error', code: 'delivery-rejected', message: '磁盘文件已改变' }
+  f.ports.executeChild = async (id, call) => call.name === 'file.save' ? saveError : tracked(id, call)
+  expect(await createCourseFromHtml({ sourcePath: f.sourcePath }, f.context, f.ports))
+    .toMatchObject({ kind: 'read', data: { status: 'imported', saved: false, saveError: saveError.message,
+      import: { kind: 'document-operation', result: { status: 'applied' } } } })
+  expect(f.host.registry.get(beforeSave.documentId).read()).toEqual(beforeSave)
+  const previousLookup = f.ports.lookupChild
+  f.ports.lookupChild = async (id, name) => id === 'create:import'
+    ? { kind: 'error', code: 'tool-outcome-unknown', message: '原提交待查证' } : previousLookup(id, name)
+  const calls = tracked.mock.calls.length
+  expect(await createCourseFromHtml({ sourcePath: f.sourcePath }, f.context, f.ports)).toMatchObject({ kind: 'error', code: 'tool-outcome-unknown' })
+  expect(tracked).toHaveBeenCalledTimes(calls)
+  f.ports.lookupChild = previousLookup; f.ports.executeChild = tracked
+  const saved = await createCourseFromHtml({ sourcePath: f.sourcePath }, f.context, f.ports)
+  expect(saved).toMatchObject({ kind: 'read', data: { saved: true } })
+  expect(tracked.mock.calls.filter(([id]) => id === 'create:import')).toHaveLength(1)
+  expect(tracked.mock.calls.filter(([, call]) => call.name === 'file.create')).toHaveLength(1)
+  expect(f.host.registry.get(beforeSave.documentId).read()).toMatchObject({ dirty: false, undoDepth: 1 })
+})
+
+it('honors read-only and a stop barrier before creating any course file', async () => {
+  const f = await fixture('<p>未授权写入</p>'), execute = f.ports.executeChild
+  let stopped = false
+  const context = { ...f.context, assertActive() { if (stopped) throw new Error('Stopped') } }
+  const tracked = vi.fn<CreateCourseFromHtmlPorts['executeChild']>(async (id, call) => {
+    const result = await execute(id, call); stopped = true; return result
+  })
+  f.ports.executeChild = tracked
+  expect(await createCourseFromHtml({ sourcePath: f.sourcePath }, { ...context, permission: 'read-only' }, f.ports))
+    .toMatchObject({ kind: 'error', code: 'permission-denied' })
+  expect(tracked).not.toHaveBeenCalled()
+  await expect(createCourseFromHtml({ sourcePath: f.sourcePath }, context, f.ports)).rejects.toThrow('Stopped')
+  expect(tracked.mock.calls.map(([, call]) => call.name)).toEqual(['file.open'])
+  expect(f.host.registry.list().some(snapshot => snapshot.model.kind === 'course-v10')).toBe(false)
+  expect((await fs.readdir(f.root)).some(filename => filename.endsWith('.glx'))).toBe(false)
+})
 
 async function editOpenedSource(host: DocumentHostService, filename: string, source: string) {
   const opened = await host.open(filename)
   expect(isSourceDocumentModel(opened.model)).toBe(true)
-  const result = await host.dispatch({ documentId: opened.documentId, epoch: opened.epoch, baseRevision: opened.revision,
+  const result = await host.internalAPI.dispatch({ documentId: opened.documentId, epoch: opened.epoch, baseRevision: opened.revision,
     operationId: `edit-${path.basename(filename)}`, actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source } } })
   expect(result.status).toBe('applied')
 }
@@ -149,7 +200,7 @@ it('creates independent host pages from current unsaved HTML, saves/reopens and 
   const f = await fixture('<!doctype html><html><body><main><section><h1>旧第一课</h1></section><section><h1>第二课</h1></section></main></body></html>')
   const source = await f.host.open(f.sourcePath)
   const updated = source.model.kind === 'text' ? source.model.source.replace('旧第一课', '当前未落盘第一课') : ''
-  await f.host.dispatch({ documentId: source.documentId, epoch: source.epoch, baseRevision: source.revision,
+  await f.host.internalAPI.dispatch({ documentId: source.documentId, epoch: source.epoch, baseRevision: source.revision,
     operationId: 'human-source', actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: updated } } })
   const result = await createCourseFromHtml({ sourcePath: f.sourcePath }, f.context, f.ports)
   expect(result).toMatchObject({ kind: 'read', data: { status: 'saved' } })
@@ -295,9 +346,14 @@ it('runs saved nested iframe/srcdoc modules, CSS and images through the real nat
   const resources = Object.fromEntries(Object.entries(reopened.model.resources.assets).map(([id, bytes]) => [id,
     `data:${reopened.model.kind === 'course-v10' ? reopened.model.project.assets[id]!.mimeType : ''};base64,${Buffer.from(bytes).toString('base64')}`]))
   const projected = resolveWebResourceBindings(instance, id => resources[id])
-  const source = authoredDocumentBootstrap(projected.data as WebRuntimeData, { instanceId: instance.id, nonce: 'nested-test', resources,
+  const runtimeData = webDataSchema.extend({ moduleGraph: z.object({
+    modules: z.record(z.string(), z.object({ code: z.string(),
+      imports: z.array(z.object({ start: z.number(), end: z.number(), path: z.string() })) })),
+    entries: z.record(z.string(), z.string()),
+  }).optional() }).parse(projected.data)
+  const source = authoredDocumentBootstrap(runtimeData, { instanceId: instance.id, nonce: 'nested-test', resources,
     bridge: programs => `(${installAuthoredDocumentPrograms.toString()})(${JSON.stringify(programs)})` })
-  const browser = await chromium.launch({ headless: true })
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH })
   try {
     const page = await browser.newPage()
     await page.setContent(source)

@@ -5,7 +5,7 @@ import path from 'node:path'
 import { expect, it } from 'vitest'
 import { DocumentHostService } from '../../../../src/main/workbench/DocumentHostService'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
-import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
+import { TEXT_DEFINITION , textDataEdit } from '../../../../src/components/text/adapters'
 import { createTextComponentData } from '../../../../src/components/text/data'
 import type { ComponentSurface } from '../../../../src/shared/contracts/component-platform/project'
 import type { ToolResult } from '../../../../src/shared/workbench/tools'
@@ -26,7 +26,7 @@ it('public V10 presentation state actions preserve teacher content geometry back
     surface.background = { mode: 'own', color: '#dfe8f1' }
     project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
     project.definitions.interactive = { id: 'interactive', title: '原互动', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
-    project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('教师已修改正文'),
+    project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('教师已修改正文')).value,
       frame: { width: 340, height: 100, transform: [1, 0, 0, 1, 41, 63] }, style: { opacity: .8 } }
     project.instances.button = { id: 'button', definitionId: 'interactive',
       data: { html: '<button onclick="this.textContent=\'已点击\'">原互动按钮</button>' },

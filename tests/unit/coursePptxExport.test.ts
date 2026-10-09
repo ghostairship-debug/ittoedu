@@ -1,8 +1,6 @@
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { describe, expect, it, vi } from 'vitest'
 import { unzipSync } from 'fflate'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import type { PublishedLayerItem } from '@/shared/publishedCourseTypes'
 import type { RuntimeLayerItem } from '@/shared/courseProjectTypes'
 import type { ImageNode } from '@/shared/contracts/native-v1/types'
@@ -18,6 +16,9 @@ import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { parsePptxImport } from '@/renderer/project/pptxImport'
 import { mergeTableCells } from '@/renderer/course/tableContentOperations'
 import { planPptxImportTransaction } from '@/renderer/project/pptxImportTransaction'
+import { createBlankCourseProjectV10 } from '@/core/course/createCourseProjectV10'
+import { CourseV10Driver } from '@/core/drivers/CourseV10Driver'
+import { buildComponentPptx } from '@/renderer/export/componentPlatform/pptx'
 import { pptxInheritanceFixture, pptxCommonMappingFixture, pptxEditablePathsFixture } from '../fixtures/pptxImport'
 import { APP_COMPANY, APP_NAME } from '@/shared/constants'
 import { createShapeNode, createTextNode, createFormulaNode, createTableNode, createChartNode, createTableLayerItem, createChartLayerItem } from '@/core/tools/nativeNodeFactories'
@@ -27,6 +28,17 @@ import {
 } from '../fixtures/course-project-v9'
 
 const NOW = '2026-08-17T12:00:00.000Z'
+
+function importCurrentPptx(draft: Awaited<ReturnType<typeof parsePptxImport>>, title: string) {
+  const project = createBlankCourseProjectV10(title), resources = { assets: {}, components: {} }
+  project.instances = {}; project.definitions = {}; project.global.overlay = []
+  const step = planPptxImportTransaction({ documentId: 'export-import', epoch: 'epoch', project, resources,
+    editingProject: project, surfaceId: project.surfaces[0].id, activeStateId: null, instanceId: null, instanceIds: [] }, draft, title)
+  const model = new CourseV10Driver().apply({ kind: 'course-v10', project, resources },
+    { type: step.type, edits: step.edits, expected: step.expected })
+  if (model.kind !== 'course-v10') throw new Error('V10 model required')
+  return model.project
+}
 
 function v9Sources(id: CourseProjectV9FixtureId): CoursePublishSources {
   const fixture = listCourseProjectV9Fixtures().find((candidate) => candidate.id === id)
@@ -125,8 +137,8 @@ describe('buildCoursePptx', () => {
   })
   it('keeps imported rounded geometry and group typography through editable PPTX export', async () => {
     const draft = await parsePptxImport(pptxCommonMappingFixture())
-    const project = planPptxImportTransaction(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }), draft, '普通映射').nextDocument
-    const exported = await buildCoursePptx({ project, assetFiles: {}, components: {} })
+    const project = importCurrentPptx(draft, '普通映射')
+    const exported = await buildComponentPptx(project)
     const xml = decodePptxSlides(exported.bytes)
     expect(xml).toContain('树状图')
     const reparsed = await parsePptxImport(exported.bytes)
@@ -134,61 +146,50 @@ describe('buildCoursePptx', () => {
     if (round?.kind !== 'native' || round.content.nativeType !== 'shape') throw new Error('rounded shape missing')
     expect(round.content.data.style.cornerRadius).toBeCloseTo(25, 2)
   })
-  it('exports imported shared underlays as reusable masters without duplicating decoration or changing page order', async () => {
+  it('exports imported shared underlays once per scoped page before local editable objects without changing page order', async () => {
     const draft = await parsePptxImport(await pptxInheritanceFixture())
-    const project = planPptxImportTransaction(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }), draft, '母版往返').nextDocument
-    const exported = await buildCoursePptx({ project, assetFiles: {}, components: {} })
+    const project = importCurrentPptx(draft, '母版往返'), before = structuredClone(project)
+    const exported = await buildComponentPptx(project)
     const files = unzipSync(exported.bytes)
-    const [firstShared, secondShared] = project.surfaces.at(-1)!.surfaceLayerItems.map(e => e.item.layerItemId)
-    const xml = (name: string) => new TextDecoder().decode(files[name])
-    const layouts = Object.keys(files).filter(name => /^ppt\/slideLayouts\/slideLayout\d+\.xml$/.test(name)).map(xml).join('\n')
-    expect(layouts).toContain(firstShared!)
-    expect(layouts).toContain(secondShared!)
+    expect(exported.pages).toHaveLength(5)
+    const pages = Array.from({ length: 5 }, (_, index) => new DOMParser().parseFromString(
+      new TextDecoder().decode(files[`ppt/slides/slide${index + 1}.xml`]), 'application/xml'))
+    const named = (page: Document, name: string) => Array.from(page.getElementsByTagNameNS('*', 'cNvPr'))
+      .filter(node => node.getAttribute('name') === name)
+    for (const id of project.global.underlay) {
+      const instance = project.instances[id], visibility = instance.visibility
+      if (!visibility || visibility.mode !== 'include' || !instance.name) throw new Error('Imported scoped decoration required')
+      for (const [index, surface] of project.surfaces.entries()) {
+        expect(named(pages[index], `${instance.name} · ${instance.id}`)).toHaveLength(visibility.surfaceIds.includes(surface.id) ? 1 : 0)
+        if (visibility.surfaceIds.includes(surface.id)) {
+          const names = Array.from(pages[index].getElementsByTagNameNS('*', 'cNvPr')).map(node => node.getAttribute('name'))
+          const local = project.instances[surface.childIds[0]], firstLocal = `${local.name} · ${local.id}`
+          expect(names.indexOf(`${instance.name} · ${instance.id}`)).toBeLessThan(names.indexOf(firstLocal ?? ''))
+        }
+      }
+    }
     const slides = decodePptxSlides(exported.bytes)
-    expect(slides).not.toContain(firstShared!)
-    expect(slides).not.toContain(secondShared!)
     expect(slides.indexOf('第1页标题')).toBeLessThan(slides.indexOf('第2页标题'))
     expect(slides.indexOf('第2页标题')).toBeLessThan(slides.indexOf('第3页标题'))
     expect(slides).toContain('平均分成两份，取一份')
-    const getLayout = (page: number) => new DOMParser().parseFromString(xml(`ppt/slides/_rels/slide${page}.xml.rels`), 'application/xml').querySelector('Relationship[Type$="/slideLayout"]')?.getAttribute('Target')
-    expect(getLayout(2)).toBe(getLayout(4))
-    expect(getLayout(2)).not.toBe(getLayout(3))
-    expect(getLayout(5)).not.toBe(getLayout(2))
+    expect(project).toEqual(before)
   })
   it('keeps shared foreground content on the slide after local objects', async () => {
     const draft = await parsePptxImport(await pptxInheritanceFixture())
-    const project = structuredClone(planPptxImportTransaction(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }), draft, '前景').nextDocument)
-    const surface = project.surfaces.at(-1)!
-    surface.surfaceLayerItems.forEach((e, index) => { e.item.order = 1000 + index })
-    const exported = await buildCoursePptx({ project, assetFiles: {}, components: {} })
+    const project = importCurrentPptx(draft, '前景')
+    project.global.overlay = [...project.global.underlay]; project.global.underlay = []
+    const exported = await buildComponentPptx(project)
     const files = unzipSync(exported.bytes)
-    const page = new TextDecoder().decode(files['ppt/slides/slide2.xml'])
-    const sharedId = surface.surfaceLayerItems[0]!.item.layerItemId
-    expect(page).toContain(sharedId)
-    expect(page.indexOf(sharedId)).toBeGreaterThan(page.indexOf('局部正文1'))
-  })
-  it('keeps the V2 PPTX helper boundary independent of V8 project types', () => {
-    const helperSources = [
-      'src/renderer/export/course/buildCoursePptx.ts',
-      'src/renderer/export/pptxShared.ts',
-      'src/renderer/export/pptxTextAndShape.ts',
-      'src/renderer/export/renderPptxComponentSnapshots.ts',
-      'src/renderer/export/renderPptxRuntimeSnapshots.ts',
-      'src/shared/imageEffects.ts',
-    ].map((relativePath) => readFileSync(join(process.cwd(), relativePath), 'utf8'))
-
-    for (const source of helperSources) {
-      expect(source).not.toMatch(
-        /from ['"][^'"]*\/projectTypes['"]/,
-      )
-      const retiredSymbols = [
-        ['Scene', 'Node'].join(''),
-        ['buildExport', 'Payload'].join(''),
-        ['Player', 'App'].join(''),
-      ]
-      expect(source).not.toMatch(new RegExp(`\\b(?:${retiredSymbols.join('|')})\\b`))
+    const page = new DOMParser().parseFromString(new TextDecoder().decode(files['ppt/slides/slide2.xml']), 'application/xml')
+    const names = Array.from(page.getElementsByTagNameNS('*', 'cNvPr')).map(node => node.getAttribute('name'))
+    const surface = project.surfaces[1], local = project.instances[surface.childIds.at(-1)!], lastLocal = `${local.name} · ${local.id}`
+    for (const id of project.global.overlay) {
+      const shared = project.instances[id]
+      if (shared.visibility?.mode === 'include' && shared.visibility.surfaceIds.includes(surface.id)) {
+        expect(names.filter(name => name === `${shared.name} · ${shared.id}`)).toHaveLength(1)
+        expect(names.indexOf(`${shared.name} · ${shared.id}`)).toBeGreaterThan(names.indexOf(lastLocal ?? ''))
+      }
     }
-    expect(helperSources.join('\n')).toMatch(/contracts\/native-v1\/types/)
   })
 
   it('builds from V9 mixed sources, keeps Slide text editable, and keeps Spatial off 1280×720 crop', async () => {

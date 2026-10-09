@@ -16,7 +16,7 @@ vi.mock('../../src/renderer/lessonWorkspace/LessonWorkspaceShell', async () => {
   const { forwardRef, useImperativeHandle } = await import('react')
   return { LessonWorkspaceShell: forwardRef<LessonWorkspaceShellHandle, LessonWorkspaceShellProps>((props, ref) => {
     useImperativeHandle(ref, () => ({
-      preserveAll: inputOwners.preserveAll, hasDirtyInputs: inputOwners.hasDirtyInputs,
+      preserveAll: inputOwners.preserveAll, hasDirtyInputs: inputOwners.hasDirtyInputs, captureMediaDrafts: () => [],
       flushAll: async () => true, saveActiveDocument: async () => 'none', closeAll: async () => true,
       suspendForClose() {}, resumeAfterCloseCancelled() {}, openFile: async () => {}, focusDocument: async () => {},
       detachLesson() {}, showProject() {},

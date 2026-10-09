@@ -1,9 +1,8 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as assetManager from '../../src/renderer/project/assetManager'
-import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
+import { openCourseProjectV10Archive } from '../../src/core/drivers/codecs/courseProjectV10Archive'
 import { createCourseFromPptx, pptxCourseArchive, pptxCourseCanvas, pptxCourseStem } from '../../src/renderer/project/pptxCourseCreation'
-import { courseSlideCanvas } from '../../src/shared/slideCanvas'
 import { pptxImportFixture } from '../fixtures/pptxImport'
 
 afterEach(() => { vi.restoreAllMocks() })
@@ -29,18 +28,17 @@ it('M21 makes a new H5 presentation holding only the PPT\'s pages, with their me
   vi.spyOn(assetManager, 'readImageDimensions').mockResolvedValue({ width: 200, height: 200 })
   const course = await createCourseFromPptx(withPageSize(pptxImportFixture({ image: true }), 9144000, 6858000), '第一课')
   expect(course.issues).toEqual([])
-  const slides = course.project.surfaces.filter(surface => surface.type === 'slide')
+  const slides = course.project.surfaces.filter(surface => surface.kind === 'slide')
   // The blank page a new course starts with is gone; the PPT's page is the course.
   expect(slides).toHaveLength(1)
   expect(course.project.surfaces).toHaveLength(1)
-  expect(courseSlideCanvas(course.project)).toEqual({ width: 1024, height: 768 })
-  expect(course.project.locations.every(location => location.surfaceId === slides[0]!.id)).toBe(true)
-  expect(course.project.startLocationId).toBe(course.project.locations[0]!.id)
-  expect(Object.keys(course.assetFiles).length).toBeGreaterThan(0)
-  expect(Object.keys(course.project.assets)).toEqual(Object.keys(course.assetFiles))
-  // It carries the teacher controller package like any new course.
-  expect(Object.keys(course.componentPackages).length).toBe(1)
-  const reopened = openCourseProjectArchive(pptxCourseArchive(course))
-  expect(reopened.project).toEqual(course.project)
-  expect(Object.keys(reopened.assetFiles).sort()).toEqual(Object.keys(course.assetFiles).sort())
+  expect(slides[0].designSize).toEqual({ width: 1024, height: 768 })
+  expect(Object.keys(course.resources.assets).length).toBeGreaterThan(0)
+  expect(Object.keys(course.project.assets)).toEqual(Object.keys(course.resources.assets))
+  // The controller is a normal current builtin definition and global instance.
+  expect(course.project.definitions['guoling.navigation'].implementation).toMatchObject({ kind: 'builtin' })
+  expect(course.project.global.overlay.some(id => course.project.instances[id].definitionId === 'guoling.navigation')).toBe(true)
+  const reopened = openCourseProjectV10Archive(pptxCourseArchive(course))
+  expect(reopened.project).toEqual(JSON.parse(JSON.stringify(course.project)))
+  expect(Object.keys(reopened.resources.assets).sort()).toEqual(Object.keys(course.resources.assets).sort())
 })

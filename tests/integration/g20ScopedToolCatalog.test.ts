@@ -1,12 +1,10 @@
 // @vitest-environment node
 import { afterEach, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
-import type { HostToolServices } from '../../src/core/tools/HostToolServices'
 import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
@@ -15,8 +13,10 @@ import { workbenchServiceToolCatalog } from '../../src/core/tools/WorkbenchServi
 import type { ModelEvent, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
 import type { ToolTarget } from '../../src/shared/workbench/tools'
 import { toolFamilies } from '../../src/core/tools/ToolCatalog'
-import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
-import { createDefaultTeacherControllerPackage } from '../../src/shared/defaultTeacherControllerComponent'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
+import { TEXT_DEFINITION, textDataEdit } from '../../src/components/text/adapters'
+import { createTextComponentData } from '../../src/components/text/data'
 
 const directories: string[] = [], servers: Server[] = []
 afterEach(async () => {
@@ -90,97 +90,62 @@ it('sends a narrow Markdown catalog on every real HTTP turn and commits one cano
   expect((await host.internalAPI.read(session.documentId))).toMatchObject({ revision: 1, undoDepth: 1, model: { source: 'X YY CC' } })
 })
 
-it('projects V9 local grants and the canonical batch while preserving full V9 and MCP discovery', async () => {
+function currentProject() {
+  const project = createBlankCourseProjectV10('当前课件')
+  project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
+  project.definitions.box = { id: 'box', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default {mount(){return {update(){},dispose(){}}}}' } }
+  project.instances.box = { id: 'box', definitionId: 'box', data: {}, childIds: ['a'] }
+  project.instances.a = { id: 'a', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('ABC')).value }
+  project.surfaces = [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['box'] }]
+  return project
+}
+
+it('projects current V10 grants without widening a frozen range or a deleted container, and rejects an unauthorized batch before any write', async () => {
   const { host } = await workspace()
-  host.tools.configureHostServices({ images: {} as HostToolServices['images'], builds: {} as HostToolServices['builds'] })
-  const bytes = await readFile('tests/fixtures/course-project-v9/mixed.h5lesson')
-  const model = new CourseV9Driver().load(new Uint8Array(bytes))
-  if (model.kind !== 'course-v9') throw new Error('V9 fixture required')
-  const session = await host.internalAPI.create(model, 'mixed.h5lesson')
-  const flow = model.project.surfaces.find(surface => surface.type === 'flow')
-  if (!flow || flow.type !== 'flow') throw new Error('Flow fixture required')
-  const block = flow.blocks.find(value => value.type === 'paragraph')
-  if (!block) throw new Error('Paragraph fixture required')
-  const range: ToolTarget = { kind: 'flow-range', surfaceId: flow.id, blockId: block.id, parentId: null,
-    slot: { kind: 'field', field: 'content' }, from: 0, to: 1 }
-  await host.tools.beginRun({ runId: 'flow', actor: 'agent', documents: [{ documentId: session.documentId, writable: [range] }] })
-  const flowNames = (await host.tools.describeRun('flow')).map(tool => tool.name)
-  expect(flowNames).toEqual(['image.generate', 'image.edit', 'image.status', 'read', 'inspect', 'listChildren', 'content.targets', 'text.replace', 'flow.content', 'batch'])
-  await host.tools.loadToolFamilies('flow', ['media'])
-  const expandedFlow = await host.tools.describeRun('flow')
-  expect(expandedFlow.map(tool => tool.name)).toEqual(['image.generate', 'image.edit', 'image.status', 'read', 'inspect', 'listChildren', 'content.targets', 'text.replace', 'flow.content', 'batch'])
-  const flowBatch = expandedFlow.find(tool => tool.name === 'batch')!
-  expect(JSON.stringify(flowBatch.schema)).toContain('flow.content')
-  expect(JSON.stringify(flowBatch.schema)).not.toContain('document.insert')
-  expect(Buffer.byteLength(JSON.stringify(flowBatch))).toBeLessThan(1600)
-  expect(Buffer.byteLength(JSON.stringify(await host.tools.describeRun('flow')))).toBeLessThan(12_000)
-  const handle = await host.tools.issueTarget('flow', session.documentId, range)
-  expect(await host.tools.execute('flow', 'not-advertised', { name: 'document.insert', input: { target: handle } })).toMatchObject({ kind: 'error', code: 'tool-not-advertised' })
-  expect(await host.tools.execute('flow', 'bad-batch', { name: 'batch', input: { operations: [{ name: 'document.insert', input: { target: handle } }] } })).toMatchObject({ kind: 'error', code: 'invalid-input' })
-  const inspected = await host.tools.execute('flow', 'inspect', { name: 'inspect', input: { target: handle } })
-  expect(inspected).toMatchObject({ kind: 'read', data: { writable: true, tools: ['read', 'inspect', 'text.replace', 'flow.content', 'batch'] } })
-  expect((await host.internalAPI.read(session.documentId)).revision).toBe(model.project.revision)
+  const project = currentProject()
+  const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'scoped.h5lesson')
+  const range: ToolTarget = { kind: 'course-instance', surfaceId: 'flow', instanceId: 'a', dataPath: ['content'], from: 0, to: 1 }
+  await host.tools.beginRun({ runId: 'range', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [range] }] })
+  const first = await host.tools.describeRun('range')
+  expect(first.map(tool => tool.name)).toContain('text.replace')
+  expect(first.map(tool => tool.name)).not.toContain('course.configure')
+  await host.tools.loadToolFamilies('range', toolFamilies)
+  expect(await host.tools.describeRun('range')).toEqual(first)
+  const text = await host.tools.issueTarget('range', initial.documentId, range)
+  const outside = await host.tools.issueTarget('range', initial.documentId, { kind: 'course-surface', surfaceId: 'flow' })
+  expect(await host.tools.execute('range', 'inspect', { name: 'inspect', input: { target: text } })).toMatchObject({ kind: 'read', data: { writable: true } })
+  expect(await host.tools.execute('range', 'out-of-scope-batch', { name: 'batch', input: { operations: [
+    { name: 'text.replace', input: { target: text, content: 'MUST NOT WRITE' } },
+    { name: 'object.insert', input: { target: outside, kind: 'text', text: 'NO' } },
+  ] } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
+  expect(await host.internalAPI.read(initial.documentId)).toEqual(initial)
+  await host.tools.beginRun({ runId: 'whole', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }] })
+  const whole = await host.tools.describeRun('whole'), wholeNames = whole.map(tool => tool.name)
+  expect(wholeNames).toEqual(expect.arrayContaining(['object.insert', 'object.update', 'batch']))
+  expect(wholeNames.some(name => name.startsWith('build.'))).toBe(false)
+  expect(wholeNames).not.toContain('job.status')
+  expect(wholeNames).not.toContain('compute.run')
+  expect(JSON.stringify(whole.find(tool => tool.name === 'batch')!.schema)).toContain('object.insert')
+  expect((await host.tools.describe()).map(tool => tool.name)).toEqual(expect.arrayContaining(wholeNames))
 
-  await host.tools.beginRun({ runId: 'flow-container', actor: 'agent', documents: [{ documentId: session.documentId,
-    writable: [{ kind: 'flow-container', surfaceId: flow.id, parentId: null }] }] })
-  await host.tools.loadToolFamilies('flow-container', ['content'])
-  expect((await host.tools.describeRun('flow-container')).map(tool => tool.name)).toContain('document.insert')
-
-  await host.tools.beginRun({ runId: 'whole', actor: 'agent', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
-  const initialWhole = await host.tools.describeRun('whole')
-  expect(initialWhole.map(tool => tool.name)).toEqual(['image.generate', 'image.edit', 'image.status', 'read', 'inspect', 'listChildren', 'content.targets', 'text.replace', 'flow.content', 'batch'])
-  expect(await host.tools.execute('whole', 'not-loaded-insert', { name: 'document.insert', input: {} })).toMatchObject({ kind: 'error', code: 'tool-not-advertised' })
-  await host.tools.loadToolFamilies('whole', toolFamilies)
-  const full = await host.tools.describeRun('whole')
-  expect(full.map(tool => tool.name)).toContain('build.create')
-  expect(full.map(tool => tool.name)).toContain('document.insert')
-  expect(full.map(tool => tool.name)).toContain('native.insert')
-  expect(JSON.stringify(full.find(tool => tool.name === 'batch')!.schema)).toContain('document.insert')
-  expect(Buffer.byteLength(JSON.stringify(full.find(tool => tool.name === 'batch')))).toBeLessThan(2800)
-  expect(await host.tools.execute('whole', 'bad-loaded-batch', { name: 'batch', input: { operations: [{ name: 'document.insert', input: { nonsense: true } }] } })).toMatchObject({ kind: 'error', code: 'invalid-input' })
-  const fullNames = full.map(tool => tool.name)
-  expect((await host.tools.describe()).map(tool => tool.name)).toEqual(expect.arrayContaining(fullNames))
-  // Runs without fileAccess do not advertise workbench job/MCP/web/media service tools.
-  expect(fullNames).not.toContain('job.status')
-  expect(fullNames).not.toContain('compute.run')
-  expect(fullNames).not.toContain('media.start')
-  expect(full.length).toBeGreaterThan(flowNames.length * 4)
+  await host.tools.beginRun({ runId: 'parent', actor: 'agent', documents: [{ documentId: initial.documentId,
+    writable: [{ kind: 'course-instance', surfaceId: 'flow', instanceId: 'box' }] }] })
+  const parent = await host.tools.issueTarget('parent', initial.documentId, { kind: 'course-instance', surfaceId: 'flow', instanceId: 'box' })
+  const frozenCatalog = await host.tools.describeRun('parent')
+  expect(frozenCatalog.map(tool => tool.name)).toContain('object.insert')
+  expect(await host.internalAPI.dispatch({ documentId: initial.documentId, epoch: initial.epoch, baseRevision: initial.revision, actor: 'human', operationId: 'remove-parent',
+    mutation: { type: 'command', command: captureComponentOperation(project, [{ type: 'instance.remove', instanceId: 'box' }]) } })).toMatchObject({ status: 'applied' })
+  const removed = await host.internalAPI.read(initial.documentId)
+  expect(await host.tools.execute('parent', 'late-insert', { name: 'object.insert', input: { target: parent, kind: 'text', text: 'NO' } })).toMatchObject({ kind: 'error' })
+  expect(await host.internalAPI.read(initial.documentId)).toEqual(removed)
+  expect(removed.undoDepth).toBe(1)
+  // The catalog describes the frozen grant; current target validation owns the actual write boundary.
+  expect(await host.tools.describeRun('parent')).toEqual(frozenCatalog)
 })
 
-it('does not offer Flow insertion in a slide-only whole-document grant', async () => {
-  const { host } = await workspace()
-  const project = createBlankCourseProject()
-  const component = createDefaultTeacherControllerPackage()
-  const session = await host.internalAPI.create({ kind: 'course-v9', project, resources: { assets: {}, components: { [`${component.manifest.id}@${component.manifest.version}`]: component.files } } }, 'slide-only.h5lesson')
-  await host.tools.beginRun({ runId: 'slide-only', actor: 'agent', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
-  await host.tools.loadToolFamilies('slide-only', ['content'])
-  expect((await host.tools.describeRun('slide-only')).map(tool => tool.name)).not.toContain('document.insert')
-  expect((await host.tools.describe()).map(tool => tool.name)).toContain('document.insert')
-})
-
-it('removes insertion disclosure when a frozen Flow parent is deleted during the run', async () => {
-  const { host } = await workspace()
-  const model = new CourseV9Driver().load(new Uint8Array(await readFile('tests/fixtures/course-project-v9/mixed.h5lesson')))
-  if (model.kind !== 'course-v9') throw new Error('V9 fixture required')
-  const flow = model.project.surfaces.find(surface => surface.type === 'flow')
-  if (!flow || flow.type !== 'flow') throw new Error('Flow fixture required')
-  flow.blocks.push({ id: 'temporary-section', type: 'section', title: { inlines: [] }, collapsedByDefault: false, blocks: [] })
-  const session = await host.internalAPI.create(model, 'nested.h5lesson')
-  const container: ToolTarget = { kind: 'flow-container', surfaceId: flow.id, parentId: 'temporary-section' }
-  await host.tools.beginRun({ runId: 'stale-parent', actor: 'agent', documents: [{ documentId: session.documentId, writable: [container] }] })
-  await host.tools.loadToolFamilies('stale-parent', ['content'])
-  expect((await host.tools.describeRun('stale-parent')).map(tool => tool.name)).toContain('document.insert')
-  await host.tools.beginRun({ runId: 'remove-parent', actor: 'agent', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
-  const target = await host.tools.issueTarget('remove-parent', session.documentId, { kind: 'flow-block', surfaceId: flow.id, blockId: 'temporary-section', parentId: null })
-  expect(await host.tools.execute('remove-parent', 'delete-parent', { name: 'flow.delete', input: { target } })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
-  expect((await host.tools.describeRun('stale-parent')).map(tool => tool.name)).not.toContain('document.insert')
-})
-
-it('loads a course tool family on demand without changing the frozen permission or duplicating schemas on repeat', async () => {
+it('sends current authoring tools by default and keeps repeated family loading idempotent while preserving frozen grants and exact provider payload bytes', async () => {
   const { directory, host } = await workspace()
-  const model = new CourseV9Driver().load(new Uint8Array(await readFile('tests/fixtures/course-project-v9/mixed.h5lesson')))
-  if (model.kind !== 'course-v9') throw new Error('V9 fixture required')
-  const session = await host.internalAPI.create(model, 'mixed.h5lesson')
+  const session = await host.internalAPI.create({ kind: 'course-v10', project: currentProject(), resources: { assets: {}, components: {} } }, 'current.h5lesson')
   const observed: { names: string[]; bytes: number; payloadBytes: number }[] = []
   const complete = (request: ModelRequest, index: number, call?: { name: string; input: unknown }): Extract<ModelEvent, { type: 'response.completed' }> => {
     const calls = call ? [{ id: `load-${index}`, type: 'function' as const, function: { name: call.name, arguments: JSON.stringify(call.input) } }] : []
@@ -196,17 +161,16 @@ it('loads a course tool family on demand without changing the frozen permission 
     runs: new ExecutionRunStore(path.join(directory, 'family-runs')), events: new ExecutionEventStore({ directory: path.join(directory, 'family-events') }) })
   const selection: ModelSelection = { model: 'fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat', baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture',
     auth: { kind: 'api-key', credentialRef: 'fixture' }, billing: { kind: 'unknown' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } }
-  const started = await engine.start({ conversationId: 'c', taskId: 't', instruction: '查看讲义插入工具', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }], selection, permission: 'workspace' })
+  const grant = { documentId: session.documentId, writable: [{ kind: 'document' as const }] }
+  const started = await engine.start({ conversationId: 'c', taskId: 't', instruction: '查看当前组件插入工具', documents: [grant], selection, permission: 'workspace' })
   const result = await engine.wait(started.runId)
   expect(result.status).toBe('completed')
   expect(result.input.permission).toBe('workspace')
+  expect(result.input.documents).toEqual([grant])
   expect(observed).toHaveLength(3)
-  expect(observed[0]!.names).toContain('tools.load')
-  expect(observed[0]!.names).not.toContain('document.insert')
-  expect(observed[0]!.bytes).toBeLessThan(20_000)
-  expect(observed[1]!.names).toContain('document.insert')
-  expect(observed[1]!.names).toEqual(observed[2]!.names)
-  expect(observed[1]!.bytes).toBe(observed[2]!.bytes)
-  expect(observed[1]!.bytes).toBeLessThan(110_000)
+  expect(observed[0].names).toEqual(expect.arrayContaining(['tools.load', 'object.insert', 'object.update']))
+  expect(observed.map(value => value.names)).toEqual(Array(3).fill(observed[0].names))
+  expect(observed.map(value => value.bytes)).toEqual(Array(3).fill(observed[0].bytes))
   expect(result.requests.map((request, index) => request.payload?.serializedBytes === observed[index]?.payloadBytes)).toEqual([true, true, true])
+  expect(await host.internalAPI.read(session.documentId)).toEqual(session)
 })

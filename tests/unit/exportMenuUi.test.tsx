@@ -1,24 +1,21 @@
-import { controllerPackages } from '../fixtures/teacherController'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RecentProjectEntry } from '@/shared/ipcTypes'
-import { useEditorStore, selectActiveCourseProjectDocument } from '@/renderer/store/editorStore'
+import { useEditorStore } from '@/renderer/store/editorStore'
 import { utf8ByteLength } from '@/renderer/export/exportSize'
-import { buildPublishedCourseStandaloneHtml } from '@/renderer/export/course/buildCoursePackages'
 import type { SingleHtmlExportMode } from '@/renderer/export/course/coursePackagePreflight'
 import { ExportSizeWarningDialog } from '@/renderer/ui/ExportSizeWarningDialog'
 import { TopToolbar, type ExportFormat } from '@/renderer/ui/TopToolbar'
-import { createBlankCourseProject } from '@/core/course/createCourseProject'
-import { createCourseStoreHost } from '../helpers/courseStoreHost'
+import { createCourseDocumentHost } from '../helpers/courseDocumentHost'
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); useEditorStore.getState().courseBridge.dispose() })
 
-let host: Awaited<ReturnType<typeof createCourseStoreHost>>
+let host: Awaited<ReturnType<typeof createCourseDocumentHost>>
 
 beforeEach(async () => {
   localStorage.clear()
-  host = await createCourseStoreHost()
-  await host.open(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }))
+  host = await createCourseDocumentHost()
+  await useEditorStore.getState().connectCourseDocuments(host.api)
 })
 
 function renderToolbar(
@@ -53,13 +50,13 @@ describe('unified export menu', () => {
     fireEvent.click(screen.getByRole('button', { name: '重命名' }))
     const title = screen.getByRole('textbox', { name: '名称' })
     fireEvent.change(title, { target: { value: '雨中的苏轼' } })
-    fireEvent.blur(title)
-    await useEditorStore.getState().drainCourseDocument()
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.title).toBe('雨中的苏轼')
+    const before = useEditorStore.getState().courseView.snapshot!
+    await act(async () => { fireEvent.blur(title); await useEditorStore.getState().drainCourseDocument() })
+    expect(useEditorStore.getState().courseView.snapshot!.undoDepth).toBe(before.undoDepth + 1)
+    expect(useEditorStore.getState().courseView.project!.title).toBe('雨中的苏轼')
     expect(useEditorStore.getState().dirty).toBe(true)
-    useEditorStore.getState().undo()
-    await useEditorStore.getState().drainCourseDocument()
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.title).toBe('未命名 H5 演示')
+    await act(async () => { useEditorStore.getState().undo(); await useEditorStore.getState().drainCourseDocument() })
+    expect(useEditorStore.getState().courseView.project!.title).toBe('initial')
   })
 
   it('keeps Save As, project health, and recent projects directly visible', () => {
@@ -89,23 +86,10 @@ describe('unified export menu', () => {
     fireEvent.click(screen.getByTitle('打开最近工程'))
     fireEvent.click(screen.getByRole('button', { name: /雨中的苏轼/ }))
     expect(onOpenRecent).toHaveBeenCalledWith('C:\\lessons\\rain.h5lesson')
+    expect(screen.queryByRole('button', { name: '导入可信的 .h5component 组件' })).not.toBeInTheDocument()
   })
 
-  it('keeps advanced project controls directly visible', () => {
-    renderToolbar(vi.fn())
-
-    expect(screen.queryByTitle('更多工程操作')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '另存为' })).toBeInTheDocument()
-    expect(screen.getByTitle('打开最近工程')).toBeInTheDocument()
-    expect(screen.getByRole('button', {
-      name: '工程检查：未发现问题',
-    })).toBeInTheDocument()
-    expect(screen.queryByRole('button', {
-      name: '导入可信的 .h5component 组件',
-    })).not.toBeInTheDocument()
-  })
-
-  it('offers both explicit single HTML modes, web package, PPTX, PDF, and DOCX', () => {
+  it('offers each export and gates DOCX on Flow while respecting dismissal and busy', async () => {
     const onExport = vi.fn<(
       format: ExportFormat,
       singleHtmlMode?: SingleHtmlExportMode,
@@ -114,26 +98,26 @@ describe('unified export menu', () => {
 
     fireEvent.click(screen.getByLabelText('导出'))
     expect(screen.getByRole('menuitem', { name: /离线便携单 HTML/ })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: /在线轻量单 HTML/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /在线单 HTML/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /网页包/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /PowerPoint（PPTX）/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /^PDF/ })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: /DOCX 讲义/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /DOCX 讲义/ })).toBeDisabled()
+    await act(async () => { await useEditorStore.getState().editComponents([{ type: 'surface.insert', index: 1, surface: { id: 'flow', kind: 'flow', title: '讲义', childIds: [] } }]) })
 
     fireEvent.click(screen.getByRole('menuitem', { name: /离线便携单 HTML/ }))
     expect(onExport).toHaveBeenLastCalledWith('single-html', 'offline-portable')
 
     fireEvent.click(screen.getByLabelText('导出'))
-    fireEvent.click(screen.getByRole('menuitem', { name: /在线轻量单 HTML/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /在线单 HTML/ }))
     expect(onExport).toHaveBeenLastCalledWith('single-html', 'online-lightweight')
 
     fireEvent.click(screen.getByLabelText('导出'))
     fireEvent.click(screen.getByRole('menuitem', { name: /网页包/ }))
     expect(onExport).toHaveBeenCalledWith('web-package')
-  })
-
-  it('closes the export menu on a click elsewhere or Escape', () => {
-    renderToolbar(vi.fn())
+    for (const [label, format] of [[/PowerPoint（PPTX）/, 'pptx'], [/^PDF/, 'pdf'], [/DOCX 讲义/, 'docx']] as const) {
+      fireEvent.click(screen.getByLabelText('导出')); fireEvent.click(screen.getByRole('menuitem', { name: label })); expect(onExport).toHaveBeenLastCalledWith(format)
+    }
     const menu = screen.getByTestId('export-menu-trigger').closest('details')!
     fireEvent.click(screen.getByLabelText('导出'))
     expect(menu.open).toBe(true)
@@ -142,22 +126,7 @@ describe('unified export menu', () => {
     fireEvent.click(screen.getByLabelText('导出'))
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(menu.open).toBe(false)
-  })
-
-  it('routes V9 course HTML through the Published Course V2 producer', () => {
-    const document = selectActiveCourseProjectDocument(useEditorStore.getState())
-    expect(document?.schemaVersion).toBe(9)
-    const html = buildPublishedCourseStandaloneHtml({
-      project: document!,
-      assetFiles: {},
-      components: controllerPackages,
-    }, '(function(){})();')
-    expect(html).toContain('window.__H5_COURSE_PAYLOAD__=')
-    expect(html).not.toContain('.course-nav')
-    expect(html).not.toContain('class="course-nav"')
-  })
-
-  it('does not open while the editor is busy', () => {
+    cleanup()
     renderToolbar(vi.fn(), true)
     const trigger = screen.getByLabelText('导出')
     fireEvent.click(trigger)
@@ -170,9 +139,7 @@ describe('single HTML size warning', () => {
     expect(utf8ByteLength('HTML课件😀')).toBe(
       new TextEncoder().encode('HTML课件😀').byteLength,
     )
-  })
 
-  it('recommends the web package but still allows a warning-sized HTML', () => {
     const onPackage = vi.fn()
     const onContinue = vi.fn()
     render(

@@ -24,7 +24,7 @@ async function fixture() {
   const conversations = new ConversationStore({ directory: path.join(directory, 'conversations') })
   await conversations.registerWorkspace({ workspaceId: 'space', rootPath: directory, managed: true, authorization: 'managed' })
   const conversation = await conversations.createConversation({ workspaceId: 'space' })
-  const execution = { events, conversations, appendExternalEvent: vi.fn((input: ExecutionEventInput) => events.append(input)) }
+  const execution = { events, conversations, appendExternalEvent: vi.fn(async (input: ExecutionEventInput) => { await events.append(input) }) }
   const document = await documents.internalAPI.create({ kind: 'markdown', source: 'start', resources: { assets: {}, components: {} } }, 'draft.md')
   const apply = async (runId: string, source: 'builtin' | 'external-mcp', content: string, publish = true) => {
     await documents.tools.beginRun({ runId, actor: source === 'builtin' ? 'agent' : 'external', documents: [{ documentId: document.documentId, writable: [{ kind: 'document' }] }] })

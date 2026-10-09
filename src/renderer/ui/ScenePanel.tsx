@@ -11,7 +11,7 @@ import type { CourseEditorLayoutResult } from '../course/courseEditorLayout'
 import { LAST_COURSE_PAGE_REASON } from '../store/slices/courseStructureSlice'
 import { flowBodyIds, projectFlowBlock } from '../componentPlatform/surfaces/flow/documentProjection'
 import { plainDocumentText } from '../../shared/document/content'
-import { useEditorStore } from '../store/editorStore'
+import { selectHasDirtyCourseContentDraft, useEditorStore, type EditorState } from '../store/editorStore'
 import { AddCourseContentMenu } from './AddCourseContentMenu'
 import { ConfirmDialog } from './ConfirmDialog'
 
@@ -153,7 +153,7 @@ export function ScenePanel() {
   const view = useEditorStore(state => state.courseView)
   const editingScope = useEditorStore(state => state.editingScope)
   const spatialViews = useEditorStore(state => state.spatialViewStates)
-  const [pendingDelete, setPendingDelete] = useState<{ node: CourseTreeNode; captured: CapturedComponentOperation | CapturedCourseTarget } | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<{ node: CourseTreeNode; captured: CapturedComponentOperation | CapturedCourseTarget; contentEdit: EditorState['slideContentEdit'] } | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
   const project = view.project
   const treeView = useMemo(() => project ? buildCourseTreeView(project) : null, [project])
@@ -178,7 +178,8 @@ export function ScenePanel() {
   }
   const requestDelete = (node: CourseTreeNode) => {
     const state = useEditorStore.getState()
-    try { setPendingDelete({ node, captured: node.frameId ? state.courseBridge.captureTarget(documentId) : state.captureCourseSurfaceDelete(node.surfaceId) }) }
+    if (selectHasDirtyCourseContentDraft(state)) { state.setError('请先完成当前输入，再删除页面或镜头。'); return }
+    try { setPendingDelete({ node, captured: node.frameId ? state.courseBridge.captureTarget(documentId) : state.captureCourseSurfaceDelete(node.surfaceId), contentEdit: state.slideContentEdit }) }
     catch (error) { state.setError(error instanceof Error ? error.message : '删除目标已改变') }
   }
   const onDragEnd = ({ active, over }: DragEndEvent) => {
@@ -211,8 +212,14 @@ export function ScenePanel() {
         const pending = pendingDelete; setPendingDelete(null)
         if (!pending) return
         const state = useEditorStore.getState()
-        if (pending.node.frameId) void state.deleteSpatialCameraFrame(pending.node.surfaceId, pending.node.frameId, pending.captured as CapturedCourseTarget)
-        else void state.deleteCourseSurface(pending.node.surfaceId, pending.captured as CapturedComponentOperation)
+        if (state.courseView.activeDocumentId !== pending.captured.documentId || state.slideContentEdit !== pending.contentEdit || selectHasDirtyCourseContentDraft(state)) {
+          state.setError('删除目标或当前输入已改变，请完成输入后重新确认。')
+          return
+        }
+        const operation = pending.node.frameId
+          ? state.deleteSpatialCameraFrame(pending.node.surfaceId, pending.node.frameId, pending.captured as CapturedCourseTarget)
+          : state.deleteCourseSurface(pending.node.surfaceId, pending.captured as CapturedComponentOperation)
+        void operation.catch(error => state.setError(error instanceof Error ? error.message : '删除失败，原内容已保留。'))
       }} />
   </aside>
 }

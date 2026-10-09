@@ -10,6 +10,7 @@ import { courseLogicAuthoringView, commitCourseLogicAuthoringCommand } from '../
 import { TEACHER_CONTROLLER_DEFINITION, createTeacherControllerData, createTeacherControllerFrame } from '../../components/teacher-controller/data'
 import type { JsonValue } from '../../shared/contracts/component-platform'
 import { componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform/project'
+import { removeComponentRule, moveComponentRule } from '../../shared/componentInteractionData'
 
 export function AutomationTab() {
   const courseView = useEditorStore(state => state.courseView)
@@ -44,7 +45,7 @@ export function AutomationTab() {
     if (!rules.some(rule => rule.id === ruleId)) throw new Error('互动规则已不存在')
     return rules.map(rule => rule.id === ruleId ? { ...rule, ...patch } : rule)
   })
-  const remove = (ruleId: string) => commit(rules => rules.filter(rule => rule.id !== ruleId))
+  const remove = (ruleId: string) => commit(rules => removeComponentRule(rules, ruleId))
   const selectedNode = view.nodes.find(node => node.id === courseView.selectedInstanceId)
   const controller = Object.values(project.instances).find(instance => componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.navigation')
   const teacher = () => {
@@ -94,7 +95,7 @@ export function AutomationTab() {
         conditions: [...(scope === 'global' ? [{ type: 'scene.in' as const, sceneIds: [surfaceId] }] : []),
           ...(courseView.activeStateId ? [{ type: 'presentation.in' as const, stateIds: [courseView.activeStateId] }] : [])] }))}
       onDuplicateRule={ruleId => commit(rules => { const index = rules.findIndex(rule => rule.id === ruleId); if (index >= 0) rules.splice(index + 1, 0, duplicateComponentRule(rules[index]!)); return rules })}
-      onMoveRule={(ruleId, direction) => commit(rules => { const index = rules.findIndex(rule => rule.id === ruleId), next = index + direction; if (index >= 0 && next >= 0 && next < rules.length) [rules[index], rules[next]] = [rules[next]!, rules[index]!]; return rules })} />
+      onMoveRule={(ruleId, direction) => commit(rules => moveComponentRule(rules, ruleId, direction))} />
     {clickRulesOpen && (selectedNode ? <InteractionEditor {...shared} selectedNode={selectedNode} /> : <p role="status">请在画布选择一个对象，再编辑点击规则。</p>)}
   </div>
 }

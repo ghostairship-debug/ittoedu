@@ -27,7 +27,7 @@ async function fixture() {
     const filename = path.join(root, name)
     await fs.writeFile(filename, `original ${name}`)
     const snapshot = await host.open(filename)
-    await host.dispatch({ documentId: snapshot.documentId, epoch: snapshot.epoch, operationId: `edit-${name}`, baseRevision: snapshot.revision, actor: 'human',
+    await host.internalAPI.dispatch({ documentId: snapshot.documentId, epoch: snapshot.epoch, operationId: `edit-${name}`, baseRevision: snapshot.revision, actor: 'human',
       mutation: { type: 'command', command: { type: 'markdown.replace', source: `changed ${name}` } } })
   }
   const order: string[] = []

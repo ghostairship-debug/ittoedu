@@ -84,7 +84,7 @@ it('sends only catalog identity fields for batch Flow insertion, preparation, up
         surfaces: [{ id: 'flow-page', kind: 'flow', title: '正文', childIds: [] }], global: { underlay: [], overlay: [] } },
       resources: { assets: {}, components: {} } }
     let view = { project: model.project, activeDocumentId: 'flow-course', surfaceId: 'flow-page', selectedInstanceIds: [],
-      views: [{ documentId: 'flow-course', model }] } as unknown as CourseV10ViewState
+      views: [{ documentId: 'flow-course', model, surfaceId: 'flow-page', activeStateId: null, selectedInstanceIds: [], selectedInstanceId: null }] } as unknown as CourseV10ViewState
     const listeners = new Set<() => void>(), commands: CapturedComponentOperation[] = [], driver = new CourseV10Driver()
     const kernel = { bridge: { subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener) } },
       readView: () => view, readDocument: () => model.project, readResources: () => model.resources,
@@ -95,7 +95,7 @@ it('sends only catalog identity fields for batch Flow insertion, preparation, up
         commands.push(captured)
         const { documentId: _documentId, epoch: _epoch, ...command } = captured
         model = driver.apply(model, command) as typeof model
-        view = { ...view, project: model.project, views: [{ documentId: 'flow-course', model }] }
+        view = { ...view, project: model.project, views: [{ documentId: 'flow-course', model, surfaceId: 'flow-page', activeStateId: null, selectedInstanceIds: [], selectedInstanceId: null }] }
         listeners.forEach(listener => listener())
         return { status: 'applied', revision: model.project.revision }
       }, selectInstances: vi.fn(), setFeedback: vi.fn(),

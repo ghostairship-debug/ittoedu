@@ -13,7 +13,7 @@ import type { RecoverableDocumentFilePort } from '../../src/renderer/documentFil
 
 const original = '正文'
 const diagnosed = '正文\n\n$$\nx^2'
-afterEach(() => { cleanup(); vi.restoreAllMocks(); for (const card of elementCards.texts()) elementCards.closeText(card.id) })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); for (const card of elementCards.texts()) elementCards.closeText(card.key) })
 
 async function fixture() {
   const documentRef = { kind: 'file' as const, path: '/lesson/formula.md' }

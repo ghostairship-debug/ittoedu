@@ -8,8 +8,10 @@ import path from 'node:path'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { CourseV10DocumentBridge } from '../../src/renderer/documents/CourseV10DocumentBridge'
 import { createEditorStoreKernel } from '../../src/renderer/store/editorStoreKernel'
-import { createCrossSurfaceCommands, type CrossSurfaceCommandPorts } from '../../src/renderer/composition/crossSurfaceCommands'
-import { useEditorKeyboardRouter, type EditorKeyboardActionPorts } from '../../src/renderer/app/useEditorKeyboardRouter'
+import { createCrossSurfaceCommands } from '../../src/renderer/composition/crossSurfaceCommands'
+import { createCourseLifecycleSlice } from '../../src/renderer/store/slices/courseLifecycleSlice'
+import { createCourseStructureSlice } from '../../src/renderer/store/slices/courseStructureSlice'
+import { useEditorKeyboardRouter } from '../../src/renderer/app/useEditorKeyboardRouter'
 import { ComponentPropertiesEditor } from '../../src/renderer/ui/ComponentPropertiesEditor'
 import { IMAGE_DEFINITION, createImageData, imageDataSchema } from '../../src/components/image'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
@@ -39,14 +41,17 @@ it('undoes and redoes one ACKed checkbox property while preserving its focus and
     surfaces: [{ id: 'slide', kind: 'slide', title: '第一页', childIds: ['image'], designSize: { width: 1280, height: 720 } }],
     global: { underlay: [], overlay: [] }, assets: { 'image-asset': { id: 'image-asset', path: 'assets/image.png', filename: 'image.png', mimeType: 'image/png' } } }
   const service = new DocumentHostService(path.join(directory, 'recovery'))
-  const initial = await service.internalAPI.create({ kind: 'course-v10', project, resources: { assets: { 'image-asset': new Uint8Array([1]) }, components: {} } })
+  const initial = await service.internalAPI.create({ kind: 'course-v10', project, resources: { assets: { 'image-asset': new Uint8Array([1]) }, components: {} } }, '图片')
   const unavailable = async (): Promise<never> => { throw new Error('fixture has no dialogs') }
   const api: DocumentHostAPI = { ...service.internalAPI, bootstrapCourse: () => service.bootstrapCourse(), saveWithDialog: unavailable, close: unavailable,
     closeWithDialog: unavailable, discardRecovery: unavailable, subscribe: listener => service.subscribeEvents(listener) }
   const bridge = new CourseV10DocumentBridge(); await bridge.connect(api)
   dispose.push(async () => bridge.dispose())
   const feedback = vi.fn(), kernel = createEditorStoreKernel({ bridge, commit: feedback })
-  const commands = createCrossSurfaceCommands({ kernel, slide: {}, flow: {}, spatial: {}, shell: { read: () => ({ canvasMode: 'edit', editingTextNodeId: null }), patch: () => {} } } as CrossSurfaceCommandPorts)
+  const commands = createCrossSurfaceCommands({ kernel, slide: {}, flow: {}, spatial: {},
+    structure: createCourseStructureSlice(kernel, { readActiveLocationId: () => bridge.read().surfaceId }),
+    lifecycle: createCourseLifecycleSlice(kernel, { bridge, read: () => ({ projectPath: null, dirty: false }), patch: () => {} }),
+    shell: { read: () => ({ canvasMode: 'edit', editingTextNodeId: null }), patch: () => {} } })
   commands.selectNode('image')
   let propertyAck: ReturnType<typeof kernel.editCaptured> | undefined, history: Promise<boolean> | undefined
   const undo = vi.fn(() => { history = commands.undo() }), redo = vi.fn(() => { history = commands.redo() })
@@ -54,7 +59,8 @@ it('undoes and redoes one ACKed checkbox property while preserving its focus and
   function Properties() {
     const view = useSyncExternalStore(bridge.subscribe, bridge.read)
     useEditorKeyboardRouter({ isReadOnly: () => false, undo, redo, nudgeSelection, deleteSelectedNodes, selectedCount: () => 1,
-      captureDeleteSnapshot: vi.fn(), routeEditorAction: vi.fn() } as unknown as EditorKeyboardActionPorts)
+      captureDeleteSnapshot: vi.fn(), routeEditorAction: vi.fn(), copySelection: vi.fn(), pasteClipboard: vi.fn(),
+      duplicateSelection: vi.fn(), selectAll: vi.fn(), clearSelection: vi.fn(), saveProject: vi.fn(), newProject: vi.fn(), openProject: vi.fn() })
     return <ComponentPropertiesEditor definition={view.project!.definitions[IMAGE_DEFINITION.id]} node={view.project!.instances.image} onChange={value => {
       const target = kernel.captureTarget()
       propertyAck = kernel.editCaptured(kernel.capture([{ type: 'data.set', instanceId: 'image', path: [], value }], target))

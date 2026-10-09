@@ -1,3 +1,4 @@
+import { artifactDeliverySource } from '../../src/core/tools/HostArtifactTools'
 // @vitest-environment node
 import { expect, it, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
@@ -74,6 +75,14 @@ it('production task input freezes the opened current draft and its document vers
     const request = { runId: 'dirty-parent', jobId: 'delegate-current-draft', taskId: 'dirty-input', intent: {
       command: process.execPath, sources: ['numbers.txt'], outputs: ['current.json'], args: ['-e',
         'const fs=require("fs");const values=JSON.parse(fs.readFileSync("numbers.txt","utf8"));fs.writeFileSync("current.json",JSON.stringify({total:values.reduce((a,b)=>a+b,0)}));'] } }
+    await expect(services.taskInputs!.freeze('dirty-parent', [path.join(paths.root, 'outside.txt')])).rejects.toThrow()
+    if (process.platform !== 'win32') {
+      await expect(services.delegation!.prepareLocal!({ ...request, sources })).rejects.toThrow('仅支持 Windows')
+      await expect(services.jobs!.status({ runId: request.runId, jobId: request.jobId, kind: 'delegation' })).rejects.toMatchObject({ code: 'unknown-job' })
+      expect(await fs.readFile(filename, 'utf8')).toBe('[1]')
+      expect(host.registry.get(documentId).read()).toMatchObject({ dirty: true, revision: snapshot.revision })
+      return
+    }
     const preview = await services.delegation!.prepareLocal!({ ...request, sources })
     expect(preview.sources[0]!.version).toBe(sources[0]!.version)
     await services.delegation!.authorizeLocal!(request)
@@ -91,13 +100,17 @@ it('production task input freezes the opened current draft and its document vers
 }, 30_000)
 
 it('runs an installed native JSON task with stdin and frozen input, then reads and saves its actual result without replay', async () => {
-  expect(process.platform).toBe('win32')
   const paths = await fixture(), service = new DelegationJobService(paths)
   const jobs = new HostJobService({ delegation: service, images: {} as ImageGenerationService })
   const source = new TextEncoder().encode('[2,3,5]')
   const intent: LocalToolRunIntent = { command: process.execPath, cwd: 'data', sources: ['numbers.json'], outputs: ['summary.json'],
     stdin: '{"multiplier":4}', args: ['-e', 'const fs=require("fs"); const input=JSON.parse(fs.readFileSync("numbers.json","utf8")); let text="";process.stdin.on("data",x=>text+=x);process.stdin.on("end",()=>{const p=JSON.parse(text);const value={count:input.length,total:input.reduce((a,b)=>a+b,0)*p.multiplier};fs.writeFileSync("summary.json",JSON.stringify(value),{flag:"wx"});process.stdout.write("validated-json count="+value.count);});'] }
   const request = { ...identity('json'), jobId: `delegate-${documentDigest(['parent', 'json'])}`, intent }
+  if (process.platform !== 'win32') {
+    await expect(service.prepareLocal({ ...request, sources: [{ source: 'numbers.json', name: 'numbers.json', mimeType: 'application/json', version: 'source-v1', bytes: source }] })).rejects.toThrow('仅支持 Windows')
+    await expect(service.status('parent', request.jobId)).rejects.toMatchObject({ code: 'unknown-job' })
+    return
+  }
   const preview = await service.prepareLocal({ ...request, sources: [{ source: 'numbers.json', name: 'numbers.json', mimeType: 'application/json', version: 'source-v1', bytes: source }] })
   expect(preview).toMatchObject({ executable: await fs.realpath(process.execPath), stdinByteLength: 16,
     sources: [{ source: 'numbers.json', name: 'numbers.json', version: 'source-v1', byteLength: 7 }] })
@@ -125,7 +138,7 @@ it('runs an installed native JSON task with stdin and frozen input, then reads a
     cancel: (...args) => service.cancel(...args), cancelRun: run => service.cancelRun(run) }, artifacts: {
       lookup: (run, operation) => deliveries.lookup(operation, run), save: ({ grant, operationId, source: artifactSource, bytes, assertActive }) =>
         deliveries.deliver({ runId: grant.runId, operationId, workspaceRoot: paths.workspaceRoot, permission: 'workspace',
-          destination: artifactSource.destination, sourceKind: artifactSource.kind, sourceId: artifactSource.job, bytes, assertActive }),
+          destination: artifactSource.destination, ...artifactDeliverySource(artifactSource), bytes, assertActive }),
     } }, registry, { resolveImage: async () => { throw new Error('No document access') }, active() { throw new Error('No document access') },
     ownsDocument: () => false, provideImage: async () => { throw new Error('No document access') }, readImage: async () => { throw new Error('No document access') } })
   await host.beginRun({ runId: 'parent', actor: 'agent', documents: [], fileAccess: { permission: 'workspace', workspaceRoot: paths.workspaceRoot } })
@@ -144,6 +157,13 @@ it('runs an installed native JSON task with stdin and frozen input, then reads a
 it('reports actual stderr and nonzero exit, cancels a running process tree, and retains the original job when queried again', async () => {
   const paths = await fixture(), service = new DelegationJobService(paths)
   const failed = { ...identity('failure'), intent: { command: process.execPath, args: ['-e', 'process.stderr.write("invalid data");process.exit(7)'] } }
+  if (process.platform !== 'win32') {
+    await expect(service.prepareLocal({ ...failed, sources: [] })).rejects.toThrow('仅支持 Windows')
+    await expect(service.status('parent', failed.jobId)).rejects.toMatchObject({ code: 'unknown-job' })
+    await service.cancelRun('parent')
+    await expect(service.prepareLocal({ ...identity('late'), intent: { command: process.execPath }, sources: [] })).rejects.toThrow('父任务已停止')
+    return
+  }
   await service.prepareLocal({ ...failed, sources: [] }); service.authorizeLocal(failed); await service.startLocal(failed)
   expect(await service.wait('parent', failed.jobId, 10_000)).toMatchObject({ status: 'failed', exitCode: 7, artifacts: [] })
   expect((await service.logs('parent', failed.jobId)).entries.some(entry => entry.kind === 'stderr' && entry.message.includes('invalid data'))).toBe(true)

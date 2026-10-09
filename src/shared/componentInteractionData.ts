@@ -126,3 +126,31 @@ export function duplicateComponentRule(rule: InteractionRule): InteractionRule {
   if (next.trigger.type === 'animation.completed' && actions.has(next.trigger.actionId)) next.trigger.actionId = actions.get(next.trigger.actionId)!
   return next
 }
+
+/** Removing an action also removes its completion program, including later followers. */
+export function removeComponentRule(rules: readonly InteractionRule[], ruleId: string): InteractionRule[] {
+  if (!rules.some(rule => rule.id === ruleId)) throw new Error('互动规则已不存在')
+  const removed = new Set([ruleId]), actions = new Set<string>()
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const rule of rules) if (removed.has(rule.id)) for (const step of rule.actions) actions.add(step.id)
+    for (const rule of rules) if (!removed.has(rule.id) && rule.trigger.type === 'animation.completed' && actions.has(rule.trigger.actionId)) {
+      removed.add(rule.id); changed = true
+    }
+  }
+  return rules.filter(rule => !removed.has(rule.id))
+}
+
+/** Click rules and automation have separate lists in the editor; move within that list. */
+export function moveComponentRule(rules: readonly InteractionRule[], ruleId: string, direction: -1 | 1): InteractionRule[] {
+  const index = rules.findIndex(rule => rule.id === ruleId)
+  if (index < 0) throw new Error('互动规则已不存在')
+  const click = rules[index].trigger.type === 'node.click'
+  let next = index + direction
+  while (next >= 0 && next < rules.length && (rules[next].trigger.type === 'node.click') !== click) next += direction
+  if (next < 0 || next >= rules.length) return [...rules]
+  const result = [...rules], [current] = result.splice(index, 1)
+  result.splice(next, 0, current)
+  return result
+}

@@ -1,123 +1,49 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
-import { imageNodeSchema } from '../../src/shared/contracts/native-v1'
-import { createImageNode } from '../../src/core/tools/nativeNodeFactories'
-import { selectActiveScene, useEditorStore,
-  selectActiveCourseProjectDocument,
-  selectSelectedNodeId,
-  selectSlideSceneList,
-} from '../../src/renderer/store/editorStore'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { expect, it, vi } from 'vitest'
+import { createImageData, IMAGE_DEFINITION, imageDataSchema } from '../../src/components/image'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { courseAuthorData } from '../../src/renderer/media/commitCourseMediaAuthoring'
+import { useEditorStore } from '../../src/renderer/store/editorStore'
 import { PropertiesTab } from '../../src/renderer/ui/PropertiesTab'
-import { connectAssignedCourse, settleAssignedCourse, undoAssignedCourse } from '../helpers/triage-t5-courseHost'
+import { createV10StoreHost } from '../helpers/courseV10StoreHost'
 
-afterEach(cleanup)
-
-beforeEach(async () => {
-  await connectAssignedCourse()
+it('defaults current image data to no guides and rejects overflow, duplicate identities and more than sixteen areas', () => {
+  expect(imageDataSchema.parse({ assetId: 'art', originalAssetId: 'art' }).safeAreas).toEqual([])
+  const area = { id: 'subject', label: '主体', x: .1, y: .1, width: .8, height: .8 }
+  const data = createImageData('art')
+  for (const safeAreas of [[{ ...area, x: .7 }], [area, area], Array.from({ length: 17 }, (_, index) => ({ ...area, id: String(index) }))])
+    expect(imageDataSchema.safeParse({ ...data, safeAreas }).success).toBe(false)
 })
 
-async function addImage(): Promise<string> {
-  const store = useEditorStore.getState()
-  store.addImageNode({
-    id: 'asset-image',
-    filename: 'image.png',
-    mimeType: 'image/png',
-    kind: 'image',
-    path: 'assets/image.png',
-    byteLength: 4,
-    width: 320,
-    height: 180,
-  }, new Uint8Array([1, 2, 3, 4]))
-  await settleAssignedCourse()
-  return selectSelectedNodeId(useEditorStore.getState())!
-}
-
-describe('image safe-area metadata', () => {
-  it('defaults native image input to an empty safe-area list and rejects overflow', () => {
-    const image = createImageNode({ assetId: 'image' })
-    const legacy = structuredClone(image) as unknown as Record<string, unknown>
-    delete legacy.safeAreas
-    expect(imageNodeSchema.parse(legacy)).toMatchObject({ safeAreas: [] })
-
-    image.safeAreas = [{
-      id: 'subject',
-      label: '人物主体',
-      x: 0.7,
-      y: 0.1,
-      width: 0.5,
-      height: 0.8,
-    }]
-    expect(imageNodeSchema.safeParse(image)).toMatchObject({ success: false })
-  })
-
-  it('adds, edits, removes, and undoes a stable safe area from image properties', async () => {
-    const nodeId = await addImage()
+it('edits stable safe-area identities through current Properties, undoes geometry, removes guides and enforces the sixteen-area limit', async () => {
+  const project = createBlankCourseProjectV10('图片安全区')
+  project.definitions[IMAGE_DEFINITION.id] = IMAGE_DEFINITION
+  project.instances.image = { id: 'image', definitionId: IMAGE_DEFINITION.id, data: courseAuthorData(createImageData('art')),
+    frame: { width: 320, height: 180, transform: [1, 0, 0, 1, 40, 50] } }
+  project.surfaces[0].childIds.push('image'); project.assets.art = { id: 'art', path: 'assets/art.png', mimeType: 'image/png' }
+  const h = await createV10StoreHost(project, { assets: { art: new Uint8Array([1, 2, 3]) }, components: {} }), previous = useEditorStore.getState()
+  const areas = () => imageDataSchema.parse(h.model().project.instances.image.data).safeAreas
+  try {
+    await previous.connectCourseDocuments(h.api); useEditorStore.getState().courseKernel.selectInstances(['image'])
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
-
-    fireEvent.click(screen.getByRole('button', { name: '添加安全区' }))
-    await settleAssignedCourse()
-    let node = selectActiveScene(useEditorStore.getState()).nodes.find(
-      ({ id }) => id === nodeId,
-    )
-    expect(node?.type).toBe('image')
-    if (node?.type !== 'image') throw new Error('Expected image node')
-    expect(node.safeAreas).toEqual([expect.objectContaining({
-      id: expect.stringMatching(/^safe_area_/),
-      label: '安全区 1',
-      x: 0.1,
-      width: 0.8,
-    })])
-
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '添加安全区' })) })
+    await waitFor(() => expect(areas()).toHaveLength(1))
+    const areaId = areas()[0].id
+    expect(areas()[0]).toMatchObject({ id: expect.stringMatching(/^safe_area_/), label: '安全区 1', x: .1, width: .8 })
     const left = screen.getByRole('slider', { name: '左侧位置' })
-    fireEvent.change(left, { target: { value: '15' } })
-    fireEvent.pointerUp(left)
-    await settleAssignedCourse()
-    node = selectActiveScene(useEditorStore.getState()).nodes.find(
-      ({ id }) => id === nodeId,
-    )
-    if (node?.type !== 'image') throw new Error('Expected image node')
-    expect(node.safeAreas?.[0]!.x).toBe(0.15)
-
-    await undoAssignedCourse()
-    node = selectActiveScene(useEditorStore.getState()).nodes.find(
-      ({ id }) => id === nodeId,
-    )
-    if (node?.type !== 'image') throw new Error('Expected image node')
-    expect(node.safeAreas?.[0]!.x).toBe(0.1)
-
-    fireEvent.click(screen.getByRole('button', { name: '删除安全区 安全区 1' }))
-    await settleAssignedCourse()
-    node = selectActiveScene(useEditorStore.getState()).nodes.find(
-      ({ id }) => id === nodeId,
-    )
-    if (node?.type !== 'image') throw new Error('Expected image node')
-    expect(node.safeAreas).toEqual([])
-  })
-
-  it('does not let the editor exceed the 16-area schema limit', async () => {
-    const nodeId = await addImage()
-    useEditorStore.getState().updateNode(nodeId, {
-      safeAreas: Array.from({ length: 16 }, (_, index) => ({
-        id: `safe_area_${index}`,
-        label: `安全区 ${index + 1}`,
-        x: 0,
-        y: 0,
-        width: 1,
-        height: 1,
-      })),
-    })
-    await settleAssignedCourse()
-    render(<PropertiesTab onReplaceImage={vi.fn()} />)
-
-    const add = screen.getByRole('button', { name: '添加安全区' })
-    expect(add).toBeDisabled()
-    fireEvent.click(add)
-    const node = selectActiveScene(useEditorStore.getState()).nodes.find(
-      ({ id }) => id === nodeId,
-    )
-    expect(node?.type === 'image' ? node.safeAreas : []).toHaveLength(16)
-    expect(courseProjectDocumentSchema.safeParse(selectActiveCourseProjectDocument(useEditorStore.getState())!).success)
-      .toBe(true)
-  })
+    await act(async () => { fireEvent.change(left, { target: { value: '15' } }); fireEvent.pointerUp(left) })
+    await waitFor(() => expect(areas()[0]).toMatchObject({ id: areaId, x: .15 }))
+    await act(async () => { await useEditorStore.getState().courseBridge.undo() })
+    expect(areas()[0]).toMatchObject({ id: areaId, x: .1 })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '删除安全区 安全区 1' })) })
+    await waitFor(() => expect(areas()).toEqual([]))
+    const full = Array.from({ length: 16 }, (_, index) => ({ id: `guide-${index}`, label: `安全区 ${index + 1}`, x: 0, y: 0, width: 1, height: 1 }))
+    await act(async () => { await useEditorStore.getState().courseKernel.edit([{ type: 'data.set', instanceId: 'image', path: ['safeAreas'], value: courseAuthorData(full) }]) })
+    const add = screen.getByRole('button', { name: '添加安全区' }), before = structuredClone(h.first.read())
+    expect(add).toBeDisabled(); fireEvent.click(add); expect(h.first.read()).toEqual(before)
+    const reopened = h.driver.load(h.driver.serialize(h.model()))
+    if (reopened.kind !== 'course-v10') throw new Error('Expected a Course V10 archive')
+    expect(reopened.project).toEqual(h.model().project)
+    expect([...reopened.resources.assets.art]).toEqual([...h.model().resources.assets.art])
+  } finally { cleanup(); useEditorStore.getState().courseBridge.dispose(); useEditorStore.setState(previous, true); h.bridge.dispose() }
 })

@@ -1,3 +1,4 @@
+import { documentHostAPI } from '../helpers/documentHostAPI'
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -35,7 +36,7 @@ it('selects the page from card padding while retaining child controls, menus, dr
     frames: [{ id: 'camera', title: '局部镜头', pose: { x: 20, y: 30, zoom: 2 } }] } })
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-a0-page-card-'))
   const host = new DocumentHostService(directory), bridge = new CourseV10DocumentBridge()
-  const api = { ...host.internalAPI, bootstrapCourse: () => host.bootstrapCourse(), subscribe: listener => host.subscribeEvents(listener) } as DocumentHostAPI
+  const api = documentHostAPI(host)
   await bridge.connect(api)
   await bridge.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } })
   const documentId = bridge.read().activeDocumentId!

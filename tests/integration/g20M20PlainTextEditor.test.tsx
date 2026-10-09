@@ -8,7 +8,7 @@ import { PlainTextDocumentEditor, type PlainTextDocumentEditorHandle } from '../
 import { LessonDocumentEditor, type LessonDocumentEditorHandle } from '../../src/renderer/documentFiles/LessonDocumentEditor'
 import type { RecoverableDocumentFilePort } from '../../src/renderer/documentFiles/documentFileSession'
 import type { DocumentEvent, DocumentModel } from '../../src/shared/workbench/document'
-import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
+import { authoringDraftRecoverySchema, type AuthoringDraftRecovery, type DocumentHostAPI } from '../../src/shared/workbench/desktop'
 
 afterEach(cleanup)
 
@@ -32,6 +32,7 @@ it('M20-T02 mounted document editor commits its exact source through DocumentSes
       if (result.status !== 'saved') throw new Error('Save failed')
       return { ...input.binding, version: result.version.contentVersion }
     } } })
+  const authoringDrafts = new Map<string, AuthoringDraftRecovery>()
   const documents: DocumentHostAPI = {
     bootstrapCourse: async () => { throw new Error('unused') }, list: async () => registry.list(),
     create: async () => { throw new Error('unused') },
@@ -41,6 +42,9 @@ it('M20-T02 mounted document editor commits its exact source through DocumentSes
       return session.read()
     },
     read: async id => registry.get(id).read(), dispatch: operation => registry.get(operation.documentId).execute(operation),
+    readAuthoringDrafts: async id => { registry.get(id); return structuredClone(authoringDrafts.get(id) ?? null) },
+    writeAuthoringDrafts: async (id, drafts) => { registry.get(id); authoringDrafts.set(id, structuredClone(authoringDraftRecoverySchema.parse(drafts))) },
+    clearAuthoringDrafts: async id => { registry.get(id); authoringDrafts.delete(id) },
     lookup: async (id, operationId) => registry.get(id).lookupOperation(operationId), save: id => registry.save(id),
     saveWithDialog: async () => { throw new Error('unused') }, closeWithDialog: async () => true,
     observeFile: async id => { const binding = registry.get(id).read().binding; if (binding.kind !== 'file') throw new Error('Expected file binding'); return { bindingVersion: binding.bindingVersion, version, model: model(disk) } },

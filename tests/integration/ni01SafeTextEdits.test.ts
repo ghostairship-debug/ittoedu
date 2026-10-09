@@ -504,7 +504,7 @@ it.each([
   expect(session.read()).toMatchObject({ model: { source: expected }, undoDepth: 1 })
   expect(await gateway.previewTarget(runId, handle, 500)).toMatchObject({ text: replacement })
   expect(new TextDecoder().decode(driver.serialize(session.read().model))).toBe(expected)
-  if ('batchPrefix' in scenario) {
+  if (scenario.batchPrefix !== undefined) {
     const changes = session.committedChangesSince(0)[0].textChanges!
     expect(changes.aggregateMappings).toEqual([{ before: target, after: { kind: 'text-selection', fragments: [
       { target: { kind: 'markdown-range', from: expected.indexOf('甲'), to: expected.indexOf('甲') + 1 } },
@@ -550,7 +550,9 @@ it('compiles the declared TypeScript entry after public source replacement and k
   expect(await compiler.compile(input)).toMatchObject({ status: 'ready', cacheHit: false })
   expect(await compiler.compile(componentCompilationInputSchema.parse({ ...input, entryLanguage: 'javascript' }))).toMatchObject({ status: 'failed', cacheHit: false })
   expect(await compiler.compile(input)).toMatchObject({ status: 'ready', cacheHit: true })
-  const original = componentCompilationInputSchema.parse(componentCompilationInput(model.project, model.project.definitions['guoling.text'].implementation, model.resources))
+  const originalImplementation = model.project.definitions['guoling.text'].implementation
+  if (originalImplementation.kind !== 'source') throw new Error('Original source implementation required')
+  const original = componentCompilationInputSchema.parse(componentCompilationInput(model.project, originalImplementation, model.resources))
   expect(original.entryLanguage).toBe('javascript')
   expect(await compiler.compile(original)).toMatchObject({ status: 'ready', cacheHit: false })
 })

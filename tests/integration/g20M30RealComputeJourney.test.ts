@@ -16,7 +16,6 @@ import { ExecutionSettingsStore } from '../../src/main/workbench/providers/Execu
 import type { CredentialEncryptionPort } from '../../src/main/workbench/providers/providerCredentials'
 import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
 import type { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
-import type { ControlledBuildService } from '../../src/main/workbench/build/ControlledBuildService'
 
 const roots: string[] = []
 const servers: Server[] = []
@@ -164,7 +163,7 @@ it('M30 T1 runs the exact delivered Python source in real isolated compute and s
 
   const documents = new DocumentHostService(path.join(root, 'journals'))
   const compute = new ComputeJobService({ directory: path.join(root, 'jobs'), backend })
-  const jobs = new HostJobService({ compute, images: {} as ImageGenerationService, builds: {} as ControlledBuildService })
+  const jobs = new HostJobService({ compute, images: {} as ImageGenerationService })
   documents.tools.configureHostServices({ compute, jobs })
   const settings = new ExecutionSettingsStore({ directory: path.join(root, 'settings'), encryption: encryption() })
   const saved = await settings.saveConnection({ apiKey: 'fixture-secret', connection: {

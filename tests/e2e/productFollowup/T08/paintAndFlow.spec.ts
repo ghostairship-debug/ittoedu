@@ -1,3 +1,4 @@
+import { jsonValueSchema } from '../../../../src/shared/contracts/component-platform/schema'
 import { expect, test, type FrameLocator, type ElectronApplication, type Locator, type Page } from '@playwright/test'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -101,8 +102,8 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
   project.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
-  project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('局部原说明') }
-  project.instances.human = { id: 'human', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('人工浮层保持位置'),
+  project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(createTextComponentData('局部原说明')) }
+  project.instances.human = { id: 'human', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(createTextComponentData('人工浮层保持位置')),
     frame: { width: 220, height: 60, transform: [1, 0, 0, 1, 430, 180] }, style: { opacity: .6 }, flowPlacement: { space: 'paper', plane: 'overlay' } }
   project.instances['nested-group'] = { id: 'nested-group', definitionId: 'group', data: {}, childIds: ['nested-control'],
     frame: { width: 500, height: 220, transform: [1, 0, 0, 1, 120, 100] } }

@@ -18,7 +18,6 @@ import bundledSkills from '../../src/shared/generated/bundledSkills.json'
 import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
 import type { CredentialEncryptionPort } from '../../src/main/workbench/providers/providerCredentials'
 import type { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
-import type { ControlledBuildService } from '../../src/main/workbench/build/ControlledBuildService'
 
 /** Opt-in Owner-authorized real inference; fixture success cannot satisfy this test. */
 it.skipIf(process.env.GUOLING_R3_REAL_NATIVE !== '1')('delivers a real-model compute report and a sourced research report through the native services', async () => {
@@ -42,7 +41,7 @@ it.skipIf(process.env.GUOLING_R3_REAL_NATIVE !== '1')('delivers a real-model com
   const backend = new PodmanComputeBackend({ distro: 'Ubuntu', image: PINNED_PYTHON_IMAGE_ID })
   expect(await backend.availability()).toEqual({ available: true })
   const compute = new ComputeJobService({ directory: path.join(root, 'jobs'), backend })
-  const jobs = new HostJobService({ compute, images: {} as ImageGenerationService, builds: {} as ControlledBuildService })
+  const jobs = new HostJobService({ compute, images: {} as ImageGenerationService })
   const web = new WebResearchService({ searchProvider: new DeepSeekSearchProvider({ selection: () => ({ connection: saved.connection, model: 'deepseek-flash' }), credential: conn => settings.resolveCredential(conn) }) })
   const documents = new DocumentHostService(path.join(root, 'journals'))
   documents.tools.configureHostServices({ compute, jobs, web, skills: new BundledSkillService(bundledSkills), beginRun: async grant => { web.beginRun(grant.runId) }, stopRun: async runId => { await web.stopRun(runId) } })

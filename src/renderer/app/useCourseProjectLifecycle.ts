@@ -195,7 +195,10 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
     if (!file) return
     if (!same(identity)) throw new Error('选择文件期间文档已改变，已取消打开')
     await service().open(file.path)
-    await ref.current.confirmProjectOpen(file.confirmationId)
+    try { await ref.current.confirmProjectOpen(file.confirmationId) }
+    catch (error) {
+      ref.current.commitStatus(`工程已打开，可继续编辑；最近工程记录确认失败，请稍后重新打开：${error instanceof Error ? error.message : String(error)}`)
+    }
   }) }, [replace])
   const openRecentProject = useCallback((path: string, options?: CourseProjectReplacementOptions) => replace(() => service().open(path), options), [replace])
   const saveProject = useCallback(async (saveAs = false, options?: CourseProjectOperationOptions): Promise<boolean> => {

@@ -1,3 +1,5 @@
+import { imageDataSchema } from '../../src/components/image/data'
+import { requireWorkspaceRoot } from '../helpers/workspaceGrant'
 // @vitest-environment node
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -59,7 +61,7 @@ it('cold opens a saved document and saves its ready image through public artifac
       readReadyResourceFromJob: images.readReadyResourceFromJob.bind(images) },
       artifacts: { lookup: (runId, operationId) => currentHost.artifactDeliveries.lookup(operationId, runId),
         save: ({ grant, operationId, source, bytes: supplied, assertActive }) => currentHost.artifactDeliveries.deliver({
-          runId: grant.runId, operationId, workspaceRoot: grant.fileAccess!.workspaceRoot, permission: grant.fileAccess!.permission,
+          runId: grant.runId, operationId, workspaceRoot: requireWorkspaceRoot(grant.fileAccess), permission: grant.fileAccess!.permission,
           destination: source.destination, ...artifactDeliverySource(source),
           bytes: supplied, assertActive,
         }) },
@@ -102,7 +104,7 @@ it('cold opens a saved document and saves its ready image through public artifac
     const applied = await host.internalAPI.read(currentDocumentId)
     if (applied.model.kind !== 'course-v10') throw new Error('Expected course')
     const instanceId = applied.model.project.surfaces[0]!.childIds[0]!
-    const assetId = applied.model.project.instances[instanceId]!.data.assetId as string
+    const assetId = imageDataSchema.parse(applied.model.project.instances[instanceId]!.data).assetId
     expect(await sharp(applied.model.resources.assets[assetId]).raw().toBuffer({ resolveWithObject: true })).toEqual(pixels)
 
     await begin(host, 'no-document')
@@ -159,7 +161,7 @@ it('saves a fetched task image through the existing artifact writer and retains 
     beginRun: async grant => { openImages.beginRun(grant.runId) }, stopRun: runId => { openImages.stopRun(runId) },
     artifacts: { lookup: (runId, operationId) => host.artifactDeliveries.lookup(operationId, runId),
       save: ({ grant, operationId, source, bytes: supplied, assertActive }) => host.artifactDeliveries.deliver({
-        runId: grant.runId, operationId, workspaceRoot: grant.fileAccess!.workspaceRoot, permission: grant.fileAccess!.permission,
+        runId: grant.runId, operationId, workspaceRoot: requireWorkspaceRoot(grant.fileAccess), permission: grant.fileAccess!.permission,
         destination: source.destination, ...artifactDeliverySource(source), bytes: supplied, assertActive,
       }) },
   })

@@ -40,6 +40,9 @@ async function host() {
     async create(model, name) { return (await registry.create(model, name)).read() },
     async open() { throw new Error('This test uses untitled documents') },
     async read(id) { return registry.get(id).read() },
+    async readAuthoringDrafts() { return null },
+    async writeAuthoringDrafts() {},
+    async clearAuthoringDrafts() {},
     async dispatch(operation) {
       operations.push(structuredClone(operation))
       await controls.before?.(operation)

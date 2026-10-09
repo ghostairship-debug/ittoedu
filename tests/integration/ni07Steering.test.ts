@@ -95,7 +95,7 @@ async function fixture(boundary: 'provider' | 'approval' | 'question' | 'finish'
     expectedRevision: conversation.revision, submissionId: randomUUID(), text: '先修改原范围再继续', ...(boundary === 'approval' ? { permission: 'ask' } : {}), documents: [{ documentId: original.documentId, epoch: original.epoch, revision: original.revision, writable: [target], selection: [target] }] }) as ExecutionSendResult
   await gap.promise
   const current = await service.operate({ type: 'conversation', workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId }) as { revision: number }
-  const adjustment: ExecutionSendInput = { type: 'send', workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId, expectedRevision: current.revision,
+  const adjustment: ExecutionSendInput & { type: 'send' } = { type: 'send', workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId, expectedRevision: current.revision,
     submissionId: randomUUID(), text: '后续改为 STEER，保留人工前缀', mode: 'adjust', ...(boundary === 'approval' ? { permission: 'ask' as const } : {}), documents: [{ documentId: other.documentId, epoch: other.epoch, revision: other.revision, writable: [{ kind: 'document' }] }] }
   return { root, documents, original, other, service, options, started, adjustment, release, payloads, approvals, newApproval, requestGap, releaseRequest }
 }

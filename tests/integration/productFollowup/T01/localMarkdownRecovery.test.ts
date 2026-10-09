@@ -6,7 +6,7 @@ import { expect, it } from 'vitest'
 import { DocumentHostService } from '../../../../src/main/workbench/DocumentHostService'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
 import { componentProjectFiles } from '../../../../src/core/projectFiles/componentPlatform'
-import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
+import { TEXT_DEFINITION , textDataEdit } from '../../../../src/components/text/adapters'
 import { createTextComponentData } from '../../../../src/components/text/data'
 
 it('a locally unsupported Markdown table retains the neighboring live Flow object and recoverable original source', async () => {
@@ -16,7 +16,7 @@ it('a locally unsupported Markdown table retains the neighboring live Flow objec
     const project = createBlankCourseProjectV10('局部诊断')
     project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
     project.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
-    project.instances.paragraph = { id: 'paragraph', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('可用正文') }
+    project.instances.paragraph = { id: 'paragraph', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('可用正文')).value }
     project.instances.interaction = { id: 'interaction', definitionId: 'web', data: { html: '<details><summary>问答</summary>答案</details>' },
       frame: { width: 300, height: 130, transform: [1, 0, 0, 1, 20, 30] } }
     project.surfaces.push({ id: 'flow', kind: 'flow', title: '讲义', childIds: ['paragraph', 'interaction'] })

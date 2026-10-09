@@ -158,7 +158,7 @@ it('uses the actual Flow destination control and preserves identity and world fr
     frame:{...frame,transform:[1.5,.4,.7,1.2,-65,-158]},flowLayout:{width:'content-width',wrap:'none'}})
   expect(body.instances.floating.flowPlacement).toBeUndefined()
   expect(body.instances.neighbor).toEqual(project.instances.neighbor)
-  fireEvent.click(screen.getByRole('button',{name:'转为浮层',exact:true}))
+  fireEvent.click(screen.getByRole('button',{name:/^转为浮层$/}))
   await waitFor(()=>expect(useEditorStore.getState().courseKernel.readDocument().instances.floating.flowPlacement).toEqual({space:'paper',plane:'overlay'}))
   const floating=useEditorStore.getState().courseKernel.readDocument()
   expect(floating.instances.floating.frame).toEqual(frame)

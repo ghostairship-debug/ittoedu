@@ -97,6 +97,8 @@ export function paintCompositionDocument(root: HTMLElement, content: DocumentCon
         element = placeholderElement(dom, '组件', block.title || block.name)
         element.style.height = `${block.height ?? 240}px`
         break
+      case 'course-instance':
+        throw new Error(`正文实例 ${block.id} 需要正式组件宿主渲染，不能作为页面文档内的旧组件挂载`)
     } } catch (cause) {
       const error = cause instanceof Error ? cause : new Error(String(cause))
       element = dom.createElement('aside')

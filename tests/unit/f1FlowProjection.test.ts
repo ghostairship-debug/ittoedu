@@ -45,7 +45,10 @@ it.each(['instance-override','shared-rebound'] as const)('keeps %s text and tabl
   const edits=[...flowProfessionalTextStyleEdits(project,'body',{bold:true}),...flowProfessionalTextStyleEdits(project,'table',{color:'#123456'})]
   expect(edits.every(edit=>edit.type==='data.set')).toBe(true)
   const edited=applyComponentOperation(project,captureComponentOperation(project,edits))
-  expect(textComponentDataSchema.parse(edited.instances.body.data).content.inlines[0].style?.bold).toBe(true)
+  const bodyInline = textComponentDataSchema.parse(edited.instances.body.data).content.inlines[0]
+  expect(bodyInline.type).toBe('text')
+  if (bodyInline.type !== 'text') throw new Error('Expected professional text inline')
+  expect(bodyInline.style?.bold).toBe(true)
   const changed=parseTableData(edited.instances.table.data)
   expect(changed.columns[0].header!.inlines[0].style?.color).toBe('#123456');expect(changed.rows[0].cells[0].content!.inlines[0].style?.color).toBe('#123456')
   expect(edited.instances.body.implementationOverride).toEqual(project.instances.body.implementationOverride);expect(edited.instances.table.implementationOverride).toEqual(project.instances.table.implementationOverride)

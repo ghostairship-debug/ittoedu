@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createTeacherControllerData, createTeacherControllerRuntimeImplementation } from '../../src/components/teacher-controller'
 import type { ComponentInstance, ComponentRuntimeScope, TeacherControllerPort, TeacherControllerSnapshot } from '../../src/shared/contracts/component-platform'
-import type { TeacherControllerData } from '../../src/components/teacher-controller'
+import { jsonValueSchema } from '../../src/shared/contracts/component-platform/schema'
 
 async function fixture(interactive: boolean | undefined, defaultCollapsed: boolean) {
   const root = document.createElement('div'); document.body.append(root)
@@ -19,8 +19,8 @@ async function fixture(interactive: boolean | undefined, defaultCollapsed: boole
   const scope: ComponentRuntimeScope = { runScopeId: 'authoring', instanceId: 'controller', generation: 1, signal: controller.signal,
     isActive: () => !controller.signal.aborted, cleanup: dispose => { cleanups.push(dispose) }, target: () => null,
     events: { emit() {}, subscribe: () => () => {} }, state: { get: () => undefined, set() {}, subscribe: () => () => {} } }
-  const instance: ComponentInstance<TeacherControllerData> = { id: 'controller', definitionId: 'guoling.navigation',
-    data: { ...createTeacherControllerData(), defaultCollapsed, backgroundAssetId: 'texture' },
+  const instance: ComponentInstance = { id: 'controller', definitionId: 'guoling.navigation',
+    data: jsonValueSchema.parse({ ...createTeacherControllerData(), defaultCollapsed, backgroundAssetId: 'texture' }),
     frame: { width: 880, height: 64, transform: [1, 0, 0, 1, 200, 638] } }
   const frame = structuredClone(instance.frame)
   const mounted = await createTeacherControllerRuntimeImplementation(port).mount({ root, instance, scope, resources: { url: id => id === 'texture' ? 'blob:controller-texture' : undefined } })

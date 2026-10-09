@@ -6,20 +6,18 @@ import path from 'node:path'
 import { BundledSkillService } from '../../src/main/workbench/skills/BundledSkillService'
 import { ScopedSkillService } from '../../src/main/workbench/skills/ScopedSkillService'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
-import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
-import { createDefaultTeacherControllerPackage } from '../../src/shared/defaultTeacherControllerComponent'
-import { parseWebComposition } from '../../src/main/workbench/htmlImport/parseWebComposition'
-import { slidePageFiles } from '../../src/core/projectFiles/projectFileView'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { componentProjectFiles } from '../../src/core/projectFiles/componentPlatform'
 const directories: string[] = []
 afterEach(async () => { for (const dir of directories.splice(0)) await fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) })
 
-it('reading the course method exposes project files before opening a course and keeps read-only authority', async () => {
+it('reading the course method retains the current project tools and their original read-only authority before opening a course', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-course-method-')); directories.push(root)
   const host = new DocumentHostService(path.join(root, 'journals'))
-  const project = createBlankCourseProject({ title: '四季' })
-  const controller = createDefaultTeacherControllerPackage()
-  const session = await host.registry.create({ kind: 'course-v9', project, resources: { assets: {},
-    components: { [`${controller.manifest.id}@${controller.manifest.version}`]: controller.files } } }, '四季.h5lesson')
+  const project = createBlankCourseProjectV10('四季')
+  const resources = { assets: {}, components: {} }
+  const page = componentProjectFiles(project, resources).find(value => value.kind === 'page')!
+  const session = await host.registry.create({ kind: 'course-v10', project, resources }, '四季.h5lesson')
   const initialRevision = session.read().revision
   const skills = new BundledSkillService({ manifest: { skills: [
     { name: 'orchestrate-courseware', description: '创作', path: 'skills/orchestrate-courseware/SKILL.md', references: [], version: 'one' },
@@ -29,32 +27,34 @@ it('reading the course method exposes project files before opening a course and 
   host.tools.configureHostServices({ skills, observations: {
     observe: async input => {
       observations++
-      expect(input.locationId).toBe(slidePageFiles(project)[0]!.locationId)
+      expect(input.locationId).toBe(project.surfaces[0].id)
       return { source: 'isolated-published', identity: { documentId: input.documentId, epoch: input.epoch,
         revision: input.revision, locationId: input.locationId }, coverage: { width: 1, height: 1 },
         structure: [], diagnostics: [], image: { resourceId: 'page-picture', mimeType: 'image/png', width: 1, height: 1, byteLength: 1 } }
     },
     readResource: async () => ({ mimeType: 'image/png', bytes: new Uint8Array([1]) }),
-  }, projectFiles: { parsePage: parseWebComposition,
+  }, projectFiles: {
     openProject: async ({ fileAccess }) => ({ documentId: session.documentId, writable: fileAccess?.permission !== 'read-only' }) } })
   for (const permission of ['workspace', 'read-only'] as const) {
     const runId = `method-${permission}`
     await host.tools.beginRun({ runId, actor: 'agent', documents: [], fileAccess: { permission, workspaceRoot: root } })
-    expect((await host.tools.describeRun(runId)).map(tool => tool.name)).not.toContain('project.write')
+    const initialNames = (await host.tools.describeRun(runId)).map(tool => tool.name)
+    expect(initialNames).toEqual(expect.arrayContaining(['project.list', 'project.read']))
+    expect(initialNames.includes('project.apply')).toBe(permission !== 'read-only')
     expect(await host.tools.execute(runId, 'method', { name: 'skills.read', input: { skill: 'orchestrate-courseware' } }))
       .toMatchObject({ kind: 'read' })
     const names = (await host.tools.describeRun(runId)).map(tool => tool.name)
     expect(names).toEqual(expect.arrayContaining(['project.list', 'project.read']))
     expect(names).not.toContain('html.import')
     expect(names.some(name => name.startsWith('build.'))).toBe(false)
-    expect(names.includes('project.write')).toBe(permission !== 'read-only')
+    expect(names.includes('project.apply')).toBe(permission !== 'read-only')
     expect(await host.tools.execute(runId, 'list', { name: 'project.list', input: { project: '四季.h5lesson' } }))
-      .toMatchObject({ kind: 'read', data: { files: expect.arrayContaining([expect.objectContaining({ path: 'theme.css' })]) } })
-    expect(await host.tools.execute(runId, 'observe', { name: 'view.observe', input: { path: slidePageFiles(project)[0]!.path } }))
+      .toMatchObject({ kind: 'read', data: { files: expect.arrayContaining([expect.objectContaining({ path: page.path })]) } })
+    expect(await host.tools.execute(runId, 'observe', { name: 'view.observe', input: { path: page.path } }))
       .toMatchObject({ kind: 'read', data: { source: 'isolated-published' } })
-    expect(await host.tools.execute(runId, 'missing-page', { name: 'view.observe', input: { path: 'slides/99-不存在.html' } }))
+    expect(await host.tools.execute(runId, 'missing-page', { name: 'view.observe', input: { path: 'slides/99-不存在.json' } }))
       .toMatchObject({ kind: 'error', code: 'target-not-found' })
-    if (permission === 'read-only') expect(await host.tools.execute(runId, 'write', { name: 'project.write', input: { path: 'theme.css', content: ':root { color: red }' } }))
+    if (permission === 'read-only') expect(await host.tools.execute(runId, 'write', { name: 'project.apply', input: { path: page.path, content: '{}' } }))
       .toMatchObject({ kind: 'error' })
     await host.tools.stop(runId)
   }

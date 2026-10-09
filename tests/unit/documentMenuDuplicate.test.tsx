@@ -1,3 +1,4 @@
+import type { DocumentContent } from '../../src/shared/document/content'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { SharedDocumentEditor } from '../../src/renderer/document/SharedDocumentEditor'
@@ -30,7 +31,7 @@ it('duplicates a real chapter menu through the clipboard owner with a new formal
     return true
   })
   const ui = render(<SharedDocumentEditor document={projectFlowDocument(project, 'flow')} revision="0" target="flow"
-    clipboardContext={(_references, content) => createCourseDocumentClipboardContext({ documentId: 'doc', project, resources, roots: content.blocks.map(block => block.id) })}
+    clipboardContext={(_references: unknown, content: DocumentContent) => createCourseDocumentClipboardContext({ documentId: 'doc', project, resources, roots: content.blocks.map(block => block.id) })}
     clipboardResourcePort={context => createFlowDocumentResourcePort({ target, source: readCourseDocumentClipboardContext(context) })}
     renderObject={(_block, host) => { host.textContent = '互动对象' }} onChange={commit} onDraft={() => {}} onUndo={() => {}} onRedo={() => {}} />)
   try {

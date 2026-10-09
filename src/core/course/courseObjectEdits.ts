@@ -342,6 +342,18 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
     edits.push({ type: 'instance.insert', container: group.owner, index: sameContainer(group.owner, destination.container) ? destination.index : containerChildIds(project, group.owner).length, instances: first ? instances : [], rootIds: group.roots })
     first = false
   }
+  // A same-world copy includes only relationships inside the selected graph.
+  // Paths, camera frames and zoom policies remain owned by the original world.
+  const destinationSurface = project.surfaces.find(surface => surface.id === destinationSurfaceId)
+  const sourceSurface = source.project.surfaces.find(surface => surface.id === destinationSurfaceId)
+  if (!moving && sameDocument && destinationOwner?.kind === 'surface' && destinationSurface?.kind === 'spatial' && sourceSurface?.kind === 'spatial'
+    && destinationSurface.spatial && sourceSurface.spatial) {
+    const relations = sourceSurface.spatial.relations?.filter(relation => idMap.has(relation.sourceInstanceId) && idMap.has(relation.targetInstanceId))
+      .map(relation => ({ ...structuredClone(relation), id: crypto.randomUUID(),
+        sourceInstanceId: mapId(relation.sourceInstanceId), targetInstanceId: mapId(relation.targetInstanceId) })) ?? []
+    if (relations.length) edits.push({ type: 'spatial.set', surfaceId: destinationSurface.id,
+      spatial: { ...structuredClone(destinationSurface.spatial), relations: [...destinationSurface.spatial.relations ?? [], ...relations] } })
+  }
   let copiedBehaviorId: string | undefined
   if (externalBehaviors.length) {
     let owner = destination.container

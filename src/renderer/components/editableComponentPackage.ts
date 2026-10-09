@@ -5,6 +5,7 @@ import { componentSupportsScope } from '../../shared/componentCapabilities'
 import { UserFacingError } from '../../shared/errors'
 import type { EmbeddedComponentPackageMeta } from '../../shared/contracts/component-v4'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
+import type { CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import {
   parseComponentPackageFiles,
   validateComponentRuntimeSource,
@@ -35,7 +36,7 @@ export function rewriteComponentDefinitionId(
 
 export function validateEditableComponentPackage(
   packageData: ComponentPackageData,
-  project: CourseProjectDocument | null,
+  project: CourseProjectV10 | null,
   additionalScopes: ReadonlyArray<'scene' | 'global'> = [],
 ): void {
   const parsed = componentManifestSchema.safeParse(packageData.manifest)

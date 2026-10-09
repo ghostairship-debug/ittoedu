@@ -1,3 +1,4 @@
+import { documentHostAPI } from '../helpers/documentHostAPI'
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
@@ -82,7 +83,7 @@ it('updates course logic from a named presentation state across base/question/an
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-a0-logic-state-'))
   const host = new DocumentHostService(directory), bridge = new CourseV10DocumentBridge()
   fixtures.push({ bridge, directory })
-  const api = { ...host.internalAPI, bootstrapCourse: () => host.bootstrapCourse(), subscribe: listener => host.subscribeEvents(listener) } as DocumentHostAPI
+  const api = documentHostAPI(host)
   await bridge.connect(api)
   await bridge.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } })
   const documentId = bridge.read().activeDocumentId!

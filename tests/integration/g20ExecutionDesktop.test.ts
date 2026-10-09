@@ -7,7 +7,7 @@ import path from 'node:path'
 import sharp from 'sharp'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
-import { createTextComponentData } from '../../src/components/text/data'
+import { createTextComponentData, textComponentDataSchema } from '../../src/components/text/data'
 import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { plainDocumentText } from '../../src/shared/document/content'
 import { readEditableTargetContent } from '../../src/core/tools/ToolTargets'
@@ -737,13 +737,13 @@ it('NI01 completes a real Flow card aggregate, follows its current receipt and u
   expect((await waitForRun(h.service, second.run.runId)).status).toBe('completed')
   await waitForCompletedConversation(h.service, space.workspace.workspaceId, conversation.conversationId, second.run.runId)
   const written = session.read(); if (written.model.kind !== 'course-v10') throw new Error('Expected V10')
-  expect(plainDocumentText(written.model.project.instances.a.data.content as any)).toBe('前更甲后')
-  expect(plainDocumentText(written.model.project.instances.b.data.content as any)).toBe('前更乙后')
+  expect(plainDocumentText(textComponentDataSchema.parse(written.model.project.instances.a.data).content)).toBe('前更甲后')
+  expect(plainDocumentText(textComponentDataSchema.parse(written.model.project.instances.b.data).content)).toBe('前更乙后')
   expect(await h.service.operate({ type: 'element-revert', submissionId: secondId, direction: 'undo' })).toMatchObject({ status: 'applied', change: { state: 'undone' } })
   const after = session.read(); if (after.model.kind !== 'course-v10') throw new Error('Expected V10')
   expect(after.undoDepth).toBe(written.undoDepth + 1)
-  expect(plainDocumentText(after.model.project.instances.a.data.content as any)).toBe('前新甲后')
-  expect(plainDocumentText(after.model.project.instances.b.data.content as any)).toBe('前新乙后')
+  expect(plainDocumentText(textComponentDataSchema.parse(after.model.project.instances.a.data).content)).toBe('前新甲后')
+  expect(plainDocumentText(textComponentDataSchema.parse(after.model.project.instances.b.data).content)).toBe('前新乙后')
   expect(after.model.project.instances.a.frame?.width).toBe(999)
   expect(after.model.project.instances.c.data).toEqual(project.instances.c.data)
   expect(after.model.project.surfaces[0].childIds[0]).toBe('prefix')

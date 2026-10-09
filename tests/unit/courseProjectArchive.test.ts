@@ -7,9 +7,14 @@ import { describe, expect, it, vi } from 'vitest'
 import { pptxImportFixture, pptxInheritanceFixture, pptxCommonMappingFixture, pptxEditableChartsFixture } from '../fixtures/pptxImport'
 import { parsePptxImport } from '@/renderer/project/pptxImport'
 import { planPptxImportTransaction } from '@/renderer/project/pptxImportTransaction'
-import { buildCoursePptx } from '@/renderer/export/course/buildCoursePptx'
+import { buildComponentPptx } from '@/renderer/export/componentPlatform/pptx'
+import { createBlankCourseProjectV10 } from '@/core/course/createCourseProjectV10'
+import { CourseV10Driver } from '@/core/drivers/CourseV10Driver'
+import { DocumentSession } from '@/core/documents/DocumentSession'
+import { createCourseProjectV10Archive, openCourseProjectV10Archive } from '@/core/drivers/codecs/courseProjectV10Archive'
+import { courseProjectV10Schema } from '@/shared/contracts/component-platform/schema'
+import type { DocumentOperation } from '@/shared/workbench/document'
 import { openPptxPackage } from '@/renderer/project/pptxPackage'
-import { applyEditorTransactionStep } from '@/renderer/authoring/editorTransaction'
 import * as assetManager from '@/renderer/project/assetManager'
 import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
 import { createImageNode } from '@/core/tools/nativeNodeFactories'
@@ -39,6 +44,45 @@ const NOW = '2026-08-17T12:00:00.000Z'
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), '../fixtures/course-project-v9')
 const DIAGRAM_BYTES = new Uint8Array([137, 80, 78, 71, 1, 2, 3])
 
+async function stagePptxImport(draft: Awaited<ReturnType<typeof parsePptxImport>>, title: string) {
+  const project = createBlankCourseProjectV10(title)
+  // This import fixture isolates professional objects from the default controller.
+  project.instances = {}; project.definitions = {}; project.global.overlay = []
+  const resources = { assets: {}, components: {} }
+  let rejectAppend = false
+  const append = vi.fn(async () => { if (rejectAppend) throw new Error('recovery write rejected') })
+  const session = await DocumentSession.create({ documentId: 'pptx-import', epoch: 'epoch',
+    binding: { kind: 'untitled', suggestedName: `${title}.h5lesson` }, model: { kind: 'course-v10', project, resources } },
+    new CourseV10Driver(), { append, save: async () => { throw new Error('Archive bytes are verified below') } })
+  const step = planPptxImportTransaction({ documentId: session.documentId, epoch: 'epoch', project, resources,
+    editingProject: project, activeStateId: null, surfaceId: project.surfaces[0].id, instanceId: null, instanceIds: [] }, draft, title)
+  const execute = (mutation: DocumentOperation['mutation']) => session.execute({ documentId: session.documentId,
+    epoch: 'epoch', baseRevision: session.read().revision, operationId: crypto.randomUUID(), actor: 'human', mutation })
+  const read = () => {
+    const model = session.read().model
+    if (model.kind !== 'course-v10') throw new Error('V10 model required')
+    return model
+  }
+  return { project, resources, session, append, read, execute, rejectNextAppend: () => { rejectAppend = true },
+    apply: () => execute({ type: 'command', command: { type: step.type, edits: step.edits, expected: step.expected } }) }
+}
+
+function reopenCurrent(model: ReturnType<Awaited<ReturnType<typeof stagePptxImport>>['read']>) {
+  const reopened = openCourseProjectV10Archive(createCourseProjectV10Archive({ project: model.project, resources: model.resources }))
+  // JSON canonically represents both frame zero and rotated frame -0 as zero.
+  expect(reopened.project).toEqual(JSON.parse(JSON.stringify(model.project)))
+  expect(Object.keys(reopened.resources.assets)).toEqual(Object.keys(model.resources.assets))
+  for (const [id, bytes] of Object.entries(model.resources.assets)) expect(Array.from(reopened.resources.assets[id])).toEqual(Array.from(bytes))
+  expect(reopened.resources.components).toEqual(model.resources.components)
+  return reopened
+}
+
+async function importCurrent(draft: Awaited<ReturnType<typeof parsePptxImport>>, title: string) {
+  const staged = await stagePptxImport(draft, title)
+  expect(await staged.apply()).toMatchObject({ status: 'applied' })
+  return staged
+}
+
 describe('S2 restricted PPTX import atomic archive transaction', () => {
   it('imports editable charts from matching workbook/cache data and rejects conflicts or missing points', async () => {
     const bytes = await pptxEditableChartsFixture()
@@ -54,14 +98,12 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
       expect(item.content.data.title).toBe('阅读调查')
       expect(item.content.data.style.legendPosition).toBe('bottom')
     }
-    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-    const initial = { document: project, resources: { assetFiles: {}, componentPackages: {} } }
-    const step = planPptxImportTransaction(project, draft, '图表课件')
-    const applied = applyEditorTransactionStep(initial, step, 'forward')
-    const reopened = openCourseProjectArchive(createCourseProjectArchive({ project: applied.document, assetFiles: {}, componentFiles: {} }))
-    expect(reopened.project).toEqual(applied.document)
-    expect(applyEditorTransactionStep(applied, step, 'inverse')).toEqual(initial)
-    const exported = await buildCoursePptx({ project: reopened.project, assetFiles: {}, components: {} })
+    const staged = await importCurrent(draft, '图表课件')
+    const reopened = reopenCurrent(staged.read())
+    expect(await staged.execute({ type: 'undo' })).toMatchObject({ status: 'applied' })
+    expect(staged.read().project).toEqual({ ...staged.project, revision: 2 })
+    expect(staged.read().resources).toEqual(staged.resources)
+    const exported = await buildComponentPptx(reopened.project)
     const roundtrip = await parsePptxImport(exported.bytes)
     const roundtripCharts = roundtrip.slides.flatMap(slide => slide.items).filter(item => item.kind === 'native' && item.content.nativeType === 'chart')
     expect(roundtripCharts).toHaveLength(4)
@@ -88,8 +130,8 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
     expect(items[3]!.frame.height).toBeCloseTo(6.4999475)
     expect(items[4]).toMatchObject({ content: { data: { shapeType: 'rounded-rectangle', style: { cornerRadius: 25, lineStyle: 'dotted' } } } })
     expect(items[5]).toMatchObject({ content: { data: { shapeType: 'rectangle' } } })
-    const project = planPptxImportTransaction(createBlankCourseProject(), draft, '普通映射').nextDocument
-    expect(openCourseProjectArchive(createArchiveFixture({ project, assetFiles: {}, componentFiles: {} })).project).toEqual(project)
+    const staged = await importCurrent(draft, '普通映射')
+    reopenCurrent(staged.read())
   })
   it('still reports multi-character justified paragraphs and unknown shape adjustments', async () => {
     const files = unzipSync(pptxCommonMappingFixture())
@@ -135,20 +177,21 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
     expect(table.content.data.rows.map(row => row.cells.map(c => c.text))).toEqual([['分数', '含义'], ['1/2', '平均分成两份，取一份']])
     expect(table.content.data.columns.map(c => c.width)).toEqual([288, 672])
     expect(draft.issues.every(i => i.type === '表格样式')).toBe(true)
-    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-    const step = planPptxImportTransaction(project, draft, '继承课件')
-    const initial = { document: project, resources: { assetFiles: {}, componentPackages: {} } }
-    const applied = applyEditorTransactionStep(initial, step, 'forward')
-    const surface = applied.document.surfaces.at(-1)!
-    expect(surface.surfaceLayerItems).toHaveLength(4)
-    expect(surface.surfaceLayerItems.map(e => e.visibility.locationIds.length)).toEqual([2, 2, 1, 1])
-    expect(applied.document.surfaces[0]).toEqual(project.surfaces[0])
-    expect(applied.document.globalLayerItems).toEqual(project.globalLayerItems)
-    expect(applied.document.revision).toBe(project.revision + 1)
-    courseProjectDocumentSchema.parse(applied.document)
-    const reopened = openCourseProjectArchive(createCourseProjectArchive({ project: applied.document, assetFiles: {}, componentFiles: {} }))
-    expect(reopened.project).toEqual(applied.document)
-    expect(applyEditorTransactionStep(applied, step, 'inverse')).toEqual(initial)
+    const staged = await importCurrent(draft, '继承课件'), applied = staged.read()
+    expect(applied.project.global.underlay).toHaveLength(4)
+    expect(applied.project.global.underlay.map(id => {
+      const visibility = applied.project.instances[id].visibility
+      if (!visibility || visibility.mode !== 'include') throw new Error('Imported decoration must have an explicit page scope')
+      return visibility.surfaceIds.length
+    })).toEqual([2, 2, 1, 1])
+    expect(applied.project.surfaces[0]).toEqual(staged.project.surfaces[0])
+    expect(applied.project.global.overlay).toEqual(staged.project.global.overlay)
+    expect(applied.project.revision).toBe(staged.project.revision + 1)
+    courseProjectV10Schema.parse(applied.project)
+    reopenCurrent(applied)
+    expect(await staged.execute({ type: 'undo' })).toMatchObject({ status: 'applied' })
+    expect(staged.read().project).toEqual({ ...staged.project, revision: 2 })
+    expect(staged.read().resources).toEqual(staged.resources)
   })
   it('expands nested ordinary group transforms and keeps source order', async () => {
     const files = unzipSync(pptxImportFixture())
@@ -169,7 +212,8 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
       const draft = await parsePptxImport(zipSync(files))
       expect(draft.issues).toEqual([])
       expect(draft.slides[0]!.items[2]).toMatchObject({ content: { nativeType: 'image', data: { crop: { left: 0.1, top: 0.2, right: 0.15, bottom: 0.05 } } } })
-      courseProjectDocumentSchema.parse(planPptxImportTransaction(createBlankCourseProject(), draft, '裁剪').nextDocument)
+      const staged = await importCurrent(draft, '裁剪')
+      courseProjectV10Schema.parse(reopenCurrent(staged.read()).project)
     } finally { decoder.mockRestore() }
   })
   it('reports merged tables instead of silently changing the cell structure', async () => {
@@ -205,7 +249,8 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
       }
       expect(Math.min(item.frame.width, item.frame.height)).toBeGreaterThan(item.content.data.style.borderWidth)
     }
-    courseProjectDocumentSchema.parse(planPptxImportTransaction(createBlankCourseProject(), draft, '线条').nextDocument)
+    const staged = await importCurrent(draft, '线条')
+    courseProjectV10Schema.parse(reopenCurrent(staged.read()).project)
   })
   it('imports an adjusted flipped elbow connector without changing its bend or direction', async () => {
     const files = unzipSync(pptxImportFixture())
@@ -232,8 +277,8 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
     const draft = await parsePptxImport(bytes)
     expect(draft.slides).toHaveLength(2)
     expect(draft.slides.map(s => s.items.filter(i => i.kind === 'native' && i.content.nativeType === 'text').length)).toEqual([1, 1])
-    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-    expect(planPptxImportTransaction(project, draft, '正常 PPTX').nextDocument.locations).toHaveLength(3)
+    const staged = await importCurrent(draft, '正常 PPTX')
+    expect(staged.read().project.surfaces).toHaveLength(3)
   })
   it('imports editable text, shape and media with one revision, reversible sidecar and archive reopen', async () => {
     // Browser decoding is covered by the real-host test; this unit targets XML and atomic archive semantics.
@@ -247,30 +292,32 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
       expect(text.content.data.text).toBe('知识 😀')
       expect(text.content.data.runs[0]!.end).toBe(4)
       expect(text.frame).toMatchObject({ x: 100, y: 100, width: 1000, height: 200 })
-      const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-      const original = structuredClone(project)
-      const step = planPptxImportTransaction(project, draft, '导入课件')
-      const initial = { document: project, resources: { assetFiles: {}, componentPackages: {} } }
-      const applied = applyEditorTransactionStep(initial, step, 'forward')
-      expect(applied.document.revision).toBe(project.revision + 1)
-      expect(applied.document.locations).toHaveLength(project.locations.length + 1)
-      expect(Object.keys(applied.resources.assetFiles)).toHaveLength(1)
-      courseProjectDocumentSchema.parse(applied.document)
-      const reopened = openCourseProjectArchive(createCourseProjectArchive({ project: applied.document, assetFiles: applied.resources.assetFiles, componentFiles: {} }))
-      expect(reopened.project).toEqual(applied.document)
-      expect(reopened.assetFiles).toEqual(applied.resources.assetFiles)
-      expect(applyEditorTransactionStep(applied, step, 'inverse')).toEqual(initial)
-      expect(project).toEqual(original)
+      const staged = await stagePptxImport(draft, '导入课件'), original = structuredClone(staged.project)
+      const initial = staged.session.read()
+      expect(await staged.apply()).toMatchObject({ status: 'applied' })
+      const applied = staged.read()
+      expect(applied.project.revision).toBe(staged.project.revision + 1)
+      expect(applied.project.surfaces).toHaveLength(staged.project.surfaces.length + 1)
+      expect(Object.keys(applied.resources.assets)).toHaveLength(1)
+      courseProjectV10Schema.parse(applied.project)
+      reopenCurrent(applied)
+      expect(staged.session.read().undoDepth).toBe(1)
+      expect(await staged.execute({ type: 'undo' })).toMatchObject({ status: 'applied' })
+      expect(staged.read().project).toEqual({ ...staged.project, revision: 2 })
+      expect(staged.read().resources).toEqual(staged.resources)
+      expect(await staged.execute({ type: 'redo' })).toMatchObject({ status: 'applied' })
+      expect(staged.read().project.instances).toEqual(applied.project.instances)
+      expect(staged.read().resources).toEqual(applied.resources)
+      expect(staged.project).toEqual(original)
 
-      for (const fault of ['document', 'sidecar']) {
-        let current = initial
-        const broken = fault === 'document' ? { ...step, get nextDocument(): typeof project { throw new Error('document rejected') } }
-          : { ...step, resourceChanges: { assetFileChanges: [{ assetId: 'fault', get after(): Uint8Array { throw new Error('sidecar rejected') } }] } }
-        expect(() => { current = applyEditorTransactionStep(current, broken, 'forward') }).toThrow('rejected')
-        expect(current).toBe(initial)
-        expect(current.document).toEqual(original)
-        expect(current.resources.assetFiles).toEqual({})
-      }
+      // A durable append failure must expose neither the staged objects nor their bytes/history.
+      const rejected = await stagePptxImport(draft, '拒绝导入'), rejectedInitial = rejected.session.read()
+      rejected.rejectNextAppend()
+      expect(await rejected.apply()).toMatchObject({ status: 'failed', code: 'recovery-write-failed' })
+      expect(rejected.session.read()).toEqual(rejectedInitial)
+      expect(rejected.read().resources.assets).toEqual({})
+      expect(rejected.append).toHaveBeenCalledTimes(2)
+      expect(initial.undoDepth).toBe(0)
     } finally { decoder.mockRestore() }
   })
   it('rejects unreadable archives but retains highly compressed content and reports unsupported objects', async () => {
@@ -321,7 +368,7 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
       ]))
     } finally { decoder.mockRestore() }
   })
-  it('does not keep a half-converted shape/text object and refuses an entirely empty result', async () => {
+  it('does not keep a half-converted shape/text object and retains an editable empty page with precise object warnings', async () => {
     const files = unzipSync(pptxImportFixture())
     files['ppt/slides/slide1.xml'] = strToU8(strFromU8(files['ppt/slides/slide1.xml']!)
       .replace('<a:noFill/>', '<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>')
@@ -330,7 +377,15 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
     expect(draft.slides[0]!.items).toHaveLength(1)
     expect(draft.slides[0]!.items[0]).toMatchObject({ kind: 'native', content: { nativeType: 'shape', data: { shapeType: 'ellipse' } } })
     files['ppt/slides/slide1.xml'] = strToU8(strFromU8(files['ppt/slides/slide1.xml']!).replace(/<p:sp>[\s\S]*?<\/p:sp>/g, '<p:graphicFrame/>'))
-    await expect(parsePptxImport(zipSync(files))).rejects.toThrow('无可导入内容')
+    const empty = await parsePptxImport(zipSync(files))
+    expect(empty.slides).toEqual([expect.objectContaining({ sourcePage: 1, title: '导入演示', backgroundColor: '#f0f5ff', items: [] })])
+    expect(empty.issues).toEqual([
+      expect.objectContaining({ page: 1, type: 'graphicFrame', message: expect.stringContaining('对象 1') }),
+      expect.objectContaining({ page: 1, type: 'graphicFrame', message: expect.stringContaining('对象 2') }),
+    ])
+    const staged = await importCurrent(empty, '待完善页面'), reopened = reopenCurrent(staged.read())
+    expect(reopened.project.surfaces.at(-1)).toMatchObject({ kind: 'slide', title: '导入演示', childIds: [], background: { mode: 'own', color: '#f0f5ff' } })
+    expect(reopened.project.surfaces).toHaveLength(2)
   })
 })
 

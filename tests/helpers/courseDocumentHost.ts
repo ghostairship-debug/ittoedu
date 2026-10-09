@@ -3,7 +3,7 @@ import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { CourseV10DocumentBridge } from '../../src/renderer/documents/CourseV10DocumentBridge'
 import { createCourseProjectContent } from '../../src/renderer/store/slices/courseLifecycleSlice'
 import type { CourseProjectLifecyclePorts } from '../../src/renderer/app/useCourseProjectLifecycle'
-import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
+import { authoringDraftRecoverySchema, type AuthoringDraftRecovery, type DocumentHostAPI } from '../../src/shared/workbench/desktop'
 import type { DocumentEvent, DocumentModel, DocumentPersistence, DurableDocumentState } from '../../src/shared/workbench/document'
 
 export function deferred<T = void>() {
@@ -18,6 +18,7 @@ export async function createCourseDocumentHost() {
   const bridge = new CourseV10DocumentBridge()
   const disk = new Map<string, Uint8Array>()
   const durable = new Map<string, DurableDocumentState>()
+  const authoringDrafts = new Map<string, AuthoringDraftRecovery>()
   const listeners = new Set<(event: DocumentEvent) => void>()
   const observed = new Set<string>()
   const controls: {
@@ -65,6 +66,18 @@ export async function createCourseDocumentHost() {
     async bootstrapCourse() { return registry.get(startupId).read() },
     async list() { return registry.list() },
     async read(documentId) { return registry.get(documentId).drain() },
+    async readAuthoringDrafts(documentId) {
+      registry.get(documentId)
+      return structuredClone(authoringDrafts.get(documentId) ?? null)
+    },
+    async writeAuthoringDrafts(documentId, drafts) {
+      registry.get(documentId)
+      authoringDrafts.set(documentId, structuredClone(authoringDraftRecoverySchema.parse(drafts)))
+    },
+    async clearAuthoringDrafts(documentId) {
+      registry.get(documentId)
+      authoringDrafts.delete(documentId)
+    },
     async create(input, suggestedName) {
       const session = await registry.create(input, suggestedName)
       observe(session.documentId)
@@ -106,7 +119,7 @@ export async function createCourseDocumentHost() {
       observe(session.documentId)
       return session.read()
     },
-    async discardRecovery(documentId) { durable.delete(documentId) },
+    async discardRecovery(documentId) { durable.delete(documentId); authoringDrafts.delete(documentId) },
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } },
   }
   const documents: NonNullable<CourseProjectLifecyclePorts['documents']> = {

@@ -3,7 +3,6 @@ import { afterEach, expect, it } from 'vitest'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-// @ts-expect-error jsdom is a Vitest-only fixture and does not ship declarations here.
 import { JSDOM } from 'jsdom'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { HtmlSourceEditService } from '../../src/main/workbench/htmlPreview/HtmlSourceEditService'
@@ -73,7 +72,7 @@ it('edits ordinary two-column HTML through its document writer and retains scope
   expect(structure.rules.find(rule => rule.selector === '.card' && !rule.context.length)?.declarations).toContain('background: #fff8e6')
   const executable = source.slice(source.lastIndexOf('<script>'), source.lastIndexOf('</script>') + '</script>'.length)
   expect(reopenedSource).toContain(executable)
-  const dom = new JSDOM(reopenedSource, { runScripts: 'dangerously' }) as { window: Window & { close(): void } }
+  const dom = new JSDOM(reopenedSource, { runScripts: 'dangerously' })
   expect(dom.window.document.querySelector('#live-title')?.textContent).toBe('十四天观察计划')
   expect(dom.window.getComputedStyle(dom.window.document.querySelector('#left')!).backgroundColor).toBe('rgb(255, 248, 230)')
   expect(dom.window.getComputedStyle(dom.window.document.querySelector('#right')!).padding).toBe('32px')

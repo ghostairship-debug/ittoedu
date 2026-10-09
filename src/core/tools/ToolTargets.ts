@@ -160,6 +160,7 @@ export function courseInstanceSlotPath(data: unknown, slot: DocumentSlot): strin
   return ['rows', rowIndex, 'cells', slot.columnId]
 }
 /** Join only the selected fragments; syntax in source gaps never becomes writable text. */
+export function textSelectionTarget<T extends ToolTarget>(model: DocumentModel, targets: readonly T[]): T | Extract<ToolTarget, { kind: 'text-selection' }>
 export function textSelectionTarget(model: DocumentModel, targets: readonly ToolTarget[]): ToolTarget {
   if (!targets.length) throw new Error('选区为空，不会扩大到整份文档。')
   if (targets.length === 1 && (model.kind !== 'markdown' || targets[0].kind === 'text-selection')) return targets[0]
@@ -181,7 +182,7 @@ export function textSelectionTarget(model: DocumentModel, targets: readonly Tool
   return { kind: 'text-selection', fragments }
 }
 /** Uses the mature Flow document projection and its visible slot order, including section children. */
-export function flowTextSelectionTarget(model: DocumentModel, surfaceId: string, selection: Extract<DocumentSelection, { kind: 'text' }>, stateId?: string | null): ToolTarget {
+export function flowTextSelectionTarget(model: DocumentModel, surfaceId: string, selection: Extract<DocumentSelection, { kind: 'text' }>, stateId?: string | null): Extract<ToolTarget, { kind: 'course-instance' | 'text-selection' }> {
   if (model.kind !== 'course-v10') throw new Error('当前文档不是 Project V10')
   const project = resolveComponentPresentation(model.project, surfaceId, stateId ?? null)
   const entries: { blockId: string; key: string; length: number; barrier?: boolean }[] = []
@@ -198,7 +199,7 @@ export function flowTextSelectionTarget(model: DocumentModel, surfaceId: string,
   const forward = a < b || a === b && selection.anchor.offset <= selection.head.offset
   const start = forward ? selection.anchor : selection.head, end = forward ? selection.head : selection.anchor
   const selected = entries.slice(Math.min(a, b), Math.max(a, b) + 1)
-  const targets: TextFragmentTarget[] = selected.map((entry, index): TextFragmentTarget => {
+  const targets = selected.map((entry, index): Extract<TextFragmentTarget, { kind: 'course-instance' }> => {
     if (entry.barrier) throw new Error('选区内包含独立对象，请使用对象内容入口；不会跳过对象修改其它文字')
     const instance = project.instances[entry.blockId]
     const slot: DocumentSlot = entry.key.startsWith('item:') ? { kind: 'item', itemId: entry.key.slice(5) }

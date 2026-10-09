@@ -5,7 +5,7 @@ import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { DocumentProjection, DocumentExactAckUnknownError } from '../../src/renderer/documents/DocumentProjection'
 import { CourseV10DocumentBridge } from '../../src/renderer/documents/CourseV10DocumentBridge'
-import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
+import { authoringDraftRecoverySchema, type AuthoringDraftRecovery, type DocumentHostAPI } from '../../src/shared/workbench/desktop'
 import type { DocumentEvent, DocumentOperation } from '../../src/shared/workbench/document'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform'
 
@@ -27,12 +27,28 @@ async function host() {
     global: { underlay: [], overlay: [] }, assets: {} }
   const session = await registry.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'close.h5lesson', true)
   const listeners = new Set<(event: DocumentEvent) => void>()
-  session.subscribe(event => { for (const listener of listeners) listener(structuredClone(event)) })
+  const authoringDrafts = new Map<string, AuthoringDraftRecovery>()
+  session.subscribe(event => {
+    if (event.type === 'closed') authoringDrafts.delete(event.documentId)
+    for (const listener of listeners) listener(structuredClone(event))
+  })
   const controls: { cancel: boolean; beforeDispatch?(operation: DocumentOperation): Promise<void>; afterClose?(): void } = { cancel: false }
   const unused = async (): Promise<never> => { throw new Error('Outside close lifecycle fixture') }
   const api: DocumentHostAPI = {
     async bootstrapCourse() { return session.read() }, async list() { return registry.list() },
     create: unused, open: unused, async read(id) { return registry.get(id).read() },
+    async readAuthoringDrafts(id) { registry.get(id); return structuredClone(authoringDrafts.get(id) ?? null) },
+    async writeAuthoringDrafts(id, input) {
+      const snapshot = registry.get(id).read(), model = snapshot.model, drafts = authoringDraftRecoverySchema.parse(input)
+      if (model.kind !== 'course-v10' || drafts.advanced.some(record => record.documentId !== id
+        || record.epoch !== snapshot.epoch || record.projectId !== model.project.id)
+        || drafts.properties.some(record => {
+          const binding: unknown = JSON.parse(record.bindingKey)
+          return !Array.isArray(binding) || binding[0] !== id || binding[1] !== snapshot.epoch
+        })) throw new Error('Draft does not belong to the current V10 session')
+      authoringDrafts.set(id, structuredClone(drafts))
+    },
+    async clearAuthoringDrafts(id) { registry.get(id); authoringDrafts.delete(id) },
     async dispatch(operation) { await controls.beforeDispatch?.(operation); return registry.get(operation.documentId).execute(operation) },
     async lookup(id, operationId) { return registry.get(id).lookupOperation(operationId) },
     save: unused, saveWithDialog: unused, observeFile: unused, reconcileFile: unused,
@@ -54,19 +70,23 @@ describe('V10 close lifecycle', () => {
   it('publishes no transient error on normal close and keeps a canceled view editable', async () => {
     const h = await host(), bridge = new CourseV10DocumentBridge(), errors: string[] = []
     await bridge.connect(h.api)
+    // The Bridge keeps one host subscription; its document Projection owns another.
+    const connectedSubscriptions = h.listeners.size
+    expect(connectedSubscriptions).toBe(2)
     const stop = bridge.subscribe(() => { if (bridge.read().error) errors.push(bridge.read().error!) })
     try {
       h.controls.cancel = true
       expect(await bridge.close(h.session.documentId)).toBe(false)
-      expect(h.listeners.size).toBe(1)
+      expect(h.listeners.size).toBe(connectedSubscriptions)
       await bridge.edit([{ type: 'data.set', instanceId: 'text', path: ['text'], value: 'after cancel' }])
       expect((await bridge.drain())[0]).toMatchObject({ revision: 1, undoDepth: 1 })
       h.controls.cancel = false
-      h.controls.afterClose = () => { expect(errors).toEqual([]); expect(h.listeners.size).toBe(0) }
+      h.controls.afterClose = () => { expect(errors).toEqual([]); expect(h.listeners.size).toBe(connectedSubscriptions - 1) }
       expect(await bridge.close(h.session.documentId)).toBe(true)
       expect(bridge.read()).toMatchObject({ activeDocumentId: null, documents: [], error: null })
       expect(errors).toEqual([])
     } finally { stop(); bridge.dispose() }
+    expect(h.listeners.size).toBe(0)
   })
 
   it('retains an unacknowledged edit when Main closes before its dispatch resolves', async () => {

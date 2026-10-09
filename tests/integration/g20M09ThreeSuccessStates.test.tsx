@@ -56,7 +56,7 @@ async function fixture() {
   const conversation = await conversations.createConversation({ workspaceId: 'space' })
   const document = await documents.internalAPI.create({ kind: 'markdown', source: 'OLD', resources: { assets: {}, components: {} } }, 'draft.md')
   const saves = installDocumentSaveEvents({ documents, execution: {
-    events, conversations, appendExternalEvent: input => events.append(input),
+    events, conversations, appendExternalEvent: async input => { await events.append(input) },
   } })
   const run = async (content: string) => {
     const engine = new ExecutionEngine({ registry: documents.registry, gateway: documents.tools,

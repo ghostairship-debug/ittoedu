@@ -34,8 +34,8 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); dom.window.close(
 function measureFields() {
   // JSDOM has no layout engine. Registration geometry is supplied here; the
   // real runtime, data parser, author edit planner and saved format are used.
-  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function () {
-    const root = (this as Element).hasAttribute('data-test-professional-root')
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    const root = this.hasAttribute('data-test-professional-root')
     return { x: root ? 0 : 30, y: root ? 0 : 40, left: root ? 0 : 30, top: root ? 0 : 40,
       width: root ? 1120 : 160, height: root ? 400 : 28, right: root ? 1120 : 190, bottom: root ? 400 : 68, toJSON() {} }
   })
@@ -57,10 +57,17 @@ async function fixture(project: CourseProjectV10, resources = emptyResources()) 
   const session = await registry.create({ kind: 'course-v10', project, resources }, 'fields.h5lesson')
   session.subscribe(event => listeners.forEach(listener => listener(event)))
   const bridge = new CourseV10DocumentBridge()
-  await bridge.connect({ bootstrapCourse: async () => session.read(), read: async () => session.read(),
+  const unavailable = async (): Promise<never> => { throw new Error('No file service in this author-field fixture') }
+  const api: DocumentHostAPI = {
+    list: async () => [session.read()], create: unavailable, open: unavailable, save: unavailable, saveWithDialog: unavailable,
+    observeFile: unavailable, reconcileFile: unavailable, close: unavailable, closeWithDialog: unavailable,
+    recoverable: unavailable, restore: unavailable, discardRecovery: unavailable,
+    readAuthoringDrafts: async () => null, writeAuthoringDrafts: unavailable, clearAuthoringDrafts: unavailable,
+    bootstrapCourse: async () => session.read(), read: async () => session.read(),
     dispatch: async operation => session.execute(operation), lookup: async (_id, operationId) => session.lookupOperation(operationId),
     subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener) } },
-  } as DocumentHostAPI)
+  }
+  await bridge.connect(api)
   const compiler = createEsbuildComponentCompiler(), diagnostics: string[] = []
   const load = compileFunction('return import(url)', ['url'], { importModuleDynamically: constants.USE_MAIN_CONTEXT_DEFAULT_LOADER })
   const world = new ComponentPlatformRuntime('professional-fields', { mode: 'edit', report: message => diagnostics.push(message),

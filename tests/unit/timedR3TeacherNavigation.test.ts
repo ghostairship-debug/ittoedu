@@ -49,7 +49,7 @@ it('replays the actual reveal recipe once in its retained scene while preserving
   const world = new ComponentPlatformRuntime('r3-local-replay', { teacherController: navigation, resolveSource: prepare,
     report: message => diagnostics.push(message), builtins: new Map<string, ComponentRuntimeImplementation>([['r3-probe', { mount(context) {
       scopes.set(context.instance.id, context.scope)
-      const off = context.interactions!.subscribeTrigger({ type: 'scene.enter' }, () => enters.set(context.instance.id, (enters.get(context.instance.id) ?? 0) + 1))
+      const off = context.interactions!.subscribeTrigger({ type: 'scene.enter' }, () => { enters.set(context.instance.id, (enters.get(context.instance.id) ?? 0) + 1) })
       context.scope.cleanup(off)
       return { update() {}, dispose() { off(); disposed(context.instance.id) } }
     } }]]) })

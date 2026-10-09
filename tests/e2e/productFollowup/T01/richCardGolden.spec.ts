@@ -1,3 +1,4 @@
+import { jsonValueSchema } from '../../../../src/shared/contracts/component-platform/schema'
 import { expect, test, type ElectronApplication } from '@playwright/test'
 import { createServer } from 'node:http'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
@@ -5,7 +6,7 @@ import { join, resolve } from 'node:path'
 import { CourseV10Driver } from '../../../../src/core/drivers/CourseV10Driver'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
 import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
-import { createFormulaComponentData, createTextComponentData, type TextComponentData } from '../../../../src/components/text/data'
+import { createFormulaComponentData, createTextComponentData, textComponentDataSchema } from '../../../../src/components/text/data'
 import { modelToolWireName } from '../../../../src/main/workbench/providers/OpenAIChatProvider'
 import { closeSelectionApp, launchSelectionApp, openSelectionFile, readSelectionDocument, setupSelectionUI } from '../../helpers/g20SelectionHarness'
 import { chooseM23Workspace } from '../../helpers/g20M23Harness'
@@ -20,9 +21,9 @@ test('actual rich card rewrites from material, preserves links formulas and neig
     { type: 'text', text: '正方形面积', style: { bold: true }, link: { href: 'https://example.org/source' } },
     { type: 'text', text: '：原说明 ' }, createFormulaComponentData('kept-formula', 'x^2').formula, { type: 'text', text: '。' },
   ] })
-  project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: original }
-  project.instances.tail = { id: 'tail', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('未选正文保留') }
-  project.instances.overlay = { id: 'overlay', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('人工定位保留'),
+  project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(original) }
+  project.instances.tail = { id: 'tail', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(createTextComponentData('未选正文保留')) }
+  project.instances.overlay = { id: 'overlay', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(createTextComponentData('人工定位保留')),
     frame: { width: 180, height: 60, transform: [1, 0, 0, 1, 470, 220] }, style: { opacity: .65 }, flowPlacement: { space: 'paper', plane: 'overlay' } }
   project.surfaces = [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body', 'tail', 'overlay'] }]
   writeFileSync(join(workspace, filename), new CourseV10Driver().serialize({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }))
@@ -87,15 +88,15 @@ test('actual rich card rewrites from material, preserves links formulas and neig
     await expect.poll(async () => (await readSelectionDocument(page, opened.documentId)).undoDepth).toBe(1)
     const committed = await readSelectionDocument(page, opened.documentId)
     if (committed.model.kind !== 'course-v10') throw new Error('V10 required')
-    const inlines = (committed.model.project.instances.body.data as TextComponentData).content.inlines
+    const inlines = textComponentDataSchema.parse(committed.model.project.instances.body.data).content.inlines
     expect(inlines.some(value => value.link?.href === 'https://example.org/source')).toBe(true)
-    expect(inlines.find(value => value.type === 'math' && value.latex === 'x^2')?.formulaId).toBe('kept-formula')
+    expect(inlines.find(value => value.type === 'math' && value.latex === 'x^2')).toMatchObject({ type: 'math', formulaId: 'kept-formula' })
     expect(inlines.some(value => value.type === 'text' && value.text.includes('对话说明'))).toBe(false)
     expect(committed.model.project.instances.tail).toEqual(project.instances.tail)
     expect(committed.model.project.instances.overlay).toEqual(project.instances.overlay)
     expect(requests).toHaveLength(2)
     await frame.locator('.course-light-tools').getByRole('button', { name: '撤销', exact: true }).click()
-    await expect.poll(async () => (await readSelectionDocument(page, opened.documentId)).model).toMatchObject({ project: { instances: { body: { data: original } } } })
+    await expect.poll(async () => (await readSelectionDocument(page, opened.documentId)).model).toMatchObject({ project: { instances: { body: { data: jsonValueSchema.parse(original) } } } })
     await frame.locator('.course-light-tools').getByRole('button', { name: '重做', exact: true }).click()
     await expect.poll(async () => (await readSelectionDocument(page, opened.documentId)).model).toMatchObject({ kind: 'course-v10', project: {
       instances: committed.model.project.instances, definitions: committed.model.project.definitions, surfaces: committed.model.project.surfaces,

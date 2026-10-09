@@ -5,7 +5,7 @@ import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
-import { createTextComponentData } from '../../src/components/text/data'
+import { createTextComponentData, textComponentDataSchema } from '../../src/components/text/data'
 import { createTableData } from '../../src/components/table/data'
 import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { continueDocumentTargets } from '../../src/main/workbench/execution/continuationTargets'
@@ -140,7 +140,7 @@ it('reverts separate Flow rich-text fragments as one canonical batch and keeps a
   expect(after.model.project.instances.a.frame?.width).toBe(999)
   expect(await tracker.revert('submission', 'redo')).toMatchObject({ status: 'applied', change: { state: 'applied' } })
   const redone = session.read(); if (redone.model.kind !== 'course-v10') throw new Error('Expected V10')
-  expect(plainDocumentText(redone.model.project.instances.a.data.content as any)).toBe('前新甲后')
+  expect(plainDocumentText(textComponentDataSchema.parse(redone.model.project.instances.a.data).content)).toBe('前新甲后')
   expect(redone.model.project.instances.a.frame?.width).toBe(999)
   tracker.dispose()
 })

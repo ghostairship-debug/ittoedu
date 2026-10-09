@@ -1,19 +1,17 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
-import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
-import { locateCourseLayer } from '../../src/core/drivers/course/layerProperties'
 import { CourseEditorChromeContext } from '../../src/renderer/documents/CourseEditorChromeContext'
 import { useContextMenu, type MenuCommand } from '../../src/renderer/editing/commands/CommandMenu'
 import { multiObjectCommands, singleObjectCommands, type ObjectCommandPorts } from '../../src/renderer/editing/commands/objectCommands'
 import { requestObjectContextMenu } from '../../src/renderer/editing/commands/objectContextMenu'
 import { selectActiveCourseLocationId, selectSelectedNodeId, selectSelectedNodeIds, useEditorStore } from '../../src/renderer/store/editorStore'
 import { NativeSelectionContext } from '../../src/renderer/workbench/NativeSelectionContext'
-import { createCourseStoreHost } from '../helpers/courseStoreHost'
+import { createCourseDocumentHost } from '../helpers/courseDocumentHost'
 
 const store = () => useEditorStore.getState()
 const previousDesktopAPI = window.desktopAPI
 afterEach(() => {
-  cleanup()
+  cleanup(); if (store().courseView.project) store().cancelTextEdit(); store().courseBridge.dispose()
   Object.defineProperty(window, 'desktopAPI', { configurable: true, value: previousDesktopAPI })
 })
 
@@ -40,9 +38,7 @@ it('M21 lists one object\'s commands once, keeping unavailable ones in place wit
   // An object owned elsewhere can still be copied and pasted from; everything else says why not.
   const blocked = singleObjectCommands(state({ disabledReason: '此对象属于母版' }), ports())
   expect(reasons(blocked)).toMatchObject({ 'object.copy': '此对象属于母版', 'object.paste': null, 'object.hide': '此对象属于母版' })
-})
 
-it('M21 lists a multi-selection\'s commands with the counts they need', () => {
   const items = multiObjectCommands({ count: 2, unlocked: 2, allHidden: false, duplicate: null, remove: vi.fn(), distribute: vi.fn(), setLocked: vi.fn(), setVisible: vi.fn() }, ports())
   expect(reasons(items)).toMatchObject({ 'objects.duplicate': '所选对象不能一起复制', 'objects.delete': null, 'objects.distribute.horizontal': '至少需要 3 个未锁定对象' })
 })
@@ -80,19 +76,19 @@ it('M21 right-click menu: unavailable items show why and do nothing; others run 
 })
 
 it('M21 the selection owner answers a right-click with the same commands as its quick bar', async () => {
-  const host = await createCourseStoreHost()
-  await host.open(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }))
+  const host = await createCourseDocumentHost()
+  await store().connectCourseDocuments(host.api); store().setEditingScope('scene')
   store().addTextNode(); await store().drainCourseDocument()
-  const documentId = store().courseDocument.documentId!
+  const documentId = store().courseView.activeDocumentId!
   const first = selectSelectedNodeId(store())!
   Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { documents: host.api } })
   const item = () => {
     const model = host.registry.get(documentId).read().model
-    if (model.kind !== 'course-v9') throw new Error('course fixture')
-    return locateCourseLayer(model.project, first)?.item
+    if (model.kind !== 'course-v10') throw new Error('course fixture')
+    return model.project.instances[first]
   }
   function CurrentSelection() {
-    const revision = useEditorStore(state => state.courseDocument.snapshot?.revision ?? 0)
+    const revision = useEditorStore(state => state.courseView.snapshot?.revision ?? 0)
     const itemIds = useEditorStore(selectSelectedNodeIds)
     const locationId = useEditorStore(selectActiveCourseLocationId)
     return <CourseEditorChromeContext.Provider value={{ documentId, mode: 'light', setMode() {} }}>
@@ -123,24 +119,8 @@ it('M21 the selection owner answers a right-click with the same commands as its 
   await act(async () => { fireEvent.click(within(lockedMenu).getByRole('menuitem', { name: '解锁' })); await store().drainCourseDocument() })
   expect(item()?.locked).toBe(false)
   expect(extra).not.toHaveBeenCalled()
-})
-
-it('M21 offers 编辑文字 only for text: a shape\'s right-click menu starts with the clipboard', async () => {
-  const host = await createCourseStoreHost()
-  await host.open(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }))
-  store().addRectangleNode(); await store().drainCourseDocument()
-  const documentId = store().courseDocument.documentId!
+  await act(async () => { await store().addRectangleNode(); await store().courseBridge.drain() })
   const shape = selectSelectedNodeId(store())!
-  Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { documents: host.api } })
-  function CurrentSelection() {
-    const revision = useEditorStore(state => state.courseDocument.snapshot?.revision ?? 0)
-    const itemIds = useEditorStore(selectSelectedNodeIds)
-    const locationId = useEditorStore(selectActiveCourseLocationId)
-    return <CourseEditorChromeContext.Provider value={{ documentId, mode: 'light', setMode() {} }}>
-      <main data-testid="workspace"><NativeSelectionContext documentId={documentId} revision={revision} locationId={locationId} itemIds={itemIds} enabled bounds={() => ({ left: 200, top: 200, width: 120, height: 40 })} /></main>
-    </CourseEditorChromeContext.Provider>
-  }
-  render(<CurrentSelection />)
   await screen.findByRole('toolbar', { name: '选中对象快捷工具' })
   act(() => { requestObjectContextMenu(screen.getByTestId('workspace'), { x: 300, y: 260, itemIds: [shape] }) })
   const labels = within(screen.getByRole('menu', { name: '对象操作' })).getAllByRole('menuitem').map(element => element.getAttribute('aria-label'))

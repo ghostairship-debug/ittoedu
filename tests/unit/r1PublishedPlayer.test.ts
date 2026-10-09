@@ -37,7 +37,7 @@ it('consumes section defaults and keeps child input alive through ordinary discl
     expect(details.open).toBe(false)
     const summary = details.querySelector('summary')!, answer = root.querySelector<HTMLInputElement>('[data-input-node-id="answer"]')!
     expect(summary.textContent).toBe('Show answers')
-    expect(details.contains(player.runtime.targetElement('answer'))).toBe(true)
+    expect(details.contains(player.runtime.targetElement('answer') ?? null)).toBe(true)
     expect(player.runtime.targetElement('heading')!.querySelector('details')).toBeNull()
     summary.click(); expect(details.open).toBe(true)
     answer.value = '90'
@@ -152,8 +152,10 @@ it('removes the fitted Flow wrapper when capturing only a source group body in i
   input.instances.group = { id: 'group', definitionId: 'group', data: {}, frame: { width: 240, height: 120, transform: [0, 1, -1, 0, 40, 50] } }
   vi.spyOn(content, 'getBoundingClientRect').mockImplementation(() => ({ x: 0, y: 0, width: 240, height: 120 }) as DOMRect)
   vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { queueMicrotask(() => callback(0)); return 1 })
-  const player = { runtime: { contentElement: () => content, targetElement: () => target, beforeProjectionMutation() {}, afterProjectionMutation() {} } } as unknown as Awaited<ReturnType<typeof mountPublishedCourseV3>>
+  const waitForCaptureReady = vi.fn(async (_content: HTMLElement) => {})
+  const player = { waitForCaptureReady, runtime: { contentElement: () => content, targetElement: () => target, beforeProjectionMutation() {}, afterProjectionMutation() {} } } as unknown as Awaited<ReturnType<typeof mountPublishedCourseV3>>
   expect(await prepareComponentOutputRegion({ payload: input, root, player, surfaceId: 'flow', instanceId: 'group' })).toEqual({ x: 0, y: 0, width: 240, height: 120 })
+  expect(waitForCaptureReady).toHaveBeenCalledExactlyOnceWith(content)
   expect(stage.style.height).toBe('100%'); expect(stage.style.transform).toBe('none')
   expect(target.style.transform).toBe('none'); expect(child.hidden).toBe(true)
   expect(runtimeRoot.hidden).toBe(false); expect(runtimeRoot.closest('[hidden]')).toBeNull()
@@ -177,7 +179,7 @@ it('observes Slide and Flow content through their view owner while Teacher remai
   vi.spyOn(shell, 'getBoundingClientRect').mockReturnValue({ width: 800, height: 450 } as DOMRect)
   try {
     await player.next()
-    const shellTransform = shell.style.transform, teacherTransform = teacher.style.transform
+    const shellTransform = shell.style.transform, teacherTransform = teacher.style.transform, teacherTranslate = teacher.style.translate
     player.navigation.setZoom(2)
     expect(player.navigation.read().zoom).toBe(2)
     expect(root.style.zoom).toBe('')
@@ -186,10 +188,10 @@ it('observes Slide and Flow content through their view owner while Teacher remai
     expect(root.querySelector<HTMLElement>('[data-component-surface="slide"] [data-playback-content]')!.style.transform).toContain('scale(2)')
     expect(player.runtime.targetElement('decoration')!.style.transform).toContain('scale(2)')
     player.navigation.moveBy(15, 20)
-    expect(teacher.style.translate).toBe('12px 16px')
+    expect(teacher.style.translate).toBe(teacherTranslate)
     player.navigation.resetView()
     expect(player.navigation.read().zoom).toBe(1); expect(player.navigation.currentStateId()).toBe('reveal')
-    expect(teacher.style.translate).toBe('0px 0px')
+    expect(teacher.style.translate).toBe(teacherTranslate)
     await player.go('flow')
     player.navigation.setZoom(1.5)
     const flowContent = root.querySelector<HTMLElement>('[data-component-surface="flow"] [data-playback-content]')!

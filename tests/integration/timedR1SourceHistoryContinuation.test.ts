@@ -28,7 +28,7 @@ async function fixture(source = 'TARGET\nrest', extension = 'md', from = 0, to =
     revision: opened.revision, writable: [target], selection: [target] }
   const replace = async (source: string, historyGroup?: string, resources?: DocumentResources) => {
     const current = session.read()
-    const result = await host.dispatch({ documentId: current.documentId, epoch: current.epoch,
+    const result = await host.internalAPI.dispatch({ documentId: current.documentId, epoch: current.epoch,
       operationId: randomUUID(), actor: 'human', baseRevision: current.revision,
       ...(historyGroup ? { historyGroup } : {}),
       mutation: { type: 'command', command: { type: 'markdown.replace', source, ...(resources ? { resources } : {}) } } })
@@ -36,14 +36,31 @@ async function fixture(source = 'TARGET\nrest', extension = 'md', from = 0, to =
   }
   const history = async (type: 'undo' | 'redo') => {
     const current = session.read()
-    expect(await host.dispatch({ documentId: current.documentId, epoch: current.epoch,
+    expect(await host.internalAPI.dispatch({ documentId: current.documentId, epoch: current.epoch,
       operationId: randomUUID(), actor: 'human', baseRevision: current.revision, mutation: { type } })).toMatchObject({ status: 'applied' })
   }
   const continueCurrent = () => continueDocumentTargets(session, reference, new Set())
   return { root, filename, recovery, host, opened, session, target, reference, replace, history, continueCurrent }
 }
 
-it('continues a source selection through a disjoint disk reconciliation after recovery', async () => {
+async function restoreForAuthorizedContinuation(f: Awaited<ReturnType<typeof fixture>>) {
+  const restarted = new DocumentHostService(f.recovery)
+  const restored = await restarted.internalAPI.restore(f.opened.documentId)
+  const session = restarted.registry.get(restored.documentId)
+  expect(restored.documentId).toBe(f.reference.documentId)
+  expect(restored.epoch).not.toBe(f.reference.epoch)
+  await expect(continueDocumentTargets(session, f.reference, new Set())).rejects.toThrow('原文档会话已改变')
+  expect(await restarted.internalAPI.dispatch({ documentId: f.reference.documentId, epoch: f.reference.epoch,
+    operationId: 'stale-restored-write', baseRevision: restored.revision, actor: 'human',
+    mutation: { type: 'command', command: { type: 'markdown.replace', source: 'must not apply' } } }))
+    .toMatchObject({ status: 'conflict', code: 'stale-epoch', applied: false })
+  expect(session.read()).toEqual(restored)
+  // Explicitly authorize the restored session while retaining the exact original
+  // ranges and revision, so their mapping still comes from the durable history.
+  return { session, reference: { ...f.reference, epoch: restored.epoch } }
+}
+
+it('continues a source selection through a disjoint disk reconciliation after reauthorizing the recovered session', async () => {
   const f = await fixture()
   await fs.writeFile(f.filename, 'TARGET\nrest!')
   const disk = await f.host.observeFile(f.opened.documentId)
@@ -51,9 +68,8 @@ it('continues a source selection through a disjoint disk reconciliation after re
     baseRevision: f.opened.revision, bindingVersion: disk.bindingVersion, version: disk.version, choice: 'disk' })
   expect(adopted).toMatchObject({ revision: 1, dirty: false, undoDepth: 1 })
   // Explicit restore reads the actual durable receipt, even though the adopted file is clean.
-  const restarted = new DocumentHostService(f.recovery)
-  await restarted.internalAPI.restore(f.opened.documentId)
-  const continued = await continueDocumentTargets(restarted.registry.get(f.opened.documentId), f.reference, new Set())
+  const restored = await restoreForAuthorizedContinuation(f)
+  const continued = await continueDocumentTargets(restored.session, restored.reference, new Set())
   expect(continued.writable).toEqual([f.target])
   expect(continued.selection).toEqual(continued.writable)
 })
@@ -69,14 +85,13 @@ it('continues an unchanged source selection when disk text is inserted exactly a
   expect(continued.selection).toEqual(continued.writable)
   expect(f.session.read()).toMatchObject({ revision: 1, dirty: false, undoDepth: 1 })
 })
-it('continues a plain-text selection through coalesced human typing after recovery', async () => {
+it('continues a plain-text selection through coalesced human typing after reauthorizing the recovered session', async () => {
   const f = await fixture('TARGET\nrest', 'txt')
   await f.replace('TARGET\nrest!', 'typing')
   await f.replace('TARGET\nrest!!', 'typing')
   expect(f.session.read()).toMatchObject({ revision: 2, undoDepth: 1 })
-  const restarted = new DocumentHostService(f.recovery)
-  await restarted.internalAPI.restore(f.opened.documentId)
-  expect((await continueDocumentTargets(restarted.registry.get(f.opened.documentId), f.reference, new Set())).writable).toEqual([f.target])
+  const restored = await restoreForAuthorizedContinuation(f)
+  expect((await continueDocumentTargets(restored.session, restored.reference, new Set())).writable).toEqual([f.target])
 })
 
 it('continues a source selection through Undo, Redo and a new branch without relying on retained redo models', async () => {

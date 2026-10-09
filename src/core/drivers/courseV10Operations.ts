@@ -1,7 +1,7 @@
 import { componentAssetIds } from '../components/library/references'
 import type { ComponentAppliedChanges, ComponentEdit, ComponentExpectation, ComponentOperationBatch } from '../../shared/contracts/component-platform/operations'
 import { componentDefinitionBuiltinKey, componentIsLocked, resolveComponentPresentation, containerChildIds, owningContainer, type ComponentContainer, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
-import { componentOperationBatchSchema, courseProjectV10Schema } from '../../shared/contracts/component-platform/schema'
+import { componentOperationBatchSchema, courseProjectV10Schema, jsonValueSchema } from '../../shared/contracts/component-platform/schema'
 import { componentInteractionDataSchema } from '../../shared/componentInteractionData'
 import type { ComponentFrame } from '../../shared/contracts/component-platform/frame'
 import { DEFAULT_SLIDE_CANVAS, sharedSlideFrameMapping } from '../../shared/slideCanvas'
@@ -87,6 +87,10 @@ function descendantIds(project: CourseProjectV10, instanceId: string): string[] 
 /** Only references actually touched by deletion join its captured baseline. */
 function removalReferencePaths(project: CourseProjectV10, removed: ReadonlySet<string>, removedSurface?: string): string[][] {
   const paths: string[][] = []
+  for (const change of deletedObjectInteractionData(project, removed)) {
+    paths.push(change.path)
+    if (change.path[0] === '@surface') paths.push([...change.path.slice(0, 5), 'id'])
+  }
   for (const surface of project.surfaces) {
     const spatial = surface.spatial
     if (spatial && (spatial.frames.some(frame => frame.targetInstanceId && removed.has(frame.targetInstanceId))
@@ -104,7 +108,54 @@ function removalReferencePaths(project: CourseProjectV10, removed: ReadonlySet<s
   return paths
 }
 
+/** Keep surviving rules useful and remove every completion follower of a deleted action. */
+function deletedObjectInteractionData(project: CourseProjectV10, removed: ReadonlySet<string>): { path: string[]; value: JsonValue; instanceId: string }[] {
+  const changes: { path: string[]; value: JsonValue; instanceId: string }[] = []
+  const clean = (data: JsonValue): JsonValue => {
+    const parsed = componentInteractionDataSchema.parse(data), removedActions = new Set<string>()
+    let rules = parsed.rules.flatMap(rule => {
+      if ('nodeId' in rule.trigger && removed.has(rule.trigger.nodeId)) {
+        rule.actions.forEach(step => removedActions.add(step.id)); return []
+      }
+      const actions = rule.actions.filter(step => {
+        if (!('nodeId' in step.action) || !removed.has(step.action.nodeId)) return true
+        removedActions.add(step.id); return false
+      })
+      if (!actions.length) return []
+      if (actions[0].id !== rule.actions[0].id) actions[0] = { ...actions[0], start: 'after-previous' }
+      return [{ ...rule, actions }]
+    })
+    let changed = true
+    while (changed) {
+      changed = false
+      rules = rules.filter(rule => {
+        if (rule.trigger.type !== 'animation.completed' || !removedActions.has(rule.trigger.actionId)) return true
+        rule.actions.forEach(step => removedActions.add(step.id)); changed = true; return false
+      })
+    }
+    return equalComponentValue(parsed.rules, rules) ? data : jsonValueSchema.parse({ ...parsed, rules })
+  }
+  for (const instance of Object.values(project.instances)) {
+    if (removed.has(instance.id) || componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) !== 'guoling.interactions') continue
+    const update = (data: JsonValue, path: string[]) => {
+      const value = clean(data)
+      if (!equalComponentValue(value, data)) changes.push({ instanceId: instance.id, path, value })
+    }
+    update(instance.data, ['instances', instance.id, 'data'])
+    for (const surface of project.surfaces) for (const [index, state] of (surface.presentation?.states ?? []).entries()) {
+      const data = state.overrides[instance.id]?.data
+      if (data !== undefined) update(data, ['@surface', surface.id, 'presentation', 'states', String(index), 'overrides', instance.id, 'data'])
+    }
+  }
+  return changes
+}
+
 function removeDeletedReferences(project: CourseProjectV10, removed: ReadonlySet<string>, removedSurfaces: ReadonlySet<string>): void {
+  for (const change of deletedObjectInteractionData(project, removed)) {
+    if (componentIsLocked(project, change.instanceId)) throw new Error('关联互动已锁定，请先解锁')
+    if (change.path[0] === '@surface') writeField(project.surfaces.find(surface => surface.id === change.path[1])!, change.path.slice(2), change.value)
+    else writeField(project, change.path, change.value)
+  }
   for (const surface of project.surfaces) {
     const spatial = surface.spatial
     if (spatial) {
@@ -459,17 +510,74 @@ export function presentationComponentEdits(project: CourseProjectV10, surfaceId:
   return result
 }
 
+function isFlowBody(project: CourseProjectV10, id: string): boolean {
+  let instance = project.instances[id]
+  if (!instance || instance.flowPlacement || project.definitions[instance.definitionId]?.role === 'behavior') return false
+  let owner = owningContainer(project, id)
+  while (owner?.kind === 'instance') {
+    instance = project.instances[owner.instanceId]
+    if (instance.flowPlacement || componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) !== 'guoling.document-block'
+      || !instance.data || typeof instance.data !== 'object' || Array.isArray(instance.data) || instance.data.type !== 'section') return false
+    owner = owningContainer(project, instance.id)
+  }
+  return owner?.kind === 'surface' && project.surfaces.some(surface => surface.id === owner.surfaceId && surface.kind === 'flow')
+}
+
+/** A document insertion may shift numeric slots without moving a locked paragraph past an existing reading neighbor. */
+function passiveFlowMoves(project: CourseProjectV10, edits: readonly ComponentEdit[]): Set<ComponentEdit> {
+  const key = (container: ComponentContainer) => container.kind === 'surface' ? `surface:${container.surfaceId}`
+    : container.kind === 'instance' ? `instance:${container.instanceId}` : `global:${container.plane}`
+  const children = new Map<string, string[]>([
+    ...project.surfaces.map(surface => [`surface:${surface.id}`, [...surface.childIds]] as [string, string[]]),
+    ...Object.values(project.instances).map(instance => [`instance:${instance.id}`, [...instance.childIds ?? []]] as [string, string[]]),
+    ['global:underlay', [...project.global.underlay]], ['global:overlay', [...project.global.overlay]],
+  ])
+  const remove = (id: string) => { for (const ids of children.values()) { const index = ids.indexOf(id); if (index >= 0) ids.splice(index, 1) } }
+  for (const edit of edits) {
+    if (edit.type === 'instance.insert') {
+      for (const instance of edit.instances) children.set(`instance:${instance.id}`, [...instance.childIds ?? []])
+      edit.rootIds.forEach(remove)
+      const ids = children.get(key(edit.container)) ?? []; ids.splice(edit.index, 0, ...edit.rootIds); children.set(key(edit.container), ids)
+    } else if (edit.type === 'instance.move') {
+      remove(edit.instanceId)
+      const ids = children.get(key(edit.container)) ?? []; ids.splice(edit.index, 0, edit.instanceId); children.set(key(edit.container), ids)
+    } else if (edit.type === 'instance.remove') descendantIds(project, edit.instanceId).forEach(remove)
+  }
+  const permitted = new Set<ComponentEdit>()
+  for (const edit of edits) {
+    if (edit.type !== 'instance.move' || !isFlowBody(project, edit.instanceId)) continue
+    const owner = owningContainer(project, edit.instanceId)!, before = containerChildIds(project, owner), after = children.get(key(owner)) ?? []
+    if (key(owner) !== key(edit.container) || edit.frame && !equalComponentValue(edit.frame, project.instances[edit.instanceId].frame) || !after.includes(edit.instanceId)) continue
+    if (before.every(id => id === edit.instanceId || !isFlowBody(project, id) || !after.includes(id)
+      || (before.indexOf(id) < before.indexOf(edit.instanceId)) === (after.indexOf(id) < after.indexOf(edit.instanceId)))) permitted.add(edit)
+  }
+  return permitted
+}
+
+function flowBodyContentEdit(project: CourseProjectV10, edit: ComponentEdit): boolean {
+  if (edit.type !== 'data.set' || !isFlowBody(project, edit.instanceId)
+    || componentDefinitionBuiltinKey(project.definitions[project.instances[edit.instanceId].definitionId]) !== 'guoling.text') return false
+  if (edit.path[0] === 'content') return true
+  const before = project.instances[edit.instanceId].data, after = edit.value
+  if (edit.path.length || !before || typeof before !== 'object' || Array.isArray(before) || !after || typeof after !== 'object' || Array.isArray(after)) return false
+  const { content: _oldContent, ...oldFields } = before, { content: _newContent, ...newFields } = after
+  return equalComponentValue(oldFields, newFields)
+}
+
 export function applyComponentOperation(project: CourseProjectV10, raw: ComponentOperationBatch): CourseProjectV10 {
   const command = componentOperationBatchSchema.parse(raw)
   checkComponentExpectations(project, command)
   const next = structuredClone(project)
+  const passive = command.edits.some(edit => edit.type === 'instance.move' && componentIsLocked(project, edit.instanceId))
+    ? passiveFlowMoves(project, command.edits) : new Set<ComponentEdit>()
   const removedInBatch = new Set<string>()
   for (const edit of command.edits) {
     // Every author entry reaches this application boundary. Runtime state/animation never does.
     const requireUnlocked = (id: string) => {
       if (project.instances[id] && componentIsLocked(next, id)) throw new Error('对象已锁定，请先解锁')
     }
-    if ('instanceId' in edit && !(edit.type === 'instance.patch' && Object.keys(edit.patch).every(key => key === 'locked')))
+    if ('instanceId' in edit && !(edit.type === 'instance.patch' && Object.keys(edit.patch).every(key => key === 'locked'))
+      && !(edit.type === 'instance.move' && passive.has(edit)) && !flowBodyContentEdit(next, edit))
       requireUnlocked(edit.instanceId)
     if (edit.type === 'instance.insert' && edit.container.kind === 'instance') requireUnlocked(edit.container.instanceId)
     if (edit.type === 'instance.move' && edit.container.kind === 'instance') requireUnlocked(edit.container.instanceId)

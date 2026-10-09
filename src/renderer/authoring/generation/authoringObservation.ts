@@ -58,6 +58,8 @@ export class AuthoringObservationUnavailable extends Error {
 
 export interface AuthoringObservationState {
   readonly document: CourseProjectDocument
+  readonly documentId: string
+  readonly epoch: string
   readonly sessionGeneration: number
   readonly surfaceId: string
   readonly locationId: string
@@ -378,7 +380,7 @@ export function createAuthoringObservationController(ports: AuthoringObservation
         stateId: data.observationStateId || null, ready: data.observationReady === 'true', stateVersion: 0, publicState: null } }
   }
   const identity = (state: AuthoringObservationState, host: ResolvedHost, includeDomEpoch = true) => observationJson([
-    state.document.id, state.document.revision, state.sessionGeneration, draftKey(state), state.surfaceId,
+    state.documentId, state.epoch, state.document.id, state.document.revision, state.sessionGeneration, draftKey(state), state.surfaceId,
     state.locationId, state.stateId, state.selectedIds, host.source, host.facts, host.runtime,
     includeDomEpoch ? host.viewEpoch : null, host.interactionEpoch, currentCanvasDrafts(host.root),
     captureRect(host.root), host.spatialView, authoringObservationDraftToken(state.assetFiles),
@@ -416,8 +418,8 @@ export function createAuthoringObservationController(ports: AuthoringObservation
       const readinessIdentity = identity(before, host, false)
       const preview = before.previewBackgroundColor
       const activeStylePreview = host.source === 'authoring' && preview
-        && preview.target.projectId === before.document.id && preview.target.revision === before.document.revision
-        && preview.target.generation === before.sessionGeneration && preview.target.locationId === host.facts.locationId
+        && preview.target.documentId === before.documentId && preview.target.epoch === before.epoch
+        && preview.target.surfaceId === host.facts.surfaceId
         && preview.target.stateId === host.facts.stateId ? preview : null
       if (input.intent === 'edit' && activeStylePreview) throw new AuthoringObservationUnavailable('当前样式预览尚未正式提交')
       const localDrafts = currentCanvasDrafts(host.root)

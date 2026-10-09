@@ -9,7 +9,6 @@ import { ComputeJobService } from '../../src/main/workbench/compute/ComputeJobSe
 import { PINNED_PYTHON_IMAGE_ID, PodmanComputeBackend } from '../../src/main/workbench/compute/PodmanComputeBackend'
 import { HostJobService } from '../../src/main/workbench/jobs/HostJobService'
 import type { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
-import type { ControlledBuildService } from '../../src/main/workbench/build/ControlledBuildService'
 import type { ToolResult } from '../../src/shared/workbench/tools'
 
 const image = process.env.G20_TEST_PODMAN_IMAGE
@@ -26,12 +25,12 @@ it.skipIf(!image)('routes a real isolated compute job through coordinator, job w
   if (image === PINNED_PYTHON_IMAGE_ID) expect(await backend.provisionPinnedPython()).toEqual({ available: true })
   const compute = new ComputeJobService({ directory: path.join(root, 'jobs'),
     backend })
-  const jobs = new HostJobService({ compute, images: {} as ImageGenerationService, builds: {} as ControlledBuildService })
+  const jobs = new HostJobService({ compute, images: {} as ImageGenerationService })
   const registry = new DocumentRegistry({ drivers: [], createId: () => 'unexpected-document', bindingKey: binding => binding.path,
     persistence: { async append() { throw new Error('No document transaction expected') }, async save() { throw new Error('No document save expected') } } })
   const never = async (): Promise<never> => { throw new Error('Compute must not touch document authority') }
-  const host = new HostToolCoordinator({ compute, jobs }, registry, { resolve: never, resolveImage: never, active: never, applied: never,
-    actor: () => 'agent', ownsDocument: () => false, provideImage: never, readImage: never })
+  const host = new HostToolCoordinator({ compute, jobs }, registry, { resolveImage: never, active: never,
+    ownsDocument: () => false, provideImage: never, readImage: never })
   await host.beginRun({ runId: 'compute-run', actor: 'agent', documents: [], fileAccess: { permission: 'workspace', workspaceRoot: root } })
   const submitted = data(await host.runCompute('compute-run', 'tool:compute-chain', { language: 'python',
     code: `from pathlib import Path\nimport csv, json\nvalues = [int(row['score']) for row in csv.DictReader(Path('/job/input/scores.csv').open())]\nPath('/job/output/summary.json').write_text(json.dumps({'sum': sum(values), 'count': len(values)}))\nPath('/job/output/report.html').write_text('<h1>Sum %s</h1>' % sum(values))\nprint('computed', sum(values))`,

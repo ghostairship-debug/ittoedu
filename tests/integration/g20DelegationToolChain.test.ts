@@ -8,7 +8,6 @@ import { DelegationJobService } from '../../src/main/workbench/delegation/Delega
 import type { CodexDelegationRunner } from '../../src/main/workbench/delegation/CodexDelegationRunner'
 import { HostJobService } from '../../src/main/workbench/jobs/HostJobService'
 import type { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
-import type { ControlledBuildService } from '../../src/main/workbench/build/ControlledBuildService'
 
 it('blocks unverified paid delegation and routes an approved managed copy through jobs and sealed readback', async () => {
   const base = path.resolve('output/g20/b23')
@@ -28,7 +27,7 @@ it('blocks unverified paid delegation and routes an approved managed copy throug
       verification, reason: verification.detail, externalChangesPossible: true }
   })
   const delegation = new DelegationJobService({ directory: path.join(root, 'jobs'), copyRootBase: path.join(root, 'copies'), runner: { run } })
-  const jobs = new HostJobService({ delegation, images: {} as ImageGenerationService, builds: {} as ControlledBuildService })
+  const jobs = new HostJobService({ delegation, images: {} as ImageGenerationService })
   let available = false
   const registry = new DocumentRegistry({ drivers: [], createId: () => 'unused', bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('No document writes expected') } } })
@@ -55,7 +54,7 @@ it('blocks unverified paid delegation and routes an approved managed copy throug
     expect(submitted).toMatchObject({ kind: 'read', data: { job: expect.stringMatching(/^delegate-/) } })
     if (submitted.kind !== 'read') throw new Error('delegate did not return a job')
     const job = (submitted.data as { job: string }).job
-    const waited = await gateway.execute('active', 'wait', { name: 'job.wait', input: { kind: 'delegation', job, milliseconds: 5000 } })
+    const waited = await gateway.execute('active', 'wait', { name: 'job.wait', input: { job, milliseconds: 5000 } })
     expect(waited).toMatchObject({ kind: 'read', data: { kind: 'delegation', status: 'ready', terminal: true } })
     const read = await gateway.execute('active', 'read', { name: 'delegate.read', input: { job, name: 'answer.txt' } })
     expect(read).toMatchObject({ kind: 'read', data: { status: 'read', job, name: 'answer.txt',

@@ -49,7 +49,7 @@ it('keeps host font faces in Published realm snapshots and later theme events wi
     expect(player.runtime.themeCss().indexOf(fontFaceCss)).toBeLessThan(player.runtime.themeCss().indexOf('@layer guoling-theme'))
     const mounted = await sync.mock.results[sync.mock.calls.findIndex(([request]) => request.instance.id === 'text')].value
     const updates: unknown[] = []
-    const off = mounted!.scope.events.subscribe('__runtime.theme', value => updates.push(value))
+    const off = mounted!.scope.events.subscribe('__runtime.theme', (value: unknown) => updates.push(value))
     const changed = structuredClone(course); changed.revision++; changed.theme = { css: '.sample { color: #445566; }' }
     await player.update({ kind: 'course-v10', project: changed, resources })
     expect(updates).toEqual([player.runtime.themeCss()])

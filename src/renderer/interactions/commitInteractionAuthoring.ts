@@ -3,6 +3,7 @@ import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import { componentRuleEdits, duplicateComponentRule, interactionBehavior, interactionRules } from './componentInteractionAuthoring'
 import { buildInteractionTemplateRule, type InteractionTemplateRequest } from './interactionTemplates'
+import { moveComponentRule, removeComponentRule } from '../../shared/componentInteractionData'
 
 export interface InteractionAuthoringPorts { kernel: EditorStoreKernel; capture(): CapturedCourseTarget }
 export type InteractionAuthoringCommitResult = { ok: true; status: 'committed' } | { ok: false; reason: string }
@@ -26,22 +27,17 @@ export function createInteractionAuthoringActions({ kernel, capture }: Interacti
     const index = rules.findIndex(rule => rule.id === id); if (index < 0) throw new Error('互动规则已不存在')
     rules.splice(index + 1, 0, duplicateComponentRule(rules[index]!)); return rules
   }
-  const move = (rules: InteractionRule[], id: string, direction: -1 | 1) => {
-    const index = rules.findIndex(rule => rule.id === id), next = index + direction
-    if (index >= 0 && next >= 0 && next < rules.length) [rules[index], rules[next]] = [rules[next]!, rules[index]!]
-    return rules
-  }
   return {
     addInteractionRule: (surfaceId: string, rule: InteractionRule) => commit(false, rules => [...rules, rule], surfaceId),
     updateInteractionRule: (surfaceId: string, id: string, patch: Partial<Omit<InteractionRule, 'id'>>) => commit(false, rules => update(rules, id, patch), surfaceId),
-    deleteInteractionRule: (surfaceId: string, id: string) => commit(false, rules => rules.filter(rule => rule.id !== id), surfaceId),
+    deleteInteractionRule: (surfaceId: string, id: string) => commit(false, rules => removeComponentRule(rules, id), surfaceId),
     duplicateInteractionRule: (surfaceId: string, id: string) => commit(false, rules => duplicate(rules, id), surfaceId),
-    moveInteractionRule: (surfaceId: string, id: string, direction: -1 | 1) => commit(false, rules => move(rules, id, direction), surfaceId),
+    moveInteractionRule: (surfaceId: string, id: string, direction: -1 | 1) => commit(false, rules => moveComponentRule(rules, id, direction), surfaceId),
     addGlobalInteractionRule: (rule: InteractionRule) => commit(true, rules => [...rules, rule]),
     updateGlobalInteractionRule: (id: string, patch: Partial<Omit<InteractionRule, 'id'>>) => commit(true, rules => update(rules, id, patch)),
-    deleteGlobalInteractionRule: (id: string) => commit(true, rules => rules.filter(rule => rule.id !== id)),
+    deleteGlobalInteractionRule: (id: string) => commit(true, rules => removeComponentRule(rules, id)),
     duplicateGlobalInteractionRule: (id: string) => commit(true, rules => duplicate(rules, id)),
-    moveGlobalInteractionRule: (id: string, direction: -1 | 1) => commit(true, rules => move(rules, id, direction)),
+    moveGlobalInteractionRule: (id: string, direction: -1 | 1) => commit(true, rules => moveComponentRule(rules, id, direction)),
     applyInteractionTemplate: (request: InteractionTemplateRequest, global = false, surfaceId?: string) => commit(global, rules => [...rules, buildInteractionTemplateRule(request)], surfaceId),
   }
 }

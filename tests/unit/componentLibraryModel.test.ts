@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { AvailableComponentCatalogPackage } from '@/shared/componentCatalog'
-import type { ComponentPackageData } from '@/shared/componentTypes'
+import type { ComponentDefinition } from '@/shared/contracts/component-platform/project'
+import { compareSemanticVersions } from '@/renderer/components/componentCatalogStatus'
 import {
   BUILT_IN_COMPONENT_CATALOG_SHA256,
   trustForManagedCatalogDigest,
 } from '@/shared/builtInComponentCatalog'
 import {
+  componentCatalogInstallStatus,
   collectComponentLibrarySubjects,
   filterComponentLibraryPackages,
   GENERAL_COMPONENT_SUBJECT,
@@ -30,8 +32,8 @@ function catalogEntry(
     packagePath: `packages/component-${index}.h5component`,
     thumbnailPath: `thumbnails/component-${index}.svg`,
     sha256: index.toString(16).padStart(64, '0'),
-    componentSchemaVersion: 4,
-    runtimeApiVersion: 4,
+    componentSchemaVersion: 1,
+    runtimeApiVersion: 5,
     renderMode: 'dom',
     supportedScopes: ['scene'],
     quality: 'experimental',
@@ -44,31 +46,9 @@ function catalogEntry(
   }
 }
 
-function embeddedPackage(entry: AvailableComponentCatalogPackage): ComponentPackageData {
-  return {
-    manifest: {
-      schemaVersion: 4,
-      runtimeApiVersion: 4,
-      renderMode: entry.renderMode,
-      supportedScopes: entry.supportedScopes,
-      id: entry.packageId,
-      name: entry.name,
-      version: entry.version,
-      entry: 'runtime.js',
-      defaultSize: { width: 320, height: 180 },
-      minSize: { width: 120, height: 80 },
-      preserveAspectRatio: false,
-      assets: {},
-      defaultProps: {},
-    },
-    runtimeSource: 'CoursewareComponent.define({ runtimeApiVersion: 4 })',
-    files: {},
-    provenance: {
-      sha256: entry.sha256,
-      importedAt: '2026-08-11T00:00:00.000Z',
-      sourceLabel: entry.sourceLabel,
-    },
-  }
+function embeddedPackage(entry: AvailableComponentCatalogPackage): ComponentDefinition {
+  return { id: entry.packageId, title: entry.name, version: entry.version, role: 'content',
+    implementation: { kind: 'source', language: 'javascript', source: 'export default {}' } }
 }
 
 describe('component library model', () => {
@@ -98,6 +78,15 @@ describe('component library model', () => {
       sourceTrust: 'built-in',
     })
 
+    expect(compareSemanticVersions('1.10.0', '1.9.9')).toBeGreaterThan(0)
+    expect(compareSemanticVersions('2.0.0-beta.1', '2.0.0')).toBeLessThan(0)
+    expect(compareSemanticVersions('2.0.0-beta.10', '2.0.0-beta.2')).toBeGreaterThan(0)
+    expect(compareSemanticVersions('2.0.0-2', '2.0.0-alpha')).toBeLessThan(0)
+    expect(compareSemanticVersions('1.0.0', '1.0.0')).toBe(0)
+    expect(componentCatalogInstallStatus(older)).toBe('available')
+    expect(componentCatalogInstallStatus(older, embeddedPackage(older))).toBe('embedded')
+    expect(componentCatalogInstallStatus(builtInCurrent, embeddedPackage(older))).toBe('update-available')
+    expect(componentCatalogInstallStatus(older, embeddedPackage(builtInCurrent))).toBe('embedded-newer')
     expect(selectCurrentCatalogPackages([older, promptCurrent, builtInCurrent]))
       .toEqual([builtInCurrent])
   })

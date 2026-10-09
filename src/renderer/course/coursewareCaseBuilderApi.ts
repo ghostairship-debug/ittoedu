@@ -82,6 +82,7 @@ export interface CoursewareCaseBuilderContext {
   apiVersion: typeof COURSEWARE_CASE_BUILDER_API_VERSION
   caseDir: string
   encodeBase64(value: Uint8Array | string): string
+  readAsset(relativePath: string): Promise<Uint8Array>
   documents: {
     teachingPlan: { path: string, content: string }
     presentationScript: { path: string, content: string }

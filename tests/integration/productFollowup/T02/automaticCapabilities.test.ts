@@ -7,6 +7,7 @@ import { DocumentHostService } from '../../../../src/main/workbench/DocumentHost
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
 import { createTextComponentData } from '../../../../src/components/text/data'
 import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
+import { jsonValueSchema } from '../../../../src/shared/contracts/component-platform/schema'
 import { BundledSkillService } from '../../../../src/main/workbench/skills/BundledSkillService'
 
 it('executes an authorized V10 property edit without tools.load and preserves the frozen range authority', async () => {
@@ -16,7 +17,7 @@ it('executes an authorized V10 property edit without tools.load and preserves th
   try {
     const project = createBlankCourseProjectV10('自动能力')
     project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
-    project.instances.title = { id: 'title', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('标题'),
+    project.instances.title = { id: 'title', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(createTextComponentData('标题')),
       frame: { width: 250, height: 90, transform: [1, 0, 0, 1, 30, 40] } }
     project.surfaces[0].childIds = ['title']
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'capability.h5lesson')

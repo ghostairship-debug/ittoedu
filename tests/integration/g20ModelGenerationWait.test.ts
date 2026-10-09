@@ -77,7 +77,7 @@ it.each(protocols)('%s reports a real stalled response as a retryable generation
   const failed = events.at(-1)
   expect(failed).toMatchObject({ type: 'response.failed', failure: { outcome: 'unknown', kind: 'timeout', code: 'response-body-idle' } })
   if (failed?.type !== 'response.failed') throw new Error('missing failure')
-  expect(modelGenerationRetry(selected, failed.failure, 1, () => 0)).toEqual({ kind: 'retry', delayMs: 1000 })
+  expect(modelGenerationRetry(selected, failed.failure, 1)).toEqual({ kind: 'retry', delayMs: 1000 })
   expect(calls).toBe(1)
 })
 

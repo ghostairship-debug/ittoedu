@@ -16,6 +16,7 @@ it('starts the App light-editing port without a document and commits its page ac
     const host = new DocumentHostService(path.join(directory, 'recovery'))
     const api: DocumentHostAPI = { ...host.internalAPI, bootstrapCourse: () => host.bootstrapCourse(),
       saveWithDialog: id => host.internalAPI.save(id, path.join(directory, 'course.h5lesson')),
+      close: async (id, discardDirty) => { await host.operate({ type: 'close', documentId: id, discardDirty }) },
       closeWithDialog: async id => { await host.operate({ type: 'close', documentId: id }); return true },
       discardRecovery: async id => { await host.operate({ type: 'discard-recovery', documentId: id }) },
       subscribe: listener => host.subscribeEvents(listener) }

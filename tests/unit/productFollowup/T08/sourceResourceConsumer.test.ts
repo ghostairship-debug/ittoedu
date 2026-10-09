@@ -54,16 +54,17 @@ it('an actual compiled source realm resolves an assetId without optional binding
     await writeFile(entry, `const {app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(join(directory, 'profile'))});
       app.whenReady().then(()=>new BrowserWindow({show:false,webPreferences:{backgroundThrottling:false}}).loadURL(${JSON.stringify(origin)}));`)
     const nativeEnv: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter(([key, value]) => key !== 'ELECTRON_RUN_AS_NODE' && value !== undefined)), ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
-    app = await electron.launch({ cwd: process.cwd(), args: [entry], timeout: 5000, env: nativeEnv })
+    app = await electron.launch({ cwd: process.cwd(), args: [...(process.platform === 'linux' && process.getuid?.() === 0 ? ['--no-sandbox', '--ozone-platform=x11'] : []), entry], timeout: 5000, env: nativeEnv })
     const page = await app.firstWindow()
     await page.waitForFunction(() => Boolean((window as any).ResourceConsumerProbe), undefined, { timeout: 5000 })
-    const observed = await page.evaluate(async payload => {
+    const observed = await page.evaluate(async serializedPayload => {
+      const payload: unknown = JSON.parse(serializedPayload)
       const root = document.getElementById('player')!, fetches: string[] = [], nativeFetch = window.fetch.bind(window)
       window.fetch = (input, options) => { fetches.push(String(input)); return nativeFetch(input, options) }
       const player = await (window as any).ResourceConsumerProbe.mountPublishedCourseV3(payload, root)
       ;(window as any).__resourceConsumer = player
       return { url: player.stateSnapshot().observedAssetUrl, fetches }
-    }, published.payload)
+    }, JSON.stringify(published.payload))
     expect(observed.url).toBe(`${origin}/image.png`)
     expect(observed.fetches).toEqual([])
     const image = page.frameLocator('[data-component-object="source"] iframe').getByAltText('源码组件图片')

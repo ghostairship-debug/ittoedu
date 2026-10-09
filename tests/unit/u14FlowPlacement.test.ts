@@ -128,7 +128,7 @@ it('uses the actual Flow floating toolbar without turning a fixed drag into para
   let ui: ReturnType<typeof render> | undefined
   try {
     ui = render(createElement(FlowWorkspace, { documentId: 'flow-u14', project, surfaceId: 'flow', onSelectImageAsset: async () => null }))
-    const move = ui.getByRole('button', { name: '移动', exact: true })
+    const move = ui.getByRole('button', { name: '移动' })
     move.setPointerCapture = () => {}
     fireEvent.pointerDown(move, { pointerId: 1, clientX: 100, clientY: 100 })
     fireEvent.pointerMove(move, { pointerId: 1, clientX: 130, clientY: 150 })

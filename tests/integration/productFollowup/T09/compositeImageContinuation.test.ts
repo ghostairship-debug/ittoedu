@@ -6,9 +6,9 @@ import sharp from 'sharp'
 import { expect, it } from 'vitest'
 import { DocumentHostService } from '../../../../src/main/workbench/DocumentHostService'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
-import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
+import { TEXT_DEFINITION , textDataEdit } from '../../../../src/components/text/adapters'
 import { createTextComponentData } from '../../../../src/components/text/data'
-import { TABLE_DEFINITION } from '../../../../src/components/table/adapters'
+import { TABLE_DEFINITION, tableDataEdit } from '../../../../src/components/table/adapters'
 import { createTableData, type TableData } from '../../../../src/components/table/data'
 import { CHART_DEFINITION, createChartData, type ChartData } from '../../../../src/components/chart'
 import { captureComponentOperation } from '../../../../src/core/drivers/courseV10Operations'
@@ -63,9 +63,9 @@ it.each(['existing-chart-update', 'table-conversion'] as const)('a real %s and n
   table.rows[1].cells[0].text = '甲'; table.rows[1].cells[1].text = '2'
   table.rows[2].cells[0].text = '乙'; table.rows[2].cells[1].text = '5'
   const frame = { width: 300, height: 160, transform: [1, 0, 0, 1, 40, 70] as [number, number, number, number, number, number] }
-  project.instances.table = { id: 'table', definitionId: TABLE_DEFINITION.id, data: table, frame, style: { opacity: 0.75 }, name: '源数据' }
+  project.instances.table = { id: 'table', definitionId: TABLE_DEFINITION.id, data: tableDataEdit('table', table).value, frame, style: { opacity: 0.75 }, name: '源数据' }
   project.instances.chart = { id: 'chart', definitionId: CHART_DEFINITION.id, data: createChartData(), frame: { ...frame, transform: [1, 0, 0, 1, 400, 70] } }
-  project.instances.existing = { id: 'existing', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('原有说明') }
+  project.instances.existing = { id: 'existing', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('原有说明')).value }
   project.surfaces[0].childIds = ['table', 'chart']
   project.surfaces.push({ id: 'flow', kind: 'flow', title: '任务说明', childIds: ['existing'] })
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'composite.h5lesson')

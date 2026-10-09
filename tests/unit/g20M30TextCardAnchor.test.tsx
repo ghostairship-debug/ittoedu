@@ -85,8 +85,8 @@ it('folds on an outside pointer, keeps input inside open, and restores the same 
 })
 
 it('restores a folded draft after unrelated revision changes and reselecting the original text', async () => {
-  let snapshot = { documentId: 'draft-recovery', epoch: 'original-session', revision: 1,
-    model: { kind: 'markdown', source: 'text END', resources: { attachments: [] } } } as DocumentSnapshot
+  let snapshot: DocumentSnapshot = { binding: { kind: 'untitled', suggestedName: 'card.md' }, dirty: false, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0, documentId: 'draft-recovery', epoch: 'original-session', revision: 1,
+    model: { kind: 'markdown', source: 'text END', resources: { assets: {}, components: {} } } }
   const unregister = workbenchSelection.register('draft-recovery', async () => snapshot)
   const view = () => <>
     <TextAiButton documentId="draft-recovery" selectionIdentity={String(snapshot.revision)} start={() => {
@@ -105,7 +105,7 @@ it('restores a folded draft after unrelated revision changes and reselecting the
     fireEvent.change(within(original).getByRole('textbox', { name: 'AI 修改要求' }), { target: { value: '保留的修改要求' } })
     fireEvent.pointerDown(screen.getByRole('button', { name: 'outside' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'AI 修改：原目标' })).toBeNull())
-    snapshot = { ...snapshot, revision: 2, model: { kind: 'markdown', source: 'prefix text END', resources: { attachments: [] } } }
+    snapshot = { ...snapshot, revision: 2, model: { kind: 'markdown', source: 'prefix text END', resources: { assets: {}, components: {} } } }
     rendered.rerender(view())
     fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }))
     const empty = await screen.findByRole('dialog', { name: 'AI 修改：原目标' })

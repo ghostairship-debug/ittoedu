@@ -2,14 +2,15 @@ import { expect, test } from '@playwright/test'
 import { build } from 'esbuild'
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { pptxMediaFixture } from '../fixtures/pptxMedia'
 import type { PptxImportDraft } from '../../src/renderer/project/pptxImport'
-import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { planPptxImportTransaction } from '../../src/renderer/project/pptxImportTransaction'
-import { applyEditorTransactionStep } from '../../src/renderer/authoring/editorTransaction'
-import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
-import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
+import { DocumentSession } from '../../src/core/documents/DocumentSession'
+import { createCourseProjectV10Archive, openCourseProjectV10Archive } from '../../src/core/drivers/codecs/courseProjectV10Archive'
+import { buildPublishedCourseV3 } from '../../src/core/publish/componentPlatform/buildPublishedCourseV3'
+import { buildComponentSingleHtml } from '../../src/core/publish/componentPlatform/buildSingleHtml'
 
 for (const kind of ['video', 'audio'] as const) test(`PPTX embedded ${kind} decodes, survives save/reopen, and plays in offline HTML`, async ({ page }, testInfo) => {
   const bundle = await build({ stdin: { contents: "export { parsePptxImport } from './src/renderer/project/pptxImport'", resolveDir: process.cwd(), loader: 'ts' }, bundle: true, format: 'iife', globalName: 'pptxImportTest', platform: 'browser', write: false })
@@ -25,19 +26,38 @@ for (const kind of ['video', 'audio'] as const) test(`PPTX embedded ${kind} deco
   const draft: PptxImportDraft = { ...staged, assets: staged.assets.map(asset => ({ ...asset, bytes: new Uint8Array(asset.bytes) })) }
   expect(draft.assets).toHaveLength(1)
   expect(draft.assets[0].meta.duration).toBeGreaterThan(0)
-  const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-  const initial = { document: project, resources: { assetFiles: {}, componentPackages: {} } }
-  const step = planPptxImportTransaction(project, draft, '内嵌视频')
-  const applied = applyEditorTransactionStep(initial, step, 'forward')
-  expect(applyEditorTransactionStep(applied, step, 'inverse')).toEqual(initial)
-  const reopened = openCourseProjectArchive(createCourseProjectArchive({ project: applied.document, assetFiles: applied.resources.assetFiles, componentFiles: {} }))
-  expect(reopened.project).toEqual(applied.document)
-  const imported = reopened.project.surfaces.find(surface => surface.type === 'slide' && surface.scenes.some(scene => scene.layerItems.some(item => item.label.startsWith('内嵌视频'))))!
-  reopened.project.startLocationId = reopened.project.locations.find(location => location.surfaceId === imported.id)!.id
-  const html = buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: {} }, { playerBundle: readFileSync(resolve('dist-player/player.iife.js'), 'utf8') })
+  const project = createBlankCourseProjectV10('内嵌媒体')
+  const resources = { assets: {}, components: {} }, driver = new CourseV10Driver()
+  const session = await DocumentSession.create({ documentId: 'pptx-media', epoch: 'epoch', binding: { kind: 'untitled', suggestedName: '内嵌媒体.h5lesson' },
+    model: { kind: 'course-v10', project, resources } }, driver, {
+      append: async () => {}, save: async () => { throw new Error('Archive save is exercised directly below') },
+    })
+  const step = planPptxImportTransaction({ documentId: session.documentId, epoch: 'epoch', project, resources, editingProject: project,
+    activeStateId: null, surfaceId: project.surfaces[0].id, instanceIds: [], instanceId: null }, draft, '内嵌媒体')
+  const dispatch = (mutation: import('../../src/shared/workbench/document').DocumentOperation['mutation']) => session.execute({
+    documentId: session.documentId, epoch: 'epoch', baseRevision: session.read().revision, operationId: crypto.randomUUID(), actor: 'human', mutation,
+  })
+  const receipt = await dispatch({ type: 'command', command: { type: 'component-platform.apply', edits: step.edits, expected: step.expected } })
+  expect(receipt, JSON.stringify(receipt)).toMatchObject({ status: 'applied' })
+  const applied = session.read().model
+  expect(await dispatch({ type: 'undo' })).toMatchObject({ status: 'applied' })
+  expect(session.read().model).toMatchObject({ kind: 'course-v10', project: { instances: project.instances, assets: {} }, resources })
+  expect(await dispatch({ type: 'redo' })).toMatchObject({ status: 'applied' })
+  const redone = session.read().model
+  if (redone.kind !== 'course-v10' || applied.kind !== 'course-v10') throw new Error('V10 required')
+  expect(redone.project.instances).toEqual(applied.project.instances)
+  expect(redone.resources).toEqual(applied.resources)
+  const reopened = openCourseProjectV10Archive(createCourseProjectV10Archive({ project: redone.project, resources: redone.resources }))
+  // Project JSON has one representation for zero, including rotated frame -0.
+  expect(reopened.project).toEqual(JSON.parse(JSON.stringify(redone.project)))
+  const imported = reopened.project.surfaces.find(surface => surface.id === step.createdSurfaceId)!
+  const outputProject = { ...reopened.project, surfaces: [imported, ...reopened.project.surfaces.filter(surface => surface.id !== imported.id && surface.id !== project.surfaces[0].id)] }
+  const published = await buildPublishedCourseV3({ project: outputProject, assetBytes: reopened.resources.assets })
+  expect(published.diagnostics).toEqual([])
+  const html = buildComponentSingleHtml(published.payload, readFileSync(resolve('dist-player/player.iife.js'), 'utf8'))
   const path = testInfo.outputPath('media.html')
   mkdirSync(testInfo.outputDir, { recursive: true }); writeFileSync(path, html)
-  await page.addInitScript(() => {
+  await page.evaluate(() => {
     const original = HTMLMediaElement.prototype.play
     ;(window as unknown as { playedMedia: HTMLMediaElement[] }).playedMedia = []
     HTMLMediaElement.prototype.play = function () {
@@ -45,7 +65,7 @@ for (const kind of ['video', 'audio'] as const) test(`PPTX embedded ${kind} deco
       return original.call(this)
     }
   })
-  await page.goto(pathToFileURL(path).href)
+  await page.setContent(readFileSync(path, 'utf8'))
   if (kind === 'audio') {
     await page.getByText('▶ 播放音频', { exact: true }).click()
     await expect.poll(() => page.evaluate(() => (window as unknown as { playedMedia: HTMLMediaElement[] }).playedMedia.some(element => element.tagName === 'AUDIO' && element.currentTime > 0.1 && !element.error))).toBe(true)
@@ -60,7 +80,11 @@ for (const kind of ['video', 'audio'] as const) test(`PPTX embedded ${kind} deco
   }
   const video = page.locator('video').first()
   await expect(video).toBeVisible()
-  const shape = page.locator('[data-native-type="shape"]').first()
+  const shapeId = Object.values(outputProject.instances).find(instance => {
+    const implementation = outputProject.definitions[instance.definitionId]?.implementation
+    return implementation?.kind === 'builtin' && implementation.key === 'guoling.shape'
+  })!.id
+  const shape = page.locator(`[data-component-object="${shapeId}"]`)
   await expect(shape).toBeHidden()
   await page.getByText('知识 😀', { exact: true }).click()
   await expect(shape).toBeVisible()
@@ -74,11 +98,12 @@ for (const kind of ['video', 'audio'] as const) test(`PPTX embedded ${kind} deco
   await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThan(pausedTime + 0.05)
   await page.keyboard.press('ArrowRight')
   await expect(page.getByText('第二页', { exact: true })).toBeVisible()
-  await expect(page.locator('video')).toHaveCount(0)
+  await expect(video).toBeHidden()
   await expect.poll(() => page.evaluate(() => (window as unknown as { playedMedia: HTMLMediaElement[] }).playedMedia.every(element => element.paused))).toBe(true)
   await page.keyboard.press('ArrowLeft')
   await expect(video).toBeVisible()
-  await expect(shape).toBeHidden()
+  // The current Player retains visited roots and interaction state; leaving pauses media.
+  await expect(shape).toBeVisible()
   expect(await video.evaluate((element: HTMLVideoElement) => element.paused)).toBe(true)
   await video.evaluate(async (element: HTMLVideoElement) => { element.muted = true; await element.play() })
   await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThan(0.1)

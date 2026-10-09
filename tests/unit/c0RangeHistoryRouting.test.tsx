@@ -1,3 +1,6 @@
+import { createCourseStructureSlice } from '../../src/renderer/store/slices/courseStructureSlice'
+import { createCourseLifecycleSlice } from '../../src/renderer/store/slices/courseLifecycleSlice'
+import { documentHostAPI } from '../helpers/documentHostAPI'
 import { cleanup, renderHook } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -40,14 +43,16 @@ it('routes retained range focus to captured formal undo, keeping native text/IME
     surfaces: [{ id: 'slide', kind: 'slide', title: '第一页', childIds: ['image'], designSize: { width: 1280, height: 720 } }],
     global: { underlay: [], overlay: [] }, assets: { old: asset('old') } }
   const service = new DocumentHostService(path.join(directory, 'recovery'))
-  const initial = await service.internalAPI.create({ kind: 'course-v10', project, resources: { assets: { old: new Uint8Array([1]) }, components: {} } })
+  const initial = await service.internalAPI.create({ kind: 'course-v10', project, resources: { assets: { old: new Uint8Array([1]) }, components: {} } }, 'image.glx')
   const unavailable = async (): Promise<never> => { throw new Error('fixture has no dialogs') }
-  const api: DocumentHostAPI = { ...service.internalAPI, bootstrapCourse: () => service.bootstrapCourse(), saveWithDialog: unavailable, close: unavailable,
+  const api: DocumentHostAPI = { ...documentHostAPI(service), bootstrapCourse: () => service.bootstrapCourse(), saveWithDialog: unavailable, close: unavailable,
     closeWithDialog: unavailable, discardRecovery: unavailable, subscribe: listener => service.subscribeEvents(listener) }
   const bridge = new CourseV10DocumentBridge(); await bridge.connect(api)
   dispose.push(async () => bridge.dispose())
   const feedback = vi.fn(), kernel = createEditorStoreKernel({ bridge, commit: feedback })
-  const commands = createCrossSurfaceCommands({ kernel, slide: {}, flow: {}, spatial: {}, shell: { read: () => ({ canvasMode: 'edit', editingTextNodeId: null }), patch: () => {} } } as CrossSurfaceCommandPorts)
+  const commands = createCrossSurfaceCommands({ kernel, slide: {}, flow: {}, spatial: {},
+    structure: createCourseStructureSlice(kernel, { readActiveLocationId: () => kernel.readView().surfaceId }),
+    lifecycle: createCourseLifecycleSlice(kernel, { bridge, read: () => ({ projectPath: null, dirty: bridge.read().snapshot?.dirty ?? false }), patch() {} }), shell: { read: () => ({ canvasMode: 'edit', editingTextNodeId: null }), patch: () => {} } })
   await kernel.edit([{ type: 'asset.add', asset: asset('replacement'), bytes: new Uint8Array([2]) },
     { type: 'data.set', instanceId: 'image', path: [], value: { ...data, assetId: 'replacement', originalAssetId: 'replacement' } }])
   commands.selectNode('image')

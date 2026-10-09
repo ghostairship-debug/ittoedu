@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { expect, it } from 'vitest'
 import { buildCoursewareCase } from '../../scripts/build-courseware-case'
-import type { CoursewareCaseBuilderContextV2 } from '../../scripts/courseware-builder-v2-host'
+import type { CoursewareCaseBuilderContext } from '../../src/renderer/course/coursewareCaseBuilderApi'
 
-it('supplies V2 binary asset helpers and rejects lexical and linked escapes before delivery', async () => {
+it('supplies historical binary asset helpers and rejects lexical and linked escapes before delivery', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'courseware-v2-assets-'))
   try {
     const caseDir = path.join(root, '课例 #1'), outside = path.join(root, 'outside')
@@ -27,8 +27,8 @@ it('supplies V2 binary asset helpers and rejects lexical and linked escapes befo
     }, {
       editorRoot: path.resolve(__dirname, '../..'),
       playerBundle: 'window.CoursewarePlayer={mount(){}};',
-      importBuilder: async () => ({ apiVersion: 2, default: async (context: CoursewareCaseBuilderContextV2) => {
-        expect(context.apiVersion).toBe(2)
+      importBuilder: async () => ({ apiVersion: 1, default: async (context: CoursewareCaseBuilderContext) => {
+        expect(context.apiVersion).toBe(1)
         const bytes = await context.readAsset('素材/图 #1.bin')
         expect(bytes).toBeInstanceOf(Uint8Array)
         expect([...bytes]).toEqual([...source])
@@ -47,6 +47,15 @@ it('supplies V2 binary asset helpers and rejects lexical and linked escapes befo
       } }),
     })).rejects.toBe(completed)
     expect(checked).toBe(true)
+    let invokedRetiredBuilder = false
+    await expect(buildCoursewareCase({
+      caseDir, builder: 'build.mjs', teachingPlan: '01.md', presentationScript: '02.md',
+      project: 'out.h5lesson', html: 'out.html', force: false,
+    }, {
+      editorRoot: path.resolve(__dirname, '../..'), playerBundle: 'window.CoursewarePlayer={mount(){}};',
+      importBuilder: async () => ({ apiVersion: 2, default: async () => { invokedRetiredBuilder = true; throw completed } }),
+    })).rejects.toThrow('产品工作会话已退役')
+    expect(invokedRetiredBuilder).toBe(false)
     await expect(readFile(path.join(caseDir, 'out.h5lesson'))).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(readFile(path.join(caseDir, 'out.html'))).rejects.toMatchObject({ code: 'ENOENT' })
   } finally { await rm(root, { recursive: true, force: true }) }

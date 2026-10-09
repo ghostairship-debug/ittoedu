@@ -2000,7 +2000,10 @@ export class ExecutionEngine {
               const unsettled = remaining.some(issue => issue.status === 'pending' || issue.status === 'unknown')
               // Calls in one response share a request: the model has not read
               // a receipt produced earlier in that same tool batch yet.
-              const unreadReceipt = remaining.some(issue => issue.requestId === tool.requestId)
+              const unreadFailure = warnings.some(issue => issue.requestId === tool.requestId
+                && otherTools.some(receipt => receipt.callId === issue.receiptCallId
+                  && ['write', 'save'].includes(toolRegistration(receipt.call.name)?.capability ?? '')))
+              const unreadReceipt = remaining.some(issue => issue.requestId === tool.requestId) || unreadFailure
               const stalled = !unreadReceipt && decision.status === 'continue'
                 && repeatedExitWithoutProgress(active, tool.requestId, decision.continuable)
               if (stalled) record.failure = { code: 'model-no-progress',
@@ -2008,7 +2011,9 @@ export class ExecutionEngine {
               tool.result = unreadReceipt || decision.status === 'continue' && !stalled
                 ? { kind: 'error', code: 'task-unfinished', message: unsettled
                   ? '仍有正在运行或结果未知的操作；请查询这些原操作，不要重放已提交的成果。'
-                  : decision.status === 'continue'
+                  : unreadFailure
+                    ? '本次响应的新修改或保存失败回执尚未被读取；请按真实回执修正，或如实说明未完成的部分。'
+                    : decision.status === 'continue'
                     ? '已有明确拒绝且仍可修正的写入或保存操作尚未完成；请按当前正式目标修正后继续，不能用无关操作或再次结束代替。'
                     : '本轮指定交付尚未确认保存或写出当前版本；请按真实交付结果判断剩余工作。', data: { remaining, ...(warnings.length?{warnings}:{}), ...(delivery ? { delivery } : {}) } }
                 : { kind: 'read', data: { status: stalled || remaining.length ? 'partial' : 'completed', ...(remaining.length ? { remaining } : {}), ...(warnings.length?{warnings}:{}), ...(delivery ? { delivery } : {}) } }

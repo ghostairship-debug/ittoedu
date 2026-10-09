@@ -78,7 +78,7 @@ test('T06 public default PPTX import uses the actual converter and keeps text an
         documents: [], selection, permission: 'workspace', workspaceRoot: input.workspace })
       log('engine.start.returned', { runId: started.runId })
       const finished = await engine.wait(started.runId); log('engine.wait.returned', { status: finished.status, failure: finished.failure, tools: finished.tools })
-      const snapshot = host.registry.list().find(value => value.binding.kind === 'file' && value.binding.path === path.join(input.workspace, 'editable.h5lesson'))
+      const snapshot = host.registry.list().find((value: import('../../../../src/shared/workbench/document').DocumentSnapshot) => value.binding.kind === 'file' && value.binding.path === path.join(input.workspace, 'editable.h5lesson'))
       if (!snapshot) return { status: finished.status, failure: finished.failure, tools: finished.tools, snapshot: null }
       const imageIds = Object.values(snapshot.model.project.instances).filter((instance: any) => snapshot.model.project.definitions[instance.definitionId]?.implementation?.key === 'guoling.image')
         .map((instance: any) => instance.id)
@@ -97,6 +97,7 @@ test('T06 public default PPTX import uses the actual converter and keeps text an
     expect(facts.tools.map((tool: any) => tool.call.name)).toEqual(['course.importPptx', 'file.open', 'project.list', 'project.read', 'object.update', 'file.save'])
     expect(facts.snapshot).toMatchObject({ dirty: false, undoDepth: 1, model: { kind: 'course-v10' } })
     expect(JSON.stringify(facts.snapshot.model.project.instances)).toContain('Revised imported text')
+    if (!facts.snapshot || !facts.imageIds) throw new Error(`PPTX import did not create a saved document: ${JSON.stringify(facts)}`)
     expect(facts.imageIds.length).toBeGreaterThan(0)
     expect(Object.keys(facts.snapshot.model.resources.assets).length).toBeGreaterThan(0)
     for (const id of facts.imageIds) expect(facts.snapshot.model.project.instances[id]).toEqual(facts.imported.model.project.instances[id])
