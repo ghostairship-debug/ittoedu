@@ -1,8 +1,8 @@
 // @vitest-environment node
-import { promises as fs } from 'node:fs'
+import { promises as fs, type BigIntStats } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   WorkspaceFiles,
   WorkspaceOperationCancelledError,
@@ -13,6 +13,7 @@ import { DocumentHostService } from '../../src/main/workbench/DocumentHostServic
 
 const roots: string[] = []
 afterEach(async () => {
+  vi.restoreAllMocks()
   for (const root of roots.splice(0)) {
     if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('fixture outside temp')
     await fs.rm(root, { recursive: true, force: true })
@@ -35,6 +36,18 @@ function systemError(code: string, message = code): NodeJS.ErrnoException {
   return Object.assign(new Error(message), { code })
 }
 
+/** Deterministic filesystem collision: a new file reuses the old device/inode but has a new birth generation. */
+function simulateReusedInode(filename: string, previous: BigIntStats) {
+  const lstat = fs.lstat.bind(fs)
+  return vi.spyOn(fs, 'lstat').mockImplementation(async (...args) => {
+    const stat = await lstat(...args)
+    if (args[0] === filename && typeof stat.ino === 'bigint') {
+      Object.assign(stat, { dev: previous.dev, ino: previous.ino, birthtimeNs: previous.birthtimeNs + 1n })
+    }
+    return stat
+  })
+}
+
 describe('G20 S09 controlled workspace files', () => {
   it('keeps a file handle through the document writer atomic save but rejects a later external replacement', async () => {
     const root = await temporaryRoot('g20-files-save-identity-')
@@ -54,8 +67,10 @@ describe('G20 S09 controlled workspace files', () => {
     expect(accessible((await host.files.listChildren({ workspaceId: workspace.workspaceId,
       directoryEntryId: workspace.rootEntryId })).entries, 'note.md').entryId).toBe(entryId)
 
+    const acknowledged = await fs.lstat(filename, { bigint: true })
     await fs.rm(filename)
     await fs.writeFile(filename, '# External\n')
+    simulateReusedInode(filename, acknowledged)
     await expect(host.files.resolveEntry(workspace.workspaceId, entryId)).rejects.toMatchObject({ code: 'entry-changed' })
   })
 
@@ -94,22 +109,36 @@ describe('G20 S09 controlled workspace files', () => {
   })
 
   it('does not retarget an issued handle when an external program replaces its path', async () => {
-    const root = await temporaryRoot('g20-files-external-replace-')
-    const filename = path.join(root, 'note.md')
-    await fs.writeFile(filename, 'original')
-    const files = new WorkspaceFiles()
-    const workspace = await files.registerRoot(root)
-    const initial = await files.listChildren({ workspaceId: workspace.workspaceId, directoryEntryId: workspace.rootEntryId })
-    const oldId = accessible(initial.entries, 'note.md').entryId
+    // Identical bytes are still a new external file; content hashes cannot be physical identity.
+    for (const replacement of ['replacement', 'original']) {
+      const root = await temporaryRoot('g20-files-external-replace-')
+      const filename = path.join(root, 'note.md')
+      await fs.writeFile(filename, 'original')
+      const files = new WorkspaceFiles()
+      const workspace = await files.registerRoot(root)
+      const initial = await files.listChildren({ workspaceId: workspace.workspaceId, directoryEntryId: workspace.rootEntryId })
+      const oldId = accessible(initial.entries, 'note.md').entryId
+      const original = await fs.lstat(filename, { bigint: true })
+      // Ordinary in-place edits and metadata changes are the same file, not a replacement.
+      await fs.writeFile(filename, 'in-place edit')
+      await fs.chmod(filename, 0o600)
+      expect(await files.resolveEntry(workspace.workspaceId, oldId)).toMatchObject({ entryId: oldId })
+      await fs.writeFile(filename, 'original')
+      expect(accessible((await files.listChildren({ workspaceId: workspace.workspaceId,
+        directoryEntryId: workspace.rootEntryId })).entries, 'note.md').entryId).toBe(oldId)
 
-    await fs.rm(filename)
-    await fs.writeFile(filename, 'replacement')
-    await expect(files.resolveEntry(workspace.workspaceId, oldId)).rejects.toMatchObject({ code: 'entry-changed' })
-    const after = await files.listChildren({ workspaceId: workspace.workspaceId, directoryEntryId: workspace.rootEntryId })
-    expect(accessible(after.entries, 'note.md').entryId).not.toBe(oldId)
-    await expect(files.rename({ operationId: 'stale-rename', workspaceId: workspace.workspaceId,
-      sourceEntryId: oldId, name: 'renamed.md' })).resolves.toMatchObject({ status: 'failed' })
-    expect(await fs.readFile(filename, 'utf8')).toBe('replacement')
+      await fs.rm(filename)
+      await fs.writeFile(filename, replacement)
+      const collision = simulateReusedInode(filename, original)
+      try {
+        await expect(files.resolveEntry(workspace.workspaceId, oldId)).rejects.toMatchObject({ code: 'entry-changed' })
+        const after = await files.listChildren({ workspaceId: workspace.workspaceId, directoryEntryId: workspace.rootEntryId })
+        expect(accessible(after.entries, 'note.md').entryId).not.toBe(oldId)
+        await expect(files.rename({ operationId: 'stale-rename', workspaceId: workspace.workspaceId,
+          sourceEntryId: oldId, name: 'renamed.md' })).resolves.toMatchObject({ status: 'failed' })
+        expect(await fs.readFile(filename, 'utf8')).toBe(replacement)
+      } finally { collision.mockRestore() }
+    }
   })
 
   it('keeps issued handles for externally renamed files and directories without merging a hard link', async () => {

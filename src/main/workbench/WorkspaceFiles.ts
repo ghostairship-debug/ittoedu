@@ -788,7 +788,11 @@ export class WorkspaceFiles {
   }
 
   private fileIdentity(stat: Stats | BigIntStats): string | undefined {
-    return stat.ino ? `${stat.dev}:${stat.ino}` : undefined
+    if (!stat.ino) return undefined
+    // Inodes may be recycled after unlink; birth generation survives edits, renames and hard links.
+    // Filesystems without birth time retain the weaker device/inode identity.
+    const birth = 'birthtimeNs' in stat ? stat.birthtimeNs : stat.birthtimeMs
+    return `${stat.dev}:${stat.ino}${birth > 0 ? ':' + birth : ''}`
   }
 
   private async provisionalEntry(workspaceId: string, resolvedPath: string, kind: WorkspaceEntryKind): Promise<EntryRecord> {

@@ -155,13 +155,19 @@ export class ManagedBrowserMcpService {
     await fs.writeFile(configFile, JSON.stringify({ browser: { isolated: true, launchOptions: { headless: false,
       args: ['--window-position=-32000,-32000'] } } }), { flag: 'wx' })
     const privateTools = [{ name: 'browser_run_code_unsafe', effect: 'write' as const }, { name: 'browser_close', effect: 'read' as const }]
+    // The SDK's default stdio environment omits desktop display connections.
+    const browserEnvironment: Record<string, string> = { ELECTRON_RUN_AS_NODE: '1' }
+    for (const name of ['DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR']) {
+      const value = process.env[name]
+      if (value) browserEnvironment[name] = value
+    }
     const client = new McpClientService({ connection: { namespace: 'browser',
       transport: { kind: 'stdio', command: this.options.nodeExecutable ?? process.execPath,
         args: [join(packageRoot, 'cli.js'), '--browser=msedge', `--config=${configFile}`, '--isolated', '--no-webmcp', '--block-service-workers',
           '--timeout-navigation=0', '--timeout-action=0', `--output-dir=${scratch}`, `--proxy-server=${proxyUrl}`,
           '--proxy-bypass=<-loopback>',
           ...(allowedOrigins.length ? [`--allowed-origins=${allowedOrigins.join(';')}`] : [])],
-        cwd: scratch, env: { ELECTRON_RUN_AS_NODE: '1' } },
+        cwd: scratch, env: browserEnvironment },
       tools: [...browserTools, ...privateTools] },
       // Navigation is independently checked below. This guard prevents accidental direct invocation bypass.
       authorizeCall: async ({ tool, arguments: args }) => tool !== 'browser_navigate' || this.allowedUrl(grant, args.url, allowedOrigins),

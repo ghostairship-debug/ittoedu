@@ -55,7 +55,7 @@ async function fixture() {
     await fs.rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 })
   })
   const workspace = path.join(root, 'workspace'); await fs.mkdir(workspace)
-  const firstRequest = deferred(), releaseFirstResponse = deferred(), firstResponseProcessed = deferred()
+  const firstRequest = deferred(), releaseFirstResponse = deferred(), firstResponseProcessed = deferred(), waitingObserved = deferred()
   const requests: Array<{ messages: Array<{ role: string; content?: string }> }> = []
   const localFetch: typeof fetch = async (_input, init) => {
     requests.push(JSON.parse(String(init?.body)))
@@ -79,7 +79,10 @@ async function fixture() {
   const desktop = new ExecutionDesktopService({ directory: path.join(root, 'desktop'), documents, settings,
     authorizeWorkspaceRoot: async input => ({ resolvedPath: await fs.realpath(input) }), fetch: localFetch })
   const events: ExecutionEvent[] = []
-  desktop.setSinks(event => { events.push(event) })
+  desktop.setSinks(event => {
+    events.push(event)
+    if (event.type === 'run.state' && event.data.status === 'waiting') waitingObserved.resolve()
+  })
   const recordTiming = desktop.events.recordTiming.bind(desktop.events)
   vi.spyOn(desktop.events, 'recordTiming').mockImplementation(mark => {
     if (mark.stage === 'request.finished' && mark.detail?.outcome === 'completed') firstResponseProcessed.resolve()
@@ -97,10 +100,11 @@ async function fixture() {
   const control = (action: 'status' | 'takeover' | 'resume') => desktop.operate({ type: 'browser-control', workspaceId, conversationId, runId, action })
   const assertPaused = async () => {
     releaseFirstResponse.resolve(); await firstResponseProcessed.promise
-    // Processing reached the actual response-completion barrier. No network work remains pending.
+    // Pause acknowledgement queues display asynchronously; observe its actual durable event.
+    await waitingObserved.promise
     let settled = false
     void desktop.engine.wait(runId).then(() => { settled = true })
-    await new Promise<void>(resolve => setTimeout(resolve, 25))
+    await desktop.events.flushPending()
     expect(settled).toBe(false)
     expect(requests).toHaveLength(1)
     expect((await desktop.engine.read(runId))?.tools).toHaveLength(0)
@@ -157,9 +161,10 @@ it('does not pause the real execution when browser status rejects before takeove
   carrier.control.mockRejectedValue(new Error('本任务尚未启动受管浏览器'))
   const f = await fixture()
   await expect(f.control('takeover')).rejects.toThrow('受管浏览器暂时无法接管或读取')
-  expect(f.events.some(event => event.type === 'run.state' && event.data.status === 'waiting')).toBe(false)
   f.releaseFirstResponse.resolve()
   await f.assertCompleted()
+  await f.desktop.events.flushPending()
+  expect(f.events.some(event => event.type === 'run.state' && event.data.status === 'waiting')).toBe(false)
   // The failed takeover re-reads status to decide whether to unpause; takeover itself is never attempted.
   expect(carrier.control.mock.calls.map(call => call[1])).toEqual(['status', 'status'])
 })
