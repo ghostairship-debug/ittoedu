@@ -204,9 +204,15 @@ it('preserves prior settings when secure storage/encryption/disk writes fail, wh
   cipher.state.failEncrypt = false; cipher.state.failDecrypt = true
   await expect(store.resolveCredential(first.connection)).rejects.toMatchObject({ code: 'credential-decryption-failed' })
   cipher.state.failDecrypt = false
-  const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(Object.assign(new Error('fixture disk full'), { code: 'ENOSPC' }))
+  const originalRename = fs.rename.bind(fs)
+  const rename = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+    // Public model-cache refreshes also rename files in the background.
+    if (to === filename) throw Object.assign(new Error('fixture disk full'), { code: 'ENOSPC' })
+    await originalRename(from, to)
+  })
   try {
     await expect(store.saveConnection({ id: first.connection.id, connection: config(), apiKey: 'fixture-private' })).rejects.toMatchObject({ code: 'settings-write-failed' })
+    expect(rename).toHaveBeenCalledWith(expect.any(String), filename)
   } finally { rename.mockRestore() }
   expect(await fs.readFile(filename, 'utf8')).toBe(before)
   const obstructed = path.join(directory, 'blocked-parent')

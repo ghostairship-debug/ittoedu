@@ -6,5 +6,5 @@ Tasks: 2 · blocked: 2
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [20261009-ci-repair](tasks/20261009-ci-repair.md) | blocked | Root | none | bbb07c4d 已推送，远端 37944533518 的产品 test、typecheck、development-index 通过，可信门仍失败。用户已明确批准管理员安装，无须再次授权。本包为已审修复准备独立 validation-baseline 安装候选：可信 checkout 使用固定分支，缺分支／未保护时失败，保留真实 push before／PR base 的变化范围。独立审查与 4 文件 34 项检查通过后发布该候选；Owner 须锁定基线并禁止绕过。保护元数据只证明已配置保护，不证明锁定或独立必需工作流；当前 main 未受保护，不能宣称已形成硬权限保证。GitHub 管理保护读取接口返回 403；实际管理员设置及新主分支运行仍待完成。 |
+| [20261009-ci-repair](tasks/20261009-ci-repair.md) | blocked | Root | none | Owner 已保护 validation-baseline 的 8c3f6e26；同一候选已推 main，实际 37993412843 可信验证、字体和任务板通过。完整产品测试仅一项失败：g20ExecutionSettings 的全局下一次 rename 故障可被真实后台模型缓存刷新消耗，之后设置写入成功；临时受控真实刷新完整复现，限定目标设置文件注入后原 9 项全部通过，全部保存／凭据／撤销断言保留。仅维护原测试故障定位与命中断言，无源码变更。获审候选须由 Owner 更新锁定的可信快照，已给的安装授权继续有效；管理接口不足，准备基线更新 PR 供网页合入并重新锁定，之后再推 main 验证。 |
 | [现有](tasks/20261008-core-experience-followup.md) | blocked | Root | ai-session | 原目标完整保留；以当前实际源码／Run／交付／冷开判断剩余，不改总方案。v8后共享图片元数据／真实文件与publication结算变化提供一次新完整验证理由，先内置核心、再公开 MCP。正常GUI打开被自动审查拒绝，同一外部步骤连续三目标轮未就绪；第三轮核owned PID51408／句柄51794仍存续、CDP9262无窗口，目标blocked，待Owner手动正常启动，未发模型请求。旧三路同尺寸补证不能替签新一次创作；原失败、模型自身错误及费用边界保留。唯一事实记 REVIEW_RESULT.md 的 resume-20261009 节。 |
