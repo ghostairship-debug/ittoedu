@@ -43,6 +43,7 @@ export class ExecutionSubmissionStore {
       || record.start.taskId !== record.submissionId || record.start.conversationId !== record.conversationId
       || !Array.isArray(record.documents) || !Array.isArray(record.start.documents) || !Array.isArray(record.attachments) || !Array.isArray(record.attachmentIds)
       || !Number.isSafeInteger(record.createdAt) || !Number.isSafeInteger(record.updatedAt)) throw new Error('执行提交恢复记录无效')
+    if (record.steeringRunId && (record.mode !== 'adjust' || typeof record.steeringRunId !== 'string')) throw new Error('调整提交的原运行身份无效')
     if (record.contentOutput) executionContentOutputSchema.parse(record.contentOutput)
     if (record.start.contentOutput) executionContentOutputSchema.parse(record.start.contentOutput)
     // Public retry retains the original selection; Main may rebind the same indexed document in start.

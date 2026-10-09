@@ -22,10 +22,13 @@ export interface ExecutionStart {
   selection: ModelSelection
   /** Optional visual fallback fixed when this task was accepted. */
   visionSelection?: ModelSelection
+  /** Optional user-selected no-tool compression route; absent uses the frozen main model. */
+  compressionSelection?: ModelSelection
+  compressionUnavailableReason?: string
   visionUnavailableReason?: string
   /** User-visible role/connection revisions; host role freezing rejects later changes. */
   disclosedSettings?: DisclosedExecutionSettings
-  documents: readonly { documentId: string; writable: readonly ToolTarget[]; selection?: readonly ToolTarget[] }[]
+  documents: readonly { documentId: string; epoch?: string; revision?: number; writable: readonly ToolTarget[]; selection?: readonly ToolTarget[] }[]
   contentOutput?: ExecutionContentOutput
   materials?: ExecutionMaterials
   webAuthorization?: WebTaskAuthorization
@@ -46,6 +49,8 @@ export type ExecutionStatus = 'queued' | 'running' | 'stopping' | 'stopped' | 'p
 export interface ExecutionToolRecord {
   /** Host applications share canonical receipts without inventing provider tool calls. */
   origin?: 'host'
+  /** Host receipt: this old call was cancelled at a safe boundary before dispatch. */
+  notInvokedReason?: 'steering'
   callId: string
   providerCallId: string
   requestId: string
@@ -55,9 +60,13 @@ export interface ExecutionToolRecord {
   /** Durable timestamp makes a reconstructed commit event identical after a crash. */
   receiptTime?: number
   /** Derived from host-issued handles before dispatch; never supplied in model arguments. */
-  effectTargets?: Array<{ documentId: string; target: ToolTarget }>
+  effectTargets?: Array<{ documentId: string; target: ToolTarget; epoch?: string }>
   /** Canonical file paths returned by the host's mutation preflight before dispatch. */
   effectPaths?: string[]
+  /** Host-normalized intent from a missing-parent create refusal; never a successful preflight or effect. */
+  rejectedCreationPath?: string
+  /** Canonical authored fields captured before dispatch; absent means the host cannot prove coverage. */
+  writeScopes?: Array<{ documentId: string; epoch: string; paths: string[][] }>
   /** Host capture/vision delivery failure after an observation receipt was returned. */
   observationFailure?: { message: string; outcome?: ModelFailure['outcome'] }
 }
@@ -65,6 +74,7 @@ export interface ExecutionModelRecord {
   requestId: string
   /** An independent no-tool vision or context-note request is accounted alongside conversation requests. */
   kind?: 'visual-analysis' | 'context-summary'
+  selection?: { connectionId: string; connectionRevision: number; provider: string; model: string; billingKind: string }
   state: 'sending' | 'completed' | 'failed'
   actualModel?: string
   responseId?: string
@@ -72,6 +82,8 @@ export interface ExecutionModelRecord {
   finishReason?: string
   failure?: ModelFailure
   payload?: { phase: 'initial' | 'dynamic'; digest: string; serializedBytes: number }
+  /** Local unfinished content only; never calls, model messages, effects or replay inputs. */
+  argumentDrafts?: Array<{ state: 'incomplete-prefix'; providerCallId?: string; toolName?: string; argumentsText: string }>
   /** Provider-reported counters, not balances; used to size the working context. */
   inputTokens?: number
   outputTokens?: number
@@ -107,11 +119,15 @@ export interface ExecutionRunRecord {
   documentBindings?: Record<string, ExecutionDocumentBinding>
   requests: ExecutionModelRecord[]
   tools: ExecutionToolRecord[]
+  /** Durable user adjustments; the original provider, grant and input remain frozen. */
+  steering?: { submissionId: string; text: string; acceptedAt: number; messageIndex?: number; appliedAt?: number }[]
   failure?: { code: string; message: string; outcome?: ModelFailure['outcome'] }
   /** Fact summary contains only actual tool returns; it cannot grant permissions. */
   compacted?: { atRequest: number; facts: string; fromMessage?: number
     /** Model-authored note merged from the archived excerpt; advisory, never a new grant. */
     summary?: string
+    /** Only a completed summary advances this exclusive source-message watermark. */
+    summaryThroughMessage?: number
     /** Messages before this index were re-projected with bounded text excerpts. */
     boundedThroughMessage?: number
     /** The per-message text threshold used for that bounded projection. */
@@ -124,4 +140,8 @@ export interface ExecutionRunRecord {
   /** Host-verified image resource reissued from an ancestor run under this run's authority. */
   hostContinuationImages?: Array<{ sourceRunId: string; sourceJobId: string; resourceId: string;
     sourceDocumentId: string; destinationDocumentId: string; documentId: string; resource: string }>
+  /** Image owner identities by original message index; context.read preserves these sources. */
+  imageContextSources?: Record<number, string[]>
+  /** Historical auxiliary vision receipts. Later success settles only the same original source. */
+  visualAnalyses?: Array<{ source: string; sourceMessage: string; status: 'analyzed' | 'vision-unavailable'; reason?: string }>
 }

@@ -5,11 +5,12 @@ import type { DocumentHostService } from '../DocumentHostService'
 import { htmlImportDesktopRequestSchema, type HtmlImportDesktopResult } from '../../../shared/workbench/htmlImportDesktop'
 import { containerChildIds, owningContainer, type ComponentContainer } from '../../../shared/contracts/component-platform'
 import type { ComponentProjectSnapshot } from '../../../core/projectFiles/componentPlatform'
-import { decodeComponentHtmlSource, readComponentProjectFileInput, readCurrentHtmlDocumentSource } from '../projectFiles/componentPlatformFileInput'
+import { decodeComponentHtmlSource, readComponentProjectFileInput } from '../projectFiles/componentPlatformFileInput'
+import { isSourceDocumentModel } from '../../../shared/workbench/document'
 
 /** A manual import captures its original document, then uses the same L19 service/writer as project.apply. */
 export class HtmlImportDesktopService {
-  constructor(private readonly options: { documents: Pick<DocumentHostService, 'registry' | 'tools'>; chooseSource(): Promise<string | null> }) {}
+  constructor(private readonly options: { documents: Pick<DocumentHostService, 'registry' | 'tools' | 'readOpenedSource'>; chooseSource(): Promise<string | null> }) {}
 
   async import(raw: unknown): Promise<HtmlImportDesktopResult | null> {
     const input = htmlImportDesktopRequestSchema.parse(raw), host = this.options.documents
@@ -41,7 +42,10 @@ export class HtmlImportDesktopService {
       const current = await session.drain()
       if (current.epoch !== frozen.epoch) throw new Error('HTML 导入工程会话已变化；原文件未修改')
       const prepared = await readComponentProjectFileInput({ from: source, fileAccess,
-        currentHtml: filename => readCurrentHtmlDocumentSource(host.registry, filename) })
+        currentSource: async filename => {
+          const captured = await host.readOpenedSource(filename)
+          return captured && isSourceDocumentModel(captured.model) ? captured.model.source : undefined
+        } })
       const bytes = prepared.bytes, decoded = decodeComponentHtmlSource(bytes)
       const result = await gateway.applyComponentContent(runId, callId, frozen as ComponentProjectSnapshot, {
         intent: 'insert', target: { kind: 'container', container, index },

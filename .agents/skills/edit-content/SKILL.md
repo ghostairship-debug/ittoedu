@@ -17,8 +17,8 @@ description: 修改已有课件、文档或 HTML 的局部文字、图表、布�
 
 HTML/CSS 修订保留原有 DOM 结构及相关选择器；专业正文或图表使用现有结构。普通选区有明确替换通道时，生成所需内容即可，不把整份工程 Schema 混入输出。需要视觉判断时观察目标及邻近受影响区域，修复具体问题后停止。
 
-课件修改直接落在当前工程：通过 `project.list/read` 读取当前页、主题或组件，使用 `project.apply {path,content}` 提交该文件的新文本，软件只更新实际改变的正式字段。已有对象源码与共享定义源码按用户要求选择范围；任务授权工作区里的源文件可用 `from`。当前精确选区可直接复用 AI 卡提供的目标。工程读取已经包含人工修改；与读取后人工修改冲突时，保留输入并重读再修。不要修改外部源 HTML、重新导入或删除旧图层来替代局部编辑。工程文件路径与写法见[工程内文件](../orchestrate-courseware/references/project-files.md)。普通 HTML 文件本身仍通过其源文编辑入口修改。
+当前精确选区可直接复用任务提供的内容和可写目标，生成所需替换即可。需要工程页、对象或源码操作说明时读取共享指南的[选择与局部编辑](../workbench-usage/references/selection-and-editing.md)或[工程内文件](../workbench-usage/references/project-files.md)；内置读取用 `skills.read {skill:"workbench-usage",path:"references/所需文件.md"}`，安装版用目录返回的完整名称。不为短编辑加载教学创作方法。不要修改外部源 HTML 后重导覆盖现有课件。
 
-修改进入正式工程和恢复稿，不自动写盘。按 `project.apply` 的实际 commit、usability 与诊断说明应用结果；工具传输成功不代替正式提交。用户要求保存或交付已保存文件时调用 `project.save`，核对回执的实际路径和保存状态，再说明“已保存”；失败保留现有成果并指出原因。若环境只能生成建议或候选，如实交付该状态。
+修改和保存按共享指南的[文件与保存](../workbench-usage/references/files-and-delivery.md)及实际回执说明。若环境只能生成建议或候选，如实交付该状态。
 
 新建教学作品使用 `orchestrate-courseware`；已有 HTML 新建为课件使用 `build-courseware-project`；Word、Excel、PowerPoint 原格式内容修改使用 `office-content`。任务涉及特定文档格式时，只加载当前可用的对应专业 Skill，不把它的全部接口说明常驻到通用上下文。

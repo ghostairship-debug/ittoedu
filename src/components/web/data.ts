@@ -1,11 +1,14 @@
 import { z } from 'zod'
 import type { ComponentDefinition } from '../../shared/contracts/component-platform'
 import { componentAuthorRecordsSchema } from '../../shared/contracts/component-platform/schema'
+import { lightEditTextOverridesSchema } from '../../shared/contracts/runtime/lightEdit'
 export { componentAuthorRecordSchema as webAuthoringRecordSchema, componentAuthorRecordsSchema as webAuthoringRecordsSchema } from '../../shared/contracts/component-platform/schema'
 
 export const webDataSchema = z.object({ html: z.string(), css: z.string().optional(),
   /** Persistent local author values; runtime bindings and mount generations are observations only. */
   authoringRecords: componentAuthorRecordsSchema.optional(),
+  /** Explicit page-copy replacements, including text rendered by later program states. */
+  textOverrides: lightEditTextOverridesSchema.optional(),
   /** Editable local ES-module source, keyed relative to the HTML document. */
   modules: z.record(z.string(), z.string()).optional(),
   resourceSources: z.array(z.object({ url: z.string().min(1), usage: z.enum(['image', 'media', 'stylesheet', 'font']) }).strict()).optional(),

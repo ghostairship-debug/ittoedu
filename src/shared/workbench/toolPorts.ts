@@ -16,6 +16,38 @@
 import type { DocumentOperationResult, DocumentSnapshot } from './document'
 import type { ModelChatMessage, ModelFailure, ModelUsage } from './modelProvider'
 
+/** Author intent only; Main resolves and freezes source bytes through the existing file/resource owners. */
+export interface LocalToolRunIntent {
+  command: string
+  args?: string[]
+  cwd?: string
+  stdin?: string
+  sources?: string[]
+  outputs?: string[]
+  timeoutMs?: number
+}
+export interface LocalToolRunPreview {
+  executable: string
+  args: readonly string[]
+  cwd: string
+  stdinByteLength: number
+  sources: readonly { source: string; name: string; version?: string; byteLength: number }[]
+  outputs: readonly string[]
+}
+export interface ReadonlyDelegationIntent {
+  goal: string
+  sources: string[]
+  budget: { maxOutputTokens: number; maxDurationMs: number }
+}
+/** Host-produced snapshot. A source reference or version is never a writer grant. */
+export interface PreparedTaskSource {
+  source: string
+  name: string
+  mimeType: string
+  bytes: Uint8Array
+  version?: string
+}
+
 /** Capabilities that may read bundled authoring Skills. */
 export interface SkillServicePort {
   /** Read one manifest-registered file of a bundled skill, paged. */

@@ -31,7 +31,8 @@ export interface FormulaAuthoringDraftChange {
 }
 
 interface FormulaAuthoringEditorProps {
-  node: Omit<FormulaNode, 'ast'> & { ast?: FormulaAstNode; latex?: string }
+  /** Formal LaTeX can have no linear AST; the source branch keeps that null projection. */
+  node: Omit<FormulaNode, 'ast'> & { ast?: FormulaAstNode | null; latex?: string }
   latexSource?: string
   onCommitLatex?(latex: string, accessibleText: string): void
   onCommit(ast: FormulaAstNode, accessibleText: string): void
@@ -212,6 +213,7 @@ export function FormulaAuthoringEditor(props: FormulaAuthoringEditorProps) {
   const latex = props.latexSource ?? props.node.latex
   if (latex !== undefined) return <LatexFormulaAuthoringEditor id={props.node.id} latex={latex} accessibleText={props.node.accessibleText}
     draftSource={props.draftSource} autoFocus={props.autoFocus} onBeginEdit={props.onBeginEdit} onCompositionChange={props.onCompositionChange}
+    onDraftChange={draft => props.onDraftChange?.({ ...draft, ast: null, hasSlots: draft.source.includes(FORMULA_SLOT) })}
     onCancel={props.onCancel} onFinishReady={props.onFinishReady} onCommit={(source, description) => props.onCommitLatex?.(source, description)} />
   return <AstFormulaAuthoringEditor {...props} node={props.node as FormulaNode} />
 }

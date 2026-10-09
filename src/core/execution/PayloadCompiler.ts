@@ -22,6 +22,52 @@ export class PayloadCompiler {
     serializePayload: (input: PayloadSerializerInput) => string
   }) {}
 
+  /** Complete the first request after the host has read current facts and selected actual tools. */
+  finalize(input: PayloadSerializerInput & { manifest: PayloadManifest }): CompiledPayload {
+    const { selection, messages, tools, manifest } = structuredClone(input)
+    if (manifest.delivery.status !== 'prepared') throw new PayloadCompileError('already-sent', '已发送请求不能重新装配')
+    const userIndex = manifest.userMessageIndex ?? manifest.userText?.messageIndex ?? manifest.explicitAttachments[0]?.messageIndex
+    if (userIndex !== undefined && messages[userIndex]?.role !== 'user')
+      throw new PayloadCompileError('input-mismatch', '最终请求丢失了原用户输入')
+    const userParts = userIndex === undefined ? [] : messages[userIndex]?.content
+    if (manifest.userText && (!Array.isArray(userParts) || !userParts.some(part => part && typeof part === 'object'
+      && !Array.isArray(part) && part.type === 'text' && typeof part.text === 'string'
+      && part.text.length === manifest.userText!.characters && digest(part.text) === manifest.userText!.digest)))
+      throw new PayloadCompileError('input-mismatch', '最终请求改变了原用户指令')
+    for (const attachment of manifest.explicitAttachments) {
+      const parts = messages[attachment.messageIndex]?.content
+      const part = Array.isArray(parts) ? parts[attachment.contentIndex] : undefined
+      if (!part || typeof part !== 'object' || Array.isArray(part)
+        || (attachment.delivery === 'source' ? part.type !== 'text'
+          : attachment.mediaType.startsWith('image/') ? part.type !== 'image_url' : part.type !== 'text')
+        || attachment.contentDigest && digest(JSON.stringify(part)) !== attachment.contentDigest)
+        throw new PayloadCompileError('input-mismatch', '最终请求丢失了已摄取附件表示')
+    }
+    const known = new Map(manifest.automaticContext.map(item => [item.messageIndex, item]))
+    const automaticContext: PayloadManifest['automaticContext'] = []
+    let textCharacters = 0
+    messages.forEach((message, messageIndex) => {
+      if (typeof message.content === 'string') textCharacters += message.content.length
+      else if (Array.isArray(message.content)) for (const part of message.content) {
+        if (part && typeof part === 'object' && !Array.isArray(part) && part.type === 'text' && typeof part.text === 'string')
+          textCharacters += part.text.length
+      }
+      if (messageIndex === userIndex) return
+      const serializedMessage = JSON.stringify(message)
+      automaticContext.push({ messageIndex, provenance: known.get(messageIndex)?.provenance
+        ?? { kind: 'runtime', id: `final-context-${messageIndex}` }, digest: digest(serializedMessage), serializedBytes: size(serializedMessage) })
+    })
+    const serialized = this.options.serializePayload({ selection, messages, tools })
+    const connection = selection.connection
+    return { messages: [...messages], tools: [...tools], serialized, manifest: { ...manifest,
+      provider: { connectionId: connection.id, revision: connection.revision, provider: connection.provider,
+        model: selection.model, authKind: connection.auth.kind, billingKind: connection.billing.kind },
+      payloadDigest: digest(serialized), automaticContext,
+      totals: { ...manifest.totals, textCharacters, serializedBytes: size(serialized) },
+      tools: tools.map(tool => ({ name: tool.name, digest: digest(JSON.stringify(tool)) })),
+    } }
+  }
+
   async compile(request: { input: InputContext; selection: ModelSelection; tools: readonly ModelToolDefinition[];
     /** How dynamic images reach a text-only conversation model: inline base64 or host-held source reference. */
     imageDelivery?: 'inline' | 'source' }, options: { signal?: AbortSignal } = {}): Promise<CompiledPayload> {
@@ -108,7 +154,9 @@ export class PayloadCompiler {
     return { messages, tools: [...tools], serialized, manifest: {
       schemaVersion: 1, inputContextId: input.id, scope: 'initial-payload', laterDynamicReads: 'separately-recorded',
       provider: { connectionId: connection.id, revision: connection.revision, provider: connection.provider, model: selection.model, authKind: connection.auth.kind, billingKind: connection.billing.kind },
-      payloadDigest: digest(serialized), totals, automaticContext, explicitAttachments,
+      payloadDigest: digest(serialized), totals, automaticContext,
+      explicitAttachments: explicitAttachments.map(item => ({ ...item, contentDigest: digest(JSON.stringify(content[item.contentIndex])) })),
+      userMessageIndex: userIndex,
       userText: input.instruction ? { messageIndex: userIndex, characters: input.instruction.length, digest: digest(input.instruction) } : null,
       tools: tools.map(tool => ({ name: tool.name, digest: digest(JSON.stringify(tool)) })), delivery: { status: 'prepared' }, readStatus: 'unknown',
     } }

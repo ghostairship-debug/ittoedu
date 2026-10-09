@@ -41,7 +41,7 @@ it('keeps text, directory and grep cursors across long waits and other runs, but
   const root = await directory(), filename = path.join(root, 'a.py')
   await fs.writeFile(filename, 'needle needle'); await fs.writeFile(path.join(root, 'b.py'), 'second')
   const browse = new FileBrowsePages(), grep = new FileGrepPages()
-  const text = new AgentFileText({ registry: { list: () => [] } } as unknown as DocumentHostService)
+  const text = new AgentFileText({ registry: { list: () => [] }, readOpenedSource: async () => undefined } as unknown as DocumentHostService)
   const context = { runId: 'active', workspaceRoot: root, permission: 'read-only' as const }
   const firstFile = (await text.read(context, filename, 2)).data as { nextCursor: string }
   const firstDirectory = await browse.list('active', root, 1)

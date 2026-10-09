@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { chromium, type Browser, type Page } from 'playwright'
 import { indexHtmlElements } from '../../src/shared/html/htmlSourceScanner'
+import { htmlObservationReadyScript } from '../../src/main/workbench/observation/HtmlActionDesktopPort'
 
 let browser: Browser
 let script: string
@@ -28,6 +29,24 @@ async function mounted(source: string): Promise<Page> {
   }, sections)
   return page
 }
+
+it('preserves authored active-page navigation and waits for original startup and later live rendering before observing', async () => {
+  const page = await mounted('<!doctype html><html><head><style>section{display:none}section.active{display:block}</style></head><body><section id="one" class="active"><button id="next">下一页</button></section><section id="two"><p id="result">第二页</p></section><script>document.querySelector("#next").onclick=()=>{document.querySelector("#one").classList.remove("active");document.querySelector("#two").classList.add("active")}</script></body></html>')
+  try {
+    await page.locator('#next').click()
+    expect(await page.locator('#two').isVisible()).toBe(true)
+    expect(await page.locator('#one').isVisible()).toBe(false)
+    expect(await page.evaluate(() => (window as any).testPages.instance.readView().pageIndex)).toBe(1)
+    await page.evaluate(() => {
+      (window as any).coursePlayerReady = new Promise(resolve => setTimeout(() => resolve({ waitForCaptureReady: () =>
+        new Promise<void>(ready => setTimeout(() => { document.querySelector('#result')!.textContent = '真实运行就绪'; ready() }, 100)) }), 120))
+    })
+    await page.evaluate(htmlObservationReadyScript())
+    expect(await page.locator('#result').textContent()).toBe('真实运行就绪')
+    await page.evaluate(() => { (window as any).coursePlayerReady = Promise.resolve({ waitForCaptureReady: () => Promise.reject(new Error('后页资源失败')) }) })
+    await expect(page.evaluate(htmlObservationReadyScript())).rejects.toThrow('后页资源失败')
+  } finally { await page.close() }
+})
 
 it('uses only indexed direct sections and retains DOM, handlers and script state across navigation', async () => {
   const source = `<!doctype html><body><script>window.runs=(window.runs||0)+1</script>

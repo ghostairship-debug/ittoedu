@@ -2,6 +2,8 @@
  * return values are observations, never authority to read or write host files. */
 
 export interface HtmlPageElement {
+  /** Host-captured child realm inside the current preview; never a caller-supplied frame selector. */
+  frameToken?: string
   path: number[]
   fingerprint: string
   tag: string
@@ -25,8 +27,8 @@ export interface HtmlPageState {
 
 export type HtmlPageOperation =
   | { type: 'observe' }
-  | { type: 'click'; path: number[]; fingerprint: string }
-  | { type: 'input'; path: number[]; fingerprint: string; value: string }
+  | { type: 'click'; path: number[]; fingerprint: string; frameToken?: string }
+  | { type: 'input'; path: number[]; fingerprint: string; value: string; frameToken?: string }
 
 export type HtmlPageActionResult = { applied: boolean; reason?: string }
 

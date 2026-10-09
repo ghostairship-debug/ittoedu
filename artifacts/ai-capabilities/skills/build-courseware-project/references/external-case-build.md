@@ -1,6 +1,6 @@
 # 明确使用外部 Builder V2 的任务
 
-仅适用于已选择外部案例构建、当前环境确有产品仓库和 Builder V2 的任务。普通 HTML 导入使用主 Skill 的 `course.createFromHtml`。
+仅保留给明确选择历史 V9 外部案例构建、且当前环境确有产品仓库和 Builder V2 的任务。该历史入口不输出当前 V10 `.glx` 工程；当前 HTML 导入使用主 Skill 的 `course.createFromHtml`，工程内创作使用当前 Gateway。
 
 教师课例目录存放内容和交付物；产品仓库只提供实际安装的构建工具。可运行 `node <skill目录>/scripts/resolve-editor-root.mjs` 定位产品，不改变教师工作目录。该脚本只定位现有入口，不执行导入或保存。
 

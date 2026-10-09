@@ -1,4 +1,4 @@
-import { captureCourseDocumentReference } from './workbench/SelectionContextController'
+import { captureCourseDocumentReference, workbenchSelection } from './workbench/SelectionContextController'
 import { CourseAdvancedChrome, CourseEditorFrame, useCourseEditorChrome } from './documents/CourseEditorChromeContext'
 import { CourseLightToolbar } from './documents/CourseLightToolbar'
 import { HtmlImportDialog, type HtmlImportDestination } from './documents/HtmlImportDialog'
@@ -83,7 +83,7 @@ function desktopApi() {
   if (!window.desktopAPI) {
     throw new UserFacingError(
       '桌面功能不可用',
-      '当前页面未运行在果铃编辑器桌面环境中。',
+      '当前页面未运行在果铃工作台桌面环境中。',
       `请双击 ${APP_EXECUTABLE_NAME}.exe 启动软件。`,
     )
   }
@@ -103,7 +103,7 @@ function readableError(error: unknown, fallback: string): string {
 }
 
 async function drainCourseDocument(documentId = useEditorStore.getState().courseView.activeDocumentId): Promise<DocumentSnapshot> {
-  if (!documentId) throw new Error('请先打开一份 H5 演示')
+  if (!documentId) throw new Error('请先打开一份 果铃工程')
   return useEditorStore.getState().drainCourseDocument(documentId)
 }
 
@@ -197,6 +197,8 @@ export default function App() {
   const setSaveDirectory = useCallback((directory: SaveDirectoryContext | null) => { saveDirectory.current = directory }, [])
   const [lessonDirty, setLessonDirty] = useState(false)
   const [activeWorkspaceDocument, setActiveWorkspaceDocument] = useState<{ kind: string; name: string } | null>(null)
+  const activeWorkspaceKind = useRef<string | null>(null)
+  activeWorkspaceKind.current = activeWorkspaceDocument?.kind ?? null
   const [busy, setBusy] = useState(false)
   const [htmlImportDialog, setHtmlImportDialog] = useState<{ documentId: string; epoch: string; revision: number; projectId: string; surfaceId: string | null; stateId: string | null;
     sourcePath: string | null; destinations: HtmlImportDestination[]; busy: boolean; error: string | null } | null>(null)
@@ -206,7 +208,7 @@ export default function App() {
   const hasFlowSurface = useEditorStore(state => Boolean(state.courseView.project?.surfaces.some(surface => surface.kind === 'flow')))
   const openDesignTool = (kind: 'recipe' | 'productivity' | 'pptx') => {
     const documentId = useEditorStore.getState().courseView.activeDocumentId
-    if (!documentId) { setError('请先打开一份 H5 演示'); return }
+    if (!documentId) { setError('请先打开一份 果铃工程'); return }
     void run(async () => {
       await drainCourseDocument(documentId)
       const context = useEditorStore.getState().readDesignProductionContext(documentId)
@@ -312,13 +314,23 @@ export default function App() {
   }
   useEffect(() => {
     const api = window.desktopAPI
+    const prepareSource = api?.onRequestPrepareDocumentInput?.(async documentId => { await workbenchSelection.prepare(documentId) })
+    const captureSpatialViewport = api?.onRequestCaptureSpatialViewport?.(async input => {
+      await workbenchSelection.prepare(input.documentId)
+      if (activeWorkspaceKind.current !== 'course') throw new Error('当前空间视口尚未运行，请打开原空间视口后重试。')
+      return useEditorStore.getState().captureSpatialViewport(input)
+    })
+    const captureMediaCopy = api?.onRequestCaptureMediaCopy?.((source, kind) => {
+      if (!lessonShell.current) throw new Error('文件编辑界面尚未就绪，当前媒体稿未确认')
+      return lessonShell.current.captureMediaDrafts(source, kind)
+    })
     const discard = api?.onRequestDiscardAndClose?.(async ids => {
       await suspendCloseInputs(ids)
       await flowRecovery.flush()
       return true
     })
     const resume = api?.onRequestResumeClose?.(() => resumeCloseInputs())
-    return () => { discard?.(); resume?.() }
+    return () => { prepareSource?.(); captureSpatialViewport?.(); captureMediaCopy?.(); discard?.(); resume?.() }
   }, [rawDocuments, flowRecovery.flush])
   useEffect(() => {
     if (!rawDocuments) return
@@ -422,14 +434,14 @@ export default function App() {
     flowDraftTrigger: flowDocumentDraft,
     textEditTrigger: undefined,
   })
-  // The work area's "从 PPT 新建 H5 演示": a new untitled H5 presentation holding the PPT's pages (M21).
+  // The work area's "从 PPT 新建 果铃工程": a new untitled H5 presentation holding the PPT's pages (M21).
   const newProjectFromPptx = async ({ name, bytes }: { name: string; bytes: Uint8Array }) => {
     const title = pptxCourseStem(name)
     const course = await createCourseFromPptx(bytes, title)
     if (!await confirmPptxLosses(name, course.issues)) return false
     const issues = course.issues.length
     const created = await courseProjectLifecycle.newProjectFrom(async () => course, { origin: 'lesson' })
-    if (created) setStatus(issues ? `已从 PPT 新建 H5 演示「${title}」；${issues} 项内容未保留或已简化` : `已从 PPT 新建 H5 演示「${title}」`)
+    if (created) setStatus(issues ? `已从 PPT 新建 果铃工程「${title}」；${issues} 项内容未保留或已简化` : `已从 PPT 新建 果铃工程「${title}」`)
     return created
   }
 
@@ -438,10 +450,10 @@ export default function App() {
     try {
       if (!desktopApi().htmlImport) throw new Error('HTML 导入服务不可用')
       const documentId = useEditorStore.getState().courseView.activeDocumentId
-      if (!documentId) throw new Error('请先打开一份 H5 演示')
+      if (!documentId) throw new Error('请先打开一份 果铃工程')
       const snapshot = await useEditorStore.getState().drainCourseDocument()
       if (snapshot.documentId !== documentId || snapshot.model.kind !== 'course-v10') {
-        throw new Error('当前 H5 演示已切换，请重新发起导入')
+        throw new Error('当前 果铃工程已切换，请重新发起导入')
       }
       const project = snapshot.model.project
       const activeLocationId = selectActiveCourseLocationId(useEditorStore.getState())
@@ -458,14 +470,14 @@ export default function App() {
         })
         return [{ locationId: surface.id, surfaceType: 'flow', label: surface.title, anchors }]
       })
-      if (!destinations.length) throw new Error('当前 H5 演示没有可导入 HTML 的页面')
+      if (!destinations.length) throw new Error('当前 果铃工程没有可导入 HTML 的页面')
       destinations.sort((left, right) => Number(right.locationId === activeLocationId) - Number(left.locationId === activeLocationId))
       const sourcePath = sourceEntryId
         ? (await desktopApi().workspaceFiles!({ type: 'resolve', workspaceId: directory!.workspaceId, entryId: sourceEntryId })).resolvedPath
         : null
       const current = useEditorStore.getState().courseView
       if (current.activeDocumentId !== snapshot.documentId || current.snapshot?.epoch !== snapshot.epoch || current.snapshot.revision !== snapshot.revision) {
-        throw new Error('当前 H5 演示已变化，请重新发起导入')
+        throw new Error('当前 果铃工程已变化，请重新发起导入')
       }
       setHtmlImportDialog({ documentId, epoch: snapshot.epoch, revision: snapshot.revision, projectId: project.id,
         surfaceId: current.surfaceId, stateId: current.activeStateId,
@@ -483,7 +495,7 @@ export default function App() {
       const snapshot = await drainCourseDocument(dialog.documentId)
       if (snapshot.documentId !== dialog.documentId || snapshot.epoch !== dialog.epoch
         || snapshot.model.kind !== 'course-v10' || snapshot.model.project.id !== dialog.projectId) {
-        throw new Error('当前 H5 演示已变化，请重新选择导入位置')
+        throw new Error('当前 果铃工程已变化，请重新选择导入位置')
       }
       const api = desktopApi().htmlImport
       if (!api) throw new Error('HTML 导入服务不可用')
@@ -758,6 +770,7 @@ export default function App() {
       }}
       onOpenProject={path => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson' })} onNewProject={() => courseProjectLifecycle.newProject({ origin: 'lesson' })} onNewProjectFromPptx={newProjectFromPptx} onDirtyChange={setLessonDirty} onActiveDocumentChange={setActiveWorkspaceDocument}
       onImportHtml={(directory, sourceEntryId) => { void openHtmlImport(directory, sourceEntryId) }}
+      toolbarExtras={flowRecovery.retained.length > 0 && <button type="button" title="查看保留的正文原稿" onClick={() => setRetainedFlowOpen(true)}><FileClock size={14} />保留原稿 ({flowRecovery.retained.length})</button>}
 >
     <BundledFontBoundary><CourseEditorFrame lightTools={<CourseLightToolbar
       slideLightPage={slideLightPageView ? { view: slideLightPageView, run: command => slideLight.runPage(slideLightPageView.target, command) } : null}
@@ -895,7 +908,6 @@ export default function App() {
       <footer className="status-bar" aria-live="polite">
         <span className="status-dot" />
         <span>{courseDelivery.exportProgress === 'cancelling' ? '正在清理已取消的导出…' : busy ? '正在处理…' : (statusMessage ?? '就绪')}</span>
-        {flowRecovery.retained.length > 0 && <button type="button" title="查看保留的正文原稿" onClick={() => setRetainedFlowOpen(true)}><FileClock size={14} />保留原稿 ({flowRecovery.retained.length})</button>}
         {courseDelivery.exportProgress === 'generating' && <button type="button" onClick={courseDelivery.cancelExport}>取消导出</button>}
         {courseDelivery.exportProgress === 'saving' && <span>正在准备保存，可在保存对话框取消</span>}
         <span className="status-bar__spacer" />
@@ -906,8 +918,8 @@ export default function App() {
           editingItemCount > RECOMMENDED_SCENE_NODES) && (
           <>
             <span>·</span>
-            <span className="status-bar__warning" title="大型 H5 演示建议使用网页包导出，以减少启动和内存压力">
-              大型 H5 演示 · 建议网页包
+            <span className="status-bar__warning" title="大型 果铃工程建议使用网页包导出，以减少启动和内存压力">
+              大型 果铃工程 · 建议网页包
             </span>
           </>
         )}
@@ -917,7 +929,7 @@ export default function App() {
         <span>{projectPath ? '工程已命名' : '尚未保存'}</span>
       </footer>
 
-      {retainedFlowOpen && <div className="modal-backdrop" role="presentation">
+      {retainedFlowOpen && flowRecovery.retained.length > 0 && <div className="modal-backdrop" role="presentation">
         <section className="modal copyable-summary-dialog" role="dialog" aria-modal="true" aria-labelledby="retained-flow-title">
           <header className="copyable-summary-dialog__header"><h2 id="retained-flow-title">保留的正文原稿</h2>
             <button type="button" className="icon-button" title="关闭原稿" aria-label="关闭原稿" onClick={() => setRetainedFlowOpen(false)}><X size={17} /></button>

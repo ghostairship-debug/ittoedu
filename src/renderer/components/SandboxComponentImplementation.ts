@@ -339,6 +339,10 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
           && typeof instance.data.html === 'string') {
           contentAuthoring = fragmentBox.authoring(documentRoot ? document.documentElement : root, {
             records: () => (instance.data as unknown as WebRuntimeData).authoringRecords ?? {},
+            originalText: node => (window as Window & { __cwPageTextOverrides?: { originalText(node: Text): string } })
+              .__cwPageTextOverrides?.originalText(node),
+            claimText: (node, text) => (window as Window & { __cwPageTextOverrides?: { setLocalText(node: Text, text: string | null): void } })
+              .__cwPageTextOverrides?.setLocalText(node, text),
             resolveResource: reference => resourceUrls[(instance.data as unknown as WebRuntimeData).resourceBindings?.[reference] ?? resourceBindings[reference] ?? reference] ?? reference,
             resourceReference: url => Object.entries((instance.data as unknown as WebRuntimeData).resourceBindings ?? {})
               .find(([, id]) => resourceUrls[id] === url)?.[0],
@@ -394,6 +398,8 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
             const projected = new DOMParser().parseFromString(String((instance.data as Record<string, JsonValue>).html ?? ''), 'text/html')
             const reports: unknown[] = []
             const reported = new Set<Node>()
+            const pageText = (window as Window & { __cwPageTextOverrides?: { samples(): readonly { node: Text; raw: string }[] } }).__cwPageTextOverrides
+            const originalText = new Map(pageText?.samples().map(sample => [sample.node, sample.raw]) ?? [])
             const origin = documentRoot ? { x: 0, y: 0 } : root.getBoundingClientRect()
             const walk = (live: Element, original: Element, bound: Element) => {
               if (live.localName !== original.localName && live !== root || original.localName !== bound.localName) return
@@ -403,7 +409,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
                 const rect = range.getBoundingClientRect()
                 let handle = handles.get(node); if (!handle) { handle = `html:${++sequence}`; handles.set(node, handle) }
                 reported.add(node)
-                reports.push({ handle, kind: 'text', domPath: pathFor(original), sectionOrder: sectionOrder(original), rawText: node.textContent,
+                reports.push({ handle, kind: 'text', domPath: pathFor(original), sectionOrder: sectionOrder(original), rawText: originalText.get(node as Text) ?? node.textContent,
                   attributeName: null, scriptCreated: false, rect: { x: rect.x - origin.x, y: rect.y - origin.y, width: rect.width, height: rect.height } })
               }
               if (live.localName === 'img' && live.getAttribute('src') === bound.getAttribute('src')) {
@@ -573,6 +579,7 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
   const bootstrapApi = snapshots.bootstrap ?? (typeof window.desktopAPI?.createComponentBootstrap === 'function' && typeof window.desktopAPI?.releaseComponentBootstrap === 'function' ? window.desktopAPI : undefined)
   if (signal.aborted) throw new Error('组件源码准备已取消')
   const nonce = nanoid(), iframe = document.createElement('iframe')
+  iframe.name = leaseId
   iframe.setAttribute('sandbox', 'allow-scripts')
   iframe.setAttribute('title', '组件内容')
   Object.assign(iframe.style, { border: '0', width: '100%', height: '100%' })

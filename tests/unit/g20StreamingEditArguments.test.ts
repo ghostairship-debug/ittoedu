@@ -157,3 +157,15 @@ describe('S06 strict incremental text.replace arguments', () => {
     rejects(() => new StreamingEditArguments({ toolCallId: 'call-1', toolName: 'reasoning' as 'text.replace' }), 'invalid-tool')
   })
 })
+
+
+it('projects content-only tool arguments using the host frozen default without adding target to the model call', () => {
+  const identity = { toolCallId: 'call-1', toolName: 'text.replace' as const, defaultTarget: 'original-target' }
+  const stream = new StreamingEditArguments(identity)
+  identity.defaultTarget = 'another-target'
+  expect(stream.push(0, '{"content":"新文')).toEqual({ target: 'original-target', content: '新文', complete: false })
+  expect(stream.push(1, '字"}')).toEqual({ target: 'original-target', content: '新文字', complete: true })
+  expect(stream.finish('{"content":"新文字"}')).toEqual({ content: '新文字' })
+  const changed = new StreamingEditArguments({ toolCallId: 'call-1', toolName: 'text.replace', defaultTarget: 'original-target' })
+  rejects(() => changed.push(0, '{"target":"another-target","content":"错写"}'), 'target-changed')
+})

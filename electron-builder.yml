@@ -1,5 +1,5 @@
 appId: com.ittoedu.courseware-editor
-productName: ittoedu Courseware Editor
+productName: 果铃工作台
 asar: true
 asarUnpack:
   - "**/*.node"
@@ -11,7 +11,8 @@ files:
   - dist-electron/**
   - dist-renderer/**
   - dist-player/**
-  - resources/icons/**
+  - resources/icons/icon.png
+  - resources/icons/icon.ico
   # Built-in catalog, packages and thumbnails are application resources.
   # Authoring sources, build tools and historical evidence stay in the repository.
   - resources/built-in-components/catalog.json
@@ -27,7 +28,7 @@ extraResources:
     to: clipboard-file-list/clipboard-file-list.exe
 win:
   icon: resources/icons/icon.ico
-  executableName: ittoedu-courseware-editor
+  executableName: guoling-workbench
   target:
     - target: portable
       arch:
@@ -37,7 +38,7 @@ win:
         - x64
   requestedExecutionLevel: asInvoker
 portable:
-  artifactName: ittoedu-courseware-editor-portable-${version}.${ext}
-artifactName: ittoedu-courseware-editor-${version}-${arch}.${ext}
+  artifactName: guoling-workbench-portable-${version}.${ext}
+artifactName: guoling-workbench-${version}-${arch}.${ext}
 npmRebuild: false
 publish: null

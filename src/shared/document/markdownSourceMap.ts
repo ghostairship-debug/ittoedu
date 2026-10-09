@@ -4,8 +4,10 @@ import { documentTextSlots, type DocumentBlock } from './content'
 import type { DocumentSelection, DocumentSlot, DocumentSourceRange } from './ports'
 
 /** `barrier` is a structural line boundary. Its newline/prefix stays outside writable text ranges. */
-interface Unit { from: number; to: number; text: string; barrier?: true }
-export interface SlotMap { key: string; units: Unit[]; from?: number; to?: number; depth?: number; ordered?: boolean }
+/** Lexer coordinates precede the parser's original-source (including CRLF) offset projection. */
+export interface MarkdownInlineWrapper { from: number; to: number; kind: string; retained?: MarkdownInlineWrapper[] }
+interface Unit { from: number; to: number; text: string; barrier?: true; wrappers?: MarkdownInlineWrapper[] }
+export interface SlotMap { key: string; units: Unit[]; from?: number; to?: number; depth?: number; ordered?: boolean; retained?: MarkdownInlineWrapper[] }
 /** `keys` keeps the block's own slot order, including slots this map could not locate, so a
  * selection across an unlocatable slot is still visible to the caller. */
 export interface MarkdownBlockMap { blockId: string; from: number; to: number; keys: string[]; slots: SlotMap[]; table?: { rows: string[]; columns: string[] } }
@@ -52,11 +54,22 @@ function characters(p: Projection, decode: boolean): Unit[] {
   }
   return result
 }
-function inlineUnits(p: Projection, lex: (source: string) => Token[]): Unit[] {
-  const result: Unit[] = []; let offset = 0
+type InlineUnits = Unit[] & { retained?: MarkdownInlineWrapper[] }
+function inlineUnits(p: Projection, lex: (source: string) => Token[]): InlineUnits {
+  const result: InlineUnits = []; let offset = 0
+  const append = (units: InlineUnits) => {
+    result.push(...units)
+    if (units.retained?.length) result.retained = [...(result.retained ?? []), ...units.retained]
+  }
   for (const token of lex(p.text)) {
     if (p.text.slice(offset, offset + token.raw.length) !== token.raw) throw new UnmappedSyntax('token span mismatch')
     const q = cut(p, offset, offset + token.raw.length), t = token as Tokens.Generic
+    const wrapped = (units: InlineUnits): InlineUnits => {
+      const wrapper = { from: q.positions[0]!, to: q.positions.at(-1)! + 1, kind: token.type,
+        ...(units.retained?.length ? { retained: units.retained } : {}) }
+      return Object.assign(units.map(value => ({ ...value, wrappers: [...(value.wrappers ?? []), wrapper] })),
+        units.length ? units.retained?.length ? { retained: units.retained } : {} : { retained: [wrapper] })
+    }
     offset += token.raw.length
     switch (token.type) {
       case 'text': result.push(...characters(q, true)); break
@@ -64,14 +77,14 @@ function inlineUnits(p: Projection, lex: (source: string) => Token[]): Unit[] {
       case 'br': result.push(unit(q, 0, q.text.length, '\n')); break
       case 'strong': case 'em': case 'del': {
         const n = token.type === 'em' ? 1 : 2
-        result.push(...inlineUnits(cut(q, n, q.text.length - n), lex)); break
+        append(wrapped(inlineUnits(cut(q, n, q.text.length - n), lex))); break
       }
-      case 'cwStyle': result.push(...inlineUnits(cut(q, 1, 1 + (t.text as string).length), lex)); break
+      case 'cwStyle': append(wrapped(inlineUnits(cut(q, 1, 1 + (t.text as string).length), lex))); break
       case 'link': {
         // A bare URL or `www` autolink has no markup to skip: marked emits it with the raw
         // equal to its own text, so re-lexing it would repeat itself forever.
         if (!q.text.startsWith('[') && !q.text.startsWith('<')) { result.push(...characters(q, true)); break }
-        if (q.text.startsWith('<')) { result.push(...characters(cut(q, 1, q.text.length - 1), true)); break }
+        if (q.text.startsWith('<')) { append(wrapped(characters(cut(q, 1, q.text.length - 1), true))); break }
         let depth = 1, end = 1
         for (; end < q.text.length; end++) {
           if (q.text[end] === '\\') { end++; continue }
@@ -79,7 +92,7 @@ function inlineUnits(p: Projection, lex: (source: string) => Token[]): Unit[] {
           if (q.text[end] === ']' && --depth === 0) break
         }
         if (depth !== 0) throw new UnmappedSyntax('link text')
-        result.push(...inlineUnits(cut(q, 1, end), lex)); break
+        append(wrapped(inlineUnits(cut(q, 1, end), lex))); break
       }
       case 'codespan': {
         const n = /^`+/.exec(q.text)![0].length
@@ -87,7 +100,7 @@ function inlineUnits(p: Projection, lex: (source: string) => Token[]): Unit[] {
         if (body.text.startsWith(' ') && body.text.endsWith(' ') && /[^ ]/.test(body.text)) body = cut(body, 1, body.text.length - 1)
         const chars = characters(body, false)
         if (chars.map(c => c.text).join('') !== t.text) throw new UnmappedSyntax('code span mismatch')
-        result.push(...chars); break
+        append(wrapped(chars)); break
       }
       case 'cwMath': result.push(unit(q, 0, q.text.length, '\uFFFC')); break
       default: throw new UnmappedSyntax('unmapped inline')
@@ -195,6 +208,7 @@ export function mapMarkdownBlock(token: Token, block: DocumentBlock, offset: num
       if (error instanceof UnmappedSyntax) return
       throw error
     }
+    const retained = (units as InlineUnits).retained
     if (table) units = units.flatMap((value, index) => value.text === '\\' && units[index + 1]?.text === '|' ? [] : value.text === '|' && units[index - 1]?.text === '\\' ? [{ ...value, from: units[index - 1].from }] : [value])
     if (expected !== units.map(u => u.text).join('')) return
     for (const barrier of barriers) {
@@ -202,7 +216,8 @@ export function mapMarkdownBlock(token: Token, block: DocumentBlock, offset: num
       const carried = units.filter(u => u.from < barrier.from).at(-1)
       if (carried) carried.barrier = true
     }
-    map.slots.push({ key, units, from: source.positions[0], to: source.positions.length ? source.positions.at(-1)! + 1 : undefined, ...extra })
+    map.slots.push({ key, units, from: source.positions[0], to: source.positions.length ? source.positions.at(-1)! + 1 : undefined,
+      ...(retained?.length ? { retained } : {}), ...extra })
   }
   if (['paragraph', 'heading', 'text', 'blockquote'].includes(token.type)) {
     let body = blockBody(p)
@@ -249,7 +264,7 @@ export function slotKey(slot: DocumentSlot): string {
   switch (slot.kind) { case 'field': return slot.field; case 'item': return `item:${slot.itemId}`; case 'header': return `column:${slot.columnId}`; case 'cell': return `cell:${JSON.stringify([slot.rowId, slot.columnId])}` }
 }
 export type SelectionSourceResult = { status: 'mapped'; ranges: DocumentSourceRange[] } | { status: 'unmapped'; message: string }
-function unitsToRanges(source: string, units: Unit[]): DocumentSourceRange[] {
+export function unitsToRanges(source: string, units: readonly Unit[]): DocumentSourceRange[] {
   const ranges: DocumentSourceRange[] = []
   for (const u of units) {
     const last = ranges.at(-1)

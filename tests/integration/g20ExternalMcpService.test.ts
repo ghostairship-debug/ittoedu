@@ -14,8 +14,26 @@ import type { ExternalFilePort } from '../../src/main/workbench/external/Externa
 import type { AgentFileService } from '../../src/main/workbench/execution/AgentFileService'
 import type { ExternalApproval } from '../../src/main/workbench/external/ExternalMcpService'
 import { callTool, residentMcpFixture, type ResidentToolReply } from '../helpers/residentMcpFixture'
+import { OpenImageService } from '../../src/main/workbench/assetSources/OpenImageService'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { artifactDeliverySource } from '../../src/core/tools/HostArtifactTools'
 
 const cleanups: (() => Promise<unknown>)[] = []
+
+it('returns the shared missing-parent diagnostic over MCP without invoking or granting a write', async () => {
+  const f = await fixture(), client = await f.connect('missing-parent')
+  const input = { path: 'new-lesson/plan.md', mode: 'create', content: '策划' }
+  const failed = await callTool(client, 'file.write', input)
+  expect(failed.isError).toBe(true)
+  expect(failed.structuredContent.result).toMatchObject({ kind: 'error', code: 'tool-failed', data: { pendingCreationPath: path.join(f.root, input.path) } })
+  expect((await callTool(client, 'file.mkdir', { name: 'new-lesson', path: '.' })).isError).toBe(false)
+  const written = await callTool(client, 'file.write', input)
+  expect(written.isError).toBe(false)
+  expect(written.structuredContent.result).toMatchObject({ kind: 'read', data: { path: path.join(f.root, input.path), saved: true } })
+  expect(await readFile(path.join(f.root, input.path), 'utf8')).toBe('策划')
+  const recent = await callTool(client, 'operation.recent')
+  expect(data(recent).operations.some((entry: { tool: string; status: string }) => entry.tool === 'file.write' && entry.status === 'failed')).toBe(true)
+})
 afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
 
 async function fixture(options: { confirm?: (request: ExternalApproval) => boolean | Promise<boolean>; files?: (files: AgentFileService) => ExternalFilePort;
@@ -35,6 +53,77 @@ async function fixture(options: { confirm?: (request: ExternalApproval) => boole
   return { directory, workspace, second, host, events, ...mcp }
 }
 const data = (reply: { structuredContent: { result: any } }) => reply.structuredContent.result.data
+
+it.each(['ask', 'outside-workspace', 'denied', 'stop-approved'] as const)('binds artifact %s approval to the actual MCP operation path and frozen resource owner', async scenario => {
+  let artifactPhase = false
+  const f = await fixture({ permission: scenario === 'ask' ? 'ask' : 'workspace', confirm: async () => {
+    if (!artifactPhase) return true
+    if (scenario === 'denied') return false
+    if (scenario === 'stop-approved') await f.service.stopSession((await f.service.status()).sessions[0]!.sessionId)
+    return true
+  } })
+  const bytes = await readFile(path.resolve('tests/fixtures/g20M17/local-media.png'))
+  const images = new OpenImageService({ http: { getJson: async () => { throw new Error('Offline source') },
+    getBytes: async () => ({ url: 'https://example.com/fixture.png', contentType: 'image/png', bytes }) },
+    libraries: [['openverse', async () => ({ library: 'openverse', excluded: 0, hasMore: false, candidates: [{
+      library: 'openverse', providerId: 'fixture', title: 'Offline resource', license: { code: 'cc0', id: 'CC0 1.0', attributionRequired: false },
+      sourceName: 'Offline resource', pageUrl: 'https://example.com/fixture', fileUrl: 'https://example.com/fixture.png',
+    }] })]] })
+  f.host.tools.configureHostServices({ openImages: images, beginRun: async grant => { images.beginRun(grant.runId) }, stopRun: runId => { images.stopRun(runId) },
+    artifacts: {
+      preflight: ({ grant, destination }) => f.host.artifactDeliveries.preflight({ workspaceRoot: grant.fileAccess!.workspaceRoot!, permission: grant.fileAccess!.permission, destination }),
+      lookup: (runId, operationId) => f.host.artifactDeliveries.lookup(operationId, runId),
+      save: ({ grant, operationId, source, bytes, approvedPaths, assertActive }) => f.host.artifactDeliveries.deliver({ runId: grant.runId, operationId,
+        workspaceRoot: grant.fileAccess!.workspaceRoot!, permission: grant.fileAccess!.permission, destination: source.destination,
+        ...artifactDeliverySource(source), bytes, approvedTargetPath: approvedPaths?.[0], assertActive }),
+    },
+  })
+  const document = await f.host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('Resource owner'), resources: { assets: {}, components: {} } }, 'source.h5lesson')
+  await f.host.internalAPI.save(document.documentId, path.join(f.workspace, 'source.h5lesson'))
+  const client = await f.connect('artifact-path-owner')
+  expect((await callTool(client, 'file.open', { path: 'source.h5lesson' })).isError).toBe(false)
+  const found = data(await callTool(client, 'image.search', { query: 'fixture', limit: 1 }))
+  const fetched = data(await callTool(client, 'image.fetch', { image: found.candidates[0].image }))
+  expect(fetched).toMatchObject({ status: 'ready' })
+  f.approvals.length = 0
+  artifactPhase = true
+  const destination = scenario === 'ask' ? 'saved.png' : path.join(f.directory, 'outside.png')
+  const target = path.resolve(f.workspace, destination)
+  const saved = await callTool(client, 'artifact.save', { source: fetched.resource, destination })
+  expect(f.approvals).toEqual([expect.objectContaining({ paths: [target], reason: scenario === 'ask' ? 'ask' : 'outside-workspace' })])
+  if (scenario === 'ask' || scenario === 'outside-workspace') {
+    expect(data(saved)).toMatchObject({ status: 'written', path: target, sourceId: fetched.resource })
+    expect(await readFile(target)).toEqual(bytes)
+  } else {
+    expect(saved.isError).toBe(true)
+    await expect(readFile(target)).rejects.toMatchObject({ code: 'ENOENT' })
+  }
+})
+
+it('delivers every typed prepared image through the real MCP reply without decoding data.image', async () => {
+  const f = await fixture()
+  vi.spyOn(f.host.tools, 'resolveRunTool').mockImplementation(async (_run, name) => describeTools([name])[0] ?? null)
+  const result: ToolResult = { kind: 'read', data: { status: 'prepared', image: { resourceId: 'unrelated-legacy-value' } }, images: [
+    { kind: 'image', source: 'preview', resourceId: 'one', mimeType: 'image/png' },
+    { kind: 'image', source: 'preview', resourceId: 'two', mimeType: 'image/webp' },
+  ] }
+  vi.spyOn(f.host.tools, 'execute').mockResolvedValue(result)
+  const prepare = vi.spyOn(f.host.tools, 'prepareResultImages').mockResolvedValue([
+    { kind: 'image', bytes: Uint8Array.from([1, 2]), mimeType: 'image/png' },
+    { kind: 'image', bytes: Uint8Array.from([3, 4]), mimeType: 'image/webp' },
+  ])
+  const legacyRead = vi.spyOn(f.host.tools, 'readObservationResource')
+  const client = await f.connect('typed-preview-client')
+  const reply = await client.callTool({ name: 'image.preview', arguments: { images: ['one', 'two'] } }) as unknown as ResidentToolReply
+  expect(reply.isError).toBe(false)
+  expect(reply.content.filter(item => item.type === 'image')).toEqual([
+    { type: 'image', data: 'AQI=', mimeType: 'image/png' },
+    { type: 'image', data: 'AwQ=', mimeType: 'image/webp' },
+  ])
+  expect(prepare).toHaveBeenCalledOnce()
+  expect(prepare.mock.calls[0]![1]).toBe(result)
+  expect(legacyRead).not.toHaveBeenCalled()
+})
 
 it('keeps pending image jobs non-error on the real MCP transport without claiming completion or resending', async () => {
   const f = await fixture()
@@ -83,13 +172,13 @@ it('serves a resident session in the current workspace with the built-in tool se
   const builtin = await f.host.tools.describeRun('builtin-like')
   expect(names).toEqual(expect.arrayContaining([...builtin.map(tool => tool.name), ...agentFileTools.map(tool => tool.name),
     'course.createFromHtml', 'workspace.list', 'workspace.switch', 'workbench.state', 'operation.recent']))
-  for (const tool of builtin) expect(listed.find(item => item.name === tool.name)!.inputSchema.properties!.arguments).toEqual(tool.schema)
+  for (const tool of builtin) expect(listed.find(item => item.name === tool.name)!.inputSchema).toEqual(tool.schema)
   // Selection, not passthrough: course editing tools need an opened course document first.
   expect((await f.host.tools.describe()).some(tool => tool.name === 'object.update')).toBe(true)
   expect(names).not.toContain('object.update')
 
   const read = await callTool(client, 'file.read', { path: 'notes.md' })
-  expect(read.isError).toBe(false)
+  expect(read.isError, JSON.stringify(read.structuredContent.result)).toBe(false)
   expect(JSON.stringify(data(read))).toContain('AAA BBB')
   const opened = await callTool(client, 'file.open', { path: 'notes.md' })
   expect(data(opened)).toMatchObject({ writable: true })
@@ -108,7 +197,10 @@ it('serves a resident session in the current workspace with the built-in tool se
   expect(timeline.items.some(item => item.type === 'document.commit')).toBe(true)
   expect(timeline.items.some(item => ['run.end', 'reasoning', 'usage'].includes(item.type))).toBe(false)
   expect(JSON.stringify([conversation, timeline, await f.service.status()])).not.toContain(f.token())
-  expect(f.service.activity()).toEqual([{ clientName: 'Claude Code', pendingCalls: 0 }])
+  // The current lifecycle treats only pending calls as work; an idle resident
+  // connection stays available without holding an active-operation barrier.
+  expect(f.service.activity()).toEqual([])
+  expect((await f.service.status()).sessions).toHaveLength(1)
 
   const large = '中文'.repeat(800_000)
   const written = await callTool(client, 'file.write', { mode: 'create', path: 'large.md', content: large })
@@ -126,7 +218,7 @@ it('S12-T03 answers an undelivered write with its original receipt, executes aga
   const args = { mode: 'replace', path: 'notes.md', content: '第一版' }
   gate = new Promise(resolve => { release = resolve })
   const controller = new AbortController()
-  const first = client.callTool({ name: 'file.write', arguments: { arguments: args } }, undefined, { signal: controller.signal })
+  const first = client.callTool({ name: 'file.write', arguments: args }, undefined, { signal: controller.signal })
   await expect.poll(() => executions).toBe(1)
   controller.abort()
   await expect(first).rejects.toThrow()
@@ -273,7 +365,7 @@ it('S12-T02 keeps concurrent clients on one Session and History, and a closing d
   expect(f.service.writableSessionsForDocument(left.documentId)).toEqual([])
   const stale = await callTool(codex, 'read', { target: left.target })
   expect(stale.isError).toBe(true)
-  expect(stale.content.some(item => item.text?.includes('句柄均已失效'))).toBe(true)
+  expect(stale.structuredContent.result).toMatchObject({ kind: 'error' })
   expect((await f.service.status()).sessions.every(session => !session.stopped)).toBe(true)
   expect((await callTool(codex, 'file.read', { path: 'notes.md' })).isError).toBe(false)
 })

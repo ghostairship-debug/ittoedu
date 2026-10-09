@@ -1,3 +1,4 @@
+import { isNativeProjectFilename } from '../shared/nativeProjectFile'
 import { saveDocumentWithDialog } from './workbench/documentSaveDialog'
 import { acceptWorkbenchExportBuildReply, acceptWorkbenchExportBuildProgress, disposeWorkbenchExportPort, installWorkbenchToolServices, workbenchImageService, workbenchImageSelection, setWorkbenchHtmlPreview, workbenchHtmlActions, releaseWorkbenchHtmlDocument } from './workbench/workbenchToolServices'
 import { ImageResultsDesktopService } from './workbench/images/ImageResultsDesktopService'
@@ -5,7 +6,7 @@ import { HtmlImportDesktopService } from './workbench/htmlImport/HtmlImportDeskt
 import { closeDocumentWithDialog } from './workbench/documentCloseDialog'
 import { trashWorkspaceWithDialog } from './workbench/workspaceTrashDialog'
 import { workspaceFilesRequestSchema } from '../shared/workbench/workspaceFiles'
-import { mediaFilesRequestSchema } from '../shared/workbench/mediaFiles'
+import { mediaFilesRequestSchema, mediaFileDraftInputSchema } from '../shared/workbench/mediaFiles'
 import { operateMediaFiles } from './workbench/mediaFilesDesktopService'
 import { operateExternalMcp, closeExternalMcpService, attachExternalMcpWindow } from './workbench/external/externalDesktopService'
 import { operateExecutionSettings } from './workbench/providers/executionSettingsService'
@@ -20,11 +21,13 @@ import { ViewObservationDesktopService } from './workbench/observation/ViewObser
 import { publishedCourseV3Schema } from '../shared/contracts/component-platform/published'
 import { setHtmlPreviewProtocolHandler } from './protocols'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { app, dialog, ipcMain } from 'electron'
 import { documentHost } from './workbench/documentHost'
 import { componentCompilationInputSchema } from '../shared/workbench/componentCompilation'
 import { documentHostRequestSchema } from '../shared/workbench/desktop'
+import { spatialViewportCaptureSchema } from '../shared/workbench/spatialViewport'
 import { z } from 'zod'
 import {
   IPC_CHANNELS,
@@ -124,7 +127,7 @@ const projectPathSchema = z
   .max(32_767)
   .refine((value) => path.isAbsolute(value), '工程路径必须是绝对路径')
   .refine(
-    (value) => path.extname(value).toLocaleLowerCase('en-US') === '.h5lesson',
+    (value) => isNativeProjectFilename(value),
     '工程路径扩展名无效',
   )
 
@@ -301,6 +304,38 @@ let htmlPreview: HtmlPreviewService | undefined
 let htmlPreviewClosedCleanup: (() => void) | undefined
 export function releaseAllHtmlPreviewLeases(): void { htmlPreview?.releaseAll() }
 let detachExternalMcpWindow: (() => void) | undefined
+let stopMediaBindingEvents: (() => void) | undefined
+
+/** Input capture uses the existing renderer owner, without saving or changing the foreground. */
+function requestRendererInput<T>(window: BrowserWindow, requestChannel: string, resultChannel: string,
+  input: unknown, decode: (value: unknown) => T): Promise<T> {
+  if (window.isDestroyed() || window.webContents.isCrashed() || window.webContents.isLoadingMainFrame())
+    return Promise.reject(new Error('文档界面尚未就绪，当前输入未确认'))
+  const requestId = randomUUID()
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      ipcMain.removeListener(resultChannel, receive)
+      window.removeListener('closed', unavailable)
+      window.webContents.removeListener('render-process-gone', unavailable)
+      window.webContents.removeListener('did-start-navigation', navigating)
+    }
+    const unavailable = () => { cleanup(); reject(new Error('文档界面已断开，当前输入未确认')) }
+    const navigating = (_event: unknown, _url: string, _inPlace: boolean, mainFrame: boolean) => { if (mainFrame) unavailable() }
+    const receive = (event: IpcMainEvent, id: unknown, ready: unknown, value: unknown) => {
+      if (event.sender !== window.webContents || id !== requestId) return
+      cleanup()
+      if (ready !== true) { reject(new Error(typeof value === 'string' ? value : '文档输入尚未确认，原输入已保留')); return }
+      try { resolve(decode(value)) } catch (error) { reject(error) }
+    }
+    ipcMain.on(resultChannel, receive)
+    window.once('closed', unavailable)
+    window.webContents.once('render-process-gone', unavailable)
+    window.webContents.on('did-start-navigation', navigating)
+    try { window.webContents.send(requestChannel, requestId, input) }
+    catch (error) { cleanup(); reject(error) }
+  })
+}
+
 export function registerIpcHandlers(context: IpcContext): void {
   installWorkbenchToolServices(context)
   ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildProgress)
@@ -401,6 +436,17 @@ export function registerIpcHandlers(context: IpcContext): void {
     message: 'Pixabay 设置未能保存，原配置已保留。', suggestion: '请检查系统安全存储。',
   }, async (_event, args) => operatePixabaySettings(requireSingleArgument(args)))
   const documents = documentHost()
+  documents.setDocumentInputPreparer(documentId => requestRendererInput(requireWindow(context),
+    IPC_CHANNELS.requestPrepareDocumentInput, IPC_CHANNELS.prepareDocumentInputResult, documentId, () => undefined))
+  documents.setSpatialViewportPreparer(input => requestRendererInput(requireWindow(context),
+    IPC_CHANNELS.requestCaptureSpatialViewport, IPC_CHANNELS.captureSpatialViewportResult, input, value => spatialViewportCaptureSchema.parse(value)))
+  documents.setMediaCopyPreparer((source, kind) => requestRendererInput(requireWindow(context),
+    IPC_CHANNELS.requestCaptureMediaCopy, IPC_CHANNELS.captureMediaCopyResult, { source, kind }, value => z.array(mediaFileDraftInputSchema).parse(value)))
+  stopMediaBindingEvents?.()
+  stopMediaBindingEvents = documents.artifacts.subscribeBindings(change => {
+    const window = context.getMainWindow()
+    if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.mediaArtifactBindingChanged, change)
+  })
   htmlPreviewClosedCleanup?.()
   htmlPreview?.dispose()
   const preview = new HtmlPreviewService({
@@ -553,7 +599,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     {
       code: 'PROJECT_OPEN_FAILED',
       title: '工程打开失败',
-      message: '无法打开所选 H5 演示。',
+      message: '无法打开所选 果铃工程。',
       suggestion: '请确认文件没有损坏并重试。',
     },
     async (_event, args) => {
@@ -613,7 +659,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     {
       code: 'PROJECT_SAVE_FAILED',
       title: '工程保存失败',
-      message: '无法保存当前 H5 演示。',
+      message: '无法保存当前 果铃工程。',
       suggestion: '请改存到有足够空间且可写的位置。',
     },
     async (_event, args) => {
@@ -973,7 +1019,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     {
       code: 'PREVIEW_NETWORK_POLICY_FAILED',
       title: '预览网络配置失败',
-      message: '无法应用当前 H5 演示的网络声明。',
+      message: '无法应用当前 果铃工程的网络声明。',
       suggestion: '请检查工程网络声明并重新打开预览。',
     },
     (event, args) => {
@@ -1090,6 +1136,10 @@ export function unregisterIpcHandlers(): void {
   detachExternalMcpWindow?.(); detachExternalMcpWindow = undefined
   void closeExternalMcpService().catch(() => undefined)
   documentHost().setEventSink(undefined)
+  documentHost().setDocumentInputPreparer(undefined)
+  documentHost().setSpatialViewportPreparer(undefined)
+  documentHost().setMediaCopyPreparer(undefined)
+  stopMediaBindingEvents?.(); stopMediaBindingEvents = undefined
   for (const channel of Object.values(IPC_CHANNELS)) {
     if (channel !== IPC_CHANNELS.requestSave) ipcMain.removeHandler(channel)
   }

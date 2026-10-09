@@ -1,3 +1,4 @@
+import { nativeProjectFilename } from '../../../shared/nativeProjectFile'
 import path from 'node:path'
 import type { ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
 import type { SaveReceipt } from '../../../shared/workbench/toolPorts'
@@ -96,7 +97,7 @@ export async function createCourseFromHtml(
     ? [{ order: 0, id: null, html: sourceHtml }] : splitHtmlSections(sourceHtml).sections
 
   const requestedName = input.name ?? (path.parse(source.path).name || '课件')
-  const name = /\.h5lesson$/i.test(requestedName) ? requestedName : `${requestedName}.h5lesson`
+  const name = nativeProjectFilename(requestedName)
   const createdResult = await child('create', 'file.create', () => ({
     name, kind: 'course-v10', ...(input.path === undefined ? {} : { path: input.path }),
   }))

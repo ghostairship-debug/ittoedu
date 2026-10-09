@@ -16,7 +16,7 @@ import { OpenAIChatProvider } from '../../src/main/workbench/providers/OpenAICha
 import { callTool, residentMcpFixture } from '../helpers/residentMcpFixture'
 import type { ExecutionStart } from '../../src/shared/workbench/execution'
 import type { ModelSelection } from '../../src/shared/workbench/modelProvider'
-import { courseAgentMethodSkills } from '../../src/shared/courseAgentSkills'
+import { courseAgentBundledSkills } from '../../src/shared/courseAgentSkills'
 
 const cleanups: (() => Promise<unknown>)[] = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
@@ -66,6 +66,9 @@ function selection(baseURL: string): ModelSelection {
 describe('M24-T01 bundled Skill through real execution and MCP', () => {
   it('ordinary edit reads no Skill; creative HTTP/SSE run explicitly reads SKILL.md then a direct reference', async () => {
     const h = await fixture()
+    const entryRead = await h.skills.read({ skill: skill.name, path: 'SKILL.md', offset: 0, limit: 64_000 })
+    const referenceRead = await h.skills.read({ skill: skill.name, path: referencePath, offset: 0, limit: 64_000 })
+    if (entryRead.status !== 'read' || referenceRead.status !== 'read') throw new Error('Expected bundled files')
     let mode: 'edit' | 'creative' = 'edit', turn = 0
     const model = await localModel(body => {
       turn += 1
@@ -95,8 +98,8 @@ describe('M24-T01 bundled Skill through real execution and MCP', () => {
     const creativeResult = await engine.wait(creative.runId)
     expect(creativeResult.tools.map(tool => tool.call.name)).toEqual(['skills.read', 'skills.read'])
     expect(creativeResult.tools.map(tool => tool.result)).toMatchObject([
-      { kind: 'read', data: { status: 'read', skill: skill.name, path: 'SKILL.md', version: skill.version, content: files[skill.path], truncated: false } },
-      { kind: 'read', data: { status: 'read', skill: skill.name, path: referencePath, version: skill.version, content: files[reference], truncated: false } },
+      { kind: 'read', data: { status: 'read', skill: skill.name, path: 'SKILL.md', version: entryRead.version, content: files[skill.path], truncated: false } },
+      { kind: 'read', data: { status: 'read', skill: skill.name, path: referencePath, version: referenceRead.version, content: files[reference], truncated: false } },
     ])
     const creativeRequests = model.requests.slice(ordinaryRequests.length)
     expect(creativeRequests).toHaveLength(3)
@@ -107,9 +110,9 @@ describe('M24-T01 bundled Skill through real execution and MCP', () => {
       expect(tool.function.description).toBe(skillReadTool(bundledSkills.manifest.skills).description)
       expect(tool.function.description).not.toContain(files[skill.path])
       expect(tool.function.description).not.toContain(files[reference])
-      expect(tool.function.parameters).toEqual(z.toJSONSchema(skillReadInputSchema))
+      expect(tool.function.parameters).toEqual(z.toJSONSchema(skillReadInputSchema, { io: 'input' }))
     }
-    expect(bundledSkills.manifest.skills).toHaveLength(courseAgentMethodSkills.length)
+    expect(bundledSkills.manifest.skills).toHaveLength(courseAgentBundledSkills.length)
     for (const entry of bundledSkills.manifest.skills)
       expect(model.requests[0].tools.find((item: any) => item.function.parameters.properties.skill).function.description)
         .toContain(`${entry.name}：${entry.description}`)
@@ -118,11 +121,14 @@ describe('M24-T01 bundled Skill through real execution and MCP', () => {
     const timeline = await h.events.snapshot('conversation')
     const reads = timeline.items.filter(item => item.type === 'tool' && item.data?.toolName === 'skills.read')
     expect(reads.length).toBeGreaterThanOrEqual(2)
-    expect(reads.some(item => JSON.stringify(item.data).includes(referencePath) && JSON.stringify(item.data).includes(skill.version))).toBe(true)
+    expect(reads.some(item => JSON.stringify(item.data).includes('SKILL.md') && JSON.stringify(item.data).includes(entryRead.version))).toBe(true)
+    expect(reads.some(item => JSON.stringify(item.data).includes(referencePath) && JSON.stringify(item.data).includes(referenceRead.version))).toBe(true)
   })
 
   it('MCP tools/list exposes the same schema and tools/call returns the bundled read result', async () => {
     const h = await fixture()
+    const referenceRead = await h.skills.read({ skill: skill.name, path: referencePath, offset: 0, limit: 64_000 })
+    if (referenceRead.status !== 'read') throw new Error('Expected bundled reference')
     const root = await mkdtemp(path.join(tmpdir(), 'g20-skill-mcp-'))
     cleanups.push(() => rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }))
     const mcp = await residentMcpFixture({ host: h.host, directory: root, workspaceRoot: root, appendEvent: event => h.events.append(event) })
@@ -132,10 +138,10 @@ describe('M24-T01 bundled Skill through real execution and MCP', () => {
     const listed = tools.find(tool => tool.name === 'skills.read')!
     const canonical = (await h.host.tools.describe()).find(tool => tool.name === 'skills.read')!
     expect(listed.description).toBe(canonical.description)
-    expect(listed.inputSchema.properties!.arguments).toEqual(canonical.schema)
-    expect(canonical.schema).toEqual(z.toJSONSchema(skillReadInputSchema))
+    expect(listed.inputSchema).toEqual(canonical.schema)
+    expect(canonical.schema).toEqual(z.toJSONSchema(skillReadInputSchema, { io: 'input' }))
     const reply = await callTool(client, 'skills.read', { skill: skill.name, path: referencePath })
     expect(reply.structuredContent.result).toMatchObject({ kind: 'read', data: { status: 'read', skill: skill.name,
-      path: referencePath, version: skill.version, content: files[reference] } })
+      path: referencePath, version: referenceRead.version, content: files[reference] } })
   })
 })

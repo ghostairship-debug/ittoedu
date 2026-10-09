@@ -11,8 +11,6 @@ import { pendingApproval, pendingQuestion, type PendingApproval, type PendingQue
 import { selectionReference, workbenchSelection, type SelectionCapture } from '../SelectionContextController'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import { isExecutionInputError } from '../../../shared/workbench/executionInputMessages'
-import { textTargetContent } from '../../../core/drivers/course/elementFields'
-import { prepareExecutionContentOutput } from '../../../core/tools/ToolTargets'
 
 /**
  * Element AI cards (M15): every element has its own card with its requests and replies. A card is backed by an
@@ -37,6 +35,8 @@ export interface ElementCardView {
   key: string
   /** An element's card lives while its document is open; a text card while it is open on screen. */
   kind: 'element' | 'text'
+  /** Unsent cards may be folded without ending their conversation or discarding input. */
+  dismissed: boolean
   /** Where a text card floats (viewport coordinates). */
   anchor: { left: number; top: number } | null
   /** Why a text card cannot send again: its text is no longer where the card left it. */
@@ -73,6 +73,9 @@ interface CardRecord {
   anchor: { left: number; top: number } | null
   /** A text card: what its range held after the last request (undefined before the first check, null once lost). */
   content?: string | null
+  capture?: SelectionCapture
+  contentOutput?: ExecutionSendInput['contentOutput']
+  dismissed?: boolean
   documentId: string
   label: string
   target: ExecutionSelectionTarget
@@ -156,7 +159,7 @@ export class ElementCardController {
     const cached = this.views.get(key)
     if (cached) return cached
     const view: ElementCardView = {
-      key, kind: card.kind, anchor: card.anchor, textLost: card.kind === 'text' && card.content === null ? TEXT_LOST : null, documentId: card.documentId, label: card.label, target: card.target,
+      key, kind: card.kind, dismissed: Boolean(card.dismissed), anchor: card.anchor, textLost: card.kind === 'text' && card.content === null ? TEXT_LOST : null, documentId: card.documentId, label: card.label, target: card.target,
       entries: card.entries.map(entry => withReply(entry, card.projection)),
       busy: card.entries.some(entry => entry.state === 'sending' || entry.state === 'queued' || entry.state === 'running'),
       question: pendingQuestion(card.projection), approval: pendingApproval(card.projection), error: card.error, draft: card.draft, closing: card.closing, unconfirmed: Boolean(card.unconfirmed), ...steps(card.entries),
@@ -182,30 +185,36 @@ export class ElementCardController {
     }
     this.cards.set(key, { key, kind: 'element', anchor: null, documentId: input.documentId, label: input.label, target: structuredClone(input.target), workspaceId: null,
       conversation: null, entries: [], textStart: 0, projection: emptyExecutionProjection(''), error: '', draft: '', closing: false, sends: new Map(), sending: Promise.resolve(), catchUp: Promise.resolve() })
-    // A card ends with its document (Main deletes its conversation at the same time).
+    this.observeDocuments()
+    this.notify()
+    return key
+  }
+  /** A folded text card has the same document lifetime as an element card. */
+  private observeDocuments() {
     const documents = this.ports.documents?.()
     if (documents && this.documents?.api !== documents) {
       this.documents?.stop()
       this.documents = { api: documents, stop: documents.subscribe(event => { if (event.type === 'closed') this.forgetDocument(event.documentId) }) }
     }
-    this.notify()
-    return key
   }
 
   /**
-   * Opens a card for selected text (M15): it stays on screen until closed, and closing it ends it. Only one text
-   * card is open at a time; `content` is what the range holds now.
+   * Opens a card from the input owner's confirmed capture. Existing submitted cards keep their controls;
+   * an unsent card folds and keeps its draft in the same record.
    */
-  openText(input: { documentId: string; target: ExecutionSelectionTarget; label: string; anchor: { left: number; top: number }; content: string | null }): string {
-    for (const card of [...this.cards.values()]) if (card.kind === 'text') void this.closeText(card.key).catch(() => undefined)
+  openText(input: { documentId: string; target: ExecutionSelectionTarget; capture: SelectionCapture;
+    contentOutput?: ExecutionSendInput['contentOutput']; label: string; anchor: { left: number; top: number }; content: string | null }): string {
+    for (const card of [...this.cards.values()]) if (card.kind === 'text') this.dismissText(card.key)
     const key = `${input.documentId}:text:${crypto.randomUUID()}`
     this.cards.set(key, { key, kind: 'text', anchor: input.anchor, content: input.content ?? undefined, documentId: input.documentId, label: input.label,
-      target: structuredClone(input.target), workspaceId: null, conversation: null, entries: [], textStart: 0, projection: emptyExecutionProjection(''), error: '', draft: '', closing: false, sends: new Map(), sending: Promise.resolve(), catchUp: Promise.resolve() })
+      target: structuredClone(input.target), capture: structuredClone(input.capture), contentOutput: structuredClone(input.contentOutput), workspaceId: null, conversation: null, entries: [], textStart: 0, projection: emptyExecutionProjection(''), error: '', draft: '', closing: false, sends: new Map(), sending: Promise.resolve(), catchUp: Promise.resolve() })
+    this.observeDocuments()
     this.notify()
     return key
   }
   /** Explicit user re-selection keeps this card's draft and conversation while replacing only its live text target. */
-  rebindText(key: string, input: { documentId: string; target: ExecutionSelectionTarget; label: string;
+  rebindText(key: string, input: { documentId: string; target: ExecutionSelectionTarget; capture: SelectionCapture;
+    contentOutput?: ExecutionSendInput['contentOutput']; label: string;
     anchor: { left: number; top: number }; content: string | null }): void {
     const card = this.cards.get(key)
     if (!card || card.kind !== 'text') throw new Error('原文字卡已关闭，请重新打开。')
@@ -214,12 +223,36 @@ export class ElementCardController {
       || pendingQuestion(card.projection) || pendingApproval(card.projection)) throw new Error('当前请求尚未结束，请稍后重新选择。')
     if (input.content === null) throw new Error('新选区内容无法确认，请重新选中后再试。')
     card.target = structuredClone(input.target)
+    card.capture = structuredClone(input.capture)
+    card.contentOutput = structuredClone(input.contentOutput)
+    card.dismissed = false
     card.content = input.content
     card.label = input.label
     card.anchor = { ...input.anchor }
     card.textStart = card.entries.length
     card.error = ''
     this.notify()
+  }
+  /** Folding is only for an unsent card; submitted work keeps its controls visible. */
+  dismissText(key: string): void {
+    const card = this.cards.get(key)
+    if (!card || card.kind !== 'text' || card.entries.length || card.unconfirmed || card.closing) return
+    card.dismissed = true; this.notify()
+    void this.flushDrafts().catch(error => {
+      if (this.cards.get(key) !== card) return
+      card.error = error instanceof Error ? error.message : '草稿尚未保存，输入仍保留。'
+      this.notify()
+    })
+  }
+  revealText(key: string, anchor: { left: number; top: number }): void {
+    const card = this.cards.get(key)
+    if (!card || card.kind !== 'text') return
+    card.dismissed = false; card.anchor = { ...anchor }; this.notify()
+  }
+  matchesTextCapture(key: string, capture: SelectionCapture): boolean {
+    const card = this.cards.get(key), original = card?.capture
+    return Boolean(original && original.documentId === capture.documentId && original.epoch === capture.epoch
+      && original.revision === capture.revision && JSON.stringify(original.targets) === JSON.stringify(capture.targets))
   }
   setDraft(key: string, draft: string): void {
     const card = this.cards.get(key)
@@ -239,9 +272,10 @@ export class ElementCardController {
         card.workspaceId = workspaceId
         card.projection = emptyExecutionProjection(card.conversation.conversationId); this.listen(api)
       }
-      const snapshot = card.draft ? await this.ports.snapshot?.(card.documentId) : undefined
-      const documents = snapshot ? [selectionReference({ documentId: card.documentId, epoch: snapshot.epoch,
-        revision: snapshot.revision, targets: [structuredClone(card.target)], label: card.label }, this.permission !== 'read-only')] : []
+      const snapshot = card.draft && !card.capture ? await this.ports.snapshot?.(card.documentId) : undefined
+      const capture = card.capture ?? (snapshot ? { documentId: card.documentId, epoch: snapshot.epoch,
+        revision: snapshot.revision, targets: [structuredClone(card.target)], label: card.label } : undefined)
+      const documents = capture ? [selectionReference(capture, this.permission !== 'read-only')] : []
       for (let attempt = 0; ; attempt++) {
         const current = await api.conversation(workspaceId, card.conversation.conversationId) ?? card.conversation
         const sameContext = current.frozenContextRefs.length === documents.length && current.frozenContextRefs.every((ref, index) => {
@@ -422,15 +456,21 @@ export class ElementCardController {
     if (card.content === null) throw new Error(TEXT_LOST)
     const snapshot = await this.ports.snapshot?.(card.documentId)
     if (!snapshot) throw new Error('文档尚未就绪，请稍后再发送。')
-    if (card.content !== undefined && textTargetContent(snapshot.model, card.target) !== card.content) throw new Error('这段文字已被改动，请重新选中后再打开 AI 卡。')
-    const contentOutput = prepareExecutionContentOutput(snapshot, card.target)
-    return { documentId: card.documentId, epoch: snapshot.epoch, revision: snapshot.revision, targets: [structuredClone(card.target)], label: card.label,
-      ...(contentOutput ? { contentOutput } : {}) }
+    const capture = card.capture
+    if (!capture || snapshot.epoch !== capture.epoch) throw new Error('原文档身份已改变，请重新选中文字后再发送。')
+    // The input owner has drained above. Offsets remain tied to the captured revision; Main maps them through
+    // that Session's commits. Equal text at today's old offset is not proof of the original selection.
+    return { ...structuredClone(capture), ...(card.contentOutput ? { contentOutput: structuredClone(card.contentOutput) } : {}) }
   }
   /** A text card follows its text: each ended request, undo or redo says where it is now. */
   private followText(card: CardRecord, change: ElementChangeView) {
     if (card.kind !== 'text' || change.state === 'pending') return
-    if (change.target && change.content !== undefined) { card.target = structuredClone(change.target); card.content = change.content }
+    if (!change.unavailable && change.target && change.content !== undefined && change.epoch !== undefined && change.revision !== undefined) {
+      card.target = structuredClone(change.target); card.content = change.content
+      card.capture = { documentId: card.documentId, epoch: change.epoch, revision: change.revision,
+        targets: [structuredClone(change.target)], label: card.label }
+      if (card.contentOutput) card.contentOutput = { ...card.contentOutput, target: structuredClone(change.target) as typeof card.contentOutput.target }
+    }
     else card.content = null
   }
   private latestTextEntry(card: CardRecord): ElementCardEntry | undefined {

@@ -1,6 +1,12 @@
 {
-  "description": "编辑已有图片。课件 references 可用本任务图片资源，或当前文档的整张专业图片/图片素材句柄；独立图片用 job@resourceId。宿主读取原字节并使用冻结连接。返回资源须经 project.apply 或 media.apply 正式应用；未知结果不自动重发。",
+  "description": "编辑已有图片。references 原样传入返回的 source/resource，或当前文档的整张专业图片/图片素材句柄。宿主读取原字节并使用冻结连接。返回资源须经 project.apply 或 media.apply 正式应用；未知结果不自动重发。",
   "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
@@ -49,15 +55,13 @@
       },
       "references": {
         "items": {
-          "minLength": 1,
-          "type": "string"
+          "$ref": "#/$defs/__schema0"
         },
         "minItems": 1,
         "type": "array"
       },
       "target": {
-        "minLength": 1,
-        "type": "string"
+        "$ref": "#/$defs/__schema0"
       }
     },
     "required": [

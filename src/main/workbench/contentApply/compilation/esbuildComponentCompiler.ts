@@ -2,12 +2,13 @@ import path from 'node:path'
 import { compileHtmlModules } from './compileHtmlModules'
 import type { Loader, Message, Plugin } from 'esbuild'
 import { loadRuntimeEsbuild, runtimeEsbuildVersion } from '../../componentCompilerRuntime'
+import { componentModuleFileExtensions, componentModuleSpecifier } from '../../../../core/components/source/moduleSpecifier'
 import type {
   ComponentCompilationDiagnostic, ComponentCompilationInput, ComponentCompiler,
 } from '../../../../core/components/compilation/types'
 
 const namespace = 'component-memory'
-export const componentModuleFileExtensions = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.json', '.css', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.mjs', '/index.json']
+export { componentModuleFileExtensions } from '../../../../core/components/source/moduleSpecifier'
 const loaders: Record<string, Loader> = { '.ts': 'ts', '.tsx': 'tsx', '.js': 'js', '.jsx': 'jsx', '.mjs': 'js', '.cjs': 'js', '.json': 'json', '.css': 'css', '.txt': 'text', '.svg': 'text' }
 
 function relativeFile(name: string): string {
@@ -33,7 +34,7 @@ function diagnostics(messages: readonly Message[], severity: 'error' | 'warning'
 /** esbuild reads only supplied virtual files and returns bytes; it never runs candidate code. */
 export function createEsbuildComponentCompiler(): ComponentCompiler {
   return {
-    identity: `esbuild:${runtimeEsbuildVersion}:component-memory-esm-5`,
+    identity: `esbuild:${runtimeEsbuildVersion}:component-memory-esm-7`,
     async compile(input: ComponentCompilationInput) {
       if (input.options?.preserveModules) {
         const { transform } = await loadRuntimeEsbuild()
@@ -42,6 +43,11 @@ export function createEsbuildComponentCompiler(): ComponentCompiler {
       const files = new Map<string, string>(), names = new Map<string, string>()
       const binaryFiles = new Map<string, Uint8Array>()
       const entries = new Map<string, string>()
+      const entryLoaders = new Map<string, Loader>()
+      const declareEntry = (root: string, entry: string, language: ComponentCompilationInput['entryLanguage']) => {
+        if (language) entryLoaders.set(`${root}/${relativeFile(entry)}`, language === 'typescript'
+          ? /\.[jt]sx$/i.test(entry) ? 'tsx' : 'ts' : /\.[jt]sx$/i.test(entry) ? 'jsx' : 'js')
+      }
       const owners = new Map<string, { root: string; bindings?: Readonly<Record<string, string>> }>()
       const addFiles = (root: string, values: Readonly<Record<string, string>>, bindings?: Readonly<Record<string, string>>, dependency?: string, binaries?: Readonly<Record<string, Uint8Array>>) => {
         for (const [name, contents] of Object.entries(values)) {
@@ -58,9 +64,11 @@ export function createEsbuildComponentCompiler(): ComponentCompiler {
         }
       }
       addFiles('/source', input.files, input.moduleBindings, undefined, input.binaryFiles)
+      declareEntry('/source', input.entry, input.entryLanguage)
       for (const [specifier, dependency] of Object.entries(input.dependencies ?? {})) {
         const root = `/dependencies/${encodeURIComponent(specifier)}`
         addFiles(root, dependency.files, dependency.moduleBindings, specifier, dependency.binaryFiles)
+        declareEntry(root, dependency.entry, dependency.entryLanguage)
         entries.set(specifier, `${root}/${relativeFile(dependency.entry)}`)
       }
       const resolveFile = (base: string) => componentModuleFileExtensions.map(extension => `${base}${extension}`).find(candidate => files.has(candidate) || binaryFiles.has(candidate))
@@ -72,25 +80,30 @@ export function createEsbuildComponentCompiler(): ComponentCompiler {
             // are not ambient filesystem modules and grant no network origin.
             if ((args.kind === 'url-token' || args.kind === 'import-rule') && /^(?:data:|https?:|\/\/|cw-resource:|#)/i.test(args.path))
               return { path: args.path, external: true }
+            // Entry is a supplied physical filename, not an authored URL reference.
+            const specifier = args.kind === 'entry-point' ? { pathname: input.entry, suffix: '' }
+              : componentModuleSpecifier(args.path, args.kind === 'url-token' ? 'resource' : 'module')
+            if (specifier.diagnostic) return { errors: [{ text: specifier.diagnostic }] }
             let requested: string | undefined
             if (args.kind === 'entry-point') requested = `/source/${relativeFile(input.entry)}`
             else if (args.path.startsWith('.') || args.kind === 'url-token' || args.kind === 'import-rule') {
               const owner = owners.get(args.importer)
-              const relative = path.posix.join(path.posix.dirname(args.importer), args.path)
+              const relative = path.posix.join(path.posix.dirname(args.importer), specifier.pathname)
               if (owner && relative.startsWith(`${owner.root}/`)) requested = relative
             } else {
               const bindings = owners.get(args.importer)?.bindings
-              const identity = bindings ? (Object.hasOwn(bindings, args.path) ? bindings[args.path] : undefined) : args.path
+              const identity = bindings ? (Object.hasOwn(bindings, args.path) ? bindings[args.path]
+                : Object.hasOwn(bindings, specifier.pathname) ? bindings[specifier.pathname] : undefined) : specifier.pathname
               if (identity !== undefined) requested = entries.get(identity)
             }
             const resolved = requested && resolveFile(requested)
             if (!resolved) return { errors: [{ text: `无法解析组件依赖 ${JSON.stringify(args.path)}；请由资源服务提供该模块及其实际版本` }] }
-            return { path: resolved, namespace, pluginData: { asset: args.kind === 'url-token' } }
+            return { path: resolved, namespace, suffix: specifier.suffix, pluginData: { asset: args.kind === 'url-token' } }
           })
           builder.onLoad({ filter: /.*/, namespace }, args => {
             if (args.pluginData?.asset) return { contents: binaryFiles.get(args.path) ?? files.get(args.path)!, loader: 'dataurl' }
             if (binaryFiles.has(args.path)) return { errors: [{ text: `非文本组件依赖不能作为程序执行：${names.get(args.path) ?? args.path}` }] }
-            const loader = loaders[path.posix.extname(args.path)]
+            const loader = entryLoaders.get(args.path) ?? loaders[path.posix.extname(args.path)]
             if (!loader) return { errors: [{ text: `组件源码类型不支持：${names.get(args.path) ?? args.path}` }] }
             return { contents: files.get(args.path)!, loader }
           })

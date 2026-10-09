@@ -1,27 +1,31 @@
 import { z } from 'zod'
 import type { DocumentSnapshot } from '../../shared/workbench/document'
-import type { ToolResult, ToolTarget, ToolRunGrant } from '../../shared/workbench/tools'
+import type { ToolResult, ToolTarget, ToolRunGrant, ToolResultImage, PreparedToolImage } from '../../shared/workbench/tools'
 import type { ImageGenerationRequest, ImageJobSnapshot, ImageModelSelection } from '../../shared/workbench/images'
+import { parseGeneratedImageReference } from '../../shared/workbench/images'
 import type { HostImageInput } from './imageResource'
+import type { HostMediaInput } from './mediaResource'
 import type { AssetSource } from '../../shared/contracts/media-v1'
 import type { ComponentLibraryEntry } from '../../shared/contracts/component-platform/library'
 import type { ComputeArtifact, ComputeJobInput, ComputeJobSnapshot } from '../../shared/workbench/compute'
 import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
-import type { SkillServicePort } from '../../shared/workbench/toolPorts'
+import type { SkillServicePort, LocalToolRunIntent, LocalToolRunPreview, ReadonlyDelegationIntent, PreparedTaskSource } from '../../shared/workbench/toolPorts'
 import { executeSkillRead, executeSkillList } from './SkillTools'
-import { documentDeliveryReceiptResult, executeDocumentDeliveryTool } from './DocumentDeliveryTools'
+import { documentDeliveryReceiptResult, executeDocumentDeliveryTool, executeTaskFinishDelivery, type TaskFinishDeliveryContext } from './DocumentDeliveryTools'
 import { executeViewObserveTool, type ViewObserveToolContext } from './ViewObserveTools'
 import type { DocumentDeliveryServicePort, ObservationServicePort } from '../../shared/workbench/toolPorts'
 import { handleToolTarget, hasRunWrite, toolRegistrationFor, type ToolSupportContext } from './ToolRegistration'
 import type { OfficeContentToolName } from './OfficeContentTools'
-import type { HostArtifactSaveInput } from './HostArtifactTools'
+import { computeArtifactSource, delegationArtifactSource, resolveArtifactSource, type HostArtifactSaveInput, type HostArtifactResolvedSource } from './HostArtifactTools'
 import type { MaterialToolName } from './MaterialTools'
 import type { HtmlActionToolName } from './HtmlActionTools'
 import { serviceToolOutcome } from './modelToolResult'
 
 /** Main supplies real services. Neither their implementations nor credentials enter core. */
 export interface HostToolServices {
+  /** The document owner proves a saved source and an opened document share identity; this grants no access. */
+  matchesSavedDocument?(sourceDocumentId: string, currentDocumentId: string): Promise<boolean>
   htmlActions?: {
     execute(runId: string, document: { documentId: string; epoch: string; revision: number },
       action: { name: HtmlActionToolName; input: unknown; operationId: string }): Promise<unknown>
@@ -41,11 +45,15 @@ export interface HostToolServices {
     readResource(input: { runId: string; resourceId: string }): Promise<{ mimeType: string; bytes: Uint8Array }>
   }
   artifacts?: {
+    preflight?(input: { grant: ToolRunGrant; destination: string }): Promise<{ path: string; parent: string; outsideWorkspace: boolean; approvalRequired: boolean }>
     lookup(runId: string, operationId: string): Promise<unknown | null>
-    save(input: { grant: ToolRunGrant; operationId: string; source: HostArtifactSaveInput; bytes: Uint8Array;
+    save(input: { grant: ToolRunGrant; operationId: string; source: HostArtifactResolvedSource; bytes: Uint8Array;
       approvedPaths?: readonly string[]; assertActive(): void }): Promise<unknown>
   }
   computeInputs?: { freeze(runId: string, sources: readonly string[]): Promise<ComputeJobInput['inputs']> }
+  taskInputs?: { freeze(runId: string, sources: readonly string[]): Promise<readonly PreparedTaskSource[]> }
+  /** Existing file authorization freezes source bytes; this port owns no document or write state. */
+  mediaFiles?: { read(runId: string, source: string): Promise<HostMediaInput> }
   skills?: SkillServicePort
   deliveries?: DocumentDeliveryServicePort
   observations?: ObservationServicePort
@@ -70,6 +78,10 @@ export interface HostToolServices {
   }
   delegation?: {
     availability(): { ready: boolean; reason: string }
+    prepareLocal?(input: { runId: string; jobId: string; taskId: string; intent: LocalToolRunIntent; sources: readonly PreparedTaskSource[] }): Promise<LocalToolRunPreview>
+    authorizeLocal?(input: { runId: string; jobId: string; taskId: string; intent: LocalToolRunIntent }): void | Promise<void>
+    startLocal?(input: { runId: string; jobId: string; taskId: string; intent: LocalToolRunIntent }): Promise<HostDelegationSnapshot>
+    startReadonly?(input: { runId: string; jobId: string; taskId: string; intent: ReadonlyDelegationIntent; sources: readonly PreparedTaskSource[] }): Promise<HostDelegationSnapshot>
     startManaged(input: { runId: string; jobId: string; taskId: string; goal: string; workspaceRoot: string;
       permission: 'workspace' | 'full'; materials?: readonly string[]; expectedArtifacts: readonly string[] }): Promise<HostDelegationSnapshot>
     readArtifact(runId: string, jobId: string, name: string): Promise<{
@@ -144,8 +156,8 @@ const schema = {
 } as const
 export type HostToolName = keyof typeof schema
 const descriptions: Record<HostToolName, string> = {
-  'image.generate': '通过任务开始时冻结的 GPT OAuth 或已显式启用的 OpenAI Images API 连接生成图片。target 绑定当前获授权的课件或对象，省略时生成独立工作空间资源。ready 返回本任务资源，可用 project.apply from 插入或 media.apply 原位替换；ready 本身未写入工程。当前请求 PNG、auto/low/medium/high 画质。',
-  'image.edit': '编辑已有图片。课件 references 可用本任务图片资源，或当前文档的整张专业图片/图片素材句柄；独立图片用 job@resourceId。宿主读取原字节并使用冻结连接。返回资源须经 project.apply 或 media.apply 正式应用；未知结果不自动重发。',
+  'image.generate': '通过任务开始时冻结的 GPT OAuth 或已显式启用的 OpenAI Images API 连接生成图片。target 绑定当前获授权的课件或对象，省略时生成独立工作空间资源。ready 返回本任务资源，可用 project.apply from 插入或 media.apply 原位替换，也可直接把 htmlSource 用作 HTML 图片 src 或 CSS 图片 URL；软件读取已授权字节并存入工程，勿自造资源地址。ready 本身未写入工程。当前请求 PNG、auto/low/medium/high 画质。',
+  'image.edit': '编辑已有图片。references 原样传入返回的 source/resource，或当前文档的整张专业图片/图片素材句柄。宿主读取原字节并使用冻结连接。返回资源须经 project.apply 或 media.apply 正式应用；未知结果不自动重发。',
   'image.status': '查询本任务图片状态；ready 返回已校验的本任务图片资源身份，不返回 base64 或临时 URL。',
 }
 interface HostImageToolHandler {
@@ -166,6 +178,8 @@ interface HostAuthority {
   resolveImage(runId: string, target: string): Promise<{ snapshot: DocumentSnapshot; target: ToolTarget }>
   active(runId: string, documentId: string, epoch: string): void
   ownsDocument(runId: string, documentId: string): boolean
+  /** Current Gateway grants include documents opened after the run began. */
+  documentIds?(runId: string): readonly string[]
   /** Prior receipt identity, including a detached document; never edit authority. */
   ownsReceiptDocument?(runId: string, documentId: string): boolean
   provideImage(runId: string, documentId: string, source: HostImageInput): Promise<string>
@@ -174,14 +188,14 @@ interface HostAuthority {
   readRunImage?(runId: string, resource: string): Promise<HostImageInput | null>
 }
 interface Job { runId: string; documentId: string; epoch: string; jobId: string }
-interface ImageJob extends Job { kind: 'image'; scope: 'document' | 'workspace'; sourceRunId?: string; controller: AbortController; resources: Map<string, string> }
+interface ImageJob extends Job { kind: 'image'; scope: 'document' | 'workspace'; sourceRunId?: string; sourceDocumentId?: string; controller: AbortController; resources: Map<string, string> }
 interface CachedResult { runId: string; name: string; promise: Promise<ToolResult>; pending: boolean; uncertain: boolean; receipt: boolean }
 
 /** Service work prepares resources; the Gateway owns canonical document operations. */
 export class HostToolCoordinator {
   private readonly jobs = new Map<string, ImageJob>()
   private readonly runs = new Map<string, { grant: ToolRunGrant; stopped: boolean;
-    computeJobs: Set<string>; pendingCompute: Set<Promise<ComputeJobSnapshot>>;
+    computeJobs: Set<string>; pendingCompute: Set<Promise<ComputeJobSnapshot>>; continuationReads: Set<string>;
     delegationJobs: Set<string>; pendingDelegation: Set<Promise<HostDelegationSnapshot>> }>()
   private readonly results = new Map<string, CachedResult>()
   private readonly reissuedImages = new Map<string, { runId: string; promise: Promise<string> }>()
@@ -191,7 +205,7 @@ export class HostToolCoordinator {
   configure(services: HostToolServices) { this.services = services }
   async beginRun(grant: ToolRunGrant) {
     await this.services.beginRun?.(structuredClone(grant))
-    this.runs.set(grant.runId, { grant: structuredClone(grant), stopped: false, computeJobs: new Set(), pendingCompute: new Set(),
+    this.runs.set(grant.runId, { grant: structuredClone(grant), stopped: false, computeJobs: new Set(), pendingCompute: new Set(), continuationReads: new Set(),
       delegationJobs: new Set(), pendingDelegation: new Set() })
   }
   private serviceRun(runId: string) {
@@ -210,26 +224,26 @@ export class HostToolCoordinator {
     return run
   }
   private workspaceImageScope(runId: string): string {
-    const run = this.writableRun(runId)
+    const run = this.builtInRun(runId)
     const root = run.grant.fileAccess?.workspaceRoot
     if (!root) throw new Error('独立图片需要本任务冻结的工作空间根目录')
     return `workspace:${documentDigest({ root })}`
+  }
+  /** Main supplies verified same-task ancestors. This permits ready-result reads, never writes or cancellation. */
+  authorizeContinuationReads(runId: string, sourceRunIds: readonly string[]): void {
+    const run = this.builtInRun(runId)
+    run.continuationReads = new Set(sourceRunIds.filter(source => source !== runId))
   }
   private standaloneReference(jobId: string, resourceId: string): string {
     return `${jobId}@${resourceId}`
   }
   parseStandaloneImageReference(value: string): { jobId: string; resourceId: string } | null {
-    const match = /^(image-tool:[a-f0-9]{64})@(image_[a-f0-9]{64})$/.exec(value)
-    return match ? { jobId: match[1]!, resourceId: match[2]! } : null
+    return parseGeneratedImageReference(value)
   }
   private parseStandaloneReference(value: string): { jobId: string; resourceId: string } {
     const reference = this.parseStandaloneImageReference(value)
     if (!reference) throw new Error('独立参考图句柄无效；请使用本任务已完成图片的 resource 字段')
     return reference
-  }
-  readStandaloneImageReference(runId: string, value: string): Promise<HostImageInput> {
-    const reference = this.parseStandaloneReference(value)
-    return this.readStandaloneImage(runId, reference.jobId, reference.resourceId)
   }
   projectFileServices() { return this.services.projectFiles }
   authorizeOperationPaths(runId: string, operationId: string, paths: readonly string[]): void {
@@ -257,10 +271,12 @@ export class HostToolCoordinator {
     this.rememberResult(runId, operationId, 'course.importPptx', result)
     return structuredClone(await result)
   }
-  readMaterial(runId: string, name: MaterialToolName, input: unknown): Promise<ToolResult> {
+  async readMaterial(runId: string, name: MaterialToolName, input: unknown): Promise<ToolResult> {
     this.serviceRun(runId)
-    if (!this.services.materials) return Promise.resolve(this.serviceUnavailable('材料读取服务尚未接入'))
-    return this.services.materials.read(runId, name, input)
+    if (!this.services.materials) return this.serviceUnavailable('材料读取服务尚未接入')
+    const result = await this.services.materials.read(runId, name, input)
+    this.serviceRun(runId)
+    return this.observationImageResult(result)
   }
   async bindMaterialSources(runId: string, sourceIds: readonly string[]): Promise<void> {
     this.serviceRun(runId)
@@ -272,10 +288,21 @@ export class HostToolCoordinator {
     if (!service) return this.serviceUnavailable('成果文件保存服务尚未接入')
     const previous = await service.lookup(runId, operationId)
     if (previous) return { kind: 'read', data: previous }
-    const source = input.kind === 'image' ? await this.readStandaloneImage(runId, input.job, input.resourceId)
-      : await this.readComputeArtifact(runId, input.job, input.name)
-    return { kind: 'read', data: await service.save({ grant: run.grant, operationId, source: input, bytes: source.bytes,
+    const resolved = resolveArtifactSource(input)
+    const source = resolved.kind === 'image' ? await this.readGeneratedImageReference(runId, input.source)
+      : resolved.kind === 'image-resource' ? await this.authority.readRunImage?.(runId, resolved.resource)
+      : resolved.kind === 'compute' ? await this.readComputeArtifact(runId, resolved.job, resolved.name)
+        : await this.readDelegationArtifact(runId, resolved.job, resolved.name)
+    if (!source) throw new Error('图片资源引用无效')
+    return { kind: 'read', data: await service.save({ grant: run.grant, operationId, source: resolved, bytes: source.bytes,
       approvedPaths: this.approvedPaths.get(operationId)?.paths, assertActive: () => { this.writableRun(runId) } }) }
+  }
+  async preflightArtifactSave(runId: string, input: HostArtifactSaveInput) {
+    const run = this.writableRun(runId)
+    if (!this.services.artifacts?.preflight) throw new Error('成果文件保存服务尚未接入路径预检')
+    const result = await this.services.artifacts.preflight({ grant: run.grant, destination: input.destination })
+    this.writableRun(runId)
+    return result
   }
   supportContext(): ToolSupportContext {
     return { pptxImport: !!this.services.pptxImport, htmlActions: !!this.services.htmlActions, office: !!this.services.office, materials: !!this.services.materials, artifacts: !!this.services.artifacts,
@@ -284,9 +311,47 @@ export class HostToolCoordinator {
       compute: !!this.services.compute, delegation: !!this.services.delegation, web: !!this.services.web,
       mcp: !!this.services.mcp, media: !!this.services.media, openImages: !!this.services.openImages, assetLibrary: !!this.services.assetLibrary }
   }
-  observePage(context: ViewObserveToolContext, input: unknown): Promise<ToolResult> {
-    if (!this.services.observations) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: '画面观察服务尚未就绪' })
-    return executeViewObserveTool(this.services.observations, context, input)
+  async observePage(context: ViewObserveToolContext, input: unknown): Promise<ToolResult> {
+    if (!this.services.observations) return { kind: 'error', code: 'service-unavailable', message: '画面观察服务尚未就绪' }
+    return this.observationImageResult(await executeViewObserveTool(this.services.observations, context, input))
+  }
+  /** Result producers declare pixels once; transport consumers never infer their source. */
+  private observationImageResult(result: ToolResult): ToolResult {
+    if (result.kind !== 'read' || !result.data || typeof result.data !== 'object') return result
+    const data = result.data as { image?: { resourceId?: unknown; mimeType?: unknown; byteLength?: unknown }; detail?: unknown }
+    const image = data.image
+    if (!image || typeof image.resourceId !== 'string' || typeof image.mimeType !== 'string' || !image.mimeType.startsWith('image/')) return result
+    return { ...result, images: [{ kind: 'image', source: 'observation', resourceId: image.resourceId, mimeType: image.mimeType,
+      ...(typeof image.byteLength === 'number' ? { byteLength: image.byteLength } : {}),
+      ...(data.detail === 'auto' || data.detail === 'low' || data.detail === 'high' ? { detail: data.detail } : {}) }] }
+  }
+  /** Authorized bytes shared by UI/model/MCP adapters; no resource or document is created here. */
+  async prepareResultImages(runId: string, result: ToolResult): Promise<readonly PreparedToolImage[]> {
+    this.serviceRun(runId)
+    if (result.kind !== 'read') return []
+    const images: PreparedToolImage[] = []
+    for (const image of result.images ?? []) {
+      let prepared: { mimeType: string; bytes: Uint8Array }
+      switch (image.source) {
+        case 'preview': prepared = await this.readImagePreview(runId, image.resourceId); break
+        case 'observation': prepared = await this.readObservationResource({ runId, resourceId: image.resourceId }); break
+        case 'mcp': prepared = await this.readMcpResource(runId, image.resourceId); break
+        default: { const unavailable: never = image.source; throw new Error(`不支持的图片来源：${unavailable}`) }
+      }
+      this.serviceRun(runId)
+      if (prepared.mimeType !== image.mimeType || image.byteLength !== undefined && prepared.bytes.byteLength !== image.byteLength)
+        throw new Error('图片资源身份或字节长度已变化')
+      images.push({ kind: 'image', source: this.imageSourceIdentity(runId, image), mimeType: prepared.mimeType, bytes: Uint8Array.from(prepared.bytes),
+        ...(image.label ? { label: image.label } : {}), ...(image.detail ? { detail: image.detail } : {}) })
+    }
+    return images
+  }
+  private imageSourceIdentity(runId: string, image: ToolResultImage): string {
+    if (image.resourceId.startsWith('mcp:')) return `mcp:${runId}:${image.resourceId.slice(4)}`
+    if (this.isImageSource(image.resourceId)) return image.resourceId
+    for (const job of this.jobs.values()) if (job.runId === runId)
+      for (const [resourceId, handle] of job.resources) if (handle === image.resourceId) return this.standaloneReference(job.jobId, resourceId)
+    return `${image.source}:${runId}:${image.resourceId}`
   }
   readObservationResource(input: { runId: string; resourceId: string }): Promise<{ mimeType: string; bytes: Uint8Array }> {
     if (this.htmlResources.get(input.runId)?.has(input.resourceId) && this.services.htmlActions) {
@@ -315,11 +380,15 @@ export class HostToolCoordinator {
       if (!resources) { resources = new Set(); this.htmlResources.set(runId, resources) }
       resources.add(resourceId)
     }
-    return { kind: 'read', data }
+    return this.observationImageResult({ kind: 'read', data })
   }
   deliverDocument(context: { runId: string; operationId: string; requestDigest: string; resolveHandle(handle: string, access: 'write'): Promise<{ documentId: string; epoch: string; revision: number }> }, name: 'file.save' | 'document.export', input: unknown): Promise<ToolResult> {
     if (!this.services.deliveries) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: '文档保存与导出服务尚未就绪' })
     return executeDocumentDeliveryTool(this.services.deliveries, context, name, input)
+  }
+  completeTaskDelivery(context: TaskFinishDeliveryContext, input: unknown): Promise<ToolResult> {
+    if (!this.services.deliveries) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: '文档保存与导出服务尚未就绪' })
+    return executeTaskFinishDelivery(this.services.deliveries, context, input)
   }
   readSkill(runId: string, input: unknown): Promise<ToolResult> {
     if (!this.services.skills) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: '随附 Skill 尚未就绪' })
@@ -336,17 +405,42 @@ export class HostToolCoordinator {
       throw new Error('图片作业不属于当前任务工作空间的已完成成果')
     return scope
   }
-  private async recoveredImageScope(runId: string, snapshot: ImageJobSnapshot): Promise<Pick<ImageJob, 'scope' | 'documentId' | 'epoch'>> {
+  private async recoveredImageScope(runId: string, snapshot: ImageJobSnapshot): Promise<Pick<ImageJob, 'scope' | 'documentId' | 'epoch' | 'sourceDocumentId'>> {
     if (/^workspace:[a-f0-9]{64}$/.test(snapshot.documentId))
       return { scope: 'workspace', documentId: this.recoveredWorkspaceImageScope(runId, snapshot), epoch: '' }
-    this.builtInRun(runId)
-    if (snapshot.status !== 'ready' || snapshot.stopped || !this.authority.ownsDocument(runId, snapshot.documentId))
+    this.serviceRun(runId)
+    if (snapshot.status !== 'ready' || snapshot.stopped)
       throw new Error('图片作业不属于当前已授权文档的已完成成果')
-    const current = await this.registry.get(snapshot.documentId).drain()
-    this.authority.active(runId, snapshot.documentId, current.epoch)
-    return { scope: 'document', documentId: snapshot.documentId, epoch: current.epoch }
+    let documentId = this.authority.ownsDocument(runId, snapshot.documentId) ? snapshot.documentId : undefined
+    if (!documentId && this.services.matchesSavedDocument) for (const candidate of this.authority.documentIds?.(runId) ?? []) {
+      if (this.authority.ownsDocument(runId, candidate) && await this.services.matchesSavedDocument(snapshot.documentId, candidate)) {
+        documentId = candidate
+        break
+      }
+    }
+    if (!documentId) throw new Error('图片作业不属于当前已授权文档的已完成成果')
+    const current = await this.registry.get(documentId).drain()
+    this.authority.active(runId, documentId, current.epoch)
+    return { scope: 'document', documentId, epoch: current.epoch, sourceDocumentId: snapshot.documentId }
   }
   private async readableJobRef(runId: string, input: Omit<HostJobRef, 'runId'>): Promise<HostJobRef> {
+    const run = this.builtInRun(runId)
+    if (input.kind === 'compute' && this.services.jobs && run.continuationReads.size) {
+      try { await this.services.jobs.status({ runId, ...input }); return { runId, ...input } }
+      catch (error) {
+        if ((error as { code?: string }).code !== 'job-not-authorized') throw error
+        for (const sourceRunId of run.continuationReads) {
+          let view: HostJobView
+          try { view = await this.services.jobs.status({ runId: sourceRunId, ...input }) }
+          catch (cause) { if ((cause as { code?: string }).code === 'job-not-authorized') continue; throw cause }
+          const snapshot = view.snapshot as ComputeJobSnapshot
+          if (snapshot.status !== 'ready' || snapshot.stopped) throw new Error('原计算作业不是可读取的已完成成果')
+          this.builtInRun(runId)
+          return { runId: sourceRunId, ...input }
+        }
+        throw error
+      }
+    }
     if (input.kind !== 'image' || !this.services.images) return { runId, ...input }
     const snapshot = await this.services.images.read(input.jobId)
     if (snapshot.runId !== runId) await this.recoveredImageScope(runId, snapshot)
@@ -356,23 +450,56 @@ export class HostToolCoordinator {
   }
   async jobStatus(runId: string, input: Omit<HostJobRef, 'runId'>): Promise<ToolResult> {
     this.builtInRun(runId)
-    return this.services.jobs ? { kind: 'read', data: await this.services.jobs.status(await this.readableJobRef(runId, input)) }
-      : this.serviceUnavailable('通用作业服务尚未配置')
+    if (!this.services.jobs) return this.serviceUnavailable('通用作业服务尚未配置')
+    const data = this.jobResult(await this.services.jobs.status(await this.readableJobRef(runId, input)))
+    this.builtInRun(runId)
+    return { kind: 'read', data }
   }
   async jobWait(runId: string, input: Omit<HostJobRef, 'runId'> & { milliseconds: number }, signal?: AbortSignal): Promise<ToolResult> {
     this.builtInRun(runId)
-    return this.services.jobs ? { kind: 'read', data: await this.services.jobs.wait({ ...input, ...await this.readableJobRef(runId, input), signal }) }
-      : this.serviceUnavailable('通用作业服务尚未配置')
+    if (!this.services.jobs) return this.serviceUnavailable('通用作业服务尚未配置')
+    const data = this.jobResult(await this.services.jobs.wait({ ...input, ...await this.readableJobRef(runId, input), signal }))
+    this.builtInRun(runId)
+    return { kind: 'read', data }
   }
   async jobLogs(runId: string, input: Omit<HostJobRef, 'runId'> & { after?: number; limit?: number }): Promise<ToolResult> {
     this.builtInRun(runId)
-    return this.services.jobs ? { kind: 'read', data: await this.services.jobs.logs({ ...input, ...await this.readableJobRef(runId, input) }) }
-      : this.serviceUnavailable('通用作业服务尚未配置')
+    if (!this.services.jobs) return this.serviceUnavailable('通用作业服务尚未配置')
+    const data = await this.services.jobs.logs({ ...input, ...await this.readableJobRef(runId, input) })
+    this.builtInRun(runId)
+    return { kind: 'read', data }
   }
   async jobCancel(runId: string, input: Omit<HostJobRef, 'runId'>): Promise<ToolResult> {
     this.writableRun(runId)
     return this.services.jobs ? { kind: 'read', data: await this.services.jobs.cancel({ runId, ...input }) }
       : this.serviceUnavailable('通用作业服务尚未配置')
+  }
+  private computeArtifacts(snapshot: ComputeJobSnapshot) {
+    return snapshot.artifacts.map(artifact => ({ ...artifact, source: computeArtifactSource(snapshot.jobId, artifact.name) }))
+  }
+  private delegationArtifacts(snapshot: HostDelegationSnapshot) {
+    return snapshot.artifacts.map(artifact => ({ ...artifact, source: delegationArtifactSource(snapshot.jobId, artifact.name),
+      read: { job: snapshot.jobId, name: artifact.name, version: artifact.digest } }))
+  }
+  private imageSources(snapshot: ImageJobSnapshot) {
+    return snapshot.resources.map(resource => ({ ...resource, source: this.standaloneReference(snapshot.jobId, resource.resourceId),
+      htmlSource: `cw-result:${encodeURIComponent(this.standaloneReference(snapshot.jobId, resource.resourceId))}`,
+      resource: this.standaloneReference(snapshot.jobId, resource.resourceId) }))
+  }
+  private jobResult(view: HostJobView): HostJobView {
+    if (view.kind === 'compute') {
+      const snapshot = view.snapshot as ComputeJobSnapshot
+      return { ...view, snapshot: { ...snapshot, artifacts: this.computeArtifacts(snapshot) } }
+    }
+    if (view.kind === 'image') {
+      const snapshot = view.snapshot as ImageJobSnapshot
+      return { ...view, snapshot: { ...snapshot, resources: this.imageSources(snapshot) } }
+    }
+    if (view.kind === 'delegation') {
+      const snapshot = view.snapshot as HostDelegationSnapshot
+      return { ...view, snapshot: { ...snapshot, artifacts: this.delegationArtifacts(snapshot) } }
+    }
+    return view
   }
   async runCompute(runId: string, operationId: string, input: ComputeRunInput): Promise<ToolResult> {
     const run = this.writableRun(runId)
@@ -396,15 +523,18 @@ export class HostToolCoordinator {
           artifacts: stopped.artifacts, reason: stopped.reason ?? '任务已停止；成果不自动应用' } }
       }
       return { kind: 'read', data: { job: jobId, status: snapshot.status, stopped: snapshot.stopped,
-        outputNames: snapshot.outputNames, artifacts: snapshot.artifacts, ...(snapshot.reason ? { reason: snapshot.reason } : {}),
+        outputNames: snapshot.outputNames, artifacts: this.computeArtifacts(snapshot), ...(snapshot.reason ? { reason: snapshot.reason } : {}),
         ...(snapshot.outputDiagnostics ? { outputDiagnostics: snapshot.outputDiagnostics } : {}),
         ...(snapshot.locations ? { locations: snapshot.locations } : {}), ...(snapshot.inputs ? { inputs: snapshot.inputs } : {}) } }
     } finally { run.pendingCompute.delete(pending) }
   }
   async readComputeArtifact(runId: string, jobId: string, name: string): Promise<{ artifact: ComputeArtifact; bytes: Uint8Array }> {
-    this.writableRun(runId)
+    this.builtInRun(runId)
     if (!this.services.compute) throw new Error('受限计算后端未配置')
-    return this.services.compute.readArtifact(runId, jobId, name)
+    const ref = await this.readableJobRef(runId, { kind: 'compute', jobId })
+    const artifact = await this.services.compute.readArtifact(ref.runId, jobId, name)
+    this.builtInRun(runId)
+    return artifact
   }
   async runDelegate(runId: string, operationId: string, input: DelegationRunInput): Promise<ToolResult> {
     const run = this.writableRun(runId)
@@ -430,13 +560,62 @@ export class HostToolCoordinator {
           reason: stopped.reason ?? '父任务已停止；委派成果不自动应用' } }
       }
       return { kind: 'read', data: { job: jobId, status: snapshot.status, stopped: snapshot.stopped,
-        artifacts: snapshot.artifacts, ...(snapshot.reason ? { reason: snapshot.reason } : {}) } }
+        artifacts: this.delegationArtifacts(snapshot), ...(snapshot.reason ? { reason: snapshot.reason } : {}) } }
     } finally { run.pendingDelegation.delete(pending) }
+  }
+  private delegationIdentity(runId: string, operationId: string) {
+    if (!operationId || operationId.length > 512) throw new Error('任务操作身份无效')
+    return { runId, jobId: `delegate-${documentDigest([runId, operationId])}`, taskId: operationId }
+  }
+  async prepareLocalRun(runId: string, operationId: string, intent: LocalToolRunIntent): Promise<LocalToolRunPreview> {
+    this.writableRun(runId)
+    if (!this.services.delegation?.prepareLocal) throw new Error('本地工具执行服务尚未接入')
+    if (intent.sources?.length && !this.services.taskInputs) throw new Error('任务输入读取服务尚未接入')
+    const sources = intent.sources?.length ? await this.services.taskInputs!.freeze(runId, intent.sources) : []
+    this.writableRun(runId)
+    return this.services.delegation.prepareLocal({ ...this.delegationIdentity(runId, operationId), intent, sources })
+  }
+  async authorizeLocalRun(runId: string, operationId: string, intent: LocalToolRunIntent): Promise<void> {
+    this.writableRun(runId)
+    if (!this.services.delegation?.authorizeLocal) throw new Error('本地工具逐项批准服务尚未接入')
+    await this.services.delegation.authorizeLocal({ ...this.delegationIdentity(runId, operationId), intent })
+    this.writableRun(runId)
+  }
+  async runLocalTool(runId: string, operationId: string, intent: LocalToolRunIntent): Promise<ToolResult> {
+    this.writableRun(runId)
+    if (!this.services.delegation?.startLocal) return this.serviceUnavailable('本地工具执行服务尚未接入')
+    return this.startTaskJob(runId, this.services.delegation.startLocal({ ...this.delegationIdentity(runId, operationId), intent }))
+  }
+  async runReadonlyDelegate(runId: string, operationId: string, intent: ReadonlyDelegationIntent): Promise<ToolResult> {
+    this.builtInRun(runId)
+    if (!this.services.delegation?.startReadonly) return this.serviceUnavailable('只读子任务服务尚未接入')
+    if (intent.sources.length && !this.services.taskInputs) return this.serviceUnavailable('任务输入读取服务尚未接入')
+    const sources = intent.sources.length ? await this.services.taskInputs!.freeze(runId, intent.sources) : []
+    this.builtInRun(runId)
+    return this.startTaskJob(runId, this.services.delegation.startReadonly({ ...this.delegationIdentity(runId, operationId), intent, sources }))
+  }
+  private async startTaskJob(runId: string, pending: Promise<HostDelegationSnapshot>): Promise<ToolResult> {
+    const run = this.builtInRun(runId)
+    run.pendingDelegation.add(pending)
+    try {
+      const snapshot = await pending
+      run.delegationJobs.add(snapshot.jobId)
+      const result = run.stopped ? await this.services.delegation!.cancel(runId, snapshot.jobId) : snapshot
+      return { kind: 'read', data: { ...result, job: result.jobId, artifacts: this.delegationArtifacts(result) } }
+    } finally { run.pendingDelegation.delete(pending) }
+  }
+  async readDelegationArtifact(runId: string, jobId: string, name: string) {
+    this.builtInRun(runId)
+    if (!this.services.delegation) throw new Error('任务成果读取尚未配置')
+    const ref = await this.readableJobRef(runId, { kind: 'delegation', jobId })
+    const result = await this.services.delegation.readArtifact(ref.runId, jobId, name)
+    this.builtInRun(runId)
+    return result
   }
   async readDelegation(runId: string, input: DelegationReadInput): Promise<ToolResult> {
     this.builtInRun(runId)
     if (!this.services.delegation) return this.serviceUnavailable('有限委派服务尚未配置')
-    const { artifact, bytes } = await this.services.delegation.readArtifact(runId, input.job, input.name)
+    const { artifact, bytes } = await this.readDelegationArtifact(runId, input.job, input.name)
     if (input.version && input.version !== artifact.digest) throw new Error('委派成果版本已变化')
     let content: string
     try { content = new TextDecoder('utf-8', { fatal: true }).decode(bytes) }
@@ -450,7 +629,7 @@ export class HostToolCoordinator {
     return { kind: 'read', data: { status: 'read', job: input.job, name: artifact.name,
       version: artifact.digest, byteLength: artifact.byteLength, verifiedBytes: true, offset, text,
       ...(offset + limit < content.length ? { nextOffset: offset + limit } : {}),
-      source: 'delegated-candidate-untrusted' } }
+      source: delegationArtifactSource(input.job, artifact.name), trust: 'delegated-candidate-untrusted' } }
   }
   /** Byte port for the file owner. A model never receives the generated bytes. */
   async readStandaloneImage(runId: string, jobId: string, resourceId: string): Promise<HostImageInput> {
@@ -477,8 +656,20 @@ export class HostToolCoordinator {
   }
   async mcpInvoke(runId: string, operationId: string, name: string, args: Record<string, unknown>, snapshotId?: string, signal?: AbortSignal): Promise<ToolResult> {
     this.builtInRun(runId)
-    return this.services.mcp ? { kind: 'read', data: await this.services.mcp.invoke({ runId, operationId, name, arguments: args, ...(snapshotId ? { snapshotId } : {}), signal }) }
-      : this.serviceUnavailable('外部 MCP 服务尚未配置')
+    if (!this.services.mcp) return this.serviceUnavailable('外部 MCP 服务尚未配置')
+    const data = await this.services.mcp.invoke({ runId, operationId, name, arguments: args, ...(snapshotId ? { snapshotId } : {}), signal })
+    this.builtInRun(runId)
+    return { kind: 'read', data: this.mcpResultSources(data) }
+  }
+  /** Normal replies and uncertain-call lookup expose the same owner-issued sources without granting resource access. */
+  private mcpResultSources(data: unknown): unknown {
+    if (!data || typeof data !== 'object') return data
+    const source = (item: unknown): unknown => item && typeof item === 'object' && 'resourceId' in item
+      && typeof item.resourceId === 'string' && 'mimeType' in item && typeof item.mimeType === 'string' && /^(?:image|audio|video)\//.test(item.mimeType)
+      ? { ...item, source: `mcp:${item.resourceId}` } : item
+    const result = data as { content?: unknown[]; downloads?: unknown[] }
+    return { ...data, ...(Array.isArray(result.content) ? { content: result.content.map(source) } : {}),
+      ...(Array.isArray(result.downloads) ? { downloads: result.downloads.map(source) } : {}) }
   }
   async readMcpResource(runId: string, resourceId: string): Promise<{ mimeType: string; bytes: Uint8Array }> {
     this.builtInRun(runId)
@@ -486,7 +677,7 @@ export class HostToolCoordinator {
     return this.services.mcp.readResource(runId, resourceId)
   }
   async lookupMcp(runId: string, operationId: string): Promise<unknown | null> {
-    return this.services.mcp?.lookup(runId, operationId) ?? null
+    return this.mcpResultSources(await this.services.mcp?.lookup(runId, operationId) ?? null)
   }
   mediaDiscover(runId: string): ToolResult {
     this.builtInRun(runId)
@@ -520,23 +711,75 @@ export class HostToolCoordinator {
       else {
         const result = await this.services.openImages.preview({ runId, images: candidates, signal })
         // Preserve the existing library receipt, including its partial-result diagnostics.
-        if (!previews.length && !failures.length) return { kind: 'read', data: result }
+        if (!previews.length && !failures.length) return this.previewImageResult(result)
         const library = result as { previews?: typeof previews; failures?: typeof failures; reason?: string }
         previews.push(...library.previews ?? [])
         failures.push(...library.failures ?? (library.reason ? candidates.map(image => ({ image, reason: library.reason! })) : []))
       }
     }
     this.builtInRun(runId)
-    return { kind: 'read', data: previews.length ? { status: 'prepared', previews, ...(failures.length ? { failures } : {}) }
-      : { status: 'failed', reason: '没有取得可查看的图片', failures } }
+    return this.previewImageResult(previews.length ? { status: 'prepared', previews, ...(failures.length ? { failures } : {}) }
+      : { status: 'failed', reason: '没有取得可查看的图片', failures })
+  }
+  private previewImageResult(data: unknown): ToolResult {
+    const prepared = data as { status?: string; previews?: { image: string; resourceId: string; mimeType: string; byteLength: number }[] }
+    const images: ToolResultImage[] = prepared?.status === 'prepared' ? (prepared.previews ?? []).map(image => ({
+      kind: 'image', source: 'preview', resourceId: image.resourceId, mimeType: image.mimeType,
+      byteLength: image.byteLength, label: `图片 ${image.image}：`,
+    })) : []
+    return { kind: 'read', data, ...(images.length ? { images } : {}) }
   }
   private async generatedImagePreview(runId: string, image: string): Promise<HostImageInput | null> {
+    return this.readImageReference(runId, image)
+  }
+  async readImageReference(runId: string, image: string): Promise<HostImageInput | null> {
+    this.serviceRun(runId)
+    const result = await this.readImageSource(runId, image) ?? await this.authority.readRunImage?.(runId, image) ?? null
+    this.serviceRun(runId)
+    return result
+  }
+  isImageSource(source: string): boolean {
+    return !!this.parseStandaloneImageReference(source) || /^(?:material:|mcp:|compute-[^@\s]+@)/.test(source)
+  }
+  /** Existing resource owners validate the source; application still registers bytes in its one canonical transaction. */
+  private async readResourceSource(runId: string, source: string): Promise<HostMediaInput | null> {
+    const generated = await this.readGeneratedImageReference(runId, source)
+    if (generated) return generated
+    let file: { bytes: Uint8Array; mimeType: string } | undefined, filename: string | undefined
+    if (source.startsWith('material:')) file = await this.readObservationResource({ runId, resourceId: source })
+    else if (source.startsWith('mcp:')) file = await this.readMcpResource(runId, source.slice(4))
+    else if (source.startsWith('compute-') && source.includes('@')) {
+      const reference = resolveArtifactSource({ source, destination: '' })
+      if (reference.kind !== 'compute') return null
+      const result = await this.readComputeArtifact(runId, reference.job, reference.name)
+      file = { bytes: result.bytes, mimeType: result.artifact.mimeType }; filename = result.artifact.name
+    }
+    if (!file) return null
+    this.serviceRun(runId)
+    return { ...file, filename: filename ?? `source.${file.mimeType.split('/')[1]}` }
+  }
+  async readImageSource(runId: string, source: string): Promise<HostImageInput | null> {
+    const file = await this.readResourceSource(runId, source)
+    if (file && !file.mimeType.startsWith('image/')) throw new Error('所选来源不是图片')
+    return file
+  }
+  async readMediaSource(runId: string, source: string): Promise<HostMediaInput> {
+    this.serviceRun(runId)
+    const file = await this.readResourceSource(runId, source) ?? await this.authority.readRunImage?.(runId, source)
+      ?? await this.services.mediaFiles?.read(runId, source)
+    this.serviceRun(runId)
+    if (!file) throw new Error('所选媒体来源不可读取')
+    if (!/^(?:image|audio|video)\//.test(file.mimeType)) throw new Error('所选来源不是图片、音频或视频')
+    return file
+  }
+  /** One generated-result reader for preview, reference editing and formal application. */
+  async readGeneratedImageReference(runId: string, image: string): Promise<HostImageInput | null> {
     const reference = this.parseStandaloneImageReference(image)
-    if (!reference) return this.authority.readRunImage?.(runId, image) ?? null
+    if (!reference) return null
     const service = this.services.images
     if (!service?.readReadyResourceFromJob) throw new Error('图片资源读取服务尚未配置')
     const snapshot = await service.read(reference.jobId), scope = await this.recoveredImageScope(runId, snapshot)
-    const file = await service.readReadyResourceFromJob({ ...reference, sourceRunId: snapshot.runId, sourceDocumentId: scope.documentId })
+    const file = await service.readReadyResourceFromJob({ ...reference, sourceRunId: snapshot.runId, sourceDocumentId: snapshot.documentId })
     if (scope.scope === 'document') this.authority.active(runId, scope.documentId, scope.epoch)
     else this.workspaceImageScope(runId)
     return file
@@ -680,6 +923,14 @@ export class HostToolCoordinator {
   }
   /** Recovery queries only; no registration of edit authority or reconstruction of a task. */
   async lookup(runId: string, operationId: string, requestDigest: string, name: string): Promise<ToolResult | null> {
+    if ((name === 'local.run' || name === 'delegate.readonly') && this.services.jobs) {
+      const identity = this.delegationIdentity(runId, operationId)
+      let view: HostJobView
+      try { view = await this.services.jobs.status({ runId, kind: 'delegation', jobId: identity.jobId }) }
+      catch (error) { if ((error as { code?: string }).code === 'unknown-job') return null; throw error }
+      const snapshot = this.jobResult(view).snapshot as HostDelegationSnapshot
+      return { kind: 'read', data: { ...snapshot, job: identity.jobId } }
+    }
     if ((name === 'image.generate' || name === 'image.edit') && this.services.images) {
       const jobId = `image-${operationId}`
       let snapshot: ImageJobSnapshot
@@ -693,9 +944,9 @@ export class HostToolCoordinator {
         || !workspace && !(this.authority.ownsReceiptDocument?.(runId, snapshot.documentId)
           ?? this.authority.ownsDocument(runId, snapshot.documentId))) throw new Error('原图片回执不属于此任务或文档')
       // The durable owner binds this fixed job/run identity to its original workspace.
-      // No resource handle is issued and no current write grant is reconstructed here.
+      // Only immutable source references are returned; no current-run handle or write grant is reconstructed here.
       return { kind: 'read', data: { job: jobId, ...(workspace ? { scope: 'workspace' } : { documentId: snapshot.documentId }),
-        status: snapshot.status, stopped: snapshot.stopped, resources: structuredClone(snapshot.resources), provenance: structuredClone(snapshot.provenance),
+        status: snapshot.status, stopped: snapshot.stopped, resources: this.imageSources(snapshot), provenance: structuredClone(snapshot.provenance),
         ...(snapshot.failure ? { failure: structuredClone(snapshot.failure) } : {}), ...(snapshot.timing?.length ? { timing: structuredClone(snapshot.timing) } : {}) } }
     }
     if (name === 'artifact.save' && this.services.artifacts) {
@@ -708,7 +959,7 @@ export class HostToolCoordinator {
     }
     const cached = this.results.get(operationId)
     if (cached && cached.runId === runId && cached.name === name) return structuredClone(await cached.promise)
-    if ((name === 'file.save' || name === 'document.export') && this.services.deliveries) {
+    if ((name === 'file.save' || name === 'document.export' || name === 'task.delivery') && this.services.deliveries) {
       const receipt = await this.services.deliveries.lookup({ runId, operationId, requestDigest })
       return receipt ? documentDeliveryReceiptResult(receipt) : null
     }
@@ -723,7 +974,7 @@ export class HostToolCoordinator {
     return job
   }
   private async imageResult(job: ImageJob, snapshot: ImageJobSnapshot): Promise<ToolResult> {
-    if (snapshot.jobId !== job.jobId || snapshot.runId !== (job.sourceRunId ?? job.runId) || snapshot.documentId !== job.documentId) throw new Error('图像服务返回了不同任务的结果')
+    if (snapshot.jobId !== job.jobId || snapshot.runId !== (job.sourceRunId ?? job.runId) || snapshot.documentId !== (job.sourceDocumentId ?? job.documentId)) throw new Error('图像服务返回了不同任务的结果')
     if (job.scope === 'workspace') this.workspaceImageScope(job.runId)
     else this.authority.active(job.runId, job.documentId, job.epoch)
     const resources = []
@@ -734,11 +985,11 @@ export class HostToolCoordinator {
           await this.readStandaloneImage(job.runId, job.jobId, resource.resourceId)
           id = this.standaloneReference(job.jobId, resource.resourceId)
         } else if (job.sourceRunId) {
-          id = await this.reissueImageForContinuation(job.runId, job.documentId, job.documentId, job.sourceRunId, job.jobId, resource.resourceId)
+          id = await this.reissueImageForContinuation(job.runId, job.sourceDocumentId ?? job.documentId, job.documentId, job.sourceRunId, job.jobId, resource.resourceId)
         } else id = await this.authority.provideImage(job.runId, job.documentId, await this.services.images!.readResource(resource.resourceId))
         job.resources.set(resource.resourceId, id)
       }
-      resources.push({ resource: id, resourceId: resource.resourceId, mimeType: resource.mimeType, width: resource.width, height: resource.height, byteLength: resource.byteLength })
+      resources.push({ resource: id, htmlSource: `cw-result:${encodeURIComponent(id)}`, source: this.standaloneReference(job.jobId, resource.resourceId), resourceId: resource.resourceId, mimeType: resource.mimeType, width: resource.width, height: resource.height, byteLength: resource.byteLength })
     }
     return { kind: 'read', data: { job: job.jobId, ...(job.scope === 'workspace' ? { scope: 'workspace' } : { documentId: job.documentId }), status: snapshot.status, stopped: snapshot.stopped, resources, provenance: snapshot.provenance,
       ...(snapshot.failure ? { failure: snapshot.failure } : {}), ...(snapshot.timing?.length ? { timing: snapshot.timing } : {}) } }
@@ -749,6 +1000,7 @@ export class HostToolCoordinator {
       const operation = name === 'image.edit' ? 'edit' : 'generate'
       const references = name === 'image.edit' ? schema['image.edit'].parse(input).references : undefined
       const target = value.target ? await this.authority.resolveImage(runId, value.target) : undefined
+      if (!target) this.writableRun(runId)
       const documentId = target?.snapshot.documentId ?? this.workspaceImageScope(runId)
       if (target) for (const reference of references ?? []) await this.authority.readImage(runId, documentId, reference)
       else for (const reference of references ?? []) {
@@ -757,7 +1009,7 @@ export class HostToolCoordinator {
       }
       const selection = structuredClone(await this.services.images!.selection(runId, documentId, operation))
       if (target) this.authority.active(runId, documentId, target.snapshot.epoch)
-      else this.workspaceImageScope(runId)
+      else { this.writableRun(runId); this.workspaceImageScope(runId) }
       const jobId = `image-${operationId}`
       const request: ImageGenerationRequest = { jobId, runId, documentId, operation, prompt: value.prompt, selection, ...(references ? { referenceIds: references } : {}), ...(value.output ? { output: value.output } : {}) }
       const job: ImageJob = { kind: 'image', scope: target ? 'document' : 'workspace', jobId, runId, documentId, epoch: target?.snapshot.epoch ?? '', controller: new AbortController(), resources: new Map() }

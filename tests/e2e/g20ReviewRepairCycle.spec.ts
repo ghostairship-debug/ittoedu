@@ -56,6 +56,7 @@ test('review repair: hidden HTML and unsent AI card drafts survive normal window
     await expect(page.getByRole('textbox', { name: '给创作助手发消息', exact: true })).toHaveValue(unsent)
     expect(readFileSync(fixture.files.lightEdit, 'utf8')).toBe(fixture.sources.lightEdit)
     const recovery = page.getByRole('complementary', { name: '未保存文档的恢复稿', exact: true })
+    await page.locator('.lesson-workspace-toolbar').getByRole('button', { name: /^恢复稿（\d+）$/ }).click()
     await recovery.getByRole('button', { name: '恢复并打开', exact: true }).click()
     const restored = m23Editor(page, 'light-edit.html')
     await expect(restored.frameLocator('iframe[title="HTML 预览"]').locator('#lesson-title')).toHaveText(changed)

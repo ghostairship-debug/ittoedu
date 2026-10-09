@@ -18,9 +18,11 @@ export type TableEdit =
   | { kind: 'insert-row'; referenceRowId: string; position: 'before' | 'after' }
   | { kind: 'delete-row'; rowId: string }
   | { kind: 'reorder-rows'; orderedRowIds: readonly string[] }
+  | { kind: 'move-row'; rowId: string; direction: 'up' | 'down' }
   | { kind: 'insert-column'; referenceColumnId: string; position: 'before' | 'after'; width?: number }
   | { kind: 'delete-column'; columnId: string }
   | { kind: 'reorder-columns'; orderedColumnIds: readonly string[] }
+  | { kind: 'move-column'; columnId: string; direction: 'left' | 'right' }
 
 /** A pure data proposal; the host submits it through its existing transaction/history. */
 export function editTableData(source: TableData, edit: TableEdit): TableData {
@@ -50,9 +52,11 @@ export function editTableData(source: TableData, edit: TableEdit): TableData {
     case 'insert-row': next=commands.insertTableRow(native, edit); break
     case 'delete-row': next=commands.deleteTableRow(native, edit); break
     case 'reorder-rows': next=commands.reorderTableRows(native, edit); break
+    case 'move-row': next=commands.reorderTableRows(native, { orderedRowIds: movedIds(data.rows, edit.rowId, edit.direction === 'up' ? -1 : 1) }); break
     case 'insert-column': next=commands.insertTableColumn(native, edit); break
     case 'delete-column': next=commands.deleteTableColumn(native, edit); break
     case 'reorder-columns': next=commands.reorderTableColumns(native, edit); break
+    case 'move-column': next=commands.reorderTableColumns(native, { orderedColumnIds: movedIds(data.columns, edit.columnId, edit.direction === 'left' ? -1 : 1) }); break
   }
   const restored=restoreRich(data,next)
   if(edit.kind==='cell-text') {
@@ -69,6 +73,12 @@ export function editTableData(source: TableData, edit: TableEdit): TableData {
     }
   }
   return parseTableData(restored)
+}
+function movedIds(items: readonly { id: string }[], id: string, direction: -1 | 1): string[] {
+  const ids = items.map(item => item.id), index = ids.indexOf(id), next = index + direction
+  if (index < 0) throw new Error('表格行列已不存在')
+  if (next >= 0 && next < ids.length) { ids.splice(index, 1); ids.splice(next, 0, id) }
+  return ids
 }
 function restoreRich(source:TableData,native:NativeTableContent):TableData {
   const cells=new Map(source.rows.flatMap(row=>row.cells).map(cell=>[cell.id,cell]))

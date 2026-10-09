@@ -6,7 +6,8 @@ import { applyComponentOperation, captureComponentOperation } from '../../src/co
 import { TEXT_DEFINITION } from '../../src/components/text/adapters'
 import { DOCUMENT_BLOCK_DEFINITION, documentBlockData } from '../../src/components/document-block'
 import { createTextComponentData } from '../../src/components/text/data'
-import { flowDocumentInsertionAt, flowFloatingModeEdits, flowReadingMembers, flowReadingMove } from '../../src/renderer/ui/flow/flowParagraphLayout'
+import { flowDocumentInsertionAt, flowFloatingModeEdits } from '../../src/renderer/ui/flow/flowParagraphLayout'
+import { flowPlacementEdits, flowReadingMembers, flowReadingOrderEdits } from '../../src/core/course/courseFlowEdits'
 import { insertFlowMenu, resolveFlowMenuInsertionOptions, FLOW_DOCUMENT_INSERT_COMMANDS } from '../../src/renderer/ui/flow/flowInsertCommands'
 import type { EditorStoreKernel } from '../../src/renderer/store/editorStoreKernel'
 import { TABLE_DEFINITION } from '../../src/components/table/adapters'
@@ -43,14 +44,26 @@ function lesson() {
 it('moves between reading neighbors across floating and behavior roots and keeps a serialized formal result', () => {
   const original = lesson(), container = { kind: 'surface' as const, surfaceId: 'flow' }
   expect(flowReadingMembers(original, container)).toEqual(['a', 'b', 'section'])
-  const next = applyComponentOperation(original, captureComponentOperation(original, flowReadingMove(original, 'a', 'down')))
+  const next = applyComponentOperation(original, captureComponentOperation(original, flowReadingOrderEdits(original, 'a', 'down')))
   expect(flowReadingMembers(next, container)).toEqual(['b', 'a', 'section'])
   expect(next.instances.float).toEqual(original.instances.float)
   expect(next.instances.behavior).toEqual(original.instances.behavior)
-  const restored = applyComponentOperation(next, captureComponentOperation(next, flowReadingMove(next, 'a', 'up')))
+  const restored = applyComponentOperation(next, captureComponentOperation(next, flowReadingOrderEdits(next, 'a', 'up')))
   expect(flowReadingMembers(restored, container)).toEqual(['a', 'b', 'section'])
   const driver = new CourseV10Driver(), model = { kind: 'course-v10' as const, project: next, resources: { assets: {}, components: {} } }
   expect(driver.load(driver.serialize(model))).toEqual(model)
+})
+
+it('moves a nested body object without a prior frame to the overlay with its supplied destination frame', () => {
+  const original = lesson()
+  original.instances.section.frame = { width: 600, height: 400, transform: [1, 0, 0, 1, 100, 200] }
+  const frame = { width: 320, height: 180, transform: [1, 0, 0, 1, 20, 30] as [number, number, number, number, number, number] }
+  const edits = flowPlacementEdits(original, 'c', { kind: 'overlay', surfaceId: 'flow', placement: { space: 'paper', plane: 'overlay' }, frame })
+  const next = applyComponentOperation(original, captureComponentOperation(original, edits))
+  expect(next.instances.c).toEqual({ ...original.instances.c, frame, flowPlacement: { space: 'paper', plane: 'overlay' } })
+  expect(next.instances.section.childIds).toEqual(['d'])
+  expect(next.surfaces[0].childIds).toEqual([...original.surfaces[0].childIds, 'c'])
+  expect(next.instances.d).toEqual(original.instances.d)
 })
 
 it('captures a section drop and menu insertion in the real container instead of the old top-level selection', () => {
@@ -126,6 +139,12 @@ it('uses the actual Flow floating toolbar without turning a fixed drag into para
       { type: 'frame.set', instanceId: 'float', frame: { width: 100, height: 40, transform: [1, 0, 0, 1, 130, -460] } },
       { type: 'instance.flowPlacement.set', instanceId: 'float', flowPlacement: { space: 'viewport', plane: 'overlay' } },
     ])
+    await act(async () => fireEvent.click(ui!.getByRole('button', { name: '移到正文下方' })))
+    expect(capture.mock.calls.at(-1)![0]).toEqual([
+      { type: 'instance.flowPlacement.set', instanceId: 'float', flowPlacement: { space: 'paper', plane: 'underlay' } },
+    ])
+    await act(async () => fireEvent.click(ui!.getByRole('button', { name: '转为正文' })))
+    expect(capture.mock.calls.at(-1)![0]).toEqual([{ type: 'instance.flowPlacement.set', instanceId: 'float', flowPlacement: null }])
     const scroller = ui.getByTestId('flow-workspace-scroll'); scroller.scrollTop = 700; scroller.scrollLeft = 20
     act(() => observation!.reset())
     expect(scroller.scrollTop).toBe(0); expect(scroller.scrollLeft).toBe(0)

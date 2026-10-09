@@ -1,9 +1,12 @@
+import { isNativeProjectFilename } from '../../../shared/nativeProjectFile'
 import type { ExecutionRunRecord, ExecutionToolRecord } from '../../../shared/workbench/execution'
 import type { ToolResult } from '../../../shared/workbench/tools'
 import type { DocumentToolGateway } from '../../../core/tools/DocumentToolGateway'
 import { USER_QUESTION_TOOL } from '../../../shared/workbench/userQuestion'
 import { agentFileMutationNames } from '../../../core/tools/AgentFileTools'
-import { committedFact, contentApplyFact, currentSave, knownApplication, operationFact, saveFact, serviceToolOutcome, toolFailed } from '../../../core/tools/modelToolResult'
+import path from 'node:path'
+import { toolRegistration } from '../../../core/tools/ToolCatalog'
+import { committedFact, contentApplyFact, currentExport, currentSave, exportFact, knownApplication, operationFact, saveFact, serviceToolOutcome, toolFailed } from '../../../core/tools/modelToolResult'
 
 export const committed = (result?: ToolResult): result is Extract<ToolResult, { kind: 'document-operation' }> =>
   result?.kind === 'document-operation' && (result.result.status === 'applied' || result.result.status === 'unchanged')
@@ -12,6 +15,21 @@ export const fileCreated = (name: string, result?: ToolResult): boolean => (name
   || name === 'course.importPptx' && serviceToolOutcome(name, result)?.status === 'saved') && result?.kind === 'read'
   && !!result.data && typeof result.data === 'object'
   && (result.data as { operation?: { status?: unknown } }).operation?.status === 'success'
+
+/** Durable host receipts identify a run's documents, including one created after an empty start. */
+export function trustedRunDocumentIds(record: ExecutionRunRecord): string[] {
+  const ids = new Set(record.input.documents.map(document => document.documentId))
+  for (const tool of record.tools) {
+    if (tool.state !== 'returned') continue
+    const receipt = committedFact(tool.call.name, tool.result)
+    if (receipt) { ids.add(receipt.documentId); continue }
+    if (tool.call.name !== 'file.open' && !fileCreated(tool.call.name, tool.result)) continue
+    const data = tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
+      ? tool.result.data as { documentId?: unknown; path?: unknown } : null
+    if (typeof data?.documentId === 'string' && data.documentId && typeof data.path === 'string') ids.add(data.documentId)
+  }
+  return [...ids]
+}
 
 export { serviceToolOutcome, toolFailed, type ServiceToolOutcome } from '../../../core/tools/modelToolResult'
 const fileMutations = new Set<string>(agentFileMutationNames)
@@ -29,7 +47,7 @@ function optionalObservationFailure(tool: ExecutionToolRecord): boolean {
   if (tool.observationFailure) return tool.observationFailure.outcome !== 'unknown'
   return tool.result?.kind === 'error' && ['observation-failed', 'service-unavailable', 'html-action-failed'].includes(tool.result.code)
 }
-const failedTool = (tool: ExecutionToolRecord) => !!tool.observationFailure || toolFailed(tool.call.name, tool.result)
+const failedTool = (tool: ExecutionToolRecord) => tool.notInvokedReason !== 'steering' && (!!tool.observationFailure || toolFailed(tool.call.name, tool.result))
 const unknownToolOutcome = (tool: ExecutionToolRecord) => tool.observationFailure?.outcome === 'unknown'
   || serviceToolOutcome(tool.call.name, tool.result)?.status === 'unknown'
   || tool.result?.kind === 'error' && /outcome-unknown/.test(tool.result.code)
@@ -53,19 +71,21 @@ export function currentContentRepaired(tool: SettledExecutionTool): boolean {
     })
 }
 
-const pendingJob = (tool: ExecutionToolRecord): { kind: 'image' | 'compute' | 'delegation'; id: string } | null => {
+type PendingJob = { kind: 'image' | 'compute' | 'delegation'; id: string; requiresArtifactRead?: boolean }
+const pendingJob = (tool: ExecutionToolRecord): PendingJob | null => {
   if (serviceToolOutcome(tool.call.name, tool.result)?.status !== 'pending' || tool.result?.kind !== 'read') return null
   const data = tool.result.data as { job?: unknown }
   return (tool.call.name === 'image.generate' || tool.call.name === 'image.edit'
-    || tool.call.name === 'compute.run' || tool.call.name === 'delegate.start')
+    || tool.call.name === 'compute.run' || ['delegate.start', 'local.run', 'delegate.readonly'].includes(tool.call.name))
     && typeof data.job === 'string' ? { kind: tool.call.name === 'compute.run' ? 'compute'
-      : tool.call.name === 'delegate.start' ? 'delegation' : 'image', id: data.job } : null
+      : ['delegate.start', 'local.run', 'delegate.readonly'].includes(tool.call.name) ? 'delegation' : 'image', id: data.job,
+      ...(tool.call.name === 'local.run' ? { requiresArtifactRead: !!(tool.call.input as { outputs?: string[] })?.outputs?.length } : {}) } : null
 }
-const terminalJobReceipt = (tool: ExecutionToolRecord, pending: { kind: 'image' | 'compute' | 'delegation'; id: string }): boolean => {
+const terminalJobReceipt = (tool: ExecutionToolRecord, pending: PendingJob): boolean => {
   if (tool.result?.kind !== 'read' || toolFailed(tool.call.name, tool.result)) return false
   const data = tool.result.data as { job?: unknown; jobId?: unknown; kind?: unknown; status?: unknown; terminal?: unknown;
     sourceKind?: unknown; sourceId?: unknown; verifiedBytes?: unknown } | null
-  if (pending.kind === 'delegation') return tool.call.name === 'delegate.read' && data?.job === pending.id
+  if (pending.kind === 'delegation' && pending.requiresArtifactRead !== false) return tool.call.name === 'delegate.read' && data?.job === pending.id
     && data.status === 'read' && data.verifiedBytes === true
   if (tool.call.name === 'artifact.save') return data?.status === 'written' && data.sourceKind === pending.kind
     && typeof data.sourceId === 'string' && data.sourceId.startsWith(`${pending.id}@`)
@@ -91,18 +111,12 @@ function importedJobs(record: ExecutionRunRecord): Set<string> {
     ? [jobOf(tool)!] : []))
 }
 
-/** A final canonical import supersedes earlier failed attempts for that same scratch job. */
-const exploratoryNames = new Set(['read', 'inspect', 'listChildren', 'file.list', 'file.search', 'file.grep',
-  'material.list', 'material.find', 'tools.load'])
 function stable(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stable)
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))
     .map(([key, child]) => [key, stable(child)]))
   return value
 }
-/** Identical operation and arguments identify a retry of one concrete request, never a nearby success. */
-const origin = (tool: ExecutionToolRecord) => (tool as ExecutionToolRecord & { sourceRunId?: string }).sourceRunId ?? ''
-const requestKey = (tool: ExecutionToolRecord) => JSON.stringify([origin(tool), tool.call.name, stable(tool.call.input)])
 function sameObservedTarget(failed: ExecutionToolRecord, later: ExecutionToolRecord): boolean {
   if ((failed.call.name !== 'view.observe' && failed.call.name !== 'html.observe') || failed.call.name !== later.call.name
     || later.state !== 'returned' || failedTool(later) || later.result?.kind !== 'read') return false
@@ -115,25 +129,6 @@ function sameObservedTarget(failed: ExecutionToolRecord, later: ExecutionToolRec
   return !!failed.effectTargets?.length && !!later.effectTargets?.length
     && JSON.stringify(stable(failed.effectTargets)) === JSON.stringify(stable(later.effectTargets))
 }
-/** Correcting a read cursor changes no work. A successful reread must still identify the same source. */
-function sameReadSource(failed: ExecutionToolRecord, later: ExecutionToolRecord): boolean {
-  if (failed.call.name !== 'file.read' || later.call.name !== 'file.read' || origin(failed) !== origin(later)
-    || later.state !== 'returned' || later.result?.kind !== 'read' || failedTool(later)) return false
-  const input = (tool: ExecutionToolRecord) => tool.call.input && typeof tool.call.input === 'object'
-    ? tool.call.input as { path?: unknown } : null
-  const source = input(failed)?.path
-  return typeof source === 'string' && source === input(later)?.path
-}
-/** These planning errors reject content before commit. A later model turn may
- * correct its contents while keeping the same formal write scope. */
-function correctedRejectedContent(failed: ExecutionToolRecord, later: ExecutionToolRecord): boolean {
-  return failed.result?.kind === 'error' && (failed.result.code === 'read-basis-changed'
-      || failed.call.name === 'text.replace' && failed.result.code === 'invalid-content')
-    && failed.requestId !== later.requestId && failed.call.name === later.call.name
-    && !!failed.effectTargets?.length && !!later.effectTargets?.length
-    && JSON.stringify(stable(failed.effectTargets)) === JSON.stringify(stable(later.effectTargets))
-    && later.state === 'returned' && !failedTool(later) && knownApplication(later.call.name, later.result)
-}
 const delivered = (tool: ExecutionToolRecord) => !failedTool(tool)
   && (knownApplication(tool.call.name, tool.result) || fileCreated(tool.call.name, tool.result)
     || tool.result?.kind === 'read' && (tool.call.name === 'file.read' || tool.call.name === 'material.read'
@@ -143,105 +138,24 @@ const delivered = (tool: ExecutionToolRecord) => !failedTool(tool)
       || serviceToolOutcome(tool.call.name, tool.result)?.status === 'written'
       || fileMutations.has(tool.call.name)))
 
-/** Recover identity from host-issued references only, not text embedded in user content. */
-function recoveredDeliveryFailures(record: ExecutionRunRecord): Set<ExecutionToolRecord> {
-  const handles = new Map<string, string>(), filePaths = new Map<string, string>(), resolved = new Set<ExecutionToolRecord>()
-  const pending: { tool: ExecutionToolRecord; documentId: string; destination?: string; format?: unknown }[] = []
-  const pendingArtifacts = new Map<string, ExecutionToolRecord[]>()
-  for (const tool of record.tools) {
-    const input = tool.call.input && typeof tool.call.input === 'object' ? tool.call.input as Record<string, unknown> : {}
-    const data = tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
-      ? tool.result.data as Record<string, unknown> : null
-    if (tool.call.name === 'artifact.save' && tool.state === 'returned' && data
-      && typeof data.sourceKind === 'string' && typeof data.sourceId === 'string'
-      && typeof data.path === 'string' && typeof data.version === 'string') {
-      // The artifact owner supplies canonical target and source identity, including the bytes' version.
-      // A corrected delivery can settle a definite rejection across runs, never an unknown publication.
-      const identity = JSON.stringify([data.sourceKind, data.sourceId, data.path, data.version])
-      if (['rejected', 'conflict', 'stopped'].includes(String(data.status)))
-        pendingArtifacts.set(identity, [...(pendingArtifacts.get(identity) ?? []), tool])
-      else if (data.status === 'written') for (const failed of pendingArtifacts.get(identity) ?? []) resolved.add(failed)
-    }
-    const handleKey = (value: string) => JSON.stringify([origin(tool), value])
-    let parentDocument = tool.effectTargets?.length === 1 ? tool.effectTargets[0]!.documentId
-      : typeof input.target === 'string' ? handles.get(handleKey(input.target)) : undefined
-    // A path mistaken for a save handle is attributable only when an earlier
-    // successful host receipt identified that exact path in the same run.
-    if (!parentDocument && tool.call.name === 'file.save' && tool.result?.kind === 'error'
-      && tool.result.code === 'invalid-target' && input.destination === undefined && typeof input.target === 'string')
-      parentDocument = filePaths.get(handleKey(input.target))
-    if ((tool.call.name === 'file.open' || fileCreated(tool.call.name, tool.result)) && typeof data?.documentId === 'string' && typeof data.target === 'string')
-      handles.set(handleKey(data.target), data.documentId)
-    if (tool.state === 'returned' && (tool.call.name === 'file.open' || fileCreated(tool.call.name, tool.result))
-      && typeof data?.documentId === 'string' && typeof data.path === 'string')
-      filePaths.set(handleKey(data.path), data.documentId)
-    if ((tool.call.name === 'read' || tool.call.name === 'inspect') && parentDocument && typeof data?.target === 'string') handles.set(handleKey(data.target), parentDocument)
-    if ((tool.call.name === 'file.save' || tool.call.name === 'project.save' || tool.call.name === 'document.export') && parentDocument
-      && tool.result?.kind === 'error' && ['target-conflict', 'invalid-target', 'not-authorized', 'delivery-rejected'].includes(tool.result.code))
-      pending.push({ tool, documentId: parentDocument, destination: typeof input.destination === 'string' ? input.destination : undefined, format: input.format })
-    const saved = saveFact(tool.call.name, tool.result)
-    if (currentSave(saved) && matchesSaveBinding(record, saved!))
-      for (const failed of pending) if ((failed.tool.call.name === 'file.save' || failed.tool.call.name === 'project.save')
-        && failed.documentId === saved!.documentId) resolved.add(failed.tool)
-    if (tool.call.name === 'document.export' && data?.status === 'written' && typeof data.documentId === 'string')
-      for (const failed of pending) if (failed.tool.call.name === 'document.export' && failed.documentId === data.documentId
-        && failed.format === data.format && (!failed.destination || failed.destination === data.path)) resolved.add(failed.tool)
-  }
-  return resolved
-}
-
+/** Only calls still in flight or with an unconfirmed original external effect
+ * are unfinished operations. Definite rejections remain in the audit history. */
 function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord[] {
-  const resolvedDelivery = recoveredDeliveryFailures(record)
-  const lastImportByJob = new Map<string, number>()
-  record.tools.forEach((tool, index) => {
-    const job = jobOf(tool)
-    if (tool.call.name === 'build.import' && committed(tool.result) && job) lastImportByJob.set(job, index)
-  })
-  const hasDelivery = record.tools.some(tool => delivered(tool)
-    && tool.call.name !== 'file.read' && tool.call.name !== 'material.read')
-  const hasEvidence = hasDelivery || record.tools.some(tool => tool.state === 'returned' && tool.result?.kind === 'read'
-    && ['read', 'inspect', 'file.read', 'material.read', 'web.open', 'context.read'].includes(tool.call.name))
-  const sameIntendedEdit = (a: ExecutionToolRecord, b: ExecutionToolRecord) => {
-    if (!a.effectTargets?.length || !b.effectTargets?.length || a.call.name !== b.call.name) return false
-    const argumentsWithoutHandle = (value: unknown) => value && typeof value === 'object'
-      ? Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'target' && key !== 'expectedVersion')) : value
-    return JSON.stringify(stable(a.effectTargets)) === JSON.stringify(stable(b.effectTargets))
-      && JSON.stringify(stable(argumentsWithoutHandle(a.call.input))) === JSON.stringify(stable(argumentsWithoutHandle(b.call.input)))
-  }
-  return record.tools.filter((tool, index) => {
-    // An unanswered or malformed question changed nothing; it is not an unfinished document operation.
-    if (tool.call.name === USER_QUESTION_TOOL || tool.call.name === 'task.note' || tool.call.name === 'task.finish') return false
-    if (tool.state !== 'returned') return true
-    const saved = saveFact(tool.call.name, tool.result)
-    const wrongProjectSave = tool.call.name === 'project.save' && saved
-      && (!matchesSaveBinding(record, saved) || tool.effectTargets?.length === 1 && tool.effectTargets[0]!.documentId !== saved.documentId)
-    if (!failedTool(tool) && !wrongProjectSave) return false
-    if (currentContentRepaired(tool as SettledExecutionTool)) return false
-    // A modification the user declined is the user's decision, not an unfinished operation.
-    if (tool.result?.kind === 'error' && tool.result.code === 'user-denied') return false
-    const pending = pendingJob(tool)
-    if (pending && record.tools.slice(index + 1).some(later => terminalJobReceipt(later, pending))) return false
-    const job = jobOf(tool)
-    if (tool.call.name.startsWith('build.') && job && (lastImportByJob.get(job) ?? -1) > index) return false
-    // An unknown external effect cannot be repaired by issuing a second call ID.
-    if (unknownToolOutcome(tool)) return true
-    if (record.tools.slice(index + 1).some(later => sameObservedTarget(tool, later))) return false
-    if (record.tools.slice(index + 1).some(later => sameReadSource(tool, later))) return false
-    if (record.tools.slice(index + 1).some(later => correctedRejectedContent(tool, later))) return false
-    if (optionalObservationFailure(tool)) return false
-    if (resolvedDelivery.has(tool)) return false
-    if (record.tools.slice(index + 1).some(later => (requestKey(later) === requestKey(tool) || sameIntendedEdit(tool, later))
-      && later.state === 'returned' && !failedTool(later)
-      && (knownApplication(later.call.name, later.result) || later.result?.kind === 'read' && recoversProjectSave(record, tool, later)))) return false
-    // A malformed model call never reached a tool. Once a concrete result was
-    // delivered, keep that attempt in history without letting its syntax alone
-    // downgrade the task. Failed requested writes and unknown effects still do.
-    if (hasDelivery && tool.result?.kind === 'error' && tool.result.code === 'invalid-tool-arguments') return false
-    // Invalid exploratory handles stay in the history but do not turn a verified
-    // final delivery into a partial task. Other failed deliverables remain partial.
-    if (hasEvidence && exploratoryNames.has(tool.call.name) && tool.result?.kind === 'error'
-      && ['invalid-target', 'target-conflict', 'tool-load-failed'].includes(tool.result.code)) return false
-    return true
+  return record.tools.filter((tool,index)=>{
+    if(tool.call.name===USER_QUESTION_TOOL||tool.call.name==='task.note'||tool.call.name==='task.finish') return false
+    if(tool.notInvokedReason==='steering')return false
+    if(tool.state!=='returned'||unknownToolOutcome(tool))return true
+    const pending=pendingJob(tool)
+    if(pending){
+      const later=record.tools.slice(index+1)
+      if(later.some(receipt=>terminalJobReceipt(receipt,pending)))return false
+      const observation=later.slice().reverse().flatMap(receipt=>{
+        const data=completionJobObservation(receipt,pending)
+        return data?[{receipt,data}]:[]
+      })[0]
+      return !observation||!knownJobFailure(observation.receipt,observation.data)
+    }
+    return serviceToolOutcome(tool.call.name,tool.result)?.status==='pending'
   })
 }
 
@@ -258,14 +172,6 @@ function matchesSaveBinding(record: ExecutionRunRecord, saved: NonNullable<Retur
   }
   return !createdPath || !saved.path || pathKey(createdPath) === pathKey(saved.path)
 }
-function recoversProjectSave(record: ExecutionRunRecord, failed: ExecutionToolRecord, later: ExecutionToolRecord): boolean {
-  if (later.call.name !== 'project.save') return true
-  const saved = saveFact(later.call.name, later.result)
-  const documentId = failed.effectTargets?.length === 1 ? failed.effectTargets[0]!.documentId
-    : record.input.documents.length === 1 ? record.input.documents[0]!.documentId : undefined
-  return !!saved && currentSave(saved) && matchesSaveBinding(record, saved) && saved.documentId === documentId
-}
-
 /** Only this run's receipts count: a created path is not evidence that subsequent edits reached that file. */
 export function newFileDeliveryFacts(record: ExecutionRunRecord): NewFileDeliveryFact[] {
   const facts = new Map<string, NewFileDeliveryFact>()
@@ -288,6 +194,14 @@ export function newFileDeliveryFacts(record: ExecutionRunRecord): NewFileDeliver
     }
     const saved = saveFact(tool.call.name, tool.result)
     if (saved) {
+      // A terminal delivery for an input document shares the created-file freshness check.
+      // An ordinary earlier save never requires saving subsequent intentional editor changes.
+      if (tool.call.name === 'task.delivery' && !facts.has(saved.documentId) && trustedRunDocumentIds(record).includes(saved.documentId)
+        && matchesSaveBinding(record, saved)) {
+        const path = record.documentBindings?.[saved.documentId]?.path ?? saved.path
+        facts.set(saved.documentId, { documentId: saved.documentId, label: (path?.split(/[\\/]/).at(-1) ?? saved.documentId).slice(0, 160),
+          ...(path ? { path } : {}), revision: saved.currentRevision, savedRevision: null })
+      }
       const fact = facts.get(saved.documentId)
       if (fact && matchesSaveBinding(record, saved, fact.path)) {
         fact.savedRevision = saved.savedRevision!
@@ -295,18 +209,134 @@ export function newFileDeliveryFacts(record: ExecutionRunRecord): NewFileDeliver
       }
     }
   }
+  for(const fact of facts.values()){
+    const current=(record as SettledExecutionRun).currentDocuments?.[fact.documentId]
+    if(current&&(current.dirty||current.revision>0))fact.revision=Math.max(fact.revision??0,current.revision)
+  }
   return [...facts.values()]
 }
 const unconfirmedSave = (fact: NewFileDeliveryFact) => fact.revision !== null
   && (fact.savedRevision === null || fact.savedRevision < fact.revision)
 
+function hasConfirmedOutput(record:ExecutionRunRecord):boolean {
+  return record.tools.some(tool=>persistedToolWork(tool.call.name,tool.result)
+    ||toolRegistration(tool.call.name)?.capability==='resource'&&delivered(tool))
+    ||record.tools.some((tool,index)=>{
+      const pending=pendingJob(tool)
+      return !!pending&&record.tools.slice(index+1).some(receipt=>terminalJobReceipt(receipt,pending))
+    })
+}
 export function hasConfirmedWork(record: ExecutionRunRecord): boolean {
-  return record.tools.some(tool => delivered(tool) || tool.state === 'returned' && tool.result?.kind === 'read'
+  return hasConfirmedOutput(record)||record.tools.some(tool => delivered(tool) || tool.state === 'returned' && tool.result?.kind === 'read'
     && ['read', 'inspect', 'context.read'].includes(tool.call.name))
 }
 
 export function hasUnresolvedToolFailure(record: ExecutionRunRecord): boolean {
-  return unresolvedToolFailures(record).length > 0 || newFileDeliveryFacts(record).some(unconfirmedSave)
+  return executionCompletionIssues(record).length > 0
+}
+
+/** Current Session facts are an ephemeral settlement view, never model input or a grant. */
+export interface SettledExecutionRun extends ExecutionRunRecord {
+  currentDocuments?: Record<string,{epoch:string;revision:number;dirty:boolean}>
+}
+function currentRevision(record:ExecutionRunRecord,documentId:string,epoch?:string):number {
+  const current=(record as SettledExecutionRun).currentDocuments?.[documentId]
+  if(current&&(!epoch||current.epoch===epoch))return current.revision
+  return Math.max(0,...record.tools.flatMap(tool=>{
+    const fact=committedFact(tool.call.name,tool.result)
+    const scopes=[...tool.effectTargets??[],...tool.writeScopes??[]].filter(scope=>scope.documentId===documentId&&scope.epoch)
+    return fact&&fact.documentId===documentId&&(!epoch||!scopes.length||scopes.some(scope=>scope.epoch===epoch))?[fact.revision]:[]
+  }))
+}
+function deliveryDocument(record:ExecutionRunRecord,tool:ExecutionToolRecord):string|undefined {
+  const fact=saveFact(tool.call.name,tool.result)??exportFact(tool.call.name,tool.result)
+  if(fact)return fact.documentId
+  if(tool.effectTargets?.length===1)return tool.effectTargets[0]!.documentId
+  const documents=trustedRunDocumentIds(record)
+  return documents.length===1?documents[0]:undefined
+}
+function deliveryPath(record:ExecutionRunRecord,value:string):string {
+  const normalized=value.replace(/\\/g,'/')
+  const absolute=/^(?:[a-z]:\/|\/)/i.test(normalized)?normalized:
+    (record.input.workspaceRoot?record.input.workspaceRoot.replace(/\\/g,'/')+'/'+normalized:normalized)
+  return pathKey(path.posix.normalize(absolute))
+}
+function deliveryInput(tool:ExecutionToolRecord):{format?:string;destination?:string}|null {
+  const input=tool.call.input as {format?:string;destination?:string;delivery?:{format?:string;destination?:string}}|null
+  return tool.call.name==='task.finish'?input?.delivery??null:input
+}
+/** Delivery obligations use the final typed intent and actual save/export facts,
+ * not the sequence of content-writing attempts which led to that result. */
+function deliveryCompletionIssues(record:ExecutionRunRecord):ExecutionCompletionIssue[] {
+  const issues:ExecutionCompletionIssue[]=[]
+  // The publication owner supplies a concrete destination and immutable source
+  // version. This is an output obligation, independently of intermediate calls.
+  const publications=new Map<string,{tool:ExecutionToolRecord;status:string;path:string}>()
+  for(const tool of record.tools){
+    if(toolRegistration(tool.call.name)?.effect!=='artifact-delivery'||tool.result?.kind!=='read')continue
+    const data=tool.result.data as {sourceKind?:unknown;sourceId?:unknown;path?:unknown;version?:unknown;status?:unknown}|null
+    if(!data||![data.sourceKind,data.sourceId,data.path,data.version,data.status].every(value=>typeof value==='string'))continue
+    const identity=JSON.stringify([data.sourceKind,data.sourceId,pathKey(data.path as string),data.version])
+    // Create-only publication receipts are durable facts. A later known rejection
+    // cannot unwrite the same output; unknown effects still block independently.
+    if(publications.get(identity)?.status!=='written')
+      publications.set(identity,{tool,status:data.status as string,path:data.path as string})
+  }
+  for(const publication of publications.values())if(publication.status!=='written')
+    issues.push({name:publication.tool.call.name,status:'unverified',callId:publication.tool.callId,receiptCallId:publication.tool.callId,
+      requestId:publication.tool.requestId,message:publication.path+' 的指定来源版本尚未确认实际写入'})
+  const saveRequests=record.tools.filter(tool=>['file.save','project.save'].includes(tool.call.name)&&!currentSave(saveFact(tool.call.name,tool.result))
+    ||['task.delivery','task.finish'].includes(tool.call.name)&&deliveryInput(tool)!==null&&!deliveryInput(tool)?.format)
+  const saves=record.tools.flatMap(tool=>{
+    const fact=saveFact(tool.call.name,tool.result)
+    return fact?[fact]:[]
+  })
+  const requiredSaves=new Map<string|undefined,ExecutionToolRecord>()
+  for(const request of saveRequests)requiredSaves.set(deliveryDocument(record,request),request)
+  for(const [documentId,request] of requiredSaves){
+    const input=deliveryInput(request)
+    const target=typeof input?.destination==='string'?deliveryPath(record,input.destination):undefined
+    const actual=saves.slice().reverse().find(fact=>documentId!==undefined&&fact.documentId===documentId
+      &&(!target||typeof fact.path==='string'&&deliveryPath(record,fact.path)===target))
+    const current=documentId?(record as SettledExecutionRun).currentDocuments?.[documentId]:undefined
+    if(actual&&currentSave(actual)&&matchesSaveBinding(record,actual)
+      &&actual.savedRevision!>=currentRevision(record,actual.documentId,actual.epoch)
+      &&(!current||current.epoch===actual.epoch&&current.dirty===false))continue
+    issues.push({name:'project.save',status:'unsaved',...(documentId?{documentId}:{}),message:'目标文档的当前版本尚未确认保存并处于已保存状态'})
+  }
+  const requests=new Map<string,ExecutionToolRecord>()
+  const terminalKeys=new Set<string>()
+  for(const tool of record.tools){
+    const input=deliveryInput(tool)
+    if(tool.call.name!=='document.export'&&!(['task.delivery','task.finish'].includes(tool.call.name)&&input?.format))continue
+    const documentId=deliveryDocument(record,tool)
+    const format=input?.format??exportFact(tool.call.name,tool.result)?.format??'html-offline'
+    const key=JSON.stringify([documentId,format])
+    if(['task.delivery','task.finish'].includes(tool.call.name)){
+      terminalKeys.add(key)
+      requests.set(key,tool)
+    }else if(!terminalKeys.has(key))requests.set(key,tool)
+  }
+  for(const tool of requests.values()){
+    const input=deliveryInput(tool)
+    const documentId=deliveryDocument(record,tool)
+    const original=exportFact(tool.call.name,tool.result)
+    const format=input?.format??original?.format??'html-offline'
+    const target=typeof input?.destination==='string'?deliveryPath(record,input.destination):original?.path?deliveryPath(record,original.path):undefined
+    const candidates=record.tools.flatMap(receipt=>{
+      const fact=exportFact(receipt.call.name,receipt.result)
+      return fact&&fact.documentId===documentId&&fact.format===format
+        &&(!target||[fact.path,...fact.files?.map(file=>file.path)??[]].some(filename=>typeof filename==='string'&&deliveryPath(record,filename)===target))?[fact]:[]
+    })
+    const actual=candidates.at(-1),current=documentId?(record as SettledExecutionRun).currentDocuments?.[documentId]:undefined
+    const binding=documentId?record.documentBindings?.[documentId]:undefined
+    if(actual&&currentExport(actual)&&actual.exportedRevision!>=currentRevision(record,actual.documentId,actual.epoch)
+      &&(!binding||binding.epoch===actual.epoch&&binding.savedRevision<=actual.exportedRevision!)
+      &&(!current||current.epoch===actual.epoch))continue
+    issues.push({name:'task.delivery',status:'unverified',...(documentId?{documentId}:{}),
+      callId:tool.callId,receiptCallId:tool.callId,requestId:tool.requestId,message:format+' 指定交付产物尚未确认真实写入目标路径并匹配当前文档版本'})
+  }
+  return issues
 }
 
 export interface ExecutionCompletionIssue {
@@ -314,6 +344,29 @@ export interface ExecutionCompletionIssue {
   requestId?: string; receiptCallId?: string
   documentId?: string
   job?: string; kind?: 'image' | 'compute' | 'delegation'
+}
+
+/** Known failures are warnings; they never erase or rewrite the original records. */
+export function executionAuditWarnings(record:ExecutionRunRecord):ExecutionCompletionIssue[] {
+  const unresolved=new Set(unresolvedToolFailures(record))
+  const warnings=record.tools.filter(tool=>tool.state==='returned'&&!unresolved.has(tool)&&failedTool(tool)
+    &&tool.call.name!==USER_QUESTION_TOOL&&tool.call.name!=='task.finish').map((tool):ExecutionCompletionIssue=>({
+      name:tool.call.name,status:'failed',callId:tool.callId,requestId:tool.requestId,receiptCallId:tool.callId,
+      message:tool.observationFailure?.message??(tool.result?.kind==='error'?tool.result.message:serviceToolOutcome(tool.call.name,tool.result)?.message??'中间操作未成功；原回执保留')
+    }))
+  const latestVisual=new Map<string,NonNullable<ExecutionRunRecord['visualAnalyses']>[number]>()
+  for(const analysis of record.visualAnalyses??[])latestVisual.set(analysis.source,analysis)
+  for(const analysis of latestVisual.values())if(analysis.status==='vision-unavailable')
+    warnings.push({name:'视觉分析',status:'unverified',message:analysis.source+'：'+(analysis.reason??'原来源尚未完成视觉分析')})
+  if(record.failure?.code==='vision-unavailable')warnings.push({name:'视觉分析',status:'unverified',message:record.failure.message})
+  return warnings
+}
+export function executionExitDecision(record:ExecutionRunRecord):{
+  status:'continue'|'partial'|'completed';remaining:ExecutionCompletionIssue[];continuable:ExecutionCompletionIssue[];warnings:ExecutionCompletionIssue[]
+}{
+  const remaining=executionCompletionIssues(record),warnings=executionAuditWarnings(record)
+  const continuable=remaining.filter(issue=>issue.status==='pending'||issue.status==='unknown')
+  return {status:continuable.length?'continue':remaining.length?'partial':'completed',remaining,continuable,warnings}
 }
 
 function completionJobObservation(tool: ExecutionToolRecord, pending: NonNullable<ReturnType<typeof pendingJob>>) {
@@ -364,6 +417,12 @@ export function executionCompletionIssues(record: ExecutionRunRecord): Execution
     return { callId: tool.callId, name: tool.call.name, status, message,
       requestId: receipt.requestId, receiptCallId: receipt.callId, ...(pending ? { job: pending.id, kind: pending.kind } : {}) }
   })
+  const attemptedOutput=record.tools.some(tool=>tool.notInvokedReason!=='steering'
+    &&['write','save'].includes(toolRegistration(tool.call.name)?.capability??''))
+  const attemptedResource=record.tools.some(tool=>tool.notInvokedReason!=='steering'
+    &&toolRegistration(tool.call.name)?.capability==='resource')
+  if((attemptedOutput||attemptedResource)&&!hasConfirmedOutput(record))
+    issues.push({name:'交付',status:'unverified',message:'尚未取得正式内容应用、文件创建、保存或写出的成果回执；中间诊断已保留'})
   for (const fact of newFileDeliveryFacts(record).filter(unconfirmedSave)) {
     const receipt = record.tools.slice().reverse().find(tool => {
       const data = tool.result?.kind === 'read' ? tool.result.data as { documentResult?: Record<string, unknown> } | null : null
@@ -374,6 +433,7 @@ export function executionCompletionIssues(record: ExecutionRunRecord): Execution
       ...(receipt ? { callId: receipt.callId, receiptCallId: receipt.callId, requestId: receipt.requestId } : {}),
       message: `${fact.label} 的文档版本 ${fact.revision} 尚未确认保存到目标文件` })
   }
+  issues.push(...deliveryCompletionIssues(record))
   return issues
 }
 
@@ -391,7 +451,9 @@ export function runEndSummary(record: ExecutionRunRecord): string | undefined {
   const diagnosticWarning = diagnosticFailures.length ? '可选画面诊断未完成，相关视觉结果未验证：'
     + [...new Set(diagnosticFailures.map(tool => tool.observationFailure?.message
       ?? (tool.result?.kind === 'error' ? tool.result.message : '画面不可用')))].join('；') : undefined
-  if (record.status === 'completed') return [record.failure?.message, diagnosticWarning, noteWarning].filter(Boolean).join('；') || undefined
+  const auditWarnings=executionAuditWarnings(record)
+  const auditWarning=auditWarnings.length?'中间操作警告 '+auditWarnings.length+' 项，完整失败与诊断已保留在运行记录':undefined
+  if (record.status === 'completed') return [record.failure?.message, diagnosticWarning, noteWarning,auditWarning].filter(Boolean).join('；') || undefined
   const parts: string[] = []
   if (record.status === 'stopped') parts.push('任务已停止')
   else if (record.failure?.message) parts.push(record.failure.message)
@@ -417,7 +479,7 @@ export function runEndSummary(record: ExecutionRunRecord): string | undefined {
       const data = tool.result?.kind === 'read' ? tool.result.data as { documentId?: unknown } : undefined
       return typeof data?.documentId === 'string' ? [data.documentId] : []
     }))
-  const scaffolds = fileFacts.filter(fact => fact.revision === null && /\.h5lesson$/i.test(fact.label) && !importedDocuments.has(fact.documentId))
+  const scaffolds = fileFacts.filter(fact => fact.revision === null && isNativeProjectFilename(fact.label) && !importedDocuments.has(fact.documentId))
   if (scaffolds.length) parts.push(`仅有创建回执、未见课件内容提交：${scaffolds.map(fact => fact.label).join('、')}`)
   const savedArtifacts = record.tools.filter(tool => tool.call.name === 'artifact.save'
     && serviceToolOutcome(tool.call.name, tool.result)?.status === 'written').length

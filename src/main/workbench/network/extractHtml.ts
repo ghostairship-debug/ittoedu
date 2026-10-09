@@ -28,6 +28,7 @@ export interface ExtractedHtml {
   text: string
   publishedAt?: string
   accessRequired: boolean
+  clientChallenge: boolean
 }
 
 /** Real HTML parsing preserves headings, list/table structure and visible links. */
@@ -67,5 +68,9 @@ export function extractHtml(html: string, pageUrl: string): ExtractedHtml {
     if (lineBreak.has(tag)) output.push('\n')
   }
   visit(root)
-  return { title, text: normalized(output.join('')), ...(publishedAt ? { publishedAt } : {}), accessRequired }
+  const text = normalized(output.join(''))
+  // The observed PyPI response is a client challenge, not the requested article.
+  // Match that response's title and message together; ordinary text mentioning a challenge stays readable.
+  const clientChallenge = title.toLowerCase() === 'client challenge' && /a required part of this site couldn['’]t load\./i.test(text)
+  return { title, text, ...(publishedAt ? { publishedAt } : {}), accessRequired, clientChallenge }
 }

@@ -1,8 +1,8 @@
 # 核心体验统一解决方案
 
-更新：2026-10-08。分析基线：`423a96dcceb1cdef16791ecd668e0abe391e2fb1` 及本会话问题记录。本文是本批方案的唯一入口；问题来源保留在 [CORE_EXPERIENCE_ISSUES](CORE_EXPERIENCE_ISSUES.md)，不另建永久缺陷平台。
+更新：2026-10-08。下文保留首轮分析基线 `423a96dc` 的决策依据；当前接手HEAD `3095ea02`、源码cut `95ce7eaf` 的后续开发方案统一置于 [EXECUTION_PLAN §7](../20261008-core-experience-unified/EXECUTION_PLAN.md#7-共同业务实质统一与完整创作收口方案)。本文不是第二执行入口；问题来源保留在 [CORE_EXPERIENCE_ISSUES](CORE_EXPERIENCE_ISSUES.md)。
 
-**本轮只分析、编写方案和校正状态，不启动产品代码、模型调用或发行。** 后续恢复实施时，原 [执行指令](CORE_EXPERIENCE_EXECUTION_PROMPT.md) 的人员、费用、三路创作与最小充分验证约束继续有效；旧的暂缓分类不能排除本方案已纳入的真实问题。
+**本次Owner要求汇总对话生成方案，仅文档，不启动产品代码、模型调用或发行。** 首轮后来已获实施授权，原成果按其证据范围保留；后续启动使用更新后的START_PROMPT。原人员/费用/最小充分验证约束继续有效，最新软件层与单请求创作标准见执行计划§7，不由旧“首轮已收口”取代。
 
 本方案已转为[可执行计划包](../20261008-core-experience-unified/README.md)，该包是下一轮唯一执行入口。本方案继续承载决策依据；最新GPT Pro六项补充已进入对应既有工作包，未新增总架构或永久台账。
 

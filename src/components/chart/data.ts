@@ -5,6 +5,11 @@ const id = z.string().min(1)
 const category = z.object({ id, label: z.string() }).strict()
 const point = z.object({ id, categoryId: id, value: finite }).strict()
 const series = z.object({ id, name: z.string(), color: z.string(), points: z.array(point).min(1) }).strict()
+/** Author table values; optional identities select already observed categories/series. */
+export const chartTableDataSchema = z.object({
+  categories: z.array(z.object({ id: id.optional(), label: z.string() }).strict()).min(1),
+  series: z.array(z.object({ id: id.optional(), name: z.string(), color: z.string().optional(), values: z.array(finite).min(1) }).strict()).min(1),
+}).strict()
 const commonStyle = z.object({
   backgroundColor: z.string(), backgroundOpacity: finite.min(0).max(1),
   fontFamily: z.string().min(1), fontSize: finite.positive(), textColor: z.string(),

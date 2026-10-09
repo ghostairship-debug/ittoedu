@@ -22,7 +22,7 @@ export type ToolSupportContext = Partial<Record<'componentContent' | 'images' | 
   workbenchServices?: boolean
 }
 export type ToolCapability = 'read' | 'write' | 'save' | 'resource'
-export interface ResolvedToolTarget { documentId: string; target: ToolTarget }
+export interface ResolvedToolTarget { documentId: string; target: ToolTarget; epoch?: string }
 export interface ToolTargetResolver {
   resolveHandle(handle: string): ResolvedToolTarget | undefined
   /** Bind the original observed project path, or the task's formal project when path is omitted. */

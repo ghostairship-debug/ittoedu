@@ -1,5 +1,5 @@
 {
-  "description": "通过任务开始时冻结的 GPT OAuth 或已显式启用的 OpenAI Images API 连接生成图片。target 绑定当前获授权的课件或对象，省略时生成独立工作空间资源。ready 返回本任务资源，可用 project.apply from 插入或 media.apply 原位替换；ready 本身未写入工程。当前请求 PNG、auto/low/medium/high 画质。",
+  "description": "通过任务开始时冻结的 GPT OAuth 或已显式启用的 OpenAI Images API 连接生成图片。target 绑定当前获授权的课件或对象，省略时生成独立工作空间资源。ready 返回本任务资源，可用 project.apply from 插入或 media.apply 原位替换，也可直接把 htmlSource 用作 HTML 图片 src 或 CSS 图片 URL；软件读取已授权字节并存入工程，勿自造资源地址。ready 本身未写入工程。当前请求 PNG、auto/low/medium/high 画质。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,

@@ -7,6 +7,7 @@ import { DocumentHostService } from '../../src/main/workbench/DocumentHostServic
 import { AgentFileService } from '../../src/main/workbench/execution/AgentFileService'
 import { createCourseFromHtml, type CreateCourseFromHtmlPorts } from '../../src/main/workbench/htmlImport/CreateCourseFromHtml'
 import type { ToolResult } from '../../src/shared/workbench/tools'
+import { isSourceDocumentModel } from '../../src/shared/workbench/document'
 import { readComponentProjectFileInput, prepareComponentProjectFileSource } from '../../src/main/workbench/projectFiles/componentPlatformFileInput'
 import { componentCompilationInput } from '../../src/core/components/compilation/componentCompilationInput'
 import { componentProjectFiles } from '../../src/core/projectFiles/componentPlatform/projection'
@@ -61,6 +62,88 @@ async function fixture(html: string) {
   }
   return { root, host, sourcePath, ports, context: { callId: 'create', permission: 'workspace' as const, assertActive() {} } }
 }
+
+async function editOpenedSource(host: DocumentHostService, filename: string, source: string) {
+  const opened = await host.open(filename)
+  expect(isSourceDocumentModel(opened.model)).toBe(true)
+  const result = await host.dispatch({ documentId: opened.documentId, epoch: opened.epoch, baseRevision: opened.revision,
+    operationId: `edit-${path.basename(filename)}`, actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source } } })
+  expect(result.status).toBe('applied')
+}
+
+it('imports current opened HTML and recursive dependencies through public creation and manual import', async () => {
+  const f = await fixture('<p>disk HTML</p>')
+  const currentHtml = '<!doctype html><html><head><link rel="stylesheet" href="theme.css"></head><body><p>session HTML</p><script type="module" src="main.js"></script></body></html>'
+  const mainPath = path.join(f.root, 'main.js'), helperPath = path.join(f.root, 'helper.js')
+  await fs.writeFile(mainPath, 'window.currentValue="disk JS";')
+  await fs.writeFile(helperPath, 'export const value="disk helper";')
+  await fs.writeFile(path.join(f.root, 'theme.css'), 'p{color:rgb(3,4,5)}')
+  await editOpenedSource(f.host, f.sourcePath, currentHtml)
+  await editOpenedSource(f.host, mainPath, 'import {value} from "./helper.js";window.currentValue=value;')
+  await editOpenedSource(f.host, helperPath, 'export const value="session helper";')
+  const created = await createCourseFromHtml({ sourcePath: f.sourcePath }, f.context, f.ports)
+  expect(created).toMatchObject({ kind: 'read', data: { saved: true } })
+  const reopened = await new DocumentHostService(path.join(f.root, 'source-reopened')).open((created as { data: { path: string } }).data.path)
+  if (reopened.model.kind !== 'course-v10') throw new Error('Expected V10')
+  const importedData = JSON.stringify(Object.values(reopened.model.project.instances).map(instance => instance.data))
+  expect(importedData).toContain('session HTML'); expect(importedData).toContain('session helper')
+  expect(importedData).not.toContain('disk HTML'); expect(importedData).not.toContain('disk helper')
+  const manual = await f.host.registry.create({ kind: 'course-v10', project: createBlankCourseProjectV10(), resources: { assets: {}, components: {} } }, 'manual-sources.h5lesson')
+  const before = await manual.drain()
+  if (before.model.kind !== 'course-v10') throw new Error('Expected V10')
+  const result = await new HtmlImportDesktopService({ documents: f.host, chooseSource: async () => f.sourcePath }).import({
+    documentId: before.documentId, epoch: before.epoch, revision: before.revision, surfaceId: before.model.project.surfaces[0]!.id, source: { kind: 'choose' },
+  })
+  expect(result?.receipt.status).toBe('applied')
+  const after = await manual.drain()
+  if (after.model.kind !== 'course-v10') throw new Error('Expected V10')
+  const manualData = JSON.stringify(Object.values(after.model.project.instances).map(instance => instance.data))
+  expect(manualData).toContain('session HTML'); expect(manualData).toContain('session helper')
+  expect(manualData).not.toContain('disk helper')
+  expect(await fs.readFile(f.sourcePath, 'utf8')).toBe('<p>disk HTML</p>')
+  expect(await fs.readFile(helperPath, 'utf8')).toBe('export const value="disk helper";')
+  expect(await f.host.readOpenedSource(path.join(f.root, 'theme.css'))).toBeUndefined()
+})
+
+it('applies current opened JS and JSON plus module and CSS dependencies through public project.from', async () => {
+  const f = await fixture('<p>source input</p>')
+  const entryPath = path.join(f.root, 'entry.js'), helperPath = path.join(f.root, 'helper.js'), jsonPath = path.join(f.root, 'data.json')
+  const cssPath = path.join(f.root, 'theme.css'), nestedPath = path.join(f.root, 'nested.css')
+  await fs.writeFile(entryPath, 'export default {value:"disk entry",mount(){return {update(){},dispose(){}}}};')
+  await fs.writeFile(helperPath, 'export const value="disk helper";')
+  await fs.writeFile(jsonPath, '{"message":"disk JSON"}')
+  await fs.writeFile(cssPath, '.source{color:red}')
+  await fs.writeFile(nestedPath, '.source{color:rgb(3,4,5)}')
+  await editOpenedSource(f.host, entryPath, 'import {value} from "./helper.js";import data from "./data.json";import "./theme.css";export default {value,message:data.message,mount(){return {update(){},dispose(){}}}};')
+  await editOpenedSource(f.host, helperPath, 'export const value="session helper";')
+  await editOpenedSource(f.host, jsonPath, '{"message":"session JSON"}')
+  await editOpenedSource(f.host, cssPath, '@import "nested.css";.source{background:blue}')
+  const target = await f.host.registry.create({ kind: 'course-v10', project: createBlankCourseProjectV10(), resources: { assets: {}, components: {} } }, 'current-source.h5lesson')
+  await f.host.tools.attachRunDocument('import', target.documentId, true)
+  const project = await f.host.tools.issueTarget('import', target.documentId, { kind: 'document' })
+  const listed = await f.host.tools.execute('import', 'source-list', { name: 'project.list', input: { project } })
+  const pagePath = (listed as { data: { files: { type: string; path: string }[] } }).data.files.find(file => file.type === 'structure' && file.path.startsWith('pages/'))!.path
+  const applied = await f.host.tools.execute('import', 'source-apply', { name: 'project.apply', input: { project, path: pagePath, from: entryPath, intent: 'insert' } })
+  expect(applied).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
+  const snapshot = await target.drain()
+  if (snapshot.model.kind !== 'course-v10') throw new Error('Expected V10')
+  const componentFiles = Object.values(snapshot.model.resources.components).flatMap(files => Object.entries(files))
+  const textFiles = Object.fromEntries(componentFiles.map(([name, bytes]) => [name, new TextDecoder().decode(bytes)]))
+  expect(textFiles['entry.js']).toContain('data.message'); expect(textFiles['helper.js']).toContain('session helper')
+  expect(textFiles['data.json']).toBe('{"message":"session JSON"}')
+  expect(textFiles['theme.css']).toContain('nested.css'); expect(textFiles['nested.css']).toBe('.source{color:rgb(3,4,5)}')
+  const sourceInstanceId = snapshot.model.project.surfaces[0]!.childIds[0]!
+  const dataFile = componentProjectFiles(snapshot.model.project, snapshot.model.resources).find(file => file.kind === 'data'
+    && file.target?.kind === 'instance' && file.target.instanceId === sourceInstanceId)!
+  await f.host.tools.execute('import', 'data-read', { name: 'project.read', input: { project, path: dataFile.path } })
+  expect(await f.host.tools.execute('import', 'data-apply', { name: 'project.apply', input: { project, path: dataFile.path, from: jsonPath } }))
+    .toMatchObject({ kind: 'read', data: { commit: 'committed' } })
+  const after = await target.drain()
+  if (after.model.kind !== 'course-v10') throw new Error('Expected V10')
+  expect(after.model.project.instances[sourceInstanceId]!.data).toEqual({ message: 'session JSON' })
+  expect(await fs.readFile(jsonPath, 'utf8')).toBe('{"message":"disk JSON"}')
+  expect(await fs.readFile(cssPath, 'utf8')).toBe('.source{color:red}')
+})
 
 it('creates independent host pages from current unsaved HTML, saves/reopens and resumes without duplication', async () => {
   const f = await fixture('<!doctype html><html><body><main><section><h1>旧第一课</h1></section><section><h1>第二课</h1></section></main></body></html>')

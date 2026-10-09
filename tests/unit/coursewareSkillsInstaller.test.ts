@@ -77,6 +77,9 @@ async function createCurrentSources(): Promise<void> {
   await createSkill(sourceRoot, 'build-courseware-project', '# Build current\n')
   await createSkill(sourceRoot, 'edit-content', '# Edit current\n')
   await createSkill(sourceRoot, 'office-content', '# Office current\n')
+  await createSkill(sourceRoot, 'research-and-report', '# Research current\n')
+  await createSkill(sourceRoot, 'data-and-report', '# Data current\n')
+  await createSkill(sourceRoot, 'workbench-usage', '# Shared usage current\n')
 }
 
 async function listFiles(directory: string, prefix = ''): Promise<string[]> {
@@ -214,6 +217,9 @@ windowsDescribe('courseware Skill installer', { timeout: 20_000 }, () => {
       'build-courseware-project',
       'edit-content',
       'office-content',
+      'research-and-report',
+      'data-and-report',
+      'workbench-usage',
     ])
     expect(manifest.skills['orchestrate-courseware']?.installedTreeSignature)
       .toBe(await treeSignature(path.join(sourceRoot, 'orchestrate-courseware')))

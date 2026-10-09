@@ -1,5 +1,5 @@
 {
-  "description": "新建并打开正式文档。kind 可省略，按扩展名自动识别；kind=text 适用任意 UTF-8 数据/源文件（.json/.csv/.svg/.xml/.yaml/代码/无后缀），.md、.h5lesson 和二进制扩展名不可用此 kind。已有完整内容用 file.write mode=create 写入保存。path 省略时放在会话所属文件夹。",
+  "description": "新建并打开正式文档。kind 可省略，按扩展名自动识别；显式 kind=markdown/html/course-v10 且 name 无后缀时，软件补对应标准后缀。kind=text 适用任意 UTF-8 数据/源文件（.json/.csv/.svg/.xml/.yaml/代码/无后缀），.md、.glx 和二进制扩展名不可用此 kind。已有完整内容用 file.write mode=create 写入保存。path 指定父文件夹，name 只填写单独的文件名称；path 省略时放在会话所属文件夹。新课件回执返回已存在的页面事实，后续沿实际工程内容接续。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,

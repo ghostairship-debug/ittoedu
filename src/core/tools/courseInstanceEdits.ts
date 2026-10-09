@@ -11,44 +11,12 @@ import { createChartData } from '../../components/chart/data'
 import { changeChartType, replaceChartTableData } from '../../components/chart/contentOperations'
 import { chartDataEdit } from '../../components/chart/edit'
 import { plainDocumentText } from '../../shared/document/content'
-import { componentInputDataPropertyEdits } from '../../components/input/authoring'
-
-type DataField = { path: string[]; value: JsonValue }
-const record = (value: unknown): value is Record<string, JsonValue> => value !== null && typeof value === 'object' && !Array.isArray(value)
-
-/** These are actual professional property records, not an arbitrary recursive JSON merge. */
-const professionalPropertyRecords: Readonly<Record<string, readonly string[]>> = {
-  'guoling.text': ['appearance', 'sizing'],
-  'guoling.formula': ['appearance', 'sizing'],
-  'guoling.table': ['style'],
-  'guoling.chart': ['style'],
-  'guoling.shape': ['style'],
-  'guoling.image': ['crop', 'feather', 'filters'],
-  'guoling.video': ['poster'],
-}
-
-/**
- * Only supplied properties participate in a local edit. Arrays and content values
- * retain their existing replacement semantics; omitted fields never mean deletion.
- * Both file and object adapters can feed these fields to the canonical writer.
- */
-export function componentDataPropertyFields(before: JsonValue, patch: JsonValue, builtinKey?: string): DataField[] {
-  if (equalComponentValue(before, patch)) return []
-  if (!record(before) || !record(patch)) return [{ path: [], value: patch }]
-  const propertyRecords = professionalPropertyRecords[builtinKey ?? ''] ?? []
-  return Object.entries(patch).flatMap(([name, value]): DataField[] => {
-    const previous = before[name]
-    if (propertyRecords.includes(name) && record(previous) && record(value)) {
-      return Object.entries(value).flatMap(([field, next]) => equalComponentValue(previous[field], next)
-        ? [] : [{ path: [name, field], value: next }])
-    }
-    return equalComponentValue(previous, value) ? [] : [{ path: [name], value }]
-  })
-}
+import { componentDataEdits } from '../course/componentDataEdits'
+export { componentDataPropertyFields } from '../course/componentDataEdits'
 
 /** Selected instance properties use the same public operations as the inspector. */
 export function courseInstancePropertyEdits(model: DocumentModel, target: CourseInstanceTarget,
-  properties: z.infer<typeof objectUpdatePropertiesInputSchema>): ComponentEdit[] {
+  properties: Omit<z.infer<typeof objectUpdatePropertiesInputSchema>, 'implementation'>): ComponentEdit[] {
   if (target.dataPath || target.from !== undefined || target.to !== undefined) throw new Error('属性修改需要整对象授权，所选文字仅可替换正文')
   const { project, instance } = courseInstanceContext(model, target)
   if (instance.locked && Object.keys(properties).some(key => key !== 'locked')) throw new Error('所选对象已锁定，请先解锁')
@@ -67,22 +35,15 @@ export function courseInstancePropertyEdits(model: DocumentModel, target: Course
     }
     edits.push({ type: 'frame.set', instanceId: instance.id, frame })
   }
-  if (properties.data !== undefined) {
-    const builtinKey = componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
-    const managed = builtinKey === 'guoling.input' && record(properties.data) && Object.hasOwn(properties.data, 'acceptedAnswers')
-      ? componentInputDataPropertyEdits(project, target.surfaceId, instance.id,
-        record(instance.data) ? { ...instance.data, ...properties.data } : properties.data) : null
-    edits.push(...(managed ?? componentDataPropertyFields(instance.data, properties.data, builtinKey)
-      .map(field => ({ type: 'data.set' as const, instanceId: instance.id, ...field }))))
-  }
+  if (properties.data !== undefined) edits.push(...componentDataEdits(project, target, { kind: 'patch', data: properties.data }))
   // CSS null remains an explicit cleared value under the existing style contract.
   const style = { ...properties.style, ...(properties.opacity !== undefined ? { opacity: properties.opacity } : {}) }
   for (const [name, value] of Object.entries(style)) if (!equalComponentValue(instance.style?.[name], value))
     edits.push({ type: 'style.set', instanceId: instance.id, path: [name], value })
   const patch = { ...(properties.visible !== undefined ? { visible: properties.visible } : {}),
+    ...(properties.playbackInitialVisibility !== undefined ? { playbackInitialVisibility: properties.playbackInitialVisibility } : {}),
     ...(properties.locked !== undefined ? { locked: properties.locked } : {}), ...(properties.label !== undefined ? { name: properties.label } : {}) }
   if (Object.keys(patch).length) edits.push({ type: 'instance.patch', instanceId: instance.id, patch })
-  if (properties.implementation !== undefined) edits.push({ type: 'implementation.set', instanceId: instance.id, implementation: properties.implementation })
   return edits
 }
 

@@ -51,7 +51,8 @@ export interface WebSource {
 export type WebOpenResult =
   | { status: 'opened'; source: WebSource; text: string; offset: number; nextOffset?: number; truncated: boolean }
   | WebMaterialResult
-  | { status: 'access-required' | 'needs-material-reader' | 'failed' | 'rejected'; reason: string; url?: string }
+  | { status: 'access-required' | 'needs-material-reader' | 'failed' | 'rejected'; reason: string; url?: string;
+      response?: { title: string; text: string; contentType: string; httpStatus: number } }
 
 export interface WebMaterialResult {
   status: 'material'
@@ -202,8 +203,11 @@ export class WebResearchService {
         try { raw = new TextDecoder(response.charset || 'utf-8', { fatal: true }).decode(response.bytes) }
         catch { return { status: 'failed', reason: '网页字符集无法可靠解码', url } }
         const extracted = response.contentType === 'text/plain'
-          ? { title: new URL(url).hostname, text: raw.trim(), accessRequired: false as const }
+          ? { title: new URL(url).hostname, text: raw.trim(), accessRequired: false as const, clientChallenge: false }
           : extractHtml(raw, url)
+        if (extracted.clientChallenge) return { status: 'access-required',
+          reason: '站点返回 Client Challenge，未取得请求的正文；保留实际响应供诊断，不自动重试', url,
+          response: { title: extracted.title, text: extracted.text, contentType: response.contentType, httpStatus: response.status } }
         if (extracted.accessRequired) return { status: 'access-required', reason: '该页面需要登录或访问授权，未取得正文', url }
         if (!extracted.text.trim()) return { status: 'failed', reason: '网页未返回可读取正文', url }
         const version = createHash('sha256').update(extracted.text).digest('hex')

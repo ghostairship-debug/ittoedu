@@ -147,6 +147,7 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
           </div>
         </details>
         <div className="lesson-workspace-toolbar-actions">
+          {props.toolbarExtras}
           {(narrow || editorFocus) && <button type="button" aria-pressed={explorerVisible && (!narrow || editorFocus || state.mobilePane === 'navigation')} onClick={() => selectRegion('resources')}>资源管理器</button>}
           {(narrow || editorFocus) && <button type="button" aria-pressed={conversationsVisible && (!narrow || editorFocus || state.mobilePane === 'navigation')} onClick={() => selectRegion('conversations')}>会话列表</button>}
           {!editorFocus && narrow && <button type="button" aria-pressed={contentOpen && state.mobilePane === 'workbench'} onClick={() => selectRegion('workbench')}>内容</button>}
@@ -205,14 +206,14 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
             className="lesson-modal lesson-create-form"
             role="dialog"
             aria-modal="true"
-            aria-label="新建 H5 演示"
+            aria-label="新建 果铃工程"
             onClick={(event) => event.stopPropagation()}
             onSubmit={(event) => {
               event.preventDefault();
               void actions.run(actions.createLesson);
             }}
           >
-            <h3>新建 H5 演示</h3>
+            <h3>新建 果铃工程</h3>
             <label>
               名称
               <input

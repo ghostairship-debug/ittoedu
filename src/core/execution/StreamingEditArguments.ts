@@ -9,6 +9,8 @@ export interface StreamingEditArgumentsSnapshot {
 export interface StreamingEditArgumentsIdentity {
   readonly toolCallId: string
   readonly toolName: 'text.replace'
+  /** Frozen by the host for content-only calls; never accepted from model metadata. */
+  readonly defaultTarget?: string
 }
 export interface TextReplaceArguments { target?: string; content: string; format?: 'text' | 'html' }
 
@@ -167,6 +169,10 @@ export class StreamingEditArguments {
     this.identity = Object.freeze({ ...identity })
     if (typeof identity.toolCallId !== 'string' || !identity.toolCallId || identity.toolName !== 'text.replace') throw new StreamingEditArgumentsError(identity.toolCallId, 'invalid-tool', '正文参数解析器只接受具有稳定调用身份的 text.replace')
     if (!Number.isSafeInteger(firstSequence) || firstSequence < 0) throw new StreamingEditArgumentsError(identity.toolCallId, 'invalid-sequence', '工具分片起始序号必须为非负整数')
+    if (identity.defaultTarget !== undefined) {
+      validateInput({ target: identity.defaultTarget, content: '' })
+      this.target = identity.defaultTarget
+    }
     this.nextSequence = firstSequence
   }
 
@@ -182,8 +188,10 @@ export class StreamingEditArguments {
   }
   private read(): StreamingEditArgumentsSnapshot {
     // Even snapshot recovery must first reconfirm its target before exposing the new buffer.
-    return this.parser.target === undefined ? { complete: false } : {
-      target: this.parser.target,
+    const target = this.parser.target ?? this.identity.defaultTarget
+    if (this.parser.complete && target === undefined) this.reject('invalid-schema', '编辑调用没有明确目标或宿主默认目标')
+    return target === undefined ? { complete: false } : {
+      target,
       ...(this.parser.content === undefined ? {} : { content: this.parser.content }),
       complete: this.parser.complete,
     }
@@ -252,6 +260,7 @@ export class StreamingEditArguments {
       const parser = new ArgumentParser()
       parser.feed(completeArguments)
       const parsed = parser.finish()
+      if (parsed.target === undefined && this.identity.defaultTarget === undefined) this.reject('invalid-schema', '编辑调用没有明确目标或宿主默认目标')
       const input = validateInput(JSON.parse(completeArguments))
       if (!completeArguments.startsWith(this.buffer) || input.target !== parsed.target || input.content !== parsed.content) this.reject('final-mismatch', '完整工具参数与已接收的编辑分片不一致')
       this.fixedTarget(parser)

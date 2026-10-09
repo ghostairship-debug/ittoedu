@@ -68,12 +68,37 @@ function fixture() {
       activeContext = { ...context, lease: { ...lease, leaseId: `lease-${next}`, loadId: `load-${next}`, revision: next } }
       frameToken = `frame-${next}`
     },
+    freshDocument: () => {
+      revision = 0; frameToken = 'other-frame'
+      activeContext = { ...context, bindingPath: 'D:\\lesson\\other.html', lease: { ...lease,
+        documentId: 'other', epoch: 'other-epoch', revision: 0, leaseId: 'other-lease', loadId: 'other-load',
+        url: 'courseware-preview://preview.app/file/other.html' } }
+    },
     setFrame: (next: string) => { frameToken = next }, holdFrame: (wait: Promise<void>) => { frameWait = wait },
     failNextAction: () => { unknownAfterAction = true },
     clicks: () => clicks, stopped: () => stopped }
 }
 
 describe('M28 HTML action sessions', () => {
+  it('observes a newly authorized current HTML document without reusing old handles or an unknown action', async () => {
+    const f = fixture(), firstDoc = { documentId: 'doc', epoch: 'epoch', revision: 2 }
+    const first = await f.service.executeDocumentAction('switch-doc', firstDoc, { name: 'html.observe', input: {} })
+    if (!('elements' in first)) throw new Error('Expected observation')
+    f.failNextAction()
+    await expect(f.service.click('switch-doc', { operationId: 'spent', handle: first.elements[0]!.handle })).rejects.toThrow('结果未知')
+    f.freshDocument()
+    const otherDoc = { documentId: 'other', epoch: 'other-epoch', revision: 0 }
+    await expect(f.service.executeDocumentAction('switch-doc', otherDoc, { name: 'html.click', input: { handle: first.elements[0]!.handle }, operationId: 'no-observe' })).rejects.toThrow('目标已变化')
+    const second = await f.service.executeDocumentAction('switch-doc', otherDoc, { name: 'html.observe', input: {} })
+    if (!('elements' in second)) throw new Error('Expected observation')
+    expect(second.identity.documentId).toBe('other')
+    expect(() => f.service.click('switch-doc', { operationId: 'old-handle', handle: first.elements[0]!.handle })).toThrow('句柄已过期')
+    expect(() => f.service.click('switch-doc', { operationId: 'spent', handle: second.elements[0]!.handle })).toThrow('不能重发')
+    await expect(f.service.readResource('switch-doc', first.image.resourceId)).rejects.toThrow('不存在')
+    expect(f.clicks()).toBe(1)
+    f.service.stopRun('switch-doc')
+    await expect(f.service.executeDocumentAction('switch-doc', otherDoc, { name: 'html.observe', input: {} })).rejects.toThrow('已停止')
+  })
   it('selects only the exact current document preview and revokes source changes', async () => {
     const folder = await mkdtemp(path.join(os.tmpdir(), 'g20-html-actions-'))
     try {

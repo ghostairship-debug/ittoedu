@@ -1,7 +1,7 @@
 {
   "name": "ittoedu-courseware-editor",
   "version": "0.0.1",
-  "description": "专业互动课件编辑器",
+  "description": "果铃工作台：可编辑课件与 AI 内容创作工作台",
   "main": "dist-electron/main/index.js",
   "author": "ittoedu",
   "license": "UNLICENSED",
@@ -37,6 +37,7 @@
     "start": "npm run build:desktop && cross-env VITE_DEV_SERVER_URL= tsx scripts/launch-electron.ts .",
     "start:engineering": "npm run build:desktop && cross-env VITE_DEV_SERVER_URL= tsx scripts/launch-electron.ts . --engineering-oauth-profile",
     "generate:ai-capabilities": "tsx scripts/generate-ai-capabilities.ts",
+    "check:core-experience-validation": "tsx scripts/check-core-experience-validation.ts",
     "check:ai-capabilities": "tsx scripts/generate-ai-capabilities.ts --check",
     "generate:contracts": "tsx scripts/generate-contracts.ts",
     "generate:component-sources": "tsx scripts/generate-component-builtin-sources.ts",

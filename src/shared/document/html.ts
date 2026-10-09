@@ -494,7 +494,7 @@ function pairItems<T>(next: readonly T[], previous: readonly T[], signature: (va
   return result
 }
 
-function adoptFormulas(next: FlowTextContent, previous: FlowTextContent | undefined): FlowTextContent {
+export function adoptFormulas(next: FlowTextContent, previous: FlowTextContent | undefined): FlowTextContent {
   const old = previous?.inlines.filter((inline): inline is Extract<FlowInline, { type: 'math' }> => inline.type === 'math') ?? []
   const current = next.inlines.filter((inline): inline is Extract<FlowInline, { type: 'math' }> => inline.type === 'math')
   const paired = pairItems(current, old, inline => inline.latex)

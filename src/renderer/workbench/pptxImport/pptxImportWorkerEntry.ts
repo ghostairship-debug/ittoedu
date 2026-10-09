@@ -14,5 +14,5 @@ api.run(async input => {
   // Identical editable V10 conversion and source retention to the manual PPTX entrance.
   const course = await createCourseFromPptx(input.bytes, title)
   return { requestId: input.requestId, status: 'converted', archiveBytes: pptxCourseArchive(course),
-    suggestedName: `${title}.h5lesson`, issues: course.issues }
+    suggestedName: `${title}.glx`, issues: course.issues }
 })

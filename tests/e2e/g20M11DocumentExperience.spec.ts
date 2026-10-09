@@ -154,6 +154,7 @@ test('M11-T01 distinguishes failed save, restored draft and an unfinished AI bod
     page = await app.firstWindow()
     page.on('pageerror', error => errors.push(error.message))
     const recovery = page.getByLabel('未保存文档的恢复稿')
+    await page.locator('.lesson-workspace-toolbar').getByRole('button', { name: /^恢复稿（\d+）$/ }).click()
     await expect(recovery).toBeVisible()
     await recovery.getByRole('button', { name: '恢复并打开', exact: true }).click()
     const header = page.getByRole('region', { name: '教学文档 selection.md', exact: true }).locator(':scope > header > span[role="status"]')

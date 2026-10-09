@@ -1,4 +1,5 @@
 import { captureComponentOperation, equalComponentValue, presentationComponentEdits } from '../../../../core/drivers/courseV10Operations'
+import { componentDataEdits } from '../../../../core/course/componentDataEdits'
 import { frameCorners, translateFrame } from '../../../../core/components/geometry'
 import { containerChildIds, owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentDefinition, type ComponentEdit, type ComponentFrame, type ComponentInstance, type CourseProjectV10, type JsonObject } from '../../../../shared/contracts/component-platform'
 import type { ContentApplyDiagnostic, ContentApplyPlan, ContentChangeRequest, ContentObjectDraft } from './types'
@@ -148,7 +149,11 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
     if (request.target.kind !== 'instance') throw new Error('专业字段修改需要一个确定对象')
     const instanceId = request.target.instanceId
     if (!project.instances[instanceId]) throw new Error('目标对象已不存在')
-    request.source.fields.forEach(field => edits.push({ type: 'data.set', instanceId, ...field }))
+    let owner = owningContainer(baseProject, instanceId)
+    while (owner?.kind === 'instance') owner = owningContainer(baseProject, owner.instanceId)
+    edits.push(...componentDataEdits(baseProject, { instanceId,
+      surfaceId: context?.surfaceId ?? (owner?.kind === 'surface' ? owner.surfaceId : null), stateId: context?.stateId },
+    { kind: 'fields', fields: request.source.fields }))
     if (request.source.implementation !== undefined) edits.push({ type: 'implementation.set', instanceId, implementation: request.source.implementation })
   } else if (request.source.kind !== 'html') throw new Error('内容意图需要局部 HTML 或专业字段')
   const mapped = context ? presentationComponentEdits(baseProject, context.surfaceId, context.stateId, edits) : edits

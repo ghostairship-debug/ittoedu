@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { ExecutionRunRecord, ExecutionStart, WorkingNote } from '../../shared/workbench/execution'
 import type { ModelToolDefinition } from '../../shared/workbench/modelProvider'
 import type { ToolResult } from '../../shared/workbench/tools'
+import { taskFinishDeliverySchema } from './DocumentDeliveryTools'
 
 const MAX_GOAL_CHARS = 3_000
 const MAX_NOTE_BYTES = 16 * 1024
@@ -26,11 +27,11 @@ export const taskNoteTool: ModelToolDefinition = {
   inputSchema: z.toJSONSchema(taskNoteInputSchema) as ModelToolDefinition['inputSchema'],
 }
 
-export const taskFinishInputSchema = z.object({}).strict()
+export const taskFinishInputSchema = z.object({ delivery: taskFinishDeliverySchema.optional() }).strict()
 /** Engine run control; it does not register a document operation or change a grant. */
 export const taskFinishTool: ModelToolDefinition = {
   name: 'task.finish',
-  description: '结束本轮任务。可以在同一响应中先给出写入工具，再把 task.finish({}) 放在最后，软件按顺序核实实际回执后结束，不需要再请求一轮总结。工作完整时返回 completed；同一响应中刚出现失败或必要验证缺口时，先返回具体结果供下一轮判断，不直接结束。模型已读到确定失败、未保存内容或无法取得的必要验证后，仍明确结束的，可返回 partial 并列出实际缺口，不必反复尝试无法获得的证据。工具尚未返回、原作业仍在运行或结果未知时仍须读取原结果，不能结束或重放。此工具不修改正文、不保存文件，也不能将未提交内容或未验证结果声明为完成。',
+  description: '结束本轮任务。模型根据用户原话和当前正式作品判断内容与互动是否完整；软件按当前交付事实结算终态。可以在同一响应中先写入，再把 task.finish 放在最后。用户要求保存或导出时，用可选 delivery 声明最终交付；target 可省略使用当前文档，或使用宿主返回的文档短句柄，destination 是目标路径，format 省略为保存。软件负责机械顺序及真实回执，普通 task.finish({}) 不自动保存。目标当前版本已保存、指定产物已真实写出且版本匹配时返回 completed；中间确定失败、重试与诊断保留为 warnings，不要求逐项修复历史错误。缺失交付、未保存或版本不匹配时如实 partial；原操作仍在运行或结果未知时查询原结果，不得重放。completed 表示机械交付完成，不替代内容、互动或视觉质量验收。',
   inputSchema: z.toJSONSchema(taskFinishInputSchema) as ModelToolDefinition['inputSchema'],
 }
 

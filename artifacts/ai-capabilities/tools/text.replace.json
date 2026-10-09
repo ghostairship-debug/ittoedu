@@ -1,6 +1,13 @@
 {
   "description": "替换已授权文字字段或精确范围；保留范围外文字及富文本格式。Project V10 使用宿主捕获的组件文字字段句柄，展示状态仍固定在原目标。对象样式使用 object.update；纯文本文档保持纯文本。",
   "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "maxLength": 100,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
@@ -15,10 +22,8 @@
         "type": "string"
       },
       "target": {
-        "description": "省略时使用本次文字卡由宿主固定的默认目标；其它任务必须提供。",
-        "maxLength": 100,
-        "minLength": 1,
-        "type": "string"
+        "$ref": "#/$defs/__schema0",
+        "description": "省略时使用本次文字卡由宿主固定的默认目标；其它任务必须提供。"
       }
     },
     "required": [
@@ -33,7 +38,8 @@
     "targetKinds": [
       "markdown-range",
       "html-author-field",
-      "course-instance"
+      "course-instance",
+      "text-selection"
     ]
   },
   "name": "text.replace",

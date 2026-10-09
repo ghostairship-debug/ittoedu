@@ -7,6 +7,7 @@ import { expect, it } from 'vitest'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { documentDigest } from '../../src/core/documents/documentDigest'
 import { HostToolCoordinator, type HostToolServices } from '../../src/core/tools/HostToolServices'
+import { artifactDeliverySource } from '../../src/core/tools/HostArtifactTools'
 import { HostArtifactDeliveryService } from '../../src/main/workbench/execution/HostArtifactDeliveryService'
 import { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
 import { HostJobService } from '../../src/main/workbench/jobs/HostJobService'
@@ -47,8 +48,7 @@ async function fixture() {
     artifacts: { lookup: (runId, operationId) => artifacts.lookup(operationId, runId),
       save: ({ grant, operationId, source, bytes: supplied, assertActive }) => artifacts.deliver({
         runId: grant.runId, operationId, workspaceRoot: grant.fileAccess!.workspaceRoot, permission: grant.fileAccess!.permission,
-        destination: source.destination, sourceKind: source.kind,
-        sourceId: source.kind === 'image' ? `${source.job}@${source.resourceId}` : `${source.job}@${source.name}`,
+        destination: source.destination, ...artifactDeliverySource(source),
         bytes: supplied, assertActive,
       }) },
   }
@@ -104,7 +104,7 @@ it('reuses a ready workspace image after the original session closes and saves w
     const ready = data(await f.coordinator.invoke('reconnected', 'restored-status', '', 'image.status', { job: generated.job }))
     expect(ready).toMatchObject({ status: 'ready', scope: 'workspace', resources: [{ resourceId }] })
     const saved = data(await f.coordinator.saveArtifact('reconnected', 'save-existing', 'save-existing', {
-      kind: 'image', job: ready.job, resourceId, destination: 'continued.png',
+      source: ready.resources[0].source, destination: 'continued.png',
     }))
     expect(saved).toMatchObject({ status: 'written', sourceKind: 'image' })
     expect((await sharp(await fs.readFile(saved.path)).metadata()).width).toBe(32)
@@ -127,7 +127,7 @@ it('keeps document images, other workspaces and stopped unfinished jobs outside 
     const document = await f.images.run({ jobId: 'document-ready', runId: 'original', documentId: 'captured-document',
       operation: 'generate', prompt: 'Document fixture', selection })
     await f.begin('continuation')
-    await expect(f.coordinator.invoke('continuation', 'document-status', '', 'image.status', { job: document.jobId })).rejects.toThrow('工作空间')
+    await expect(f.coordinator.invoke('continuation', 'document-status', '', 'image.status', { job: document.jobId })).rejects.toThrow('已授权文档')
     await expect(f.coordinator.readStandaloneImage('continuation', document.jobId, document.resources[0].resourceId)).rejects.toThrow('工作空间')
     const controller = new AbortController(); controller.abort()
     const stopped = await f.images.run({ jobId: 'stopped-request', runId: 'original',

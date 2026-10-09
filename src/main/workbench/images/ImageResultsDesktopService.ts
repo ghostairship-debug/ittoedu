@@ -187,7 +187,8 @@ export class ImageResultsDesktopService {
   async preview(owner: ImageResultOwner & { resourceId: string }) {
     const view = await this.read(owner), resource = view.job.resources.find(value => value.resourceId === owner.resourceId)
     if (!resource) throw new Error('资源不属于该图片成果')
-    const image = await this.options.images.readResource(resource.resourceId)
+    const image = await this.options.images.readOwnedResultResourceFromJob({ jobId: view.job.jobId,
+      sourceRunId: view.job.runId, sourceDocumentId: view.job.documentId, resourceId: resource.resourceId })
     return { bytes: image.bytes, mimeType: image.mimeType, width: resource.width, height: resource.height }
   }
   async operate(raw: unknown): Promise<unknown> {

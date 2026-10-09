@@ -1,5 +1,5 @@
 {
-  "description": "在工作空间或已明确授权的位置新建文件夹，目标已存在时失败。",
+  "description": "在工作空间或已明确授权的位置新建文件夹，目标已存在时失败。path 指定父文件夹，name 只填写单独的文件夹名称；path 省略时放在会话所属文件夹。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,

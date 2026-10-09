@@ -85,7 +85,7 @@ export function WorkspaceDocumentTabs({ props, layout, hidden = false, onNewFrom
             )
           }
         >
-          <summary aria-label="新建标签页" title="新建文档或 H5 演示">
+          <summary aria-label="新建标签页" title="新建文档或 果铃工程">
             ＋
           </summary>
           {newTabMenuOpen && (
@@ -122,7 +122,7 @@ export function WorkspaceDocumentTabs({ props, layout, hidden = false, onNewFrom
                 void actions.run(async () => { await actions.newCourse(); revealContent() });
               }}
             >
-              新建 H5 演示
+              新建 果铃工程
             </button>
             {onNewFromPptx && <button
               type="button"
@@ -132,7 +132,7 @@ export function WorkspaceDocumentTabs({ props, layout, hidden = false, onNewFrom
                 onNewFromPptx();
               }}
             >
-              从 PPT 新建 H5 演示
+              从 PPT 新建 果铃工程
             </button>}
           </div>
         </details>

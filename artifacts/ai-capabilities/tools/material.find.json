@@ -26,8 +26,7 @@
     },
     "required": [
       "attachmentId",
-      "query",
-      "limit"
+      "query"
     ],
     "type": "object"
   },

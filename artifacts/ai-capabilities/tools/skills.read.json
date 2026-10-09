@@ -1,5 +1,5 @@
 {
-  "description": "按需读取随附或已授权用户/工作区 Skill 的 SKILL.md、references/assets/scripts 文本；不执行脚本，读取不扩大权限，也不撤下已有授权能力。skills.list 可刷新目录；拼接同一文件的分页时带返回的 version，该文件变化时重新读取。其他资料变更不使当前文件失效。不自动加载正文。可用 Skill：orchestrate-courseware：根据教材、教案或主题，分阶段创作可持续编辑的课件；产出教学策划，在工程内逐页搭框架、补素材与互动并局部精修。；build-courseware-project：将已有第三方或外来 HTML 保真导入可编辑课件；适用于 HTML 转课件，不承担新课创作与已有工程续改。；edit-content：修改已有课件、文档或 HTML 的局部文字、图表、布局与互动；保留未选内容、人工调整和既有设计。；office-content：新建或局部修改 Word、Excel、PowerPoint 原格式文件；适用于 DOCX 报告与表格、XLSX 数据与公式、PPTX 幻灯片文字，不用于课件导入或软件代码开发。；research-and-report：多来源研究并创作有可追溯引用的报告，支持材料阅读、网页核实和已有报告续写。；data-and-report：读取数据、受限计算并交付真实图表与报告，保证数值可核查、结果资源实际保存。",
+  "description": "按需读取随附或已授权用户/工作区 Skill 的 SKILL.md、references/assets/scripts 文本；不执行脚本，读取不扩大权限，也不撤下已有授权能力。skills.list 可刷新目录；拼接同一文件的分页时带返回的 version，该文件变化时重新读取。其他资料变更不使当前文件失效。不自动加载正文。可用 Skill：orchestrate-courseware：根据教材、教案或主题，分阶段创作可持续编辑的课件；产出教学策划，在工程内逐页搭框架、补素材与互动并局部精修。；build-courseware-project：将已有第三方或外来 HTML 保真导入可编辑课件；适用于 HTML 转课件，不承担新课创作与已有工程续改。；edit-content：修改已有课件、文档或 HTML 的局部文字、图表、布局与互动；保留未选内容、人工调整和既有设计。；office-content：新建或局部修改 Word、Excel、PowerPoint 原格式文件；适用于 DOCX 报告与表格、XLSX 数据与公式、PPTX 幻灯片文字，不用于课件导入或软件代码开发。；research-and-report：多来源研究并创作有可追溯引用的报告，支持材料阅读、网页核实和已有报告续写。；data-and-report：读取数据、受限计算并交付真实图表与报告，保证数值可核查、结果资源实际保存。；workbench-usage：果铃工作台的共享操作指南；在需要理解当前编辑、来源、资源、保存或观察语义时按主题读取，不替代内容方法或实际工具目录。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -34,10 +34,7 @@
       }
     },
     "required": [
-      "skill",
-      "path",
-      "offset",
-      "limit"
+      "skill"
     ],
     "type": "object"
   },

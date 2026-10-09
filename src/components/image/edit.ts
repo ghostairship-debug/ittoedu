@@ -1,5 +1,5 @@
 import type { ComponentEdit, ComponentInstance } from '../../shared/contracts/component-platform'
-import { cropForBox, type CropRect } from '../../renderer/editing/crop/imageCrop'
+import { cropForBox, type CropRect } from '../../shared/imageCrop'
 import { editImageDisplay, restoreImageOriginal, type ImageData, type ImageDisplayPatch } from './data'
 
 export function imageDataEdit(instanceId: string, data: ImageData): ComponentEdit {

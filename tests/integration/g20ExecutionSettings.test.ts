@@ -52,6 +52,27 @@ function roles(connectionId: string): ExecutionProfile['roles'] {
     vision: { connectionId, model: 'vision-model' }, imageGenerate: null, imageEdit: null }
 }
 
+it('NI05 compression is an explicit optional role and keeps its own immutable connection/model selection', async () => {
+  const { store, options } = await setup()
+  const main = await store.saveConnection({ connection: config('main'), apiKey: 'main-fixture' })
+  const auxiliary = await store.saveConnection({ connection: { ...config('auxiliary'), protocol: 'anthropic-messages',
+    capabilities: { tools: 'unsupported', stream: 'supported', vision: 'unsupported', reasoning: 'supported' } }, apiKey: 'compression-fixture' })
+  await store.saveProfile({ expectedRevision: 0, roles: roles(main.connection.id) })
+  await expect(store.snapshot('compression')).rejects.toMatchObject({ code: 'role-unconfigured' })
+  await store.saveProfile({ expectedRevision: 1, roles: { ...roles(main.connection.id), compression: {
+    connectionId: auxiliary.connection.id, model: 'small-summary', parameters: { max_tokens: 1000 } } } })
+  const frozen = await store.snapshot('compression')
+  expect(frozen).toMatchObject({ model: 'small-summary', connection: { id: auxiliary.connection.id, protocol: 'anthropic-messages' }, parameters: { max_tokens: 1000 } })
+  expect(Object.isFrozen(frozen)).toBe(true)
+  // An existing caller changing the original four roles does not erase this optional choice.
+  await store.saveProfile({ expectedRevision: 2, roles: roles(main.connection.id) })
+  const reopened = new ExecutionSettingsStore(options)
+  expect((await reopened.snapshot('compression')).model).toBe('small-summary')
+  await reopened.saveProfile({ expectedRevision: 3, roles: { ...roles(main.connection.id), compression: null } })
+  await expect(reopened.snapshot('compression')).rejects.toMatchObject({ code: 'role-unconfigured' })
+  expect(frozen.model).toBe('small-summary')
+})
+
 it('persists encrypted revision credentials and independent roles with immutable request snapshots and no product defaults', async () => {
   const { directory, options, store } = await setup()
   expect(await store.read()).toMatchObject({ connections: [], profile: { revision: 0,

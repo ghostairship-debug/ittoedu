@@ -39,8 +39,7 @@
       }
     },
     "required": [
-      "attachmentId",
-      "images"
+      "attachmentId"
     ],
     "type": "object"
   },

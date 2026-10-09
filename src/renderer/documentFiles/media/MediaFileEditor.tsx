@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent } from 'react'
-import type { MediaFileEditorPort, MediaFileOperation, MediaFileSnapshot, MediaPoint, MediaRectangle } from '../../../shared/workbench/mediaFiles'
+import type { FileArtifactBinding, MediaFileDraftInput, MediaFileEditorPort, MediaFileOperation, MediaFileSnapshot, MediaPoint, MediaRectangle } from '../../../shared/workbench/mediaFiles'
 import { MediaFileDraft } from './mediaFileDraft'
 import { PdfPagePreview } from './PdfPagePreview'
 import './mediaFileEditor.css'
@@ -16,6 +16,9 @@ export interface MediaFileEditorHandle {
   close(): Promise<boolean>
   preserveDraft(): Promise<boolean>
   drain(): Promise<boolean>
+  captureCopyDraft(): MediaFileDraftInput
+  binding(): FileArtifactBinding
+  rebind(binding: FileArtifactBinding): void
   suspendForClose(): void
   resumeAfterCloseCancelled(): void
 }
@@ -29,7 +32,7 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
   const closeSuspended = useRef(false)
   const draft = useMemo(() => new MediaFileDraft(snapshot, {
     preview: (...args) => currentPort.current.preview(...args), save: (...args) => currentPort.current.save(...args), reload: (...args) => currentPort.current.reload(...args),
-  }), [snapshot.binding.path])
+  }), [])
   const state = useSyncExternalStore(draft.subscribe, draft.read)
   const [page, setPage] = useState(0)
   const [mode, setMode] = useState<GestureMode>('select')
@@ -45,6 +48,7 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
   const currentPage = Math.min(page, Math.max(0, lastPage))
   const disabled = Boolean(state.busy) || !state.previewReady || !content.editable || content.kind === 'pdf' && !pdfReady
   useEffect(() => () => draft.dispose(), [draft])
+  useEffect(() => { draft.rebind(snapshot.binding) }, [draft, snapshot.binding])
   useEffect(() => { onDirtyChange?.(state.operations.length > 0) }, [state.operations.length, onDirtyChange])
   useEffect(() => {
     if (content.kind !== 'image') { setImageUrl(null); return }
@@ -71,6 +75,12 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
   }
   useImperativeHandle(ref, () => ({
     flush: save, drain,
+    binding: () => draft.read().base.binding,
+    rebind: binding => draft.rebind(binding),
+    captureCopyDraft: () => {
+      if (activePointer.current !== null || gesture.current.length) throw new Error('请完成当前媒体手势后再复制当前稿')
+      return draft.captureCopyDraft()
+    },
     suspendForClose: () => { closeSuspended.current = true; activePointer.current = null; gesture.current = []; setPoints([]) },
     resumeAfterCloseCancelled: () => { closeSuspended.current = false },
     close: async () => {

@@ -1,18 +1,23 @@
 import { z } from 'zod'
 import type { ComponentEdit, CourseProjectV10 } from '../../shared/contracts/component-platform'
-import { componentPresentationSchema } from '../../shared/contracts/component-platform/schema'
+import { componentBackgroundSchema, componentPresentationSchema } from '../../shared/contracts/component-platform/schema'
 import type { ToolTarget } from '../../shared/workbench/tools'
 
 export const coursePresentationInputSchema = z.object({
   target: z.string().min(1),
-  action: z.enum(['add', 'rename', 'duplicate', 'delete', 'set-initial', 'set-thumbnail', 'clear-overrides']),
+  action: z.enum(['add', 'rename', 'duplicate', 'delete', 'set-initial', 'set-thumbnail', 'clear-overrides', 'clear-object-overrides', 'background']),
   state: z.string().min(1).nullable().optional(),
   title: z.string().trim().min(1).optional(),
+  objects: z.array(z.string().min(1)).min(1).optional(),
+  background: componentBackgroundSchema.nullable().optional(),
+  inherit: z.array(z.enum(['color', 'assetId'])).optional(),
 }).strict().superRefine((input, context) => {
-  if (['rename', 'duplicate', 'delete', 'clear-overrides'].includes(input.action) && !input.state)
+  if (['rename', 'duplicate', 'delete', 'clear-overrides', 'clear-object-overrides', 'background'].includes(input.action) && !input.state)
     context.addIssue({ code: 'custom', path: ['state'], message: '请选择一个已有命名状态' })
   if (input.action === 'rename' && input.title === undefined)
     context.addIssue({ code: 'custom', path: ['title'], message: '请输入状态名称' })
+  if (input.action === 'clear-object-overrides' && !input.objects?.length)
+    context.addIssue({ code: 'custom', path: ['objects'], message: '请选择要恢复的对象' })
 })
 export type CoursePresentationInput = z.output<typeof coursePresentationInputSchema>
 
@@ -57,6 +62,20 @@ export function coursePresentationEdits(project: CourseProjectV10,
     case 'clear-overrides': {
       const state = requireState()
       state.overrides = {}; delete state.order; delete state.background
+      break
+    }
+    case 'clear-object-overrides': {
+      const state = requireState()
+      for (const id of value.objects!) delete state.overrides[id]
+      break
+    }
+    case 'background': {
+      const state = requireState()
+      if (value.background === null) delete state.background
+      else {
+        state.background = { ...state.background, ...value.background }
+        for (const field of value.inherit ?? []) delete state.background[field]
+      }
       break
     }
   }

@@ -8,14 +8,6 @@
         "minLength": 1,
         "type": "string"
       },
-      "kind": {
-        "enum": [
-          "image",
-          "compute",
-          "delegation"
-        ],
-        "type": "string"
-      },
       "milliseconds": {
         "maximum": 30000,
         "minimum": 0,
@@ -23,7 +15,6 @@
       }
     },
     "required": [
-      "kind",
       "job",
       "milliseconds"
     ],

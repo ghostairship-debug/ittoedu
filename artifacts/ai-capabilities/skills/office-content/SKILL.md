@@ -5,7 +5,7 @@ description: 新建或局部修改 Word、Excel、PowerPoint 原格式文件；�
 
 # 用内容交付 Office 文件
 
-使用当前任务的材料与目标格式，先确定正文、数据或幻灯片内容。通过 `tools.load` 加载 `office` 能力族；使用实际返回的内容入口，软件负责 OOXML 组装、版本绑定、资源保留和原格式保存，不编写压缩包、关系表或修订编号。
+使用当前任务的材料与目标格式，先确定正文、数据或幻灯片内容。能力不明确时按需读共享指南的[发现与可用性](../workbench-usage/references/discovery.md)，内置用 `skills.read {skill:"workbench-usage",path:"references/discovery.md"}`；安装版用目录返回的完整名称。使用本轮实际提供的 Office 内容入口，软件负责 OOXML 组装、版本绑定、资源保留和原格式保存，不编写压缩包、关系表或修订编号。
 
 新建使用 `office.create`：内容表达段落/表格、工作表数据/公式或幻灯片标题/正文/讲稿。文件名明确时沿用；未指定目录时使用会话所属位置。当前 PPTX 创建提供标题和正文布局，需要更复杂的视觉作品时使用当前可用的对应创作能力，不宣称已实现完整演示文稿排版。
 

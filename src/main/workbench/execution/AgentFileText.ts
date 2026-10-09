@@ -27,8 +27,8 @@ export class AgentFileText {
   }
 
   private async source(filename: string): Promise<Source> {
-    if (sourceFileKind(filename) === 'course-v10') throw new Error('H5 演示须通过正式文档工具读取，不能按普通 UTF-8 源文处理')
-    const snapshot = this.live(filename)
+    if (sourceFileKind(filename) === 'course-v10') throw new Error('果铃工程须通过正式文档工具读取，不能按普通 UTF-8 源文处理')
+    const snapshot = await this.host.readOpenedSource(filename)
     if (snapshot) {
       if (!isSourceDocumentModel(snapshot.model)) throw new Error('当前文档不是普通源文件')
       return { source: snapshot.model.source, version: `document:${snapshot.documentId}:${snapshot.epoch}:${snapshot.revision}`,
@@ -39,8 +39,8 @@ export class AgentFileText {
   }
 
   async read(context: AgentFileContext, filename: string, limit = 8_000, cursor?: string, _operationId: string = randomUUID()): Promise<AgentFileOutcome> {
-    if (sourceFileKind(filename) === 'course-v10') throw new Error('H5 演示须通过正式文档工具读取')
-    const opened = this.live(filename)
+    if (sourceFileKind(filename) === 'course-v10') throw new Error('果铃工程须通过正式文档工具读取')
+    const opened = await this.host.readOpenedSource(filename)
     if (!opened) {
       const position = cursor ? this.pages.get(cursor) : undefined
       if (cursor && (!position || position.runId !== context.runId || !samePath(position.filename, filename))) throw new Error('文件分页不属于本次读取')
@@ -57,7 +57,7 @@ export class AgentFileText {
       return { data: { path: filename, text: current.text.slice(0, length), offset, total: current.total,
         version: current.version, dirty: false, truncated, ...(nextCursor ? { nextCursor } : {}) } }
     }
-    const snapshot = await this.host.registry.get(opened.documentId).drain()
+    const snapshot = opened
     if (!isSourceDocumentModel(snapshot.model)) throw new Error('当前文档不是普通源文件')
     const current = { source: snapshot.model.source, version: `document:${snapshot.documentId}:${snapshot.epoch}:${snapshot.revision}`, dirty: snapshot.dirty }
     let offset = 0
@@ -186,7 +186,7 @@ export class AgentFileText {
   }
 
   private assertText(filename: string, content: string): void {
-    if (sourceFileKind(filename) === 'course-v10') throw new Error('不能把普通源文写入 H5 演示归档')
+    if (sourceFileKind(filename) === 'course-v10') throw new Error('不能把普通源文写入 果铃工程归档')
     textDriver.validate({ kind: 'text', source: content, resources: { assets: {}, components: {} } })
   }
 }

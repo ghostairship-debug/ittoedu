@@ -336,6 +336,23 @@ it('distinguishes provider terminal SSE events from local protocol mismatch and 
   expect(requests).toBe(cases.length)
 })
 
+it('retains declared incomplete reasons without publishing unfinished calls or retrying the request', async () => {
+  for (const reason of ['max_output_tokens', 'content_filter']) {
+    let requests = 0
+    const transport = await serve(async (req, res) => {
+      await body(req); requests++
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      res.end(frame({ type: 'response.created', response: { id: 'one', model: 'actual' } })
+        + frame({ type: 'response.incomplete', response: { id: 'one', model: 'actual', status: 'incomplete', incomplete_details: { reason } } }))
+    })
+    const provider = new ChatGPTResponsesProvider({ fetch: transport, credentialResolver: async () => ({ accessToken: 'own-token', accountId: 'account' }) })
+    const events = await collect(provider, request())
+    expect(events.at(-1)).toMatchObject({ type: 'response.failed', failure: { outcome: 'unknown', kind: 'server', code: 'chatgpt-provider-response-incomplete', message: expect.stringContaining(reason) } })
+    expect(events.some(event => event.type === 'response.completed')).toBe(false)
+    expect(requests).toBe(1)
+  }
+})
+
 function securePort(): ChatGPTOAuthSecurePersistence {
   const entries = new Map<string, OAuthSecureEntry>(), leases = new Map<string, Promise<unknown>>()
   return { read: async ref => structuredClone(entries.get(ref) ?? { version: 0, credential: null }),

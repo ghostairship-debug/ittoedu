@@ -4,6 +4,7 @@ import { containerChildIds, owningContainer } from '../../../shared/contracts/co
 import { flowDocumentBlock } from '../../componentPlatform/surfaces/flow/documentProjection'
 import { flowParagraphAnchorAt } from '../../../shared/flowParagraphAnchors'
 import { multiplyMatrices, transformPoint, type AffineMatrix } from '../../../core/components/geometry'
+import { flowReadingMembers } from '../../../core/course/courseFlowEdits'
 
 /** Actual component content local coordinates to client coordinates, including every Flow stage and parent transform. */
 export function flowContentClientMatrix(element: HTMLElement): AffineMatrix | null {
@@ -27,25 +28,6 @@ export function flowContentClientMatrix(element: HTMLElement): AffineMatrix | nu
   if (Math.abs(matrix[0] * matrix[3] - matrix[1] * matrix[2]) < 1e-12) return null
   const corners = [{ x: 0, y: 0 }, { x: width, y: 0 }, { x: 0, y: height }, { x: width, y: height }].map(point => transformPoint(matrix, point))
   return [matrix[0], matrix[1], matrix[2], matrix[3], rect.left - Math.min(...corners.map(point => point.x)), rect.top - Math.min(...corners.map(point => point.y))]
-}
-
-export function flowReadingMembers(project: CourseProjectV10, container: ComponentContainer): string[] {
-  return containerChildIds(project, container).filter(id => {
-    const instance = project.instances[id]
-    return instance && !instance.flowPlacement && project.definitions[instance.definitionId]?.role !== 'behavior'
-  })
-}
-
-/** Reorder reading members while retaining the actual mixed ownership list. */
-export function flowReadingMove(project: CourseProjectV10, id: string, direction: 'up' | 'down'): ComponentEdit[] {
-  const container = owningContainer(project, id)
-  if (!container) return []
-  const members = flowReadingMembers(project, container), at = members.indexOf(id)
-  if (at < 0) return []
-  const neighbor = members[at + (direction === 'up' ? -1 : 1)]
-  if (!neighbor) return []
-  const remaining = containerChildIds(project, container).filter(member => member !== id)
-  return [{ type: 'instance.move', instanceId: id, container, index: remaining.indexOf(neighbor) + (direction === 'down' ? 1 : 0) }]
 }
 
 /** Capture the real reading container beneath the pointer, including nested sections. */

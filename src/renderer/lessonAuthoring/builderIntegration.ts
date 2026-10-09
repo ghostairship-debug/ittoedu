@@ -11,7 +11,7 @@ export interface LessonAssemblyPorts {
   createCourseProject(options: CoursewareBuilderV2Options): Promise<void>
   owner(): CoursewareBuilderV2Owner
   validate(ticket: LessonAuthoringTicket): Promise<{ allowed: boolean; issues: string[] }>
-  /** Existing save lifecycle; success means a real saved .h5lesson path. */
+  /** Existing save lifecycle; success means a real saved .glx path. */
   saveProject(): Promise<string>
   readAsset(relativePath: string): Promise<Uint8Array>
   componentCatalog(): Promise<ComponentCatalogSnapshot>
@@ -102,7 +102,7 @@ export async function executeLessonAssembly(input: LessonAssemblyInput, ports: L
   assertTarget()
   const projectPath = await ports.saveProject()
   assertTarget()
-  if (!projectPath) throw new Error('保存已取消，当前 H5 演示仍可编辑')
+  if (!projectPath) throw new Error('保存已取消，当前 果铃工程仍可编辑')
   await validate()
   assertTarget()
   return projectPath

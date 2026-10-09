@@ -1,0 +1,28 @@
+{
+  "description": "复制已观察页面及完整对象、展示状态、规则、判题、空间镜头和内部引用；共享素材/定义继续复用，全局可见范围继承原页。软件维护新页面和对象身份，一次可撤销事务；需要整课写入授权。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "target": {
+        "maxLength": 100,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "target"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "复制页面",
+    "targetKinds": [
+      "course-surface"
+    ]
+  },
+  "name": "surface.duplicate",
+  "version": 1
+}

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -7,7 +7,6 @@ import { BufferedInput, PropertyDraftBoundary, flushPropertiesDrafts } from '../
 import { componentPropertiesEdits, componentPropertiesView, propertiesFeedbackTargets, propertiesFramePatch } from '../../src/renderer/ui/properties/componentProperties'
 import { projectWithBackgroundPreview } from '../../src/renderer/authoring/backgroundPreview'
 import { createTextData, createFormulaData, FORMULA_DEFINITION, TEXT_DEFINITION } from '../../src/components/text'
-import { FormulaAuthoringEditor } from '../../src/renderer/ui/FormulaAuthoringEditor'
 import { applyComponentOperation, captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { flowTextStyleEdits } from '../../src/renderer/componentPlatform/surfaces/flow/documentSelection'
 import { createImageData, IMAGE_DEFINITION } from '../../src/components/image'
@@ -30,6 +29,7 @@ import { createAudioData } from '../../src/components/media/data'
 import { createTableData } from '../../src/components/table/data'
 import { TableComponentEditor } from '../../src/components/table/editor'
 import { projectWithSlideContentDraft } from '../../src/renderer/store/slices/slideAuthoringSlice'
+import { DOCUMENT_BLOCK_DEFINITION, documentBlockData } from '../../src/components/document-block'
 const dispose: Array<() => Promise<void>> = []
 afterEach(async () => { cleanup(); for (const action of dispose.splice(0).reverse()) await action() })
 const frame = { width: 220, height: 90, transform: [1.5, .4, .7, 1.2, 35, 42] as [number,number,number,number,number,number] }
@@ -69,13 +69,16 @@ it('R4 honors an explicit project enum instead of the builtin oneOf choices',()=
   expect(Array.from(choices.options).map(option=>option.value)).toEqual(['music'])
   expect(choices).toHaveValue('music')
 })
-it('R4 delegates rich table cell undo and redo to the document owner',()=>{
+it('R4 delegates rich table cell undo and redo to the document owner',async()=>{
   const data=createTableData({rows:1,columns:1}),first=data.rows[0].cells[0]
   data.rows[0].cells[0]={id:first.id,columnId:first.columnId,content:{inlines:[{type:'text',text:'编辑内容'}]}}
   const undo=vi.fn(),redo=vi.fn(),edit=vi.fn()
-  render(<TableComponentEditor instanceId="table" data={data} onEdit={edit} onUndo={undo} onRedo={redo}/>)
-  fireEvent.click(screen.getAllByRole('button',{name:'撤销'})[0])
-  fireEvent.click(screen.getAllByRole('button',{name:'重做'})[0])
+  const ui=render(<TableComponentEditor instanceId="table" data={data} onEdit={edit} onUndo={undo} onRedo={redo}/>)
+  const editor=ui.container.querySelector<HTMLElement>('.ProseMirror')!
+  fireEvent.keyDown(editor,{key:'z',code:'KeyZ',ctrlKey:true})
+  await waitFor(()=>expect(undo).toHaveBeenCalledOnce())
+  fireEvent.keyDown(editor,{key:'z',code:'KeyZ',ctrlKey:true,shiftKey:true})
+  await waitFor(()=>expect(redo).toHaveBeenCalledOnce())
   expect(undo).toHaveBeenCalledOnce();expect(redo).toHaveBeenCalledOnce();expect(edit).not.toHaveBeenCalled()
 })
 it('shows only consumed Flow body frame controls while retaining opacity and floating geometry',()=>{
@@ -105,6 +108,63 @@ it('shows only consumed Flow body frame controls while retaining opacity and flo
   expect(controls('group')).toEqual({position:false,angle:false,size:true,opacity:true})
   expect(controls('shape')).toEqual({position:true,angle:true,size:true,opacity:true})
   expect(controls('floating')).toEqual({position:true,angle:true,size:true,opacity:true})
+})
+it('uses the actual Flow page controls and preserves custom reading widths through History',async()=>{
+  const directory=await mkdtemp(path.join(tmpdir(),'guoling-flow-settings-'));dispose.push(()=>rm(directory,{recursive:true,force:true}))
+  const service=new DocumentHostService(path.join(directory,'recovery')),project=fixture()
+  project.surfaces=[{id:'flow',kind:'flow',title:'原讲义',childIds:['group','neighbor'],
+    background:{mode:'own',color:'#eeeeee',fit:'contain'},flow:{layout:{widthMode:'reading',readingWidth:720,wideContentWidth:980,paperBackgroundColor:'#fafafa'}}}]
+  const first=await service.internalAPI.create({kind:'course-v10',project,resources:{assets:{},components:{}}},'讲义')
+  const unavailable=async():Promise<never>=>{throw new Error('fixture no dialog')}
+  const api:DocumentHostAPI={...service.internalAPI,bootstrapCourse:()=>service.bootstrapCourse(),saveWithDialog:unavailable,close:unavailable,closeWithDialog:unavailable,discardRecovery:unavailable,subscribe:listener=>service.subscribeEvents(listener)}
+  await useEditorStore.getState().connectCourseDocuments(api);dispose.push(async()=>useEditorStore.getState().courseBridge.dispose())
+  await useEditorStore.getState().courseBridge.activate(first.documentId)
+  useEditorStore.getState().selectNodes([])
+  render(<PropertiesTab onReplaceImage={()=>{}}/>)
+  fireEvent.change(screen.getByLabelText('讲义宽度'),{target:{value:'fluid'}})
+  await waitFor(()=>expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow?.layout.widthMode).toBe('fluid'))
+  const changed=useEditorStore.getState().courseKernel.readDocument()
+  expect(changed.surfaces[0].flow?.layout).toEqual({...project.surfaces[0].flow!.layout,widthMode:'fluid'})
+  expect(changed.surfaces[0].background).toEqual(project.surfaces[0].background)
+  expect(changed.instances).toEqual(project.instances)
+  expect((await service.internalAPI.read(first.documentId)).undoDepth).toBe(1)
+  await act(async()=>useEditorStore.getState().courseBridge.undo(first.documentId))
+  expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow).toEqual(project.surfaces[0].flow)
+  await act(async()=>useEditorStore.getState().courseBridge.redo(first.documentId))
+  expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow).toEqual(changed.surfaces[0].flow)
+})
+it('uses the actual Flow destination control and preserves identity and world frame across a nested reading section',async()=>{
+  const directory=await mkdtemp(path.join(tmpdir(),'guoling-flow-destination-'));dispose.push(()=>rm(directory,{recursive:true,force:true}))
+  const service=new DocumentHostService(path.join(directory,'recovery')),project=fixture()
+  project.definitions.section= {...DOCUMENT_BLOCK_DEFINITION,id:'section'}
+  project.instances={text:project.instances.text,neighbor:project.instances.neighbor,
+    section:{id:'section',definitionId:'section',name:'嵌套正文',childIds:['text'],
+      data:documentBlockData({id:'section',type:'section',title:{inlines:[]},collapsedByDefault:false,blocks:[]}),
+      frame:{width:600,height:400,transform:[1,0,0,1,100,200]}},
+    floating:{...project.instances.shape,id:'floating',flowPlacement:{space:'paper',plane:'overlay'}}}
+  project.surfaces=[{id:'flow',kind:'flow',title:'正文',childIds:['neighbor','section','floating']}]
+  const first=await service.internalAPI.create({kind:'course-v10',project,resources:{assets:{},components:{}}},'讲义')
+  const unavailable=async():Promise<never>=>{throw new Error('fixture no dialog')}
+  const api:DocumentHostAPI={...service.internalAPI,bootstrapCourse:()=>service.bootstrapCourse(),saveWithDialog:unavailable,close:unavailable,closeWithDialog:unavailable,discardRecovery:unavailable,subscribe:listener=>service.subscribeEvents(listener)}
+  await useEditorStore.getState().connectCourseDocuments(api);dispose.push(async()=>useEditorStore.getState().courseBridge.dispose())
+  await useEditorStore.getState().courseBridge.activate(first.documentId)
+  useEditorStore.getState().selectNode('floating')
+  render(<PropertiesTab onReplaceImage={()=>{}}/>)
+  fireEvent.change(screen.getByLabelText('正文位置'),{target:{value:JSON.stringify(['section',1])}})
+  fireEvent.click(screen.getByRole('button',{name:'转回指定正文位置'}))
+  await waitFor(()=>expect(useEditorStore.getState().courseKernel.readDocument().instances.section.childIds).toEqual(['text','floating']))
+  const body=useEditorStore.getState().courseKernel.readDocument()
+  expect(body.instances.floating).toMatchObject({id:'floating',definitionId:'shape',data:project.instances.floating.data,
+    frame:{...frame,transform:[1.5,.4,.7,1.2,-65,-158]},flowLayout:{width:'content-width',wrap:'none'}})
+  expect(body.instances.floating.flowPlacement).toBeUndefined()
+  expect(body.instances.neighbor).toEqual(project.instances.neighbor)
+  fireEvent.click(screen.getByRole('button',{name:'转为浮层',exact:true}))
+  await waitFor(()=>expect(useEditorStore.getState().courseKernel.readDocument().instances.floating.flowPlacement).toEqual({space:'paper',plane:'overlay'}))
+  const floating=useEditorStore.getState().courseKernel.readDocument()
+  expect(floating.instances.floating.frame).toEqual(frame)
+  expect(floating.instances.floating.data).toEqual(project.instances.floating.data)
+  expect(floating.instances.section.childIds).toEqual(['text'])
+  await waitFor(async()=>expect((await service.internalAPI.read(first.documentId)).undoDepth).toBe(2))
 })
 it('flushes an unblurred numeric draft and preserves the focused control',async()=>{
   const commit=vi.fn(), stale=vi.fn()
@@ -279,21 +339,53 @@ it('edits formal formula source in the original control without flattening matri
   const view=componentPropertiesView(project.instances.formula,project.definitions.formula)
   if(view.type!=='formula')throw new Error('formula view')
   expect(view.latex).toBe(source);expect(view.ast).toBeNull();expect(view.style).toMatchObject({fontSize:42,color:'#123456'})
-  const commit=vi.fn((latex:string,accessibleText:string)=>{
-    const edits=componentPropertiesEdits(project.instances.formula,project.definitions.formula,{latex,accessibleText})
-    project=applyComponentOperation(project,captureComponentOperation(project,edits))
-  })
-  render(<PropertyDraftBoundary bindingKey="formula" onStale={()=>{}}><FormulaAuthoringEditor node={view} latexSource={view.latex} onCommit={()=>{throw new Error('derived AST must not become source')}} onCommitLatex={commit}/></PropertyDraftBoundary>)
-  const input=screen.getByLabelText('公式内容（线性输入）');input.focus();fireEvent.compositionStart(input);fireEvent.change(input,{target:{value:next}})
-  await act(async()=>expect(await flushPropertiesDrafts()).toBe(false));expect(commit).not.toHaveBeenCalled()
+  const directory=await mkdtemp(path.join(tmpdir(),'guoling-properties-formula-'));dispose.push(()=>rm(directory,{recursive:true,force:true}))
+  const service=new DocumentHostService(path.join(directory,'recovery'))
+  const first=await service.internalAPI.create({kind:'course-v10',project,resources:{assets:{},components:{}}},'矩阵公式.h5lesson')
+  const unavailable=async():Promise<never>=>{throw new Error('fixture no dialog')}
+  const api:DocumentHostAPI={...service.internalAPI,bootstrapCourse:()=>service.bootstrapCourse(),saveWithDialog:unavailable,close:unavailable,closeWithDialog:unavailable,discardRecovery:unavailable,subscribe:listener=>service.subscribeEvents(listener)}
+  await useEditorStore.getState().connectCourseDocuments(api)
+  useEditorStore.getState().selectNode('formula')
+  render(<PropertiesTab onReplaceImage={()=>{}}/>)
+  const input=screen.getByLabelText('公式 LaTeX');input.focus();fireEvent.compositionStart(input);fireEvent.change(input,{target:{value:next}})
+  await act(async()=>expect(await flushPropertiesDrafts(first.documentId)).toBe(false))
+  const composing=await service.internalAPI.read(first.documentId)
+  expect(composing.undoDepth).toBe(0);expect(composing.model).toMatchObject({kind:'course-v10',project:{instances:{formula:{data:{formula:{latex:source}}}}}})
   fireEvent.compositionEnd(input)
-  await act(async()=>expect(await flushPropertiesDrafts()).toBe(true))
-  expect(commit).toHaveBeenCalledTimes(1);expect(document.activeElement).toBe(input)
+  await act(async()=>{expect(await flushPropertiesDrafts(first.documentId)).toBe(true);await useEditorStore.getState().drainCourseDocument(first.documentId)})
+  expect((await service.internalAPI.read(first.documentId)).undoDepth).toBe(1);expect(document.activeElement).toBe(input)
+  project=useEditorStore.getState().courseKernel.readDocument()
   expect(project.instances.formula.data).toMatchObject({formula:{latex:next,formulaId:'math-1',style:{fontSize:42,color:'#123456'}}})
   const edits=componentPropertiesEdits(project.instances.formula,project.definitions.formula,{style:{fontSize:60,color:'#abcdef'}})
   project=applyComponentOperation(project,captureComponentOperation(project,edits))
   expect(componentPropertiesView(project.instances.formula,project.definitions.formula)).toMatchObject({style:{fontSize:60,color:'#abcdef'},latex:next})
   expect(project.instances.neighbor).toEqual(fixture().instances.neighbor)
+})
+it('preserves a dirty formula source on target change and refuses to save it into the neighbor',async()=>{
+  const project=fixture()
+  project.definitions.formula={...FORMULA_DEFINITION,id:'formula'}
+  for(const id of ['formula','otherFormula'])project.instances[id]={id,definitionId:'formula',
+    data:JSON.parse(JSON.stringify(createFormulaData(id,'x'))),frame:structuredClone(frame)}
+  project.surfaces[0].childIds.push('formula','otherFormula')
+  const directory=await mkdtemp(path.join(tmpdir(),'guoling-properties-formula-target-'));dispose.push(()=>rm(directory,{recursive:true,force:true}))
+  const service=new DocumentHostService(path.join(directory,'recovery'))
+  const first=await service.internalAPI.create({kind:'course-v10',project,resources:{assets:{},components:{}}},'公式目标.h5lesson')
+  const unavailable=async():Promise<never>=>{throw new Error('fixture no dialog')}
+  const api:DocumentHostAPI={...service.internalAPI,bootstrapCourse:()=>service.bootstrapCourse(),saveWithDialog:unavailable,close:unavailable,closeWithDialog:unavailable,discardRecovery:unavailable,subscribe:listener=>service.subscribeEvents(listener)}
+  await useEditorStore.getState().connectCourseDocuments(api)
+  useEditorStore.getState().selectNode('formula')
+  render(<PropertiesTab onReplaceImage={()=>{}}/>)
+  const input=screen.getByLabelText('公式 LaTeX');input.focus();fireEvent.change(input,{target:{value:'x+1'}})
+  act(()=>useEditorStore.getState().selectNode('otherFormula'))
+  expect(input).toHaveValue('x+1')
+  await act(async()=>expect(await flushPropertiesDrafts(first.documentId)).toBe(false))
+  expect(screen.getByRole('alert')).toHaveTextContent('目标或源文已改变')
+  expect((await service.internalAPI.read(first.documentId)).undoDepth).toBe(0)
+  expect(useEditorStore.getState().courseKernel.readDocument().instances).toEqual(project.instances)
+  fireEvent.keyDown(input,{key:'Escape'})
+  await act(async()=>expect(await flushPropertiesDrafts(first.documentId)).toBe(true))
+  expect(input).toHaveValue('x')
+  expect((await service.internalAPI.read(first.documentId)).undoDepth).toBe(0)
 })
 it('offers mounted feedback targets from the current surface and global subtrees',()=>{
   const project=fixture()
@@ -359,7 +451,7 @@ it('coalesces canvas text and measured frame with original property position and
   const data=createTextData('文字和框架共用草稿')
   useEditorStore.getState().updateSlideDataDraft(data,false,160)
   render(<PropertiesTab onReplaceImage={()=>{}}/>)
-  expect(screen.getByLabelText('高')).toHaveValue(160)
+  expect(screen.getByRole('spinbutton',{name:'高'})).toHaveValue('160')
   const x=screen.getByLabelText('X');x.focus();fireEvent.change(x,{target:{value:'85'}})
   await act(async()=>expect(await flushPropertiesDrafts()).toBe(true))
   expect(useEditorStore.getState().slideContentEdit).toMatchObject({target:{documentId:initial.target.documentId,epoch:initial.target.epoch},frame:{height:160,transform:[frame.transform[0],frame.transform[1],frame.transform[2],frame.transform[3],85,42]}})

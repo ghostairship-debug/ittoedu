@@ -713,7 +713,7 @@ export function CourseGlobalPropertiesPanel({
         </details>
         <details className="property-section controller-property-details">
           <summary>源码与维护</summary>
-          <p className="property-hint">源码、图片和纹理随本 H5 演示保存，可由 AI 深度定制。恢复默认源码会覆盖源码定制，可以撤销。</p>
+          <p className="property-hint">源码、图片和纹理随本 果铃工程保存，可由 AI 深度定制。恢复默认源码会覆盖源码定制，可以撤销。</p>
           <button type="button" className="secondary-button secondary-button--danger" onClick={() => context.commands.manageTeacherControllerComponent?.(node.id, 'restore')}>恢复默认控制台源码</button>
         </details>
       </> : <>

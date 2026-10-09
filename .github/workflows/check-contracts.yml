@@ -1,5 +1,9 @@
 name: Scoped Validation
 
+# Candidate code must not receive a repository write/admin credential.
+permissions:
+  contents: read
+
 on:
   push:
     branches:
@@ -196,11 +200,10 @@ jobs:
           node-version: '24'
           cache: 'npm'
       - run: npm ci
-      # Example and benchmark generators read dist-player/player.iife.js, which is
-      # a build output and never tracked. Both product test paths below reach them,
-      # so the bundle must exist before either runs.
+      # The full path builds Player through pretest:product. The direct Vitest
+      # delta path still needs this preparation for example/benchmark consumers.
       - run: npm run build:player
-        if: needs.changes.outputs.product_tests == 'true'
+        if: needs.changes.outputs.product_tests == 'true' && needs.changes.outputs.product_full != 'true'
       - run: npm run test:product
         if: needs.changes.outputs.product_tests == 'true' && needs.changes.outputs.product_full == 'true'
       - name: Run affected product tests
@@ -237,12 +240,60 @@ jobs:
               done
           )
           if (( ${#inputs[@]} == 0 )); then
-            exit 0
+            echo 'Selected product validation has no inputs' >&2
+            exit 1
           fi
-          npx vitest related "${inputs[@]}" --run --passWithNoTests \
+          npx vitest related "${inputs[@]}" --run \
             --exclude=tests/unit/taskBoardGenerator.test.ts \
             --exclude=tests/unit/aiCapabilities.test.ts
       - run: npm run test:governance
         if: needs.changes.outputs.governance_tests == 'true'
       - run: npm run test:capabilities
         if: needs.changes.outputs.capability_check == 'true'
+
+  # This additional required status must be configured by the independent
+  # repository administrator. A mutable PR workflow alone cannot enforce trust.
+  # The first installation has no baseline checker and explicitly stays unverified.
+  trusted-core-validation:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.changes.outputs.base_sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Require independently installed baseline checker
+        shell: bash
+        run: |
+          if [[ ! -f trusted/scripts/check-core-experience-validation.ts ]]; then
+            echo 'NI08 unverified: install the independently reviewed checker in the protected baseline' >&2
+            exit 1
+          fi
+      - run: npm ci
+        working-directory: trusted
+      - name: Validate actual integration checkout with baseline obligations
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.changes.outputs.base_sha }}
+        run: |
+          ln -s ../trusted/node_modules candidate/node_modules
+          candidate_sha="$(git -C candidate rev-parse HEAD)"
+          trusted/node_modules/.bin/tsx trusted/scripts/check-core-experience-validation.ts \
+            --trusted-root "$PWD/trusted" --candidate-root "$PWD/candidate" \
+            --base-sha "$BASE_SHA" --candidate-sha "$candidate_sha" \
+            --output "$PWD/validation-report"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trusted-core-validation-${{ github.run_id }}
+          path: validation-report
+          if-no-files-found: warn

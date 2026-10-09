@@ -90,7 +90,16 @@ it('recovers a ready document image after cold restore and applies a fresh autho
   expect(preview).toMatchObject({ status: 'prepared', previews: [{ resourceId: recovered.resources[0].resource, mimeType: 'image/png' }] })
   const previewed = await host.tools.readOpenImagePreview('continuation', preview.previews[0].resourceId)
   expect(await sharp(previewed.bytes).raw().toBuffer()).toEqual(await sharp(replacement).raw().toBuffer())
+  const generatedReference = `${ready.job}@${ready.resources[0].resourceId}`
+  const resultPixels = await host.tools.prepareResultImages('continuation', await host.tools.execute('continuation', 'preview-source',
+    { name: 'image.preview', input: { images: [generatedReference] } }))
+  expect(resultPixels).toHaveLength(1)
+  expect(await sharp(resultPixels[0].bytes).raw().toBuffer()).toEqual(await sharp(replacement).raw().toBuffer())
+  // The same authorized result is usable as an application/reference source, not just a preview.
+  expect(await sharp((await host.tools.readImageResource('continuation', document.documentId, generatedReference)).bytes).raw().toBuffer())
+    .toEqual(await sharp(replacement).raw().toBuffer())
   await expect(host.tools.readOpenImagePreview('outside', recovered.resources[0].resource)).rejects.toThrow()
+  await expect(host.tools.readImageResource('outside', document.documentId, generatedReference)).rejects.toThrow()
   const freshTarget = await host.tools.issueTarget('continuation', document.documentId, target)
   expect(await host.tools.execute('continuation', 'apply-image', { name: 'media.apply', input: { target: freshTarget, resource: recovered.resources[0].resource } }))
     .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
@@ -137,13 +146,18 @@ it('reopens only a ready resource of the exact durable job without another provi
   ]) await expect(reopened.readReadyResourceFromJob(candidate)).rejects.toThrow()
   expect(calls).toBe(1)
 
-  await fs.rm(path.join(directory, 'resources', `${job.resources[0]!.digest}.blob`))
-  await expect(reopened.readReadyResourceFromJob(owner)).rejects.toMatchObject({ code: 'image-continuation-resource-missing' })
   const [jobFile] = await fs.readdir(path.join(directory, 'jobs'))
   const saved = JSON.parse(await fs.readFile(path.join(directory, 'jobs', jobFile!), 'utf8'))
   saved.status = 'unapplied'; saved.stopped = true
   await fs.writeFile(path.join(directory, 'jobs', jobFile!), JSON.stringify(saved))
   await expect(reopened.readReadyResourceFromJob(owner)).rejects.toMatchObject({ code: 'image-continuation-unavailable' })
+  expect(await sharp((await reopened.readOwnedResultResourceFromJob(owner)).bytes).raw().toBuffer())
+    .toEqual(await sharp(bytes).raw().toBuffer())
+  await expect(reopened.readOwnedResultResourceFromJob({ ...owner, sourceRunId: 'different-run' })).rejects.toThrow()
+  saved.status = 'ready'; saved.stopped = false
+  await fs.writeFile(path.join(directory, 'jobs', jobFile!), JSON.stringify(saved))
+  await fs.rm(path.join(directory, 'resources', `${job.resources[0]!.digest}.blob`))
+  await expect(reopened.readReadyResourceFromJob(owner)).rejects.toMatchObject({ code: 'image-continuation-resource-missing' })
   expect(calls).toBe(1)
 })
 

@@ -98,7 +98,7 @@ describe('LessonDocumentEditor mounted shared core', () => {
     attachMarkdownRendererHost(port, ref)
     const handle = createRef<LessonDocumentEditorHandle>()
     render(<LessonDocumentEditor ref={handle} documentRef={ref} port={port} />)
-    await screen.findByRole('button', { name: '源文' })
+    await screen.findByRole('button', { name: '源码' })
     await act(async () => {
       handle.current!.session.edit('教师稿')
       await handle.current!.session.drain()
@@ -120,7 +120,7 @@ describe('LessonDocumentEditor mounted shared core', () => {
     attachMarkdownRendererHost(port, ref)
     const handle = createRef<LessonDocumentEditorHandle>()
     render(<LessonDocumentEditor ref={handle} documentRef={ref} port={port} />)
-    await screen.findByRole('button', { name: '源文' })
+    await screen.findByRole('button', { name: '源码' })
     await act(async () => {
       handle.current!.session.edit('A教师\nB本地\nC原始')
       await handle.current!.session.drain()
@@ -148,7 +148,7 @@ describe('LessonDocumentEditor mounted shared core', () => {
     const autoSave = screen.getByRole('checkbox', { name: '自动保存' })
     expect(autoSave).not.toBeChecked()
     expect(undo).toBeDisabled(); expect(redo).toBeDisabled()
-    expect(screen.queryByRole('button', { name: '源文' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '源码' })).not.toBeInTheDocument()
     const view = EditorView.findFromDOM(box)
     if (!view) throw new Error('纯文本编辑器尚未挂载')
     act(() => { view.dispatch({ changes: { from: view.state.doc.length, insert: '增' } }) })

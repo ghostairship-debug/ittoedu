@@ -8,7 +8,7 @@ import { describeTools } from '../src/core/tools/ToolCatalog'
 import { agentFileTools } from '../src/core/tools/AgentFileTools'
 import { skillReadTool } from '../src/core/tools/SkillTools'
 import { builtinComponentSourceKeys } from '../src/core/components/source/builtinSources'
-import { courseAgentMethodSkills } from '../src/shared/courseAgentSkills'
+import { courseAgentBundledSkills } from '../src/shared/courseAgentSkills'
 import { courseAgentCapabilityDiskIndex, courseAgentCapabilityQueryHelp, type CourseAgentCapabilityData, type CourseAgentCapabilityEntry } from '../src/shared/courseAgentCapabilities'
 import { componentDefinitionSchema, componentImplementationSchema, componentSurfaceSchema, courseProjectV10Schema } from '../src/shared/contracts/component-platform/schema'
 import { publishedCourseV3Schema } from '../src/shared/contracts/component-platform/published'
@@ -91,7 +91,7 @@ async function methodSkillResourceFiles(projectRoot: string, skillName: string):
 /** Rebuild only method resources when their real tool entry changes. */
 export async function generateBundledSkillArtifacts(projectRoot: string) {
   const files = new Map<string, string>()
-  const manifest = { skills: await Promise.all(courseAgentMethodSkills.map(async skill => {
+  const manifest = { skills: await Promise.all(courseAgentBundledSkills.map(async skill => {
     const resources = await methodSkillResourceFiles(projectRoot, skill.name)
     const entryKey = `skills/${skill.name}/SKILL.md`
     const entry = resources.get('SKILL.md')!

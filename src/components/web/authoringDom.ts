@@ -18,6 +18,8 @@ export function createDomAuthoring(root: HTMLElement, options: {
   records(): Record<string, ComponentAuthorRecord>
   resolveResource?(reference: string): string | undefined
   resourceReference?(url: string): string | undefined
+  originalText?(node: Text): string | undefined
+  claimText?(node: Text, text: string | null): void
   onChange?(): void
   report?(authorKey: string, status: 'bound' | 'unmounted' | 'unresolved'): void
 }) {
@@ -34,7 +36,14 @@ export function createDomAuthoring(root: HTMLElement, options: {
   let reactScopes = new WeakMap<Element, ComponentAuthorScope>()
   const elementOf = (node: Target) => node.nodeType === 3 ? node.parentElement! : node as HTMLImageElement
   const valueOf = (node: Target) => node.nodeType === 3 ? node.nodeValue ?? '' : (node as HTMLImageElement).getAttribute('src') ?? ''
-  const authorValueOf = (node: Target) => node.nodeType === 3 ? valueOf(node) : options.resourceReference?.(valueOf(node)) ?? valueOf(node)
+  const authorValueOf = (node: Target) => node.nodeType === 3 ? options.originalText?.(node as Text) ?? valueOf(node)
+    : options.resourceReference?.(valueOf(node)) ?? valueOf(node)
+  const contextValueOf = (element: Element) => {
+    if (!options.originalText) return element.textContent
+    const walker = doc.createTreeWalker(element, 4), values: string[] = []
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) values.push(authorValueOf(node as Text))
+    return values.join('')
+  }
   const eligible = (node: Node): node is Target => node.nodeType === 1 && (node as Element).localName === 'img'
     || node.nodeType === 3 && Boolean(node.nodeValue?.trim()) && Boolean(node.parentElement)
       && !node.parentElement!.closest('script,style,noscript,template,textarea,title,option,[contenteditable],[data-html-preview-edit-markers]')
@@ -136,14 +145,14 @@ export function createDomAuthoring(root: HTMLElement, options: {
       const node = record.kind === 'image' ? element.localName === 'img' ? element as HTMLImageElement : undefined
         : [...element.childNodes].filter(node => node.nodeType === 3)[record.binding.textIndex ?? 0] as Text | undefined
       if (!node) return []
-      const value = valueOf(node), override = record.kind === 'text' ? record.overrides.text : record.overrides.src
+      const value = node.nodeType === 3 ? authorValueOf(node) : valueOf(node), override = record.kind === 'text' ? record.overrides.text : record.overrides.src
       const resolvedOverride = record.kind === 'image' && override ? options.resolveResource?.(override) ?? override : override
       const baseline = record.kind === 'image' ? options.resolveResource?.(record.binding.baseline) ?? record.binding.baseline : record.binding.baseline
       if (value !== baseline && value !== resolvedOverride
         && !(previous?.node === node && value === previous.content?.applied)) return []
       if (record.binding.context?.some(context => {
         const anchors = elementsAt(context.path)
-        return anchors.length !== 1 || anchors[0]!.textContent !== context.value
+        return anchors.length !== 1 || contextValueOf(anchors[0]!) !== context.value
       })) return []
       return [node]
     })
@@ -163,6 +172,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
       if (state.node.nodeType === 3) state.node.nodeValue = state.content.original
       else setAttribute(state.node as HTMLImageElement, 'src', state.content.original)
     }
+    if (state.node.nodeType === 3) options.claimText?.(state.node as Text, null)
     for (const [element, attributes] of state.attributes) for (const [name, property] of attributes)
       if (element.getAttribute(name) === property.applied) setAttribute(element, name, property.original)
     const element = elementOf(state.node) as HTMLElement
@@ -176,6 +186,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
     const value = record.kind === 'text' ? record.overrides.text : record.overrides.src
     const content = value === undefined ? undefined : record.kind === 'image' ? options.resolveResource?.(value) ?? value : value
     if (content !== undefined) {
+      if (state.node.nodeType === 3) options.claimText?.(state.node as Text, content)
       const current = valueOf(state.node)
       if (!state.content || current !== state.content.applied) state.content = { original: current, applied: content }
       else state.content.applied = content
@@ -189,6 +200,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
         else setAttribute(state.node as HTMLImageElement, 'src', state.content.original)
       }
       state.content = undefined
+      if (state.node.nodeType === 3) options.claimText?.(state.node as Text, null)
     }
     const attribute = (target: Element, name: string, value: string | null) => {
       const properties = state.attributes.get(target) ?? new Map<string, Property>()
@@ -303,7 +315,8 @@ export function createDomAuthoring(root: HTMLElement, options: {
       if (record || previous.observation.record.binding.baseline === authorValueOf(node)) return { ...previous.observation,
         record: record ?? { ...previous.observation.record, overrides: {} },
         bindingStatus: resolve(previous.observation.authorKey, record ?? previous.observation.record, active.get(previous.observation.authorKey)).node === node ? 'bound' : 'unresolved',
-        initialValue: record?.kind === 'image' ? record.overrides.src ?? authorValueOf(node) : authorValueOf(node) }
+        initialValue: record?.kind === 'image' ? record.overrides.src ?? authorValueOf(node)
+          : record?.overrides.text ?? authorValueOf(node) }
     }
     const binding: ComponentAuthorBinding = { kind: 'dom', path: pathFor(element), baseline: authorValueOf(node),
       ...(node.nodeType === 3 ? { textIndex: [...element.childNodes].filter(child => child.nodeType === 3).indexOf(node) } : {}) }

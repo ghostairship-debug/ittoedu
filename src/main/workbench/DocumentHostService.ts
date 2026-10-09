@@ -20,15 +20,19 @@ import { WorkspaceFiles, type WorkspaceFilesDependencies } from './WorkspaceFile
 import { DocumentFileCoordinator } from './DocumentFileCoordinator'
 import { FileArtifactService } from './FileArtifactService'
 import { prepareImageResource } from './admittedImageResource'
+import { prepareMediaResource } from './admittedMediaResource'
 import { createBlankCourseProjectV10 } from '../../core/course/createCourseProjectV10'
 import { InMemoryComponentCompilation } from '../../core/components/compilation/InMemoryComponentCompilation'
 import { createEsbuildComponentCompiler } from './contentApply/compilation/esbuildComponentCompiler'
 import { ContentApplyService } from './contentApply/applyService'
-import { readComponentProjectFileInput, readCurrentHtmlDocumentSource, prepareComponentProjectFileSource } from './projectFiles/componentPlatformFileInput'
+import { readComponentProjectFileInput, prepareComponentProjectFileSource } from './projectFiles/componentPlatformFileInput'
 import { AgentFileService } from './execution/AgentFileService'
 import { HostArtifactDeliveryService } from './execution/HostArtifactDeliveryService'
 import { verifyContentResourceDiagnostic } from './contentApply/resources/verifyContentResourceDiagnostic'
 import { discardFlowDocumentRecovery, type FlowRecoveryDocumentIdentity } from '../flowDocumentRecovery'
+import type { MediaFileDraftInput } from '../../shared/workbench/mediaFiles'
+import { matchesSavedDocument } from './execution/savedDocumentBinding'
+import { spatialViewportCaptureSchema, type SpatialViewportCapture, type SpatialViewportRequest } from '../../shared/workbench/spatialViewport'
 
 function canonicalKey(filename: string): string {
   return process.platform === 'win32' ? filename.toLowerCase() : filename
@@ -63,6 +67,9 @@ export class DocumentHostService {
   private readonly saveListeners = new Set<(fact: DocumentSaveFact) => unknown>()
   private readonly saveObservations = new Set<Promise<void>>()
   private readonly closeListeners = new Set<(documentId: string) => void>()
+  private documentInputPreparer?: (documentId: string) => Promise<void>
+  private spatialViewportPreparer?: (input: SpatialViewportRequest) => Promise<SpatialViewportCapture>
+  private mediaCopyPreparer?: (source: string, kind: 'file' | 'directory') => Promise<readonly MediaFileDraftInput[]>
   private bootstrapping?: Promise<DocumentSnapshot>
   private readonly authoringDraftDirectory: string
   private authoringDraftTail: Promise<unknown> = Promise.resolve()
@@ -77,12 +84,17 @@ export class DocumentHostService {
     this.journal = createDocumentJournal({ directory })
     this.registry = new DocumentRegistry({ persistence: this.journal, drivers: this.drivers, createId: randomUUID, bindingKey: binding => canonicalKey(binding.path) })
     this.compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
-    this.tools = new DocumentToolGateway(this.registry, this.drivers, randomUUID, { prepareImage: prepareImageResource,
+    this.tools = new DocumentToolGateway(this.registry, this.drivers, randomUUID, { prepareImage: prepareImageResource, prepareMedia: prepareMediaResource,
+      prepareInput: documentId => this.prepareDocumentInput(documentId),
+      prepareSpatialViewport: (documentId: string, surfaceId: string) => this.prepareSpatialViewport(documentId, surfaceId),
       componentContent: {
         verifyDiagnostic: (snapshot, diagnostic) => verifyContentResourceDiagnostic({ project: snapshot.model.project,
           resources: snapshot.model.resources, diagnostic }),
         source: (from, fileAccess, sourceHtml?: string) => readComponentProjectFileInput({ from, fileAccess, sourceHtml,
-          currentHtml: (filename: string) => readCurrentHtmlDocumentSource(this.registry, filename),
+          currentSource: async (filename: string) => {
+            const snapshot = await this.readOpenedSource(filename)
+            return snapshot && isSourceDocumentModel(snapshot.model) ? snapshot.model.source : undefined
+          },
         }),
         prepareSource: prepareComponentProjectFileSource,
         apply: input => new ContentApplyService({
@@ -113,6 +125,7 @@ export class DocumentHostService {
           const relative = path.relative(source, observed.binding.path)
           if (kind === 'file' ? canonicalKey(source) !== canonicalKey(observed.binding.path)
             : relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue
+          await this.prepareDocumentInput(observed.documentId)
           const snapshot = await this.registry.get(observed.documentId).drain()
           if (snapshot.binding.kind !== 'file' || canonicalKey(snapshot.binding.path) !== canonicalKey(observed.binding.path)) throw new Error('复制期间当前稿文件位置已变化')
           const driver = this.drivers.find(driver => driver.kind === snapshot.model.kind)
@@ -121,6 +134,8 @@ export class DocumentHostService {
             bytes: await driver.serialize(snapshot.model), ...(snapshot.model.kind === 'markdown'
               ? { markdown: { source: snapshot.model.source, resources: snapshot.model.resources } } : {}) })
         }
+        const media = await this.mediaCopyPreparer?.(source, kind) ?? []
+        if (media.length) captured.push(...await this.artifacts.captureCopyContent(source, kind, media))
         return captured
       } })
     this.artifacts = new FileArtifactService(this)
@@ -167,7 +182,7 @@ export class DocumentHostService {
       const project = createBlankCourseProjectV10()
       this.bootstrapping = this.registry.create({ kind: 'course-v10', project,
         resources: { assets: {}, components: {} },
-      }, `${project.title}.h5lesson`, true).then(session => this.attach(session))
+      }, `${project.title}.glx`, true).then(session => this.attach(session))
         .finally(() => { this.bootstrapping = undefined })
     }
     return this.bootstrapping
@@ -299,6 +314,41 @@ export class DocumentHostService {
 
   get recoveryIssues(): readonly string[] { return [...this.fileCoordinator.recoveryIssues, ...this.journal.recoveryIssues] }
 
+  /** GUI composition connects the existing renderer input owner; headless hosts have no renderer drafts. */
+  setDocumentInputPreparer(prepare?: (documentId: string) => Promise<void>): void { this.documentInputPreparer = prepare }
+
+  prepareDocumentInput(documentId: string): Promise<void> { return this.documentInputPreparer?.(documentId) ?? Promise.resolve() }
+
+  setSpatialViewportPreparer(prepare?: (input: SpatialViewportRequest) => Promise<SpatialViewportCapture>): void { this.spatialViewportPreparer = prepare }
+
+  async prepareSpatialViewport(documentId: string, surfaceId: string): Promise<SpatialViewportCapture> {
+    await this.prepareDocumentInput(documentId)
+    const before = this.registry.get(documentId).read()
+    if (before.model.kind !== 'course-v10' || !before.model.project.surfaces.some(surface => surface.id === surfaceId && surface.kind === 'spatial'))
+      throw new Error('原空间表面已不存在，请重新观察。')
+    if (!this.spatialViewportPreparer) throw new Error('当前空间视口尚未运行，请打开原空间视口后重试。')
+    const capture = spatialViewportCaptureSchema.parse(await this.spatialViewportPreparer({ documentId, epoch: before.epoch, surfaceId }))
+    const after = this.registry.get(documentId).read()
+    if (capture.documentId !== documentId || capture.epoch !== before.epoch || after.epoch !== before.epoch || capture.surfaceId !== surfaceId
+      || after.model.kind !== 'course-v10' || !after.model.project.surfaces.some(surface => surface.id === surfaceId && surface.kind === 'spatial'))
+      throw new Error('原空间视口的文档身份或表面已变化，请重新观察。')
+    return capture
+  }
+
+  setMediaCopyPreparer(prepare?: (source: string, kind: 'file' | 'directory') => Promise<readonly MediaFileDraftInput[]>): void {
+    this.mediaCopyPreparer = prepare
+  }
+
+  /** The original input owner confirms its draft before Main captures an already-open source. */
+  async readOpenedSource(filename: string): Promise<DocumentSnapshot | undefined> {
+    const observed = this.registry.list().find(snapshot => snapshot.binding.kind === 'file'
+      && canonicalKey(snapshot.binding.path) === canonicalKey(filename))
+    if (!observed || !isSourceDocumentModel(observed.model)) return undefined
+    await this.prepareDocumentInput(observed.documentId)
+    const snapshot = await this.registry.get(observed.documentId).drain()
+    return isSourceDocumentModel(snapshot.model) ? snapshot : undefined
+  }
+
   /** Replan only known local reads; Session still performs the final CAS and durable commit. */
   private async dispatch(input: DocumentOperation): Promise<DocumentOperationResult> {
     const session = this.registry.get(input.documentId)
@@ -372,7 +422,7 @@ export class DocumentHostService {
       }
       const model = structuredClone(current.model)
       if (input.source !== undefined) {
-        if (!isSourceDocumentModel(model)) throw new Error('H5 演示不能使用 Markdown 合并正文')
+        if (!isSourceDocumentModel(model)) throw new Error('果铃工程不能使用 Markdown 合并正文')
         model.source = input.source
         if (model.kind === 'markdown' && disk.model?.kind === 'markdown') model.resources = {
           assets: { ...disk.model.resources.assets, ...model.resources.assets },
@@ -381,6 +431,16 @@ export class DocumentHostService {
       }
       return { model, version: disk.version, matchesDisk: false }
     }))
+  }
+
+  /** Relate a persisted source to an already-authorized live session; this grants no document access. */
+  async matchesSavedDocument(sourceDocumentId: string, currentDocumentId: string): Promise<boolean> {
+    const source = await this.journal.inspect(sourceDocumentId)
+    if (!source || source.binding.kind !== 'file' || source.model.kind !== 'course-v10' || source.savedRevision === null) return false
+    const current = this.registry.list().find(snapshot => snapshot.documentId === currentDocumentId)
+    if (!current) return false
+    return matchesSavedDocument({ kind: 'course-v10', path: source.binding.path, projectId: source.model.project.id,
+      epoch: source.epoch, savedRevision: source.savedRevision, fileVersion: source.binding.version }, current)
   }
 
   /** Query a correlated persisted intent and its actual file identity; never perform a second save. */

@@ -1,10 +1,10 @@
 import { componentDefinitionBuiltinKey,type CourseProjectV10,type ComponentEdit,type JsonValue } from '../../../../shared/contracts/component-platform'
 import type { TextRunStyle } from '../../../../shared/contracts/native-v1'
 import {createTextComponentData,formatTextComponentRange,textComponentDataSchema} from '../../../../components/text/data'
-import {parseTableData,tableCellContent} from '../../../../components/table/data'
+import {parseTableData,tableCellContent,tableCellRichTextEdit} from '../../../../components/table/data'
 import { documentTextLength,type FlowTextContent } from '../../../../shared/document/content'
 import type { DocumentPoint, DocumentSelection,DocumentSlot } from '../../../../shared/document/ports'
-import { courseInstanceSlotPath } from '../../../workbench/SelectionContextController'
+import { courseInstanceSlotPath } from '../../../../core/tools/ToolTargets'
 
 function slotPath(project: CourseProjectV10, point: DocumentPoint): string[] | null {
   const instance = project.instances[point.blockId]
@@ -40,9 +40,8 @@ export function flowTextStyleEdits(project:CourseProjectV10,selection:DocumentSe
   if(JSON.stringify(formatted)===JSON.stringify(value))return []
   if(range.root==='flowLayout')return [{type:'instance.flowLayout.set',instanceId:instance.id,flowLayout:{...instance.flowLayout!,caption:formatted}}]
   if(typeof value==='string' && range.path.at(-1)==='text') {
-    let cell:any=instance.data;const path=range.path.slice(0,-1);for(const key of path)cell=cell[key]
-    const {text:_text,...fields}=cell
-    return [{type:'data.set',instanceId:instance.id,path,value:JSON.parse(JSON.stringify({...fields,content:formatted})) as JsonValue}]
+    const upgrade=tableCellRichTextEdit(instance.data,range.path,formatted)
+    if(upgrade)return [{type:'data.set',instanceId:instance.id,path:upgrade.path,value:JSON.parse(JSON.stringify(upgrade.value)) as JsonValue}]
   }
   return [{type:'data.set',instanceId:instance.id,path:range.path,value:JSON.parse(JSON.stringify(formatted)) as JsonValue}]
 }

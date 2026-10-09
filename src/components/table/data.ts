@@ -11,6 +11,22 @@ const native = tableNativeContentObjectSchema
 const cell = native.shape.rows.element.shape.cells.element
 const richCell = cell.omit({text:true}).extend({content:documentTextContentSchema}).strict()
 export function tableCellContent(value: TableCell): FlowTextContent { return value.content ?? {inlines:[{type:'text',text:value.text}]} }
+/** Resolve only this table cell's authored text slot, including its rich-text upgrade. */
+export function tableCellTextField(data: unknown, path: readonly string[]): { path: string[]; cell: TableCell } | null {
+  if (path.length !== 5 || path[0] !== 'rows' || path[2] !== 'cells' || !['text', 'content'].includes(path[4])
+    || !/^(0|[1-9]\d*)$/.test(path[1]) || !/^(0|[1-9]\d*)$/.test(path[3])) return null
+  const result = tableDataSchema.safeParse(data)
+  if (!result.success) return null
+  const cell = result.data.rows[Number(path[1])]?.cells[Number(path[3])] as TableCell | undefined
+  return cell ? { path: [...path.slice(0, -1), cell.content ? 'content' : 'text'], cell } : null
+}
+/** Shared human/AI upgrade; cell identity, geometry and all unselected content stay owned by the table. */
+export function tableCellRichTextEdit(data: unknown, path: readonly string[], content: FlowTextContent): { path: string[]; value: TableCell } | null {
+  const field = tableCellTextField(data, path)
+  if (!field) return null
+  const { text: _text, ...cell } = field.cell
+  return { path: field.path.slice(0, -1), value: { ...cell, content: documentTextContentSchema.parse(content) } }
+}
 export function tableLayoutCellContent(data:TableData,cell:{id:string;columnId:string;text:string}):FlowTextContent {
   const body=data.rows.flatMap(row=>row.cells).find(value=>value.id===cell.id)
   if(body)return tableCellContent(body)

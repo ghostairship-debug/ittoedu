@@ -11,21 +11,13 @@ import type { ComponentImplementation } from '../../../shared/contracts/componen
 import { readHtmlClosure } from '../htmlImport/readHtmlClosure'
 import { readComponentSourceClosure } from './componentSourceClosure'
 import { prepareContentResources, prepareImageResource } from '../contentApply/resources/contentResources'
-import { assetReferencePath, projectReferencePath } from '../../../shared/composition/projectReferences'
-import { parse } from 'parse5'
-import type { DocumentRegistry } from '../../../core/documents/DocumentRegistry'
+import { assetReferencePath, cssUrlReferences, projectReferencePath } from '../../../shared/composition/projectReferences'
+import { parse, serialize, type DefaultTreeAdapterTypes } from 'parse5'
+import type { HostImageInput } from '../../../core/tools/imageResource'
+import { parseGeneratedImageReference } from '../../../shared/workbench/images'
 
 const TEXT = new Set(['.html', '.htm', '.css', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.json', '.md', '.markdown', '.txt', '.svg'])
 const SOURCE = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx'])
-
-/** Both path application and manual import capture the same already-open source Session. */
-export async function readCurrentHtmlDocumentSource(registry: Pick<DocumentRegistry, 'list' | 'get'>, filename: string): Promise<string | undefined> {
-  const key = (value: string) => process.platform === 'win32' ? value.toLowerCase() : value
-  const observed = registry.list().find(snapshot => snapshot.binding.kind === 'file' && key(snapshot.binding.path) === key(filename))
-  if (!observed) return undefined
-  const snapshot = await registry.get(observed.documentId).drain()
-  return snapshot.model.kind === 'text' ? snapshot.model.source : undefined
-}
 
 /** Browser HTML encodings are decoded at the source boundary; the original bytes remain untouched. */
 export function decodeComponentHtmlSource(bytes: Uint8Array): { text: string; notices: string[] } {
@@ -49,7 +41,7 @@ export async function readComponentProjectFileInput(input: {
   fileAccess: ToolRunGrant['fileAccess']
   /** Host capture wins over disk; sourceHtml can be a captured independent page. */
   sourceHtml?: string
-  currentHtml?(filename: string): Promise<string | undefined>
+  currentSource?(filename: string): Promise<string | undefined>
   signal?: AbortSignal
 }): Promise<ComponentProjectFileInput> {
   const { fileAccess, signal } = input
@@ -58,26 +50,27 @@ export async function readComponentProjectFileInput(input: {
   const root = await fs.realpath(fileAccess.workspaceRoot)
   const filename = await fs.realpath(path.resolve(fileAccess.workspaceRoot, input.from))
   if (fileAccess.permission !== 'full' && !isInsideRoot(root, filename)) throw new Error('内容源文件位于本任务授权工作空间外。')
-  let bytes = new Uint8Array(await fs.readFile(filename))
   const extension = path.extname(filename).toLowerCase()
   const html = extension === '.html' || extension === '.htm'
-  const currentHtml = html ? input.sourceHtml ?? await input.currentHtml?.(filename) : undefined
-  if (currentHtml !== undefined) bytes = new TextEncoder().encode(currentHtml)
-  const text = html ? currentHtml ?? decodeComponentHtmlSource(bytes).text : TEXT.has(extension) ? new TextDecoder('utf-8', { fatal: true }).decode(bytes) : undefined
+  const current = html && input.sourceHtml !== undefined ? input.sourceHtml
+    : TEXT.has(extension) ? await input.currentSource?.(filename) : undefined
+  const bytes = current === undefined ? new Uint8Array(await fs.readFile(filename)) : new TextEncoder().encode(current)
+  const text = current ?? (html ? decodeComponentHtmlSource(bytes).text : TEXT.has(extension) ? new TextDecoder('utf-8', { fatal: true }).decode(bytes) : undefined)
   if (extension === '.html' || extension === '.htm') {
-    const closure = await readHtmlClosure({ htmlPath: filename, rootDir: fileAccess.permission === 'full' ? path.parse(filename).root : root, sourceHtml: text })
+    const closure = await readHtmlClosure({ htmlPath: filename, rootDir: fileAccess.permission === 'full' ? path.parse(filename).root : root,
+      sourceHtml: text, currentSource: input.currentSource })
     signal?.throwIfAborted()
     return { filename, bytes, text, siblingFiles: closure.siblingFiles }
   }
   if (extension === '.css' || extension === '.md' || extension === '.markdown') {
     const closure = await readHtmlClosure({ htmlPath: filename, rootDir: fileAccess.permission === 'full' ? path.parse(filename).root : root,
-      sourceHtml: extension === '.css' ? `<style>${text ?? ''}</style>` : await marked.parse(text ?? '', { async: false }) })
+      sourceHtml: extension === '.css' ? `<style>${text ?? ''}</style>` : await marked.parse(text ?? '', { async: false }), currentSource: input.currentSource })
     signal?.throwIfAborted()
     return { filename, bytes, text, siblingFiles: closure.siblingFiles }
   }
   if (SOURCE.has(extension) && text !== undefined) {
     const closure = await readComponentSourceClosure({ filename,
-      rootDir: fileAccess.permission === 'full' ? path.parse(filename).root : root, bytes, text, signal })
+      rootDir: fileAccess.permission === 'full' ? path.parse(filename).root : root, bytes, text, signal, currentSource: input.currentSource })
     signal?.throwIfAborted()
     return { filename, bytes, text, sourceEntry: closure.entry, siblingFiles: closure.files }
   }
@@ -87,8 +80,55 @@ export async function readComponentProjectFileInput(input: {
 
 /** Format decoding only; geometry, resources, identities, diagnostics and writing remain with L19. */
 export async function prepareComponentProjectFileSource(input: ComponentProjectFileInput, file: ComponentProjectFile,
-  _intent: ContentApplyIntent): Promise<ContentApplySource> {
+  _intent: ContentApplyIntent, resources?: { readImage(source: string): Promise<HostImageInput | null> }): Promise<ContentApplySource> {
   const extension = path.extname(input.filename).toLowerCase()
+  const cssSource = file.binding?.kind === 'theme' && extension === '.css'
+  const resourceReference = (reference: string) => reference.startsWith('cw-result:')
+    ? decodeURIComponent(reference.slice('cw-result:'.length))
+    : parseGeneratedImageReference(reference) ? reference : null
+  if (input.text !== undefined && (['.html', '.htm'].includes(extension) || cssSource
+    || ['page', 'html', 'structure'].includes(file.kind) && ['insert', 'redo'].includes(_intent))) {
+    const document = parse(cssSource ? `<style>${input.text.replace(/<\/style/gi, '<\\/style')}</style>` : input.text), admitted = new Map<string, Promise<string>>()
+    const imageUrl = (reference: string): Promise<string> => {
+      const resource = resourceReference(reference)
+      if (resource === null) return Promise.resolve(reference)
+      let result = admitted.get(reference)
+      if (!result) {
+        result = (async () => {
+          if (!resources) throw new Error('当前源文没有授权图片资源读取能力')
+          const source = await resources.readImage(resource)
+          if (!source || !source.mimeType.startsWith('image/')) throw new Error('HTML 图片引用不属于本任务的可用图片资源')
+          return `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString('base64')}`
+        })()
+        admitted.set(reference, result)
+      }
+      return result
+    }
+    const css = async (value: string) => {
+      const references = cssUrlReferences(value)
+      let result = value
+      for (const reference of [...references].reverse()) if (resourceReference(reference.reference) !== null)
+        result = result.slice(0, reference.start) + `url("${await imageUrl(reference.reference)}")` + result.slice(reference.end)
+      return result
+    }
+    const visit = async (node: DefaultTreeAdapterTypes.Node): Promise<void> => {
+      if ('tagName' in node) {
+        if (node.tagName === 'img') for (const attr of node.attrs) if (attr.name === 'src') attr.value = await imageUrl(attr.value)
+        for (const attr of node.attrs) if (attr.name === 'style') attr.value = await css(attr.value)
+        if (node.tagName === 'style') for (const child of node.childNodes) if (child.nodeName === '#text')
+          (child as DefaultTreeAdapterTypes.TextNode).value = await css((child as DefaultTreeAdapterTypes.TextNode).value)
+      }
+      if ('childNodes' in node) for (const child of node.childNodes) await visit(child)
+    }
+    await visit(document)
+    if (admitted.size) {
+      const style = document.childNodes.find(node => 'tagName' in node)?.childNodes
+        .find(node => 'tagName' in node && node.tagName === 'head')
+      input.text = cssSource && style && 'childNodes' in style ? style.childNodes.flatMap(node => 'childNodes' in node
+        ? node.childNodes.map(child => child.nodeName === '#text' ? (child as DefaultTreeAdapterTypes.TextNode).value : '') : []).join('') : serialize(document)
+      input.bytes = new TextEncoder().encode(input.text)
+    }
+  }
   if (file.binding?.kind === 'asset' && file.mimeType?.startsWith('image/')) {
     const mediaTypes: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' }
     const image = await prepareImageResource({ bytes: input.bytes, mimeType: mediaTypes[extension] ?? file.mimeType, filename: path.basename(input.filename) }, randomUUID)
@@ -189,6 +229,14 @@ export async function prepareComponentProjectFileSource(input: ComponentProjectF
   }
   if (extension === '.css' && (file.kind === 'html' || file.kind === 'page') && file.target?.kind === 'instance') {
     return { kind: 'data', fields: [{ path: ['css'], value: input.text }] }
+  }
+  if (file.kind === 'html' || file.kind === 'page' || file.kind === 'structure' && ['insert', 'redo'].includes(_intent)) {
+    const siblings = new Map(input.siblingFiles ?? [])
+    for (const asset of Object.values(input.assetContext?.assets ?? {})) {
+      const bytes = input.assetContext?.bytes[asset.id]
+      if (bytes && !siblings.has(asset.path)) siblings.set(asset.path, bytes)
+    }
+    input.siblingFiles = siblings
   }
   const source = componentFileContentSource(file, input.text, input)
   return source.kind === 'html' ? { ...source, original: { bytes: input.bytes, filename: path.basename(input.filename),

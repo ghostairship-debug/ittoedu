@@ -1,0 +1,275 @@
+{
+  "description": "修改整课名称、背景、设计主题参数或播放与翻页笔设置。target 使用整文档句柄，settings 只更改提供的字段；背景和播放可用 null 恢复默认。人工设置与此工具使用同一语义规划和一次可撤销事务。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema1": {
+        "additionalProperties": false,
+        "properties": {
+          "fontFamily": {
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "label": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "fontFamily"
+        ],
+        "type": "object"
+      },
+      "__schema2": {
+        "pattern": "^[a-z][a-z0-9._-]*$",
+        "type": "string"
+      },
+      "__schema3": {
+        "additionalProperties": false,
+        "properties": {
+          "color": {
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "label": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "color"
+        ],
+        "type": "object"
+      },
+      "__schema4": {
+        "type": "boolean"
+      },
+      "__schema5": {
+        "enum": [
+          "scene-navigation",
+          "authored-command"
+        ],
+        "type": "string"
+      },
+      "__schema6": {
+        "items": {
+          "$ref": "#/$defs/__schema7"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "__schema7": {
+        "additionalProperties": false,
+        "properties": {
+          "altKey": {
+            "type": "boolean"
+          },
+          "command": {
+            "enum": [
+              "next",
+              "previous"
+            ],
+            "type": "string"
+          },
+          "ctrlKey": {
+            "type": "boolean"
+          },
+          "id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "metaKey": {
+            "type": "boolean"
+          },
+          "shiftKey": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "command",
+          "key",
+          "altKey",
+          "ctrlKey",
+          "shiftKey",
+          "metaKey"
+        ],
+        "type": "object"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "settings": {
+        "additionalProperties": false,
+        "properties": {
+          "background": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "assetId": {
+                    "anyOf": [
+                      {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "type": "string"
+                  },
+                  "fit": {
+                    "enum": [
+                      "cover",
+                      "contain",
+                      "fill"
+                    ],
+                    "type": "string"
+                  },
+                  "mode": {
+                    "enum": [
+                      "inherit",
+                      "own"
+                    ],
+                    "type": "string"
+                  },
+                  "source": {
+                    "$ref": "#/$defs/__schema0",
+                    "description": "来源返回的 source 或已授权图片路径；软件登记资源，不需要拼接 assetId。"
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "designTokens": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "colors": {
+                    "items": {
+                      "$ref": "#/$defs/__schema3"
+                    },
+                    "maxItems": 256,
+                    "type": "array"
+                  },
+                  "fonts": {
+                    "items": {
+                      "$ref": "#/$defs/__schema1"
+                    },
+                    "maxItems": 64,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "fonts",
+                  "colors"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "playback": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "controls": {
+                    "enum": [
+                      "canvas",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "keyboardNavigation": {
+                    "type": "boolean"
+                  },
+                  "presenter": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "additionalBindings": {
+                        "$ref": "#/$defs/__schema6"
+                      },
+                      "enabled": {
+                        "$ref": "#/$defs/__schema4"
+                      },
+                      "strategy": {
+                        "$ref": "#/$defs/__schema5"
+                      }
+                    },
+                    "required": [
+                      "enabled",
+                      "strategy",
+                      "additionalBindings"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "target": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "target",
+      "settings"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "整课设置",
+    "targetKinds": [
+      "document"
+    ]
+  },
+  "name": "course.configure",
+  "version": 1
+}

@@ -2,14 +2,21 @@ import type { ComponentRuntimeContext, ComponentInstance } from '../../shared/co
 import type { WebRuntimeData } from './moduleGraph'
 import { isMeasuredWebFragmentBox, measuredFragmentBoxStyle, measuredFragmentExtent } from './measuredFragmentBox'
 import { webResourceReferenceMarker } from './resources'
+import { DomTextOverrides, domTextOverrideRealmSource, type DomTextOverrideController } from '../../player/lightEdit/domTextOverrides'
+import type { LightEditTextOverride } from '../../shared/contracts/runtime/lightEdit'
 
 /** Serialized builtin runs in the content realm, including the author's scripts. */
 export async function mountWebContent(context: ComponentRuntimeContext<WebRuntimeData> & { builtinKey?: string; resourceCss?: string }, fragmentBox = {
   isMeasured: isMeasuredWebFragmentBox, style: measuredFragmentBoxStyle, extent: measuredFragmentExtent,
   resourceMarker: webResourceReferenceMarker,
-}, authoredDocument = false) {
+}, authoredDocument = false, textOverridesFactory: (roots: readonly Node[], rules: readonly LightEditTextOverride[]) => DomTextOverrideController =
+  (roots, rules) => new DomTextOverrides(roots, rules)) {
   const { root, scope } = context
   if (!root) throw new Error('Web 内容需要视觉内容根')
+  const textWindow = window as Window & { __cwPageTextOverrides?: DomTextOverrideController }
+  const pageText = authoredDocument && textWindow.__cwPageTextOverrides
+    ? textWindow.__cwPageTextOverrides : textOverridesFactory([root], context.instance.data.textOverrides ?? [])
+  Object.defineProperty(textWindow, '__cwPageTextOverrides', { configurable: true, value: pageText })
   const documentRoot = root === document.body
   const containerStyle = root.style.cssText
   const attributes = (element: Element) => [...element.attributes].map(({ name, value, namespaceURI }) => ({ name, value, namespaceURI }))
@@ -84,6 +91,7 @@ export async function mountWebContent(context: ComponentRuntimeContext<WebRuntim
   }
   const render = async () => {
     if (disposed || !scope.isActive()) return
+    pageText.setRules(instance.data.textOverrides ?? [])
     writeStyle()
     const nextSignature = JSON.stringify([instance.data.html, instance.data.modules, instance.data.moduleGraph])
     if (signature === nextSignature) return
@@ -195,7 +203,8 @@ export async function mountWebContent(context: ComponentRuntimeContext<WebRuntim
   }
   const dispose = () => {
     if (disposed) return
-    disposed = true; renderRevision++; releaseLayout(); releaseUrls(); clearHeadNodes(); style.remove(); root.replaceChildren()
+    disposed = true; renderRevision++; releaseLayout(); releaseUrls(); clearHeadNodes(); pageText.destroy(); style.remove(); root.replaceChildren()
+    if (textWindow.__cwPageTextOverrides === pageText) Reflect.deleteProperty(textWindow, '__cwPageTextOverrides')
     if (measuredContainer) { root.style.cssText = containerStyle; measuredContainer = false }
     for (const { element, values } of documentAttributes) replaceAttributes(element, values)
   }
@@ -230,12 +239,14 @@ export async function mountWebContent(context: ComponentRuntimeContext<WebRuntim
     void document.fonts?.ready.then(enqueue)
     reportSize()
   }
-  return { async update(next: ComponentInstance<WebRuntimeData>) { instance = next; await render() },
+  pageText.applyAll()
+  scope.cleanup(() => pageText.destroy())
+  return { async update(next: ComponentInstance<WebRuntimeData>) { instance = next; await render(); pageText.applyAll() },
     updatePlacement(frame: ComponentInstance['frame']) { instance = { ...instance, frame }; if (!authoredDocument) writeStyle() }, dispose }
 }
 
 /** A single content-realm source owner keeps imported box rules available after serialization/minification. */
 export function webContentRealmSource(): string {
-  return `const fragmentBox={isMeasured:(${isMeasuredWebFragmentBox.toString()}),style:(${measuredFragmentBoxStyle.toString()}),extent:(${measuredFragmentExtent.toString()}),resourceMarker:(${webResourceReferenceMarker.toString()})};
-const mount=(${mountWebContent.toString()});export default {mount(context){return mount(context,fragmentBox,context.authoredDocument===true)}}`
+  return `${domTextOverrideRealmSource()}const fragmentBox={isMeasured:(${isMeasuredWebFragmentBox.toString()}),style:(${measuredFragmentBoxStyle.toString()}),extent:(${measuredFragmentExtent.toString()}),resourceMarker:(${webResourceReferenceMarker.toString()})};
+const mount=(${mountWebContent.toString()});export default {mount(context){return mount(context,fragmentBox,context.authoredDocument===true,createPageTextOverrides)}}`
 }

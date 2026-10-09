@@ -1,3 +1,4 @@
+import { isNativeProjectFilename } from '../shared/nativeProjectFile'
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
 
@@ -5,7 +6,7 @@ import { promises as fs } from 'node:fs'
 export async function launchFileArguments(argv: readonly string[], cwd: string, packaged: boolean): Promise<string[]> {
   const files: string[] = []
   for (const argument of argv.slice(packaged ? 1 : 2)) {
-    if (argument.startsWith('-') || !/\.(?:h5lesson|md|markdown|txt|html?|csv|json|pdf|docx|pptx|xlsx|png|jpe?g|webp|gif)$/i.test(argument)) continue
+    if (argument.startsWith('-') || (!isNativeProjectFilename(argument) && !/\.(?:md|markdown|txt|html?|csv|json|pdf|docx|pptx|xlsx|png|jpe?g|webp|gif)$/i.test(argument))) continue
     const candidate = path.resolve(cwd, argument)
     const absolute = await fs.realpath(candidate).catch(() => candidate)
     const stat = await fs.stat(absolute).catch(() => null)

@@ -3,27 +3,15 @@ import { owningContainer } from '../../../shared/contracts/component-platform/pr
 import { propertiesEffectiveBackground } from './componentProperties'
 import { readTeacherControllerConfig } from '../../../shared/teacherControllerConfig'
 import { projectDesignTokensSchema } from '../../../shared/contracts/design-v1/schema'
-import type { ProjectPlaybackSettings } from '../../../shared/contracts/playback-v1'
 import type { PropertiesOwnerReadModel } from '../../composition/properties/PropertiesAuthoringReadModel'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { BackgroundPreviewTarget } from '../../authoring/backgroundPreview'
 import type { SlideNativePropertiesContext } from './SlideNativePropertiesPanel'
 import type { CourseGlobalPropertiesContext } from './CourseGlobalPropertiesPanel'
-import { componentParentMatrix } from '../../composition/crossSurfaceCommands'
-import { reparentFrame, IDENTITY_MATRIX } from '../../../core/components/geometry'
-import { resizeComponentSurfacesEdits } from '../../../core/drivers/courseV10Operations'
-const defaults: ProjectPlaybackSettings = { controls: 'none', keyboardNavigation: true, presenter: { enabled: false, strategy: 'scene-navigation', additionalBindings: [] } }
-/** Editing one page preserves an include list's restriction on future pages. */
-export function globalVisibilityAtSurface(current: NonNullable<import('../../../shared/contracts/component-platform/project').ComponentInstance['visibility']>, surfaceId: string, visible: boolean) {
-  const ids = new Set(current.mode === 'all' ? [] : current.surfaceIds)
-  if (current.mode === 'include') {
-    if (visible) ids.add(surfaceId); else ids.delete(surfaceId)
-    return { mode: 'include' as const, surfaceIds: [...ids] }
-  }
-  if (visible) ids.delete(surfaceId); else ids.add(surfaceId)
-  return { mode: ids.size ? 'exclude' as const : 'all' as const, surfaceIds: [...ids] }
-}
+import { courseSettingsEdits, surfaceSettingsEdits, defaultCoursePlayback as defaults } from '../../../core/course/courseSemanticEdits'
+import { courseGlobalPlacementEdits } from '../../../core/course/courseObjectEdits'
+export { globalVisibilityAtSurface } from '../../../core/course/courseSemanticEdits'
 export function buildCourseGlobalPropertiesOwner(input: {
   read: PropertiesOwnerReadModel; selectedContext: SlideNativePropertiesContext | null; assets: Record<string, AssetMeta>; key: string
   liveTarget(): CapturedCourseTarget
@@ -64,28 +52,24 @@ export function buildCourseGlobalPropertiesOwner(input: {
     runtime: native?.runtime ?? null, interaction: null,
     commands: { patch: native?.commands.patch ?? (() => {}), preview: native?.commands.preview, replaceImage: native?.commands.replaceImage ?? (() => {}),
       clearPresentationOverride: native?.commands.clearPresentationOverride ?? (() => {}), text: native?.commands.text ?? { beginEdit() {}, commitEdit() {}, cancelEdit() {}, updateDraft() {}, toggleStyle() {} },
-      updateCourseBackground: value => run(() => { const target = liveTarget(); submit([{ type: 'project.background.set', background: { ...target.project.background,
-        ...(value.backgroundColor === undefined ? {} : { color: value.backgroundColor }), ...(value.backgroundAssetId === undefined ? {} : { assetId: value.backgroundAssetId }) } }], target) }),
+      updateCourseBackground: value => run(() => { const target = liveTarget(); submit(courseSettingsEdits(target.project, { background: {
+        ...(value.backgroundColor === undefined ? {} : { color: value.backgroundColor }), ...(value.backgroundAssetId === undefined ? {} : { assetId: value.backgroundAssetId }) } }), target) }),
       previewCourseBackground: value => run(() => input.preview(value.backgroundColor == null ? null : [{ type: 'project.background.set', background: { ...project.background, color: value.backgroundColor } }], 'project')),
       resizeSlideCanvas: (designSize, options = {}) => run(() => {
         const captured = liveTarget(), target = { ...captured, activeStateId: null, editingProject: captured.project }
         if (!target.surfaceId) return
-        return submit(resizeComponentSurfacesEdits(target.project, { surfaceIds: options.surfaceIds ?? [target.surfaceId], designSize,
-          mode: options.mode ?? 'preserve', ...(options.mode === 'contain' && options.includeGlobal ? { globalReferenceSurfaceId: target.surfaceId } : {}) }), target)
+        return submit(surfaceSettingsEdits(target.project, target.surfaceId, { resize: { ...options, designSize } }), target)
       }),
-      updatePlayback: value => run(() => { const target = liveTarget(); submit([{ type: 'project.playback.set', playback: { ...defaults, ...target.project.playback, ...value } }], target) }),
-      ensureTeacherController: () => run(async () => { const target = liveTarget(); await input.ensureTeacherController(); submit([{ type: 'project.playback.set', playback: { ...defaults, ...target.project.playback, controls: 'canvas' } }], target) }),
+      updatePlayback: value => run(() => { const target = liveTarget(); submit(courseSettingsEdits(target.project, { playback: value }), target) }),
+      ensureTeacherController: () => run(async () => { const target = liveTarget(); await input.ensureTeacherController(); submit(courseSettingsEdits(target.project, { playback: { controls: 'canvas' } }), target) }),
       manageTeacherControllerComponent: (id, _operation) => run(() => submit([{ type: 'implementation.set', instanceId: id, implementation: null }])),
       editControllerSource: input.editSource,
-      updateDesignTokens: designTokens => run(() => submit([{ type: 'project.designTokens.set', designTokens }])),
+      updateDesignTokens: designTokens => run(() => { const target = liveTarget(); submit(courseSettingsEdits(target.project, { designTokens }), target) }),
       setVisibleAtLocation: (id, visible) => run(() => { const target = liveTarget(); if (!target.surfaceId) return;
-        const current = target.project.instances[id]?.visibility ?? { mode: 'all' as const, surfaceIds: [] }
-        submit([{ type: 'instance.patch', instanceId: id, patch: { visibility: globalVisibilityAtSurface(current, target.surfaceId, visible) } }], target)
+        submit(courseGlobalPlacementEdits(target.project, id, { atSurface: { surfaceId: target.surfaceId, visible } }), target)
       }),
-      setLocationVisibility: (id, value) => run(() => submit([{ type: 'instance.patch', instanceId: id, patch: { visibility: { mode: value.mode, surfaceIds: value.locationIds } } }])),
-      updateLayerSettings: (id, value) => run(() => { const target = liveTarget(), frame = target.project.instances[id]?.frame; submit([{ type: 'instance.move', instanceId: id, container: { kind: 'global', plane: value.layer },
-        index: target.project.global[value.layer].filter(value => value !== id).length,
-        ...(frame ? { frame: reparentFrame(frame, componentParentMatrix(target.project, id), IDENTITY_MATRIX) } : {}) }], target) }),
+      setLocationVisibility: (id, value) => run(() => { const target = liveTarget(); submit(courseGlobalPlacementEdits(target.project, id, { visibility: { mode: value.mode, surfaceIds: value.locationIds } }), target) }),
+      updateLayerSettings: (id, value) => run(() => { const target = liveTarget(); submit(courseGlobalPlacementEdits(target.project, id, { plane: value.layer }), target) }),
       openProfessionalAutomation: input.openAutomation,
     }, onFeedback: value => { if (value.kind === 'error') report(value.message) } }
 }

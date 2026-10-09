@@ -1240,3 +1240,34 @@ it('sets Haiku thinking tokens directly and supports disabling or default withou
   await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ temperature: 0.4 }))
   expect(api.send).not.toHaveBeenCalled()
 })
+
+
+it('sends a text-only adjustment on the existing task without capturing temporary targets, new materials or a new model route', async () => {
+  const active = conversation('a', '原任务正在执行', '改变后续要求')
+  active.runIndex.builtinRunIds.push('run')
+  const { api } = executionFixture([active])
+  vi.mocked(api.run).mockResolvedValue(run('a'))
+  api.prepareDocuments = vi.fn(async () => { throw new Error('A steering input must not prepare a new document grant') })
+  const prepareSend = vi.fn(async () => false)
+  const captureMaterials = vi.fn(async () => { throw new Error('A steering input must not capture new materials') })
+  const settingsAPI = settingsFixture(false) // The original run still owns its frozen route.
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
+    captureDocuments={vi.fn(async () => [{ documentId: 'temporary', epoch: 'temporary-epoch', revision: 1, writable: [{ kind: 'document' as const }] }])}
+    captureMaterials={captureMaterials} prepareSend={prepareSend} />)
+  const adjust = await screen.findByRole('button', { name: '调整当前任务' })
+  await waitFor(() => expect(adjust).toBeEnabled())
+  const settingsReads = vi.mocked(settingsAPI.read).mock.calls.length
+  fireEvent.click(adjust)
+  await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1))
+  expect(vi.mocked(api.send).mock.calls[0][0]).toMatchObject({ mode: 'adjust', text: '改变后续要求', documents: [], attachments: [], permission: 'workspace' })
+  expect(vi.mocked(api.send).mock.calls[0][0].disclosedSettings).toBeUndefined()
+  expect(api.stop).not.toHaveBeenCalled(); expect(api.prepareDocuments).not.toHaveBeenCalled()
+  expect(prepareSend).not.toHaveBeenCalled(); expect(captureMaterials).not.toHaveBeenCalled()
+  expect(settingsAPI.read).toHaveBeenCalledTimes(settingsReads)
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue(''))
+  fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '新授权应加入队列' } })
+  fireEvent.click(screen.getByRole('button', { name: '权限：完全访问（工作空间）' }))
+  fireEvent.click(screen.getByRole('menuitemradio', { name: /只读/ }))
+  expect(screen.getByRole('button', { name: '调整当前任务' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '加入队列' })).toBeEnabled()
+})

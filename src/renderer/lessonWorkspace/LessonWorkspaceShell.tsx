@@ -1,4 +1,5 @@
 import type { WorkspaceFilesAPI } from '../../shared/workbench/workspaceFiles'
+import type { MediaFileDraftInput } from '../../shared/workbench/mediaFiles'
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type { LessonDesktopRequest, LessonDesktopResult } from '../../shared/lessonDesktopContract'
@@ -28,11 +29,12 @@ export interface LessonWorkspaceShellProps {
   onActiveDocumentChange?(active: { kind: LessonFileTab['kind']; name: string } | null): void
   onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void
   onImportHtml?(directory: SaveDirectoryContext, sourceEntryId?: string): void
-  prepareCurrentCopy?(): Promise<boolean>
+  toolbarExtras?: ReactNode
   children: ReactNode
 }
 
 export interface LessonWorkspaceShellHandle {
+  captureMediaDrafts(source: string, kind: 'file' | 'directory'): MediaFileDraftInput[]
   flushAll(): Promise<boolean>
   saveActiveDocument(): Promise<'course' | 'document' | 'none'>
   closeAll(): Promise<boolean>
@@ -62,6 +64,7 @@ export const LessonWorkspaceShell = forwardRef<LessonWorkspaceShellHandle, Lesso
   const activeKind = activeTab?.kind, activeName = activeTab?.name
   useEffect(() => { props.onActiveDocumentChange?.(activeKind && activeName ? { kind: activeKind, name: activeName } : null) }, [activeKind, activeName, props.onActiveDocumentChange])
   useImperativeHandle(ref, () => ({
+    captureMediaDrafts: tabs.captureMediaDrafts,
     flushAll: tabs.flushAll,
     saveActiveDocument: tabs.saveActiveDocument,
     closeAll: tabs.closeAll,
@@ -75,6 +78,6 @@ export const LessonWorkspaceShell = forwardRef<LessonWorkspaceShellHandle, Lesso
     showProject: workspace.actions.showProject,
   }), [tabs, workspace.actions, workspace.state.lesson])
   return <LessonWorkspaceView state={workspace.state} actions={workspace.actions} operation={props.lessonOperation} workspaceFiles={props.workspaceFiles} documentPort={props.documentPort} tabs={tabs} projectPath={props.projectPath} onSaveDirectoryChange={props.onSaveDirectoryChange} onImportHtml={props.onImportHtml}
-    prepareCurrentCopy={async () => { if (!await tabs.drainAll()) return false; return props.prepareCurrentCopy?.() ?? true }}
+    toolbarExtras={props.toolbarExtras}
     renderAssistant={props.renderAssistant} renderMaterial={props.renderMaterial} renderMaterials={props.renderMaterials}>{props.children}</LessonWorkspaceView>
 })

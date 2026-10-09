@@ -2,200 +2,1983 @@
   "kind": "static-executable-plan-not-runtime-platform",
   "date": "2026-10-08",
   "analysis_baseline": "423a96dcceb1cdef16791ecd668e0abe391e2fb1",
-  "this_turn": "documents-only",
+  "this_turn": "ni-start-prompt-implementation-20261008",
   "solution": "../20261007-content-revision/CORE_EXPERIENCE_UNIFIED_SOLUTION.md",
   "policy": "../20261007-content-revision/CORE_EXPERIENCE_EXECUTION_PROMPT.md",
   "execution": "EXECUTION_PLAN.md",
-  "status": "planned-not-dispatched",
+  "status": "paused-preserved-candidates",
+  "active_execution_scope": "Product dispatch paused; report_integration_20261008 NI01-NI08 and methodology goals retained; current blockers and evidence in CURRENT_STATUS.md",
+  "prior_wave_note": "U00-U22及原writers保留首轮范围/责任映射；已有效闭合子项不重开。当前待派发差额和唯一共享writer按followup读取，两个写域表不同时派发。",
   "roles": {
-    "Root": "当前主会话设置；协调/集成/交付，不代写Luna作品",
-    "I/A": "gpt-6-astra/xhigh；公共语义/结构和高难实现",
-    "G": "gpt-6.1-sol/xhigh；Agent内容请求/上下文/结果接线",
-    "implementation/exploration/T": "gpt-6.1-sol/high；T独立先审题，不参与对应实现",
-    "E": "gpt-6-luna/max；只机械执行，不设计或改断言",
-    "review-structural": "另一位gpt-6-astra/xhigh，未参与该候选实现",
-    "review-leaf": "另一位gpt-6.1-sol/high，未参与该候选实现",
+    "Root": "当前主会话设置；直接实施/自检/集成/交付，不代写Luna验收作品",
+    "I/A": "仅必要并行或独立调查时参考既有 gpt-6-astra/xhigh；领域职责槽不要求固定角色",
+    "G": "仅必要并行时参考既有 gpt-6.1-sol/xhigh；领域职责槽不要求固定角色",
+    "implementation/exploration/T": "主执行者实现和自检；必要独立调查沿既有 gpt-6.1-sol/high，不固定T或逐叶审题",
+    "E": "仅有信息增益的机械工作可用 gpt-6-luna/max；不固定单独E角色，不设计或改断言",
+    "review-structural": "命中WORKING_PROTOCOL §3.1且无有效评审可复用时，一位未参与实施的gpt-6-astra/xhigh集中独审",
+    "review-leaf": "普通任务由实施者自检和受影响测试收口，无默认独审",
     "authors": "三路各自gpt-6-luna/medium；实际正常入口与同任务真实生图"
   },
   "writers": {
-    "I-core": { "role": "I/A", "files": ["src/shared/contracts/component-platform/runtime.ts", "src/shared/contracts/component-platform/schema.ts", "src/components/web/data.ts", "src/core/tools/ToolTargets.ts", "src/core/tools/DocumentToolGateway.ts", "src/core/drivers/courseV10Operations.ts", "src/core/documents/DocumentSession.ts", "src/renderer/composition/crossSurfaceCommands.ts", "src/renderer/ui/properties/componentDefinitionPresentation.ts"] },
-    "U-lifecycle": { "role": "implementation/exploration/T", "files": ["src/renderer/App.tsx", "src/renderer/store/editorStore.ts", "src/renderer/documents/DocumentProjection.ts", "src/renderer/documents/CourseV10DocumentBridge.ts", "src/renderer/authoring/courseDraftLifecycle.ts", "src/renderer/documentFiles/documentFileSession.ts", "src/main/workbench/DocumentHostService.ts", "src/main/workbench/documentJournal.ts", "src/main/workbench/documentCloseCoordinator.ts"] },
-    "G-agent": { "role": "G", "files": ["src/renderer/workbench/ExecutionAssistant.tsx", "src/main/workbench/execution/ExecutionEngine.ts", "src/main/workbench/execution/ExecutionDesktopService.ts", "src/main/workbench/execution/ExecutionContextProjection.ts"] },
-    "A-realm": { "role": "I/A", "files": ["src/renderer/components/SandboxComponentImplementation.ts", "src/components/web/contentRealmImplementation.ts", "src/player/htmlPreview/htmlPreviewAgent.ts"] },
-    "H-html": { "role": "implementation/exploration/T", "files": ["src/main/workbench/htmlPreview/HtmlSourceEditService.ts", "src/main/workbench/htmlPreview/htmlSourceEdits.ts", "src/main/workbench/htmlPreview/htmlSourceLocator.ts", "src/main/workbench/htmlPreview/htmlImagePreparation.ts", "src/core/drivers/TextDriver.ts", "src/renderer/documentFiles/html/HtmlLightEditOverlay.tsx", "src/renderer/documentFiles/html/htmlPreviewController.ts"] },
-    "V-geometry": { "role": "implementation/exploration/T", "files": ["src/shared/stageViewport.ts", "src/shared/flowViewportGeometry.ts", "src/shared/teacherControllerViewportGeometry.ts", "src/renderer/authoring/stageViewportTransform.ts", "src/renderer/authoring/controllerDisplayBounds.ts", "src/renderer/componentPlatform/surfaces/slide/freeTransformGesture.ts", "src/renderer/ui/TeacherControllerAuthoringChrome.tsx"] },
-    "F-flow": { "role": "implementation/exploration/T", "files": ["src/renderer/ui/FlowWorkspace.tsx", "src/renderer/ui/workspaces/FlowLocationWorkspace.tsx", "src/renderer/ui/flow/flowInsertCommands.ts", "src/renderer/ui/flow/flowMenuPaperPlacement.ts", "src/renderer/ui/flow/flowParagraphLayout.ts"] },
-    "D-document": { "role": "implementation/exploration/T", "files": ["src/renderer/document/documentBlockCommands.ts", "src/renderer/document/SharedDocumentEditor.tsx", "src/renderer/document/editorSession.ts", "src/renderer/documentFiles/LessonDocumentEditor.tsx"] },
-    "P-presentation": { "role": "I/A", "files": ["src/components/web/measuredFragmentBox.ts", "src/shared/flowBodyPresentation.ts", "src/shared/flowMediaLayout.ts", "src/shared/flowRuntimePaperLayout.ts", "src/renderer/documents/CourseV10DocumentView.tsx", "src/player/componentPlatform/modelProjection.ts"] },
-    "R-host": { "role": "I/A", "files": ["src/player/componentPlatform/ModelPlayer.ts", "src/renderer/components/CourseV10RuntimeView.tsx", "src/renderer/components/ComponentNavigationOwner.ts", "src/player/componentPlatform/publishedPlayer.ts", "src/player/components/ComponentPlatformRuntime.ts"] },
-    "R-interactions": { "role": "implementation/exploration/T", "files": ["src/player/components/runtime/ComponentWorldInteractions.ts", "src/renderer/interactions/componentInteractionAuthoring.ts", "src/renderer/ui/AutomationTab.tsx", "src/components/teacher-controller/defaultController.ts"] },
-    "C-import": { "role": "implementation/exploration/T", "files": ["src/main/workbench/htmlImport/CreateCourseFromHtml.ts", "src/main/workbench/htmlImport/readHtmlClosure.ts", "src/main/workbench/componentCompilerRuntime.ts"] },
-    "X-delivery": { "role": "implementation/exploration/T", "files": ["src/renderer/export/componentPlatform/delivery.ts", "src/main/workbench/delivery/componentProjectDelivery.ts", "src/main/workbench/delivery/DocumentDeliveryService.ts", "src/main/workbench/delivery/HeadlessDocumentExportWorker.ts", "src/renderer/export/bundledFontEmbedding.ts", "src/renderer/export/course/buildCoursePptx.ts"] },
-    "E-maintenance": { "role": "implementation/exploration/T", "files": ["scripts/prepare-source-launch.mjs", "scripts/verify-component-catalog.ts", "src/core/tools/OfficeContentTools.ts", "src/core/tools/ToolCatalog.ts"] },
-    "Root-config": { "role": "Root", "files": ["package.json", "package-lock.json", "vitest.config.ts", "playwright.config.ts"] }
+    "I-core": {
+      "role": "I/A",
+      "files": [
+        "src/shared/contracts/component-platform/runtime.ts",
+        "src/shared/contracts/component-platform/schema.ts",
+        "src/components/web/data.ts",
+        "src/core/tools/ToolTargets.ts",
+        "src/core/tools/DocumentToolGateway.ts",
+        "src/core/drivers/courseV10Operations.ts",
+        "src/core/documents/DocumentSession.ts",
+        "src/renderer/composition/crossSurfaceCommands.ts",
+        "src/renderer/ui/properties/componentDefinitionPresentation.ts"
+      ]
+    },
+    "U-lifecycle": {
+      "role": "implementation/exploration/T",
+      "files": [
+        "src/renderer/App.tsx",
+        "src/renderer/store/editorStore.ts",
+        "src/renderer/documents/DocumentProjection.ts",
+        "src/renderer/documents/CourseV10DocumentBridge.ts",
+        "src/renderer/authoring/courseDraftLifecycle.ts",
+        "src/renderer/documentFiles/documentFileSession.ts",
+        "src/main/workbench/DocumentHostService.ts",
+        "src/main/workbench/documentJournal.ts",
+        "src/main/workbench/documentCloseCoordinator.ts"
+      ]
+    },
+    "G-agent": {
+      "role": "G",
+      "files": [
+        "src/renderer/workbench/ExecutionAssistant.tsx",
+        "src/main/workbench/execution/ExecutionEngine.ts",
+        "src/main/workbench/execution/ExecutionDesktopService.ts",
+        "src/main/workbench/execution/ExecutionContextProjection.ts"
+      ]
+    },
+    "A-realm": {
+      "role": "I/A",
+      "files": [
+        "src/renderer/components/SandboxComponentImplementation.ts",
+        "src/components/web/contentRealmImplementation.ts",
+        "src/player/htmlPreview/htmlPreviewAgent.ts"
+      ]
+    },
+    "H-html": {
+      "role": "implementation/exploration/T",
+      "files": [
+        "src/main/workbench/htmlPreview/HtmlSourceEditService.ts",
+        "src/main/workbench/htmlPreview/htmlSourceEdits.ts",
+        "src/main/workbench/htmlPreview/htmlSourceLocator.ts",
+        "src/main/workbench/htmlPreview/htmlImagePreparation.ts",
+        "src/core/drivers/TextDriver.ts",
+        "src/renderer/documentFiles/html/HtmlLightEditOverlay.tsx",
+        "src/renderer/documentFiles/html/htmlPreviewController.ts"
+      ]
+    },
+    "V-geometry": {
+      "role": "implementation/exploration/T",
+      "files": [
+        "src/shared/stageViewport.ts",
+        "src/shared/flowViewportGeometry.ts",
+        "src/shared/teacherControllerViewportGeometry.ts",
+        "src/renderer/authoring/stageViewportTransform.ts",
+        "src/renderer/authoring/controllerDisplayBounds.ts",
+        "src/renderer/componentPlatform/surfaces/slide/freeTransformGesture.ts",
+        "src/renderer/ui/TeacherControllerAuthoringChrome.tsx"
+      ]
+    },
+    "F-flow": {
+      "role": "implementation/exploration/T",
+      "files": [
+        "src/renderer/ui/FlowWorkspace.tsx",
+        "src/renderer/ui/workspaces/FlowLocationWorkspace.tsx",
+        "src/renderer/ui/flow/flowInsertCommands.ts",
+        "src/renderer/ui/flow/flowMenuPaperPlacement.ts",
+        "src/renderer/ui/flow/flowParagraphLayout.ts"
+      ]
+    },
+    "D-document": {
+      "role": "implementation/exploration/T",
+      "files": [
+        "src/renderer/document/documentBlockCommands.ts",
+        "src/renderer/document/SharedDocumentEditor.tsx",
+        "src/renderer/document/editorSession.ts",
+        "src/renderer/documentFiles/LessonDocumentEditor.tsx"
+      ]
+    },
+    "P-presentation": {
+      "role": "I/A",
+      "files": [
+        "src/components/web/measuredFragmentBox.ts",
+        "src/shared/flowBodyPresentation.ts",
+        "src/shared/flowMediaLayout.ts",
+        "src/shared/flowRuntimePaperLayout.ts",
+        "src/renderer/documents/CourseV10DocumentView.tsx",
+        "src/player/componentPlatform/modelProjection.ts"
+      ]
+    },
+    "R-host": {
+      "role": "I/A",
+      "files": [
+        "src/player/componentPlatform/ModelPlayer.ts",
+        "src/renderer/components/CourseV10RuntimeView.tsx",
+        "src/renderer/components/ComponentNavigationOwner.ts",
+        "src/player/componentPlatform/publishedPlayer.ts",
+        "src/player/components/ComponentPlatformRuntime.ts"
+      ]
+    },
+    "R-interactions": {
+      "role": "implementation/exploration/T",
+      "files": [
+        "src/player/components/runtime/ComponentWorldInteractions.ts",
+        "src/renderer/interactions/componentInteractionAuthoring.ts",
+        "src/renderer/ui/AutomationTab.tsx",
+        "src/components/teacher-controller/defaultController.ts"
+      ]
+    },
+    "C-import": {
+      "role": "implementation/exploration/T",
+      "files": [
+        "src/main/workbench/htmlImport/CreateCourseFromHtml.ts",
+        "src/main/workbench/htmlImport/readHtmlClosure.ts",
+        "src/main/workbench/componentCompilerRuntime.ts"
+      ]
+    },
+    "X-delivery": {
+      "role": "implementation/exploration/T",
+      "files": [
+        "src/renderer/export/componentPlatform/delivery.ts",
+        "src/main/workbench/delivery/componentProjectDelivery.ts",
+        "src/main/workbench/delivery/DocumentDeliveryService.ts",
+        "src/main/workbench/delivery/HeadlessDocumentExportWorker.ts",
+        "src/renderer/export/bundledFontEmbedding.ts",
+        "src/renderer/export/course/buildCoursePptx.ts"
+      ]
+    },
+    "E-maintenance": {
+      "role": "implementation/exploration/T",
+      "files": [
+        "scripts/prepare-source-launch.mjs",
+        "scripts/verify-component-catalog.ts",
+        "src/core/tools/OfficeContentTools.ts",
+        "src/core/tools/ToolCatalog.ts"
+      ]
+    },
+    "Root-config": {
+      "role": "Root",
+      "files": [
+        "package.json",
+        "package-lock.json",
+        "vitest.config.ts",
+        "playwright.config.ts"
+      ]
+    }
   },
-  "coverage_expected": { "R": 48, "N": ["N01", "N02", "N03", "N04"], "M": ["M01", "M02", "M03"], "original": ["F01", "F02", "F03", "F04", "F05", "F06", "F07", "F08", "F09"] },
+  "coverage_expected": {
+    "R": 48,
+    "N": [
+      "N01",
+      "N02",
+      "N03",
+      "N04"
+    ],
+    "M": [
+      "M01",
+      "M02",
+      "M03"
+    ],
+    "original": [
+      "F01",
+      "F02",
+      "F03",
+      "F04",
+      "F05",
+      "F06",
+      "F07",
+      "F08",
+      "F09"
+    ]
+  },
   "packages": [
     {
-      "id": "U00", "batch": "coordination", "title": "保全与必要小合同", "scope": [], "start_after": [], "complete_with": [], "writers": ["I-core", "A-realm", "V-geometry", "R-host"], "review": "structural",
+      "id": "U00",
+      "batch": "coordination",
+      "title": "保全与必要小合同",
+      "scope": [],
+      "start_after": [],
+      "complete_with": [],
+      "writers": [
+        "I-core",
+        "A-realm",
+        "V-geometry",
+        "R-host"
+      ],
+      "review": "structural",
       "outcome": "以当前直接链和已定方案确定capture/scope/ACK、持久地址/绑定/有效作者owner、两保存adapter及实际commit端口；现有可用接口先释放，不造总planner。",
-      "read_first": ["src/shared/contracts/component-platform/runtime.ts", "src/core/tools/ToolTargets.ts", "src/components/web/data.ts"],
+      "read_first": [
+        "src/shared/contracts/component-platform/runtime.ts",
+        "src/core/tools/ToolTargets.ts",
+        "src/components/web/data.ts"
+      ],
       "preserve_exit": "保全HEAD/用户修改/隔离样本；一DocumentSession/History；API5既有身份授权边界。无必要变更则引用既有端口，不创建接口门。",
       "minimum_evidence": "相关schema/目标解析的最便宜检查与一条直接consumer可消费证据；本轮计划不执行。"
     },
     {
-      "id": "U01", "batch": "B1", "title": "输入ACK与文档视图生命周期", "scope": ["R02", "R09", "R35", "F01", "F07", "F09"], "start_after": [], "complete_with": ["U00", "U13", "U15"], "writers": ["U-lifecycle", "I-core", "D-document", "F-flow", "R-host"], "review": "structural",
+      "id": "U01",
+      "batch": "B1",
+      "title": "输入ACK与文档视图生命周期",
+      "scope": [
+        "R02",
+        "R09",
+        "R35",
+        "F01",
+        "F07",
+        "F09"
+      ],
+      "start_after": [],
+      "complete_with": [
+        "U00",
+        "U13",
+        "U15"
+      ],
+      "writers": [
+        "U-lifecycle",
+        "I-core",
+        "D-document",
+        "F-flow",
+        "R-host"
+      ],
+      "review": "structural",
       "outcome": "drain失败不继续History/关闭，ACK前不清洁；保存捕获revision且新输入仍dirty。文档级准备、Main关闭决策，切标签不泄浮层，释放投影前按docId/epoch保全输入。",
-      "read_first": ["src/renderer/documents/CourseV10DocumentBridge.ts", "src/renderer/document/SharedDocumentEditor.tsx", "src/main/workbench/documentCloseCoordinator.ts", "tests/unit/f0DocumentDraftAck.test.tsx", "tests/unit/windowCloseV10.test.ts"],
+      "read_first": [
+        "src/renderer/documents/CourseV10DocumentBridge.ts",
+        "src/renderer/document/SharedDocumentEditor.tsx",
+        "src/main/workbench/documentCloseCoordinator.ts",
+        "tests/unit/f0DocumentDraftAck.test.tsx",
+        "tests/unit/windowCloseV10.test.ts"
+      ],
       "preserve_exit": "默认autoSave:false及现行恢复诊断/四种关闭结果保留；取消回同输入owner；App按格式猜提交/关闭业务退出，正式close/deactivate/release不混同。复用计算/图像原证据，补既有Windows工作区GUI续接与退出的实际缺口。",
       "minimum_evidence": "一次拒绝提交仍保稿且History未动、一次保存后新输入仍dirty、真实保存后标签/整窗关闭重开与隐藏浮层；按变更选最少代表操作。"
     },
     {
-      "id": "U02", "batch": "B1", "title": "完整复制、锁与状态语义", "scope": ["R03", "R04", "R05", "R06", "R30", "R39", "R44", "R45"], "start_after": ["U00"], "complete_with": ["U04", "U13", "U20"], "writers": ["I-core", "F-flow"], "review": "structural",
+      "id": "U02",
+      "batch": "B1",
+      "title": "完整复制、锁与状态语义",
+      "scope": [
+        "R03",
+        "R04",
+        "R05",
+        "R06",
+        "R30",
+        "R39",
+        "R44",
+        "R45"
+      ],
+      "start_after": [
+        "U00"
+      ],
+      "complete_with": [
+        "U04",
+        "U13",
+        "U20"
+      ],
+      "writers": [
+        "I-core",
+        "F-flow"
+      ],
+      "review": "structural",
       "outcome": "同一语义owner复制base/命名状态/层序/规则及所属反馈依赖，新ID后重映射；B2内部作者记录进入完整复制/复用，authorKey按实际局部namespace处理，副本归属/引用正确且不写原件；作者锁覆盖canvas/properties/AI，状态显隐/删除引用/隐藏找回作用域一致。",
-      "read_first": ["src/renderer/composition/crossSurfaceCommands.ts", "src/core/drivers/courseV10Operations.ts", "src/core/tools/ToolTargets.ts", "tests/unit/timedR1CopyReferences.test.ts"],
+      "read_first": [
+        "src/renderer/composition/crossSurfaceCommands.ts",
+        "src/core/drivers/courseV10Operations.ts",
+        "src/core/tools/ToolTargets.ts",
+        "tests/unit/timedR1CopyReferences.test.ts"
+      ],
       "preserve_exit": "声明外部引用不误复制；模型局部grant不扩任意兄弟写；运行互动不受作者锁；Flow块副本不保留原身份，不另建图谱。",
       "minimum_evidence": "一个含命名状态/互动/所属反馈的副本独立运行与撤销；内部替图+移动→复制或复用→改副本→保存重开证原件不变/引用图片保全，共用U20样本；锁/状态最近层合并检查。"
     },
     {
-      "id": "U03", "batch": "B1", "title": "AI目标续接与软件机械应用", "scope": ["R01", "R32", "creation-follow-up"], "start_after": ["U00"], "complete_with": ["U04", "U05"], "writers": ["G-agent", "I-core", "U-lifecycle"], "review": "structural",
+      "id": "U03",
+      "batch": "B1",
+      "title": "AI目标续接与软件机械应用",
+      "scope": [
+        "R01",
+        "R32",
+        "creation-follow-up"
+      ],
+      "start_after": [
+        "U00"
+      ],
+      "complete_with": [
+        "U04",
+        "U05"
+      ],
+      "writers": [
+        "G-agent",
+        "I-core",
+        "U-lifecycle"
+      ],
+      "review": "structural",
       "outcome": "恢复/继续保留V10冻结对象与grant；局部答案更新由托管语义owner同步实际判题。受控延迟回包时按实际字段基线保人工新几何和非目标新内容，同正文冲突明确保稿/诊断，准备后最终CAS不取消。修当前首次partial相关空页content装配/ready图片公开消费软件断点，模型只负责内容。",
-      "read_first": ["src/renderer/workbench/ExecutionAssistant.tsx", "src/main/workbench/execution/ExecutionDesktopService.ts", "src/core/tools/DocumentToolGateway.ts"],
+      "read_first": [
+        "src/renderer/workbench/ExecutionAssistant.tsx",
+        "src/main/workbench/execution/ExecutionDesktopService.ts",
+        "src/core/tools/DocumentToolGateway.ts"
+      ],
       "preserve_exit": "过滤后空范围不补整文档写权；无关revision不全量拒绝、同正文不静默覆盖，不新协作平台/全局锁；正确目录拒绝保留；成功图片作业不重生；不把作者没完成都归于软件、不由Root代写。",
       "minimum_evidence": "局部任务恢复同范围/答案真实判题；受控AI改A正文期间人移动A/改B后回包保人工结果，同正文冲突不覆盖；公开ready图/空页软件断点直接证，不新增付费矩阵。"
     },
     {
-      "id": "U04", "batch": "B2", "title": "React内部作者内容与常态应用", "scope": ["React-P0", "internal-object-core"], "start_after": ["U00"], "complete_with": ["U02", "U03", "U05", "U06", "U20"], "writers": ["I-core", "A-realm", "R-host"], "review": "structural",
+      "id": "U04",
+      "batch": "B2",
+      "title": "React内部作者内容与常态应用",
+      "scope": [
+        "React-P0",
+        "internal-object-core"
+      ],
+      "start_after": [
+        "U00"
+      ],
+      "complete_with": [
+        "U02",
+        "U03",
+        "U05",
+        "U06",
+        "U20"
+      ],
+      "writers": [
+        "I-core",
+        "A-realm",
+        "R-host"
+      ],
+      "review": "structural",
       "outcome": "恢复动态React普通图文发现和局部内容编辑，持久authorKey+scope+可重挂载记录；真实源/数据或局部覆盖唯一有效owner，人工覆盖后AI续改不被旧值遮住。",
-      "read_first": ["src/renderer/components/SandboxComponentImplementation.ts", "src/components/web/contentRealmImplementation.ts", "src/components/web/data.ts", "src/shared/contracts/component-platform/runtime.ts"],
+      "read_first": [
+        "src/renderer/components/SandboxComponentImplementation.ts",
+        "src/components/web/contentRealmImplementation.ts",
+        "src/components/web/data.ts",
+        "src/shared/contracts/component-platform/runtime.ts"
+      ],
       "preserve_exit": "运行应用独立编辑扫描，覆盖变化不被signature/early return吞；重绘幂等重绑定、不整段重执行/innerHTML重建；当前未挂载不等删除，重复图文不按值批改。无sourceRegion不得排除V9已有普通图文。记录类型小闭环即接U02复制及U05/U20保存资源consumer，覆盖图片不遗漏，不等整批尾大合并。",
       "minimum_evidence": "真实课例两同类对象仅改所选，Conversation切回/相关重绘与撤销保持；H5保存重开、非编辑Player消费由U22纵向证据完成，静态扫描不算。"
     },
     {
-      "id": "U05", "batch": "B2", "title": "原HTML同核心保存adapter", "scope": ["original-html-parity", "F05"], "start_after": ["U00"], "complete_with": ["U04", "U18", "U20"], "writers": ["H-html", "U-lifecycle", "A-realm", "I-core"], "review": "structural",
+      "id": "U05",
+      "batch": "B2",
+      "title": "原HTML同核心保存adapter",
+      "scope": [
+        "original-html-parity",
+        "F05"
+      ],
+      "start_after": [
+        "U00"
+      ],
+      "complete_with": [
+        "U04",
+        "U18",
+        "U20"
+      ],
+      "writers": [
+        "H-html",
+        "U-lifecycle",
+        "A-realm",
+        "I-core"
+      ],
+      "review": "structural",
       "outcome": "静态精确局部源patch，动态作者记录随原HTML Session与正常文件保存；共享内部地址/应用器，不转隐藏H5。软件维护自携数据区/局部consumer与实际资源SaveAs闭包。",
-      "read_first": ["src/main/workbench/htmlPreview/HtmlSourceEditService.ts", "src/core/drivers/TextDriver.ts", "src/renderer/documentFiles/documentFileSession.ts", "src/main/workbench/documentJournal.ts"],
+      "read_first": [
+        "src/main/workbench/htmlPreview/HtmlSourceEditService.ts",
+        "src/core/drivers/TextDriver.ts",
+        "src/renderer/documentFiles/documentFileSession.ts",
+        "src/main/workbench/documentJournal.ts"
+      ],
       "preserve_exit": "显式保存、原件/未改内容保全；导入包装HTML迁到H5只有一个active consumer；不新增文件/登录权限。强制旁文件/单文件便携性或格式变化先披露Owner，不阻塞无关叶。",
       "minimum_evidence": "原HTML真实图文修改undo/redo、保存/另存冷重开并在普通浏览器运行；同样本原HTML作者修改保存→H5导入→普通HTML导出→重开，绑定/资源/几何保留且只应用一次，共用U18/U20证据。"
     },
     {
-      "id": "U06", "batch": "B2", "title": "内部自由手势与同目标AI", "scope": ["runtime-free-edit", "human-ai-parity"], "start_after": ["U04", "U10"], "complete_with": ["U03", "U05"], "writers": ["V-geometry", "I-core", "A-realm", "H-html", "G-agent"], "review": "structural",
+      "id": "U06",
+      "batch": "B2",
+      "title": "内部自由手势与同目标AI",
+      "scope": [
+        "runtime-free-edit",
+        "human-ai-parity"
+      ],
+      "start_after": [
+        "U04",
+        "U10"
+      ],
+      "complete_with": [
+        "U03",
+        "U05"
+      ],
+      "writers": [
+        "V-geometry",
+        "I-core",
+        "A-realm",
+        "H-html",
+        "G-agent"
+      ],
+      "review": "structural",
       "outcome": "FreeTransformGesture复用冻结/父矩阵/吸附，内部对象提交其真实作者位置；默认自由移动，文字box resize与整体scale区分，AI用同目标和应用器。",
-      "read_first": ["src/renderer/componentPlatform/surfaces/slide/freeTransformGesture.ts", "src/renderer/authoring/stageViewportTransform.ts", "src/shared/contracts/component-platform/runtime.ts"],
+      "read_first": [
+        "src/renderer/componentPlatform/surfaces/slide/freeTransformGesture.ts",
+        "src/renderer/authoring/stageViewportTransform.ts",
+        "src/shared/contracts/component-platform/runtime.ts"
+      ],
       "preserve_exit": "一手势一History；运行变换与作者增量组合；局部自由容器在原父一次测量再装配、不边拆边测、不冻结整页/默认重排；保留邻项和人工几何。",
       "minimum_evidence": "真实React文字改宽换行、图片正确缩放、拖动邻项不重排；同对象人工覆盖→AI内容续改→冷重开，两adapter纵向收口。"
     },
     {
-      "id": "U07", "batch": "B2", "title": "轻界面复用成熟编辑能力", "scope": ["R07", "R46", "R47", "F03", "F04", "html-click-follow-up", "spatial-properties-follow-up"], "start_after": ["U00"], "complete_with": ["U04", "U05", "U11", "U13"], "writers": ["U-lifecycle", "H-html", "D-document", "F-flow"], "review": "leaf",
+      "id": "U07",
+      "batch": "B2",
+      "title": "轻界面复用成熟编辑能力",
+      "scope": [
+        "R07",
+        "R46",
+        "R47",
+        "F03",
+        "F04",
+        "html-click-follow-up",
+        "spatial-properties-follow-up"
+      ],
+      "start_after": [
+        "U00"
+      ],
+      "complete_with": [
+        "U04",
+        "U05",
+        "U11",
+        "U13"
+      ],
+      "writers": [
+        "U-lifecycle",
+        "H-html",
+        "D-document",
+        "F-flow"
+      ],
+      "review": "leaf",
       "outcome": "light/deep/原HTML同能力工具与可按需展开属性；行距同字段，文字点击光标/IME/确认退出、Escape、公式模板及状态/镜头入口复用成熟UI。",
-      "read_first": ["src/renderer/documentFiles/html/HtmlLightEditOverlay.tsx", "src/renderer/documentFiles/LessonDocumentEditor.tsx", "src/renderer/document/SharedDocumentEditor.tsx"],
+      "read_first": [
+        "src/renderer/documentFiles/html/HtmlLightEditOverlay.tsx",
+        "src/renderer/documentFiles/LessonDocumentEditor.tsx",
+        "src/renderer/document/SharedDocumentEditor.tsx"
+      ],
       "preserve_exit": "不强迫deep才编辑；页面编辑反馈不吞普通单击/退出后互动；属性只绑定当前文档/所选对象，公式用现有LaTeX不新AST。原已证操作不重新开缺陷。",
       "minimum_evidence": "从轻快捷栏实际改同专业行距/属性，中文中段输入与确认/取消；公式或状态入口仅对当前变更补一项，不全控件矩阵。"
     },
     {
-      "id": "U08", "batch": "B2", "title": "专业图表富表格与非DOM适配", "scope": ["R40", "R42", "N01", "N02"], "start_after": ["U00"], "complete_with": ["U04", "U07", "U13"], "writers": ["I-core", "A-realm", "F-flow", "D-document"], "review": "structural",
+      "id": "U08",
+      "batch": "B2",
+      "title": "专业图表富表格与非DOM适配",
+      "scope": [
+        "R40",
+        "R42",
+        "N01",
+        "N02"
+      ],
+      "start_after": [
+        "U00"
+      ],
+      "complete_with": [
+        "U04",
+        "U07",
+        "U13"
+      ],
+      "writers": [
+        "I-core",
+        "A-realm",
+        "F-flow",
+        "D-document"
+      ],
+      "review": "structural",
       "outcome": "按专业key/data/edit contract识别兼容源码定制，保留属性/导出与图表/预置组件画面文字直编辑；富单元格复用cell-content与rich editor；一个非DOM样例注册真实对象。",
-      "read_first": ["src/renderer/ui/properties/componentProperties.ts", "src/renderer/ui/properties/componentDefinitionPresentation.ts", "src/shared/contracts/component-platform/runtime.ts", "tests/unit/k0ProfessionalIdentity.test.ts", "tests/unit/componentPlatformRichTableDocx.test.ts"],
+      "read_first": [
+        "src/renderer/ui/properties/componentProperties.ts",
+        "src/renderer/ui/properties/componentDefinitionPresentation.ts",
+        "src/shared/contracts/component-platform/runtime.ts",
+        "tests/unit/k0ProfessionalIdentity.test.ts",
+        "tests/unit/componentPlatformRichTableDocx.test.ts"
+      ],
       "preserve_exit": "非仅implementation.kind；任意破坏合同源码只局部诊断，不保证旧专业面板适用；不以cell-text降级rich marks、不自动反解Canvas。",
       "minimum_evidence": "兼容源码定制专业面板仍改真实数据并真实输出；一富单元格编辑保marks；一非DOM注册对象修改持久消费。"
     },
     {
-      "id": "U09", "batch": "B2", "title": "普通HTML的GrapesJS局部投影", "scope": ["grapesjs-route"], "start_after": ["U00"], "complete_with": ["U05", "U06"], "writers": ["H-html", "I-core", "Root-config"], "review": "structural",
+      "id": "U09",
+      "batch": "B2",
+      "title": "普通HTML的GrapesJS局部投影",
+      "scope": [
+        "grapesjs-route"
+      ],
+      "start_after": [
+        "U00"
+      ],
+      "complete_with": [
+        "U05",
+        "U06"
+      ],
+      "writers": [
+        "H-html",
+        "I-core",
+        "Root-config"
+      ],
+      "review": "structural",
       "outcome": "在产品正式普通HTML入口实施GJS内部结构移动与样式编辑，接共同目标/局部语义应用和ACK重投影；add/remove按真实关系与手势识别move，不机械新增/删除；区分用户命令与ACK/AI回显、undo/redo、运行重绑定来源，不把库接入当React深编辑完成。",
-      "read_first": ["src/renderer/documentFiles/html/HtmlLightEditOverlay.tsx", "src/main/workbench/htmlPreview/HtmlSourceEditService.ts", "package.json"],
+      "read_first": [
+        "src/renderer/documentFiles/html/HtmlLightEditOverlay.tsx",
+        "src/main/workbench/htmlPreview/HtmlSourceEditService.ts",
+        "package.json"
+      ],
       "preserve_exit": "关闭GJS独立storage/autosave/正式Undo，不用project JSON或整页getHtml覆盖作者真相；一手势一正式History，非用户回显/重绑定只投影不重提交，无事件循环，复用既有操作/版本机制。Moveable可选薄输入，不另做选型比较门。拟取消/替换/延后路线须交Owner。",
       "minimum_evidence": "正式HTML入口一个结构移动/样式修改实际内部操作→共同事务→undo/redo→save/reopen，move不误删/换身份，ACK/AI回显/undo/重绑定不产生第二事务或循环；不以初始化/隔离原型或React切片替代。"
     },
     {
-      "id": "U10", "batch": "B3", "title": "共同几何与独立HUD控制台", "scope": ["F08", "viewport-hud-follow-up", "controller-gesture-follow-up"], "start_after": [], "complete_with": ["U12", "U15", "U17"], "writers": ["V-geometry", "P-presentation", "F-flow", "U-lifecycle", "R-host"], "review": "structural",
+      "id": "U10",
+      "batch": "B3",
+      "title": "共同几何与独立HUD控制台",
+      "scope": [
+        "F08",
+        "viewport-hud-follow-up",
+        "controller-gesture-follow-up"
+      ],
+      "start_after": [],
+      "complete_with": [
+        "U12",
+        "U15",
+        "U17"
+      ],
+      "writers": [
+        "V-geometry",
+        "P-presentation",
+        "F-flow",
+        "U-lifecycle",
+        "R-host"
+      ],
+      "review": "structural",
       "outcome": "同作品所有入口同设计空间和统一geometry输出，实际host rect可不同；HUD不依赖内容fit/scroll/camera，一套绘制/hit/clip/clamp/手柄逆矩阵。三表面默认收起、快捷栏收展，Flow同手柄调尺寸。",
-      "read_first": ["src/shared/stageViewport.ts", "src/shared/teacherControllerViewportGeometry.ts", "src/shared/flowViewportGeometry.ts", "src/renderer/ui/TeacherControllerAuthoringChrome.tsx"],
+      "read_first": [
+        "src/shared/stageViewport.ts",
+        "src/shared/teacherControllerViewportGeometry.ts",
+        "src/shared/flowViewportGeometry.ts",
+        "src/renderer/ui/TeacherControllerAuthoringChrome.tsx"
+      ],
       "preserve_exit": "保留控制台正式frame/身份及各surface内容语义，不强改所有内容比例、不新dock store；不在大viewport夹限后塞小page clip，不逐表面逆父矩阵补丁。",
       "minimum_evidence": "一个作品工作台/编辑/试运行/整课预览及三表面实际控制台可见与正确命中；Flow手柄保存回写；不跑比例/设备矩阵。"
     },
     {
-      "id": "U11", "batch": "B3", "title": "尺寸、镜头与可见取景", "scope": ["R08", "R21", "R22", "R23", "R24", "R34"], "start_after": [], "complete_with": ["U02", "U10", "U12", "U17"], "writers": ["I-core", "V-geometry", "R-host", "P-presentation"], "review": "structural",
+      "id": "U11",
+      "batch": "B3",
+      "title": "尺寸、镜头与可见取景",
+      "scope": [
+        "R08",
+        "R21",
+        "R22",
+        "R23",
+        "R24",
+        "R34"
+      ],
+      "start_after": [],
+      "complete_with": [
+        "U02",
+        "U10",
+        "U12",
+        "U17"
+      ],
+      "writers": [
+        "I-core",
+        "V-geometry",
+        "R-host",
+        "P-presentation"
+      ],
+      "review": "structural",
       "outcome": "当前/选中/全页设计尺寸默认保坐标，显式等比refit一次变换；固定pose/跟随明确模式，可见/all不同集合同算法，独立Spatial pan/zoom接camera端口、选项显示名称。",
-      "read_first": ["src/renderer/components/ComponentNavigationOwner.ts", "src/shared/stageViewport.ts", "src/renderer/componentPlatform/surfaces/spatial/cameraCommands.ts"],
+      "read_first": [
+        "src/renderer/components/ComponentNavigationOwner.ts",
+        "src/shared/stageViewport.ts",
+        "src/renderer/componentPlatform/surfaces/spatial/cameraCommands.ts"
+      ],
       "preserve_exit": "不拉伸/裁切；父子/共享层不双缩；有效可见包含屏幕外对象且fit不改显隐；固定画布reveal保占位，Flow按阅读展开；不把follow-offset新模式作前置。",
       "minimum_evidence": "一显式多页refit保父子/状态关系，一固定/跟随与可见fit操作，一独立Spatial浏览实际consumer。"
     },
     {
-      "id": "U12", "batch": "B3/B4", "title": "共享外层呈现决策", "scope": ["R10", "R37", "R38"], "start_after": [], "complete_with": ["U10", "U13", "U15"], "writers": ["P-presentation", "F-flow", "D-document", "A-realm", "R-host"], "review": "structural",
+      "id": "U12",
+      "batch": "B3/B4",
+      "title": "共享外层呈现决策",
+      "scope": [
+        "R10",
+        "R37",
+        "R38"
+      ],
+      "start_after": [],
+      "complete_with": [
+        "U10",
+        "U13",
+        "U15"
+      ],
+      "writers": [
+        "P-presentation",
+        "F-flow",
+        "D-document",
+        "A-realm",
+        "R-host"
+      ],
+      "review": "structural",
       "outcome": "componentLayoutInput/Flow extent-media共同frame/naturalFlow/localAssembly/extent/children/section决定供React、PM、Player消费；环绕/宽幅实际内容和真正纸面背景生效。",
-      "read_first": ["src/components/web/measuredFragmentBox.ts", "src/shared/flowBodyPresentation.ts", "src/shared/flowMediaLayout.ts", "src/renderer/documents/CourseV10DocumentView.tsx", "src/renderer/document/editorSession.ts", "src/renderer/ui/FlowWorkspace.tsx", "src/player/componentPlatform/modelProjection.ts"],
+      "read_first": [
+        "src/components/web/measuredFragmentBox.ts",
+        "src/shared/flowBodyPresentation.ts",
+        "src/shared/flowMediaLayout.ts",
+        "src/renderer/documents/CourseV10DocumentView.tsx",
+        "src/renderer/document/editorSession.ts",
+        "src/renderer/ui/FlowWorkspace.tsx",
+        "src/player/componentPlatform/modelProjection.ts"
+      ],
       "preserve_exit": "旧入口重复呈现规则退出，各DOM/lifetime/bind保留；PM经editorSession NodeView→Flow renderObject消费共同决定，contentDOM/选择/事件/destroy及projection mutation端口保留，不机械替换PM壳；作者展开/播放折叠section策略显式，复用已证原rev15 section真实行为。",
       "minimum_evidence": "一个真实Flow章节环绕/通栏/背景结果，React/PM/Player消费相同决定；旧业务退役及已有section证明受变化影响才补。"
     },
     {
-      "id": "U13", "batch": "B4", "title": "共同正文命令与选区AI用例", "scope": ["F02", "shared-document-use-cases"], "start_after": [], "complete_with": ["U01", "U03", "U07", "U08"], "writers": ["D-document", "F-flow", "G-agent", "I-core"], "review": "structural",
+      "id": "U13",
+      "batch": "B4",
+      "title": "共同正文命令与选区AI用例",
+      "scope": [
+        "F02",
+        "shared-document-use-cases"
+      ],
+      "start_after": [],
+      "complete_with": [
+        "U01",
+        "U03",
+        "U07",
+        "U08"
+      ],
+      "writers": [
+        "D-document",
+        "F-flow",
+        "G-agent",
+        "I-core"
+      ],
+      "review": "structural",
       "outcome": "Flow和文件正文入口消费已有documentBlockCommands/menu工厂及共同selection/draft/AI回显；表格/源码共同可达，减少真实重复创建与能力目录。",
-      "read_first": ["src/renderer/document/documentBlockCommands.ts", "src/renderer/ui/flow/flowInsertCommands.ts", "src/renderer/document/SharedDocumentEditor.tsx", "src/renderer/documentFiles/LessonDocumentEditor.tsx"],
+      "read_first": [
+        "src/renderer/document/documentBlockCommands.ts",
+        "src/renderer/ui/flow/flowInsertCommands.ts",
+        "src/renderer/document/SharedDocumentEditor.tsx",
+        "src/renderer/documentFiles/LessonDocumentEditor.tsx"
+      ],
       "preserve_exit": "当前共同菜单已有table不重新假设缺失；Flow专业table与DocumentBlock不同，留真正adapter，MD源码/资源保存保留；重复业务退出，不重造正文编辑器。",
       "minimum_evidence": "加号/斜杠/顶栏择实际改动入口插表格并保存，选区AI回显原目标；专业表格不降级，文件与Flow共同consumer实接。"
     },
     {
-      "id": "U14", "batch": "B4", "title": "阅读顺序、落点、锚定与替换", "scope": ["R11", "R12", "R13", "R14", "R41"], "start_after": [], "complete_with": ["U10", "U13"], "writers": ["F-flow", "I-core", "U-lifecycle"], "review": "leaf",
+      "id": "U14",
+      "batch": "B4",
+      "title": "阅读顺序、落点、锚定与替换",
+      "scope": [
+        "R11",
+        "R12",
+        "R13",
+        "R14",
+        "R41"
+      ],
+      "start_after": [],
+      "complete_with": [
+        "U10",
+        "U13"
+      ],
+      "writers": [
+        "F-flow",
+        "I-core",
+        "U-lifecycle"
+      ],
+      "review": "leaf",
       "outcome": "正文移动排除浮层/behavior，章节拖入和纸面插入捕获真实container/index/段落；固定/随文/viewport明确且拖动不改模式，资源替换保同实例与互动。",
-      "read_first": ["src/renderer/ui/FlowWorkspace.tsx", "src/renderer/ui/flow/flowMenuPaperPlacement.ts", "src/shared/flowParagraphAnchors.ts", "tests/unit/k0AssetReplace.test.ts"],
+      "read_first": [
+        "src/renderer/ui/FlowWorkspace.tsx",
+        "src/renderer/ui/flow/flowMenuPaperPlacement.ts",
+        "src/shared/flowParagraphAnchors.ts",
+        "tests/unit/k0AssetReplace.test.ts"
+      ],
       "preserve_exit": "切模式保当前画面、清anchor冻结当前几何；不按旧选区或(0,0)落点，不插新对象冒充替换。",
       "minimum_evidence": "一个长章节含正文/浮层样本实际上下移、章内拖入、固定/随文切换和媒体替换；最近层覆盖数据，不每组合冷开。"
     },
     {
-      "id": "U15", "batch": "B5", "title": "作者与Published共同运行宿主", "scope": ["F06", "flow-run-follow-up", "runtime-host-consolidation"], "start_after": [], "complete_with": ["U01", "U04", "U10", "U12"], "writers": ["R-host", "A-realm", "P-presentation", "F-flow"], "review": "structural",
+      "id": "U15",
+      "batch": "B5",
+      "title": "作者与Published共同运行宿主",
+      "scope": [
+        "F06",
+        "flow-run-follow-up",
+        "runtime-host-consolidation"
+      ],
+      "start_after": [],
+      "complete_with": [
+        "U01",
+        "U04",
+        "U10",
+        "U12"
+      ],
+      "writers": [
+        "R-host",
+        "A-realm",
+        "P-presentation",
+        "F-flow"
+      ],
+      "review": "structural",
       "outcome": "现有ModelPlayer统一prepare→实际projection commit→sync→端口→ready/dispose；退役CourseV10RuntimeView重复运行编排，编辑/暂停/当前位置继续保同程序现场。",
-      "read_first": ["src/player/componentPlatform/ModelPlayer.ts", "src/renderer/components/CourseV10RuntimeView.tsx", "src/player/componentPlatform/publishedPlayer.ts"],
+      "read_first": [
+        "src/player/componentPlatform/ModelPlayer.ts",
+        "src/renderer/components/CourseV10RuntimeView.tsx",
+        "src/player/componentPlatform/publishedPlayer.ts"
+      ],
       "preserve_exit": "React actual commit/StrictMode、ProjectionMutationBoundary与light/deep祖先保护、Bridge/IME保留；独立窗口独立runtime，导航/作者writer不迁ModelPlayer。当前Flow已setPlaying不按旧缺口重写。",
       "minimum_evidence": "真实源iframe light/deep切换/暂停继续不重挂，投影commit后正确sync，ready/dispose在途不泄；作者和Published共同行为最近真实consumer。"
     },
     {
-      "id": "U16", "batch": "B5", "title": "媒体事件和互动作者装配", "scope": ["R15", "R16", "R17", "R43"], "start_after": [], "complete_with": ["U02", "U15"], "writers": ["R-interactions", "R-host", "I-core"], "review": "leaf",
+      "id": "U16",
+      "batch": "B5",
+      "title": "媒体事件和互动作者装配",
+      "scope": [
+        "R15",
+        "R16",
+        "R17",
+        "R43"
+      ],
+      "start_after": [],
+      "complete_with": [
+        "U02",
+        "U15"
+      ],
+      "writers": [
+        "R-interactions",
+        "R-host",
+        "I-core"
+      ],
+      "review": "leaf",
       "outcome": "soundId ended桥接，视频按subscription越阈值一次/倒退重布防/scope清理；依次出现初始hidden+rule同事务，快捷点击按动作类型修改并保其他动作和顺序。",
-      "read_first": ["src/player/components/runtime/ComponentWorldInteractions.ts", "src/player/components/ComponentPlatformRuntime.ts", "src/renderer/interactions/componentInteractionAuthoring.ts", "src/renderer/ui/AutomationTab.tsx"],
+      "read_first": [
+        "src/player/components/runtime/ComponentWorldInteractions.ts",
+        "src/player/components/ComponentPlatformRuntime.ts",
+        "src/renderer/interactions/componentInteractionAuthoring.ts",
+        "src/renderer/ui/AutomationTab.tsx"
+      ],
       "preserve_exit": "普通播放保留，不每timeupdate重启动作；完整规则与快捷栏同owner，不静默替换整个click，受作者锁同约束。",
       "minimum_evidence": "真实sound结束、视频阈值/倒退和模板初始不可见/快捷两动作同存，各在直接consumer；可在一互动作品合并证据。"
     },
     {
-      "id": "U17", "batch": "B5", "title": "当前页初态、导航与控制台配置", "scope": ["R18", "R19", "R20", "R31", "R33", "R48", "return-initial-follow-up"], "start_after": ["U15"], "complete_with": ["U10", "U11", "U16"], "writers": ["R-host", "R-interactions", "V-geometry", "F-flow"], "review": "structural",
+      "id": "U17",
+      "batch": "B5",
+      "title": "当前页初态、导航与控制台配置",
+      "scope": [
+        "R18",
+        "R19",
+        "R20",
+        "R31",
+        "R33",
+        "R48",
+        "return-initial-follow-up"
+      ],
+      "start_after": [
+        "U15"
+      ],
+      "complete_with": [
+        "U10",
+        "U11",
+        "U16"
+      ],
+      "writers": [
+        "R-host",
+        "R-interactions",
+        "V-geometry",
+        "F-flow"
+      ],
+      "review": "structural",
       "outcome": "返回初态/页内重播复位本页临时显隐/actions/leases/steps/fragment/camera-scroll/观察与控制台偏移；同导航键与teacher能力，配置真实消费，accepted反馈按实际执行。",
-      "read_first": ["src/renderer/components/ComponentNavigationOwner.ts", "src/player/components/ComponentPlatformRuntime.ts", "src/components/teacher-controller/defaultController.ts"],
+      "read_first": [
+        "src/renderer/components/ComponentNavigationOwner.ts",
+        "src/player/components/ComponentPlatformRuntime.ts",
+        "src/components/teacher-controller/defaultController.ts"
+      ],
       "preserve_exit": "保当前surface/页与已提交内容，不跳整课首页/回滚作者内容，不用world.reset遮缺口；暂停继续保现场，教师bypass保留、学生guard保留；只涉及现有nav leaf可在宿主迁移前开始。",
       "minimum_evidence": "运行改变显隐/步骤后返回当前页初始画面，暂停继续不reset；teacher源码targetStateId、拒绝翻页反馈及当前位置键真实执行。"
     },
     {
-      "id": "U18", "batch": "B6", "title": "当前HTML、分页与递归编译闭包", "scope": ["R25", "R26", "R27", "N03"], "start_after": [], "complete_with": ["U05", "U20"], "writers": ["C-import", "I-core", "A-realm", "H-html"], "review": "structural",
+      "id": "U18",
+      "batch": "B6",
+      "title": "当前HTML、分页与递归编译闭包",
+      "scope": [
+        "R25",
+        "R26",
+        "R27",
+        "N03"
+      ],
+      "start_after": [],
+      "complete_with": [
+        "U05",
+        "U20"
+      ],
+      "writers": [
+        "C-import",
+        "I-core",
+        "A-realm",
+        "H-html"
+      ],
+      "review": "structural",
       "outcome": "创建从当前Session捕获非磁盘旧稿；独立页宿主化/耦合程序保真；iframe/srcdoc base/assets/CSS/modules递归真实供应，siblingFiles进入编译adapter/cache。",
-      "read_first": ["src/main/workbench/htmlImport/CreateCourseFromHtml.ts", "src/main/workbench/htmlImport/readHtmlClosure.ts", "src/main/workbench/componentCompilerRuntime.ts", "tests/unit/htmlModuleClosure.test.ts", "tests/unit/componentCompilerQ1.test.ts"],
+      "read_first": [
+        "src/main/workbench/htmlImport/CreateCourseFromHtml.ts",
+        "src/main/workbench/htmlImport/readHtmlClosure.ts",
+        "src/main/workbench/componentCompilerRuntime.ts",
+        "tests/unit/htmlModuleClosure.test.ts",
+        "tests/unit/componentCompilerQ1.test.ts"
+      ],
       "preserve_exit": "不重复复制全程序脚本强拆；能运行先承载，局部诊断不整份拒绝/静态化；origin/授权根不扩权，读到依赖不冒充实际consumer已供应。",
       "minimum_evidence": "当前未落盘文字用于创建、一独立多页与原耦合React保互动；一个含子iframe/srcdoc与CSS sibling依赖的明确失败样本真实运行/保存。"
     },
     {
-      "id": "U19", "batch": "B6", "title": "字体、GIF与真实PPTX捕获", "scope": ["R28", "R29", "N04"], "start_after": [], "complete_with": ["U20"], "writers": ["X-delivery"], "review": "leaf",
+      "id": "U19",
+      "batch": "B6",
+      "title": "字体、GIF与真实PPTX捕获",
+      "scope": [
+        "R28",
+        "R29",
+        "N04"
+      ],
+      "start_after": [],
+      "complete_with": [
+        "U20"
+      ],
+      "writers": [
+        "X-delivery"
+      ],
+      "review": "leaf",
       "outcome": "现有bundledFontEmbedding接单HTML/ZIP，GIF复用解码/捕获PNG静态帧进PPTX；headless worker修实际CSP资源捕获，叶可分不重叠writer并行。",
-      "read_first": ["src/renderer/export/bundledFontEmbedding.ts", "src/renderer/export/course/buildCoursePptx.ts", "src/main/workbench/delivery/HeadlessDocumentExportWorker.ts", "tests/unit/bundledFontExportEmbedding.test.ts"],
+      "read_first": [
+        "src/renderer/export/bundledFontEmbedding.ts",
+        "src/renderer/export/course/buildCoursePptx.ts",
+        "src/main/workbench/delivery/HeadlessDocumentExportWorker.ts",
+        "tests/unit/bundledFontExportEmbedding.test.ts"
+      ],
       "preserve_exit": "GIF不承诺PPTX动画、不继续缺图称完整；headless证据不外推GUI，不关闭全部CSP；保持原资源捕获/输出能力。",
       "minimum_evidence": "实际单HTML/ZIP带字体并离线消费，GIF在PPTX静态图片可见，headless原缺图样本真实产物；不同消费者分证不跑全格式矩阵。"
     },
     {
-      "id": "U20", "batch": "B6", "title": "统一交付snapshot与作者正常出口", "scope": ["R36", "authored-content-delivery"], "start_after": ["U00"], "complete_with": ["U04", "U05", "U18", "U19"], "writers": ["X-delivery", "I-core", "R-host", "A-realm", "P-presentation", "U-lifecycle"], "review": "structural",
+      "id": "U20",
+      "batch": "B6",
+      "title": "统一交付snapshot与作者正常出口",
+      "scope": [
+        "R36",
+        "authored-content-delivery"
+      ],
+      "start_after": [
+        "U00"
+      ],
+      "complete_with": [
+        "U04",
+        "U05",
+        "U18",
+        "U19"
+      ],
+      "writers": [
+        "X-delivery",
+        "I-core",
+        "R-host",
+        "A-realm",
+        "P-presentation",
+        "U-lifecycle"
+      ],
+      "review": "structural",
       "outcome": "drained buildComponentDelivery snapshot携带页选择/顺序/纸型到真实consumer；B2作者记录、覆盖引用资源进入现有收集/保存/提炼复用/格式转换，和同consumer随H5 Published/普通HTML/原HTML输出，不只序列化，不另建资源writer。",
-      "read_first": ["src/renderer/export/componentPlatform/delivery.ts", "src/main/workbench/delivery/componentProjectDelivery.ts", "src/player/componentPlatform/publishedPlayer.ts"],
+      "read_first": [
+        "src/renderer/export/componentPlatform/delivery.ts",
+        "src/main/workbench/delivery/componentProjectDelivery.ts",
+        "src/player/componentPlatform/publishedPlayer.ts"
+      ],
       "preserve_exit": "一个正式来源无磁盘旧稿，published htmlAuthoring:true当前事实不误报关闭；渲染consumer常态应用，原HTML/H5无双覆盖；格式能力不静默退出。",
       "minimum_evidence": "指定页顺序/纸型实际产物；React改文换图非编辑Player/普通HTML仍生效；共用内部替图移动→副本独立改→保存重开，以及原HTML→H5→普通HTML→重开单次应用样本，覆盖资源不遗漏，无全格式矩阵。"
     },
     {
-      "id": "U21", "batch": "B7", "title": "开发入口与能力注册维护", "scope": ["M01", "M02", "M03"], "start_after": [], "complete_with": [], "writers": ["E-maintenance", "Root-config"], "review": "leaf",
+      "id": "U21",
+      "batch": "B7",
+      "title": "开发入口与能力注册维护",
+      "scope": [
+        "M01",
+        "M02",
+        "M03"
+      ],
+      "start_after": [],
+      "complete_with": [],
+      "writers": [
+        "E-maintenance",
+        "Root-config"
+      ],
+      "review": "leaf",
       "outcome": "quick launcher清单覆盖实际component/generator/worker HTML；旧catalog验证接API5 reader；Office发现用唯一注册源去重。",
-      "read_first": ["scripts/prepare-source-launch.mjs", "scripts/verify-component-catalog.ts", "src/core/tools/OfficeContentTools.ts", "tests/unit/windowsSourceLaunchContract.test.ts"],
+      "read_first": [
+        "scripts/prepare-source-launch.mjs",
+        "scripts/verify-component-catalog.ts",
+        "src/core/tools/OfficeContentTools.ts",
+        "tests/unit/windowsSourceLaunchContract.test.ts"
+      ],
       "preserve_exit": "维护维度不冒充用户P0，不恢复全V9门、不阻挡独立用户修复；相关生成结果由单writer，E只机械不设计。",
       "minimum_evidence": "最低成本真实脚本/结构检查；不为维护启动GUI/付费/完整build，已生成不紧接同义check。"
     },
     {
-      "id": "U22", "batch": "integration", "title": "真实纵向切片、三路续作与全范围收口", "scope": ["real-journey", "three-route-authoring", "final-closure"], "start_after": [], "complete_with": ["U01", "U02", "U03", "U04", "U05", "U06", "U07", "U08", "U09", "U10", "U11", "U12", "U13", "U14", "U15", "U16", "U17", "U18", "U19", "U20", "U21"], "writers": [], "review": "structural",
-      "outcome": "Root持续统合正常旅程与有信息增益的探索；T独立先审题/直接证据。先React图文→手势→人AI连续改/受控在途共编→内部副本→两adapter往返→正常consumer，GJS正式入口另有实际结构/样式交付；每实际能力小闭环尽早集成和退役重复职责，相关路径就绪后续三路原任务；所有已纳入问题最终有依据处置。",
-      "read_first": ["docs/development-plan/20261007-content-revision/evidence/core-experience-20261007/FIRST_DELIVERY_REVIEW.md", "output/html-import-p0-20261007/VERIFICATION.md"],
+      "id": "U22",
+      "batch": "integration",
+      "title": "真实纵向切片、三路续作与全范围收口",
+      "scope": [
+        "real-journey",
+        "three-route-authoring",
+        "final-closure"
+      ],
+      "start_after": [],
+      "complete_with": [
+        "U01",
+        "U02",
+        "U03",
+        "U04",
+        "U05",
+        "U06",
+        "U07",
+        "U08",
+        "U09",
+        "U10",
+        "U11",
+        "U12",
+        "U13",
+        "U14",
+        "U15",
+        "U16",
+        "U17",
+        "U18",
+        "U19",
+        "U20",
+        "U21"
+      ],
+      "writers": [],
+      "review": "structural",
+      "outcome": "主执行者沿正常旅程直接实施和自检，必要独审按工作协议。先React图文→手势→人AI连续改/受控在途共编→内部副本→两adapter往返→正常consumer，GJS正式入口另有实际结构/样式交付；每实际能力小闭环尽早集成和退役重复职责，相关路径就绪后续三路原任务；所有已纳入问题最终有依据处置。",
+      "read_first": [
+        "docs/development-plan/20261007-content-revision/evidence/core-experience-20261007/FIRST_DELIVERY_REVIEW.md",
+        "output/html-import-p0-20261007/VERIFICATION.md"
+      ],
       "preserve_exit": "同材料三Luna/medium正常MCP/内置/裸HTML独立作者，真实图成功作业复用；首次记录不覆盖，Root不代写，不新收费/强模型掩错；原section/计算等有效证据复用，发行暂停。",
       "minimum_evidence": "复用真实React纵向样本含复制与HTML/H5往返、受控回包共编，一非DOM及GJS正式入口证据；GUI顺带观察卡顿/重复同步/无必要重挂载不新时限或benchmark；三路首次/续作质量、互动、时间记录，未达目标沿软件原因继续，不全矩阵。"
     }
-  ]
+  ],
+  "followup": {
+    "date": "2026-10-08",
+    "baseline": "3095ea020a4eef9864e865e4560ffbc1987cc913",
+    "product_source_cut": "95ce7eaf",
+    "status": "paused-preserved-candidates",
+    "this_turn": "ni-start-prompt-implementation-20261008",
+    "execution_section": "EXECUTION_PLAN.md#non-office-report-integration",
+    "coverage_state": "seeded-from-confirmed-evidence-not-yet-exhaustively-reconciled",
+    "coverage_rule": "当前受支持人端生产用例、正式作者操作/文件binding、公开工具及输入/资源/执行/delivery服务入口的并集，按用户语义归并；入口→owner与owner→必需消费者双向核对。不能降低支持范围洗绿，不公开全部内部primitive，不把R清单或ToolCatalog当全集。",
+    "dependency_rule": "start_after要求相关小合同/真实输出稳定，不等前批无关子项全绿；complete_with约束最终消费者闭合。S5从S0开始同行，S6在共同业务覆盖与相关实现闭合后运行。",
+    "writer_rule": "此表保留领域和共享实体唯一writer；主执行者可直接实现。已分配能力/目录范围内自主创建修改；活跃写域、共享热点或新职责冲突时协调。公共文件单writer顺序集成，不固定纯协调Root或机械E。",
+    "writers": {
+      "I-core": {
+        "files": [
+          "src/shared/workbench/tools.ts",
+          "src/shared/workbench/toolPorts.ts",
+          "src/shared/contracts/component-platform/operations.ts",
+          "src/shared/contracts/component-platform/schema.ts",
+          "src/core/tools/ToolRegistration.ts",
+          "src/core/tools/ToolCatalog.ts",
+          "src/core/tools/toolSchemas.ts",
+          "src/core/tools/ToolTargets.ts",
+          "src/core/tools/DocumentToolGateway.ts",
+          "src/core/tools/modelToolResult.ts",
+          "src/core/tools/AgentFileTools.ts",
+          "src/core/tools/courseInstanceEdits.ts",
+          "src/core/tools/coursePresentationEdits.ts",
+          "src/core/projectFiles/componentPlatform/coordinator.ts",
+          "src/core/projectFiles/componentPlatform/projection.ts",
+          "src/core/drivers/courseV10Operations.ts",
+          "src/core/components/source/sourceAuthoringEdits.ts",
+          "src/renderer/ui/properties/CourseGlobalPropertiesContextBuilder.ts",
+          "src/renderer/store/slices/courseStructureSlice.ts",
+          "src/renderer/composition/crossSurfaceCommands.ts",
+          "src/renderer/componentPlatform/surfaces/slide/freeObjectCommands.ts",
+          "scripts/check-g20-import-boundaries.ts"
+        ]
+      },
+      "U-lifecycle": {
+        "files": [
+          "src/main/workbench/DocumentHostService.ts",
+          "src/main/workbench/execution/AgentFileText.ts",
+          "src/main/workbench/execution/AgentFileService.ts",
+          "src/renderer/documentFiles/documentFileSession.ts",
+          "src/renderer/documents/DocumentProjection.ts",
+          "src/renderer/documents/CourseV10DocumentBridge.ts"
+        ]
+      },
+      "C-import": {
+        "files": [
+          "src/main/workbench/projectFiles/componentPlatformFileInput.ts",
+          "src/main/workbench/projectFiles/componentSourceClosure.ts",
+          "src/main/workbench/htmlImport/readHtmlClosure.ts",
+          "src/main/workbench/htmlImport/CreateCourseFromHtml.ts"
+        ]
+      },
+      "A-realm": {
+        "files": [
+          "src/core/tools/HostToolServices.ts",
+          "src/main/workbench/images/ImageResultsDesktopService.ts",
+          "src/main/workbench/images/ImageGenerationService.ts",
+          "src/renderer/workbench/ImageResultCard.tsx"
+        ]
+      },
+      "G-agent": {
+        "files": [
+          "src/main/workbench/execution/ExecutionEngine.ts",
+          "src/main/workbench/execution/ExecutionContextProjection.ts",
+          "src/main/workbench/execution/ExecutionDesktopService.ts",
+          "src/main/workbench/execution/executionOutcome.ts",
+          "src/main/workbench/external/ExternalMcpService.ts",
+          "src/core/tools/TaskNoteTools.ts",
+          "src/renderer/workbench/ExecutionAssistant.tsx"
+        ]
+      },
+      "D-document": {
+        "files": [
+          "src/renderer/components/ComponentSourceEditor.tsx",
+          "src/renderer/document/documentBlockCommands.ts"
+        ]
+      },
+      "F-flow": {
+        "files": [
+          "src/renderer/ui/properties/FlowPropertiesContextBuilder.ts",
+          "src/renderer/ui/FlowWorkspace.tsx"
+        ]
+      },
+      "X-delivery": {
+        "files": [
+          "src/core/tools/DocumentDeliveryTools.ts",
+          "src/main/workbench/delivery/DocumentDeliveryService.ts",
+          "src/main/workbench/delivery/componentProjectDelivery.ts",
+          "src/renderer/export/componentPlatform/delivery.ts"
+        ]
+      },
+      "Root-config": {
+        "files": [
+          "package.json",
+          "package-lock.json",
+          "vitest.config.ts",
+          "playwright.config.ts"
+        ]
+      }
+    },
+    "batches": [
+      {
+        "id": "S0",
+        "title": "覆盖全集与必要小合同",
+        "package_refs": [
+          "U00",
+          "U22"
+        ],
+        "start_after": [],
+        "complete_with": [],
+        "writers": [
+          "I-core",
+          "U-lifecycle",
+          "C-import",
+          "A-realm",
+          "G-agent",
+          "D-document",
+          "F-flow",
+          "X-delivery"
+        ],
+        "review": "structural",
+        "outcome": "先明确当前业务覆盖与合法差异，逐项落实现有领域owner、当前读取/目标/准备/结果、全体直接消费者、旧决定退出和保留行为；公共注册引用真实用例，跨端结果保留必要具体类型。已确定叶可先释放，不先造总平台。",
+        "read_first": [
+          "src/shared/contracts/component-platform/operations.ts",
+          "src/core/tools/ToolRegistration.ts",
+          "src/core/tools/ToolCatalog.ts",
+          "src/core/projectFiles/componentPlatform/projection.ts",
+          "src/renderer/ui/properties/CourseGlobalPropertiesContextBuilder.ts",
+          "docs/development-plan/20261008-core-experience-unified/REVIEW_RESULT.md"
+        ],
+        "preserve_exit": "复用已通过U01/U12/U13/U15等证据；实际生产入口纳入，旧V9/死代码不误列；不以manual元数据证明UI接通，不减少已有能力，不建平台/永久台账。",
+        "minimum_evidence": "版本绑定有限覆盖的双向静态核对，重要结构由未参与方案/实现的reviewer按实际消费者审；未核专业/互动/全部配置保持待核。"
+      },
+      {
+        "id": "S1",
+        "title": "当前状态、范围源码与创建目标接续",
+        "package_refs": [
+          "U01",
+          "U03",
+          "U18"
+        ],
+        "start_after": [
+          "S0"
+        ],
+        "complete_with": [],
+        "writers": [
+          "U-lifecycle",
+          "C-import",
+          "I-core",
+          "G-agent",
+          "D-document"
+        ],
+        "review": "structural",
+        "outcome": "现有输入owner先settle/ACK，Host同源捕获当前Session或未打开磁盘内容，入口与依赖一起摄取；只对象/只页/整作品按需给真实源码与必要上下文。创建打开由共同用例接续当前文档、授权和目标。",
+        "read_first": [
+          "src/main/workbench/execution/AgentFileText.ts",
+          "src/main/workbench/execution/AgentFileService.ts",
+          "src/main/workbench/projectFiles/componentPlatformFileInput.ts",
+          "src/main/workbench/projectFiles/componentSourceClosure.ts",
+          "src/renderer/documentFiles/documentFileSession.ts",
+          "src/renderer/workbench/ExecutionAssistant.tsx"
+        ],
+        "preserve_exit": "退出HTML特设版本选择、各端重复attach/issue和独立最新作品副本；保留IME/未ACK输入、分页基线、范围外人工调整、关闭文本读盘与正常权限。模型不填ID/登记；不直接覆盖H5。",
+        "minimum_evidence": "Session新/磁盘旧的HTML、JS、JSON及已打开依赖经实际消费口读当前稿；一个未打开正常读盘；复用既有输入ACK证据，相关发送变化才补IME检查。"
+      },
+      {
+        "id": "S2",
+        "title": "完整语义用例与三端能力可达",
+        "package_refs": [
+          "U00",
+          "U02",
+          "U06",
+          "U13"
+        ],
+        "start_after": [
+          "S0"
+        ],
+        "complete_with": [
+          "S1"
+        ],
+        "writers": [
+          "I-core",
+          "G-agent",
+          "D-document",
+          "F-flow"
+        ],
+        "review": "structural",
+        "outcome": "补页面/工程设置、保身份对象结构、状态目标与内容、放置/可见范围等已确认公共缺口，当前值与写入配套；人/MCP/内置调用同一现有语义planner，复用Runtime/组件/多文件局部源码编辑。",
+        "read_first": [
+          "src/core/tools/toolSchemas.ts",
+          "src/core/tools/courseInstanceEdits.ts",
+          "src/core/tools/coursePresentationEdits.ts",
+          "src/core/projectFiles/componentPlatform/coordinator.ts",
+          "src/core/drivers/courseV10Operations.ts",
+          "src/renderer/composition/crossSurfaceCommands.ts",
+          "src/renderer/components/ComponentSourceEditor.tsx"
+        ],
+        "preserve_exit": "尺寸preserve/contain及状态/frame联动、专业判题、重定父坐标、Flow阅读语义均保留；不裸改childIds/整结构JSON，不用redo重建或source模拟宿主设置。实例/共享/状态粒度不混，多状态到无状态粘贴继续直接拒绝。",
+        "minimum_evidence": "一组受影响代表用例证明同源可读可写、身份/范围/关联结果及History正确；真实界面接线变化才补GUI，不为每字段重跑完整保存/表面矩阵。"
+      },
+      {
+        "id": "S3",
+        "title": "共同成果资源及可消费图片载荷",
+        "package_refs": [
+          "U03",
+          "U18"
+        ],
+        "start_after": [
+          "S0"
+        ],
+        "complete_with": [
+          "S1",
+          "S2"
+        ],
+        "writers": [
+          "A-realm",
+          "I-core",
+          "G-agent",
+          "C-import"
+        ],
+        "review": "structural",
+        "outcome": "在现有资源/结果服务复用或抽取同源状态、授权资源解析、预览/参考图/应用准备；UI/model/MCP仅编码显示，asset/from/application消费同一已解析资源，模型不搬运内部命名空间。",
+        "read_first": [
+          "src/core/tools/HostToolServices.ts",
+          "src/main/workbench/images/ImageResultsDesktopService.ts",
+          "src/main/workbench/images/ImageGenerationService.ts",
+          "src/main/workbench/execution/ExecutionEngine.ts",
+          "src/main/workbench/external/ExternalMcpService.ts",
+          "src/renderer/workbench/ImageResultCard.tsx"
+        ],
+        "preserve_exit": "退出Engine预览专用读业务、MCP仅data.image判定、各端重复资源解释；用户续授权/AI冻结grant和Ready/unapplied合法区别保留；唯一资源仓库/Session，无重复生成或新Provider。",
+        "minimum_evidence": "复用一原Ready证明三个直接消费者均交付真实图片；一既有授权/停止反例；必要正式应用保存重开。离线阶段图片生成请求新增为零。"
+      },
+      {
+        "id": "S4",
+        "title": "当前结果、明确交付与任务收尾",
+        "package_refs": [
+          "U03",
+          "U20"
+        ],
+        "start_after": [
+          "S1",
+          "S2",
+          "S3"
+        ],
+        "complete_with": [],
+        "writers": [
+          "I-core",
+          "G-agent",
+          "X-delivery",
+          "U-lifecycle",
+          "A-realm"
+        ],
+        "review": "structural",
+        "outcome": "共同owner提供真实提交/应用/保存/资源/恢复事实；按当前目标与必要交付判定completed/partial，已恢复错误仅诊断，可选观察不阻断。明确用户保存意图由共同delivery完成机械顺序，各端保留循环/停止。",
+        "read_first": [
+          "src/core/tools/modelToolResult.ts",
+          "src/main/workbench/execution/executionOutcome.ts",
+          "src/main/workbench/execution/ExecutionEngine.ts",
+          "src/core/tools/TaskNoteTools.ts",
+          "src/main/workbench/delivery/DocumentDeliveryService.ts",
+          "tests/integration/productFollowup/T10/terminalJobFinish.test.ts"
+        ],
+        "preserve_exit": "退出按旧调用失败或完整参数相等决定目标状态；真实缺页/要求资源未应用/必要保存未达仍报告。Ready不等所有用途已交付；内容目标由模型判断，无必填目标表/强制无限继续。unknown只查原操作，用户停止可结束并报未知，旧副作用不重放。",
+        "minimum_evidence": "恢复且必要交付完成→completed并保历史诊断；真实缺口→partial；可选诊断与已提交/保存事实分开；unknown/停止不重放，保存期间新编辑仍dirty。"
+      },
+      {
+        "id": "S5",
+        "title": "防再分叉与消费者全集收口",
+        "package_refs": [
+          "U00",
+          "U22"
+        ],
+        "start_after": [
+          "S0"
+        ],
+        "complete_with": [
+          "S1",
+          "S2",
+          "S3",
+          "S4"
+        ],
+        "writers": [
+          "I-core",
+          "G-agent",
+          "U-lifecycle",
+          "A-realm",
+          "C-import",
+          "X-delivery"
+        ],
+        "review": "structural",
+        "outcome": "逐批核对入口→owner→全部必要消费者，结构上收窄入口绕路依赖；共同注册、目标/结果类型、现有boundary检查体现唯一业务决定。每批同时退役旧分支和关闭同根症状，全部差额闭合后才称整体统一。",
+        "read_first": [
+          "scripts/check-g20-import-boundaries.ts",
+          "src/core/tools/ToolRegistration.ts",
+          "src/shared/workbench/tools.ts",
+          "docs/development-plan/WORKING_PROTOCOL.md",
+          "docs/development-plan/20261008-core-experience-unified/EXECUTION_PLAN.md"
+        ],
+        "preserve_exit": "不先造统一平台再补丁；不以同Gateway/writer、字符串/文件存在/Hash或编译绿证明实际UI可达。合法适配/授权/循环/视图状态不同保留；独立review查原行为与真实consumer，未变证据不复验。",
+        "minimum_evidence": "有限覆盖双向闭合、实际调用和旧职责退出的结构证据；只对真实改变的目标/结果合同扩现有类型/依赖检查，配代表行为，不机械全仓门。"
+      },
+      {
+        "id": "S6",
+        "title": "真实单请求完整创作与交付",
+        "package_refs": [
+          "U22"
+        ],
+        "start_after": [
+          "S1",
+          "S2",
+          "S3",
+          "S4",
+          "S5"
+        ],
+        "complete_with": [],
+        "writers": [],
+        "review": "structural",
+        "outcome": "正常公开MCP、真实内置AI各由Luna/medium以一用户请求从空白完成完整作品，允许正常工具轮/任务内修订，不需Root/用户救场；实际可编辑/撤销/保存冷开/运行交付。原三路首次与续作保持各自范围，裸HTML未变证据复用。",
+        "read_first": [
+          "output/core-experience-20261008/FINAL_CREATION_REVIEW.md",
+          "docs/development-plan/20261007-content-revision/CORE_EXPERIENCE_EXECUTION_PROMPT.md",
+          "output/core-experience-20261008/authors/builtin-continuation/RUN_RECEIPTS.md"
+        ],
+        "preserve_exit": "新完整任务独立编号，不重写原首次；每个新图像任务同既有GPT OAuth真实生成并嵌入，失败先查原作业成功图复用。无同因付费重试、强模型/新Provider/Root代写。内容设计质量另记，不作为软件退化自动归因；发行暂停。",
+        "minimum_evidence": "每路各一次新完整正常任务，保原始请求/回执/用量、必要内容与真实图/互动的正式应用和保存证据，再独立冷开及正常交付核对；窄修/只读completed、受控provider或续作成功不替代。"
+      }
+    ],
+    "test_selection_inputs": [
+      "tests/integration/g20OpenImagePreviewEngine.test.ts",
+      "tests/integration/g20ExternalMcpService.test.ts",
+      "tests/integration/g20ImageContinuationResource.test.ts",
+      "tests/integration/g20ExecutionOutcomeR7.test.ts",
+      "tests/integration/productFollowup/T10/terminalJobFinish.test.ts",
+      "tests/integration/coreExperienceHtmlImport.test.ts",
+      "tests/integration/g20AgentFileTools.test.ts",
+      "tests/integration/g20M20PlainText.test.ts",
+      "tests/unit/coreExperienceSemanticOperations.test.ts"
+    ],
+    "test_selection_note": "仅作为直接相关选题入口；实施前核实际V10 fixture/过滤/构建/付费副作用。旧V9用例不证明current；默认最近层1-3条充分检查，相关变化才扩大，零匹配/skip不算PASS。此文档阶段不运行产品测试。",
+    "completion": [
+      "当前支持语义覆盖与全部必要消费者闭合",
+      "业务决定唯一且旧重复职责退出",
+      "保留行为最低充分证据及独立review通过",
+      "MCP和内置单请求完整任务真实通过，原首次/续作/新任务分列"
+    ],
+    "mechanical_responsibility_audit": {
+      "status": "source-audited-limited-independent-pass",
+      "authorization": "Owner 2026-10-08: 梳理现有能力全集的机械职责；独立 finish 可先修，其他机械迁移与付费创作仍暂停",
+      "canonical_record": "EXECUTION_PLAN.md#8-存量机械职责梳理与结构约束owner-2026-10-08-最新范围",
+      "baseline": "3095ea02 plus preserved uncommitted source",
+      "coverage_sources": {
+        "registered_tools": "src/core/tools/ToolCatalog.ts:toolRegistrations; 83 unique current registrations, include union and nested schemas",
+        "engine_additions": [
+          "course.createFromHtml",
+          "tools.load",
+          "context.read",
+          "task.note",
+          "task.finish",
+          "ask_user"
+        ],
+        "mcp_service_additions": [
+          "workspace.list",
+          "workspace.switch",
+          "workbench.state",
+          "operation.recent"
+        ],
+        "production_entries": [
+          "workspace file bindings and current copy",
+          "HTML/GJS/source editors",
+          "Slide/Flow/Spatial and professional authoring",
+          "Nodes/Elements/Automation/Developer",
+          "image results and media/component libraries",
+          "Recipe",
+          "Productivity including current-project PPTX append",
+          "save/preview/delivery"
+        ],
+        "method_consumers": "six courseAgentMethodSkills and their actual references/scripts, context and result projections",
+        "dynamic_boundary": "managed browser eight operations and existing third-party discovery/authorization/receipt/resource adapter; registered but unconfigured capabilities remain separately visible"
+      },
+      "finding_ids": [
+        "MECH-01",
+        "MECH-02",
+        "MECH-03",
+        "MECH-04",
+        "MECH-05",
+        "MECH-06",
+        "MECH-07",
+        "MECH-08",
+        "MECH-09",
+        "MECH-10",
+        "MECH-11",
+        "MECH-12",
+        "MECH-13",
+        "MECH-14",
+        "MECH-15"
+      ],
+      "implementation_state": "MECH-01 through MECH-13 and MECH-15 not implemented; MECH-14 common early-exit fix independently passed and integrated; missing logical-target recovery facts remain MECH-02/04 dependency",
+      "mechanism": "existing intent contract -> host prepared context -> existing domain owner; shared model/MCP projection and real UI consumption; type/source boundaries plus independent semantic review and old responsibility exit",
+      "minimum_evidence": "bidirectional source coverage from actual entry union; inspect nested/union inputs and complete use-case preparation/result sequence; representative behavior only for changed mechanisms, no paid or GUI matrix",
+      "review": "review_mechanical_coverage independent Astra/xhigh PASS: current bounded static responsibilities; migration/dynamic/real-authoring not passed"
+    },
+    "release": "paused-owner-only",
+    "report_integration_20261008": {
+      "date": "2026-10-08",
+      "status": "first-wave-dispatched-not-complete",
+      "canonical_record": "EXECUTION_PLAN.md#non-office-report-integration",
+      "baseline": "3095ea020a4eef9864e865e4560ffbc1987cc913 + effective uncommitted working tree",
+      "request_scope": "Integrate the two newest root reports with the current execution plan; defer only Office follow-on development among the near-term product scope.",
+      "not_execution_authorization": false,
+      "preserve_current_task_state": true,
+      "preserve_fee_host_release_pauses": true,
+      "reports": [
+        "AI创作与修改核心链路审查汇总报告-2026-10-08.md",
+        "果铃_全会话综合评估与优先级建议_2026-10-08_GPT.md"
+      ],
+      "evidence_boundary": "Reports and current plan read in full; selected direct source owners statically checked. No product edits, product tests, paid model calls, GUI restart or independent new product review in this planning turn.",
+      "deferred_office_only": [
+        "O1",
+        "O2",
+        "O3",
+        "X3:office-commercial-integration",
+        "MECH-13:new-public-append-PPTX-to-current-project"
+      ],
+      "preserved_existing_office": [
+        "existing inspect/create/edit",
+        "existing import/append UI/save/export",
+        "necessary shared-owner adapter and affected regression"
+      ],
+      "existing_done_reused": [
+        "MECH-14:independently-passed-early-exit-and-queue-work",
+        "valid U/S/creation-continuation evidence unaffected by change"
+      ],
+      "writer_rule": "Reuse followup.writers and current precise task-card ownership. These owner slots are not assignments or locks. New files, factory and model-setting integration require one actual writer at dispatch.",
+      "dependency_rule": "start_after and leaf_dependencies are stable-interface dependencies, never whole-batch waterfall gates. NI-08 follows from first wave; paid final journeys need current explicit authorization. Apply methodology first-slice protection before the relevant risky domain change; no all-tools/all-baselines gate. Mechanisms complete with their NI capability slice.",
+      "batches": [
+        {
+          "id": "NI-01",
+          "title": "安全短编辑",
+          "priority": "P0",
+          "maps_to": [
+            "S1",
+            "S2"
+          ],
+          "covers": [
+            "AI-F01",
+            "AI-F02",
+            "AI-F03",
+            "AI-F04",
+            "AI-F05",
+            "AI-F06",
+            "AI-F07",
+            "AI-R01",
+            "MECH-01:target-text",
+            "MECH-02",
+            "MECH-04:target"
+          ],
+          "start_after": [],
+          "owner_slots": [
+            "I-core",
+            "G-agent",
+            "D-document",
+            "U-lifecycle",
+            "F-flow"
+          ],
+          "outcome": "最终首轮载荷一致；开卡/队列/自写后同一逻辑目标；连续选区和图形无损；表格格式与卡片生命周期可用",
+          "methodology_requirements": [
+            "MTH-01",
+            "MTH-02",
+            "MTH-03",
+            "MTH-05",
+            "MTH-06"
+          ],
+          "completion_rule": "Capability repair + actual shared owner/consumers + retired old decisions + preserved behavior + effective anti-reintroduction checks; record authority and verification gaps honestly."
+        },
+        {
+          "id": "NI-02",
+          "title": "成果复用与可靠交付",
+          "priority": "P0",
+          "maps_to": [
+            "S3",
+            "S4"
+          ],
+          "covers": [
+            "AI-F08",
+            "AI-F09",
+            "AI-F10",
+            "MECH-07",
+            "MECH-08",
+            "MECH-09:jobs-materials",
+            "MECH-13:audio-video",
+            "MECH-14:remaining-source-facts"
+          ],
+          "start_after": [],
+          "integrate_with": [
+            "NI-01:stable-target-facts"
+          ],
+          "owner_slots": [
+            "A-realm",
+            "G-agent",
+            "I-core",
+            "X-delivery"
+          ],
+          "outcome": "原Ready/计算成果在合法续作中读取应用保存；只读权限正确；按来源结算；音视频摄取保留",
+          "methodology_requirements": [
+            "MTH-01",
+            "MTH-02",
+            "MTH-03",
+            "MTH-05",
+            "MTH-06"
+          ],
+          "completion_rule": "Capability repair + actual shared owner/consumers + retired old decisions + preserved behavior + effective anti-reintroduction checks; record authority and verification gaps honestly."
+        },
+        {
+          "id": "NI-03",
+          "title": "存量语义与机械职责收回",
+          "priority": "P1",
+          "maps_to": [
+            "S2",
+            "S5"
+          ],
+          "covers": [
+            "MECH-01:domain-intent",
+            "MECH-02:domain-consumers",
+            "MECH-03",
+            "MECH-04",
+            "MECH-05",
+            "MECH-11",
+            "MECH-12",
+            "MECH-15"
+          ],
+          "start_after": [
+            "NI-01:relevant-target-contract"
+          ],
+          "owner_slots": [
+            "I-core",
+            "D-document",
+            "F-flow"
+          ],
+          "outcome": "专业/Flow/Spatial/Recipe/生产力意图共用原planner；身份引用排序装配由软件；旧旁路退出",
+          "methodology_requirements": [
+            "MTH-01",
+            "MTH-02",
+            "MTH-03",
+            "MTH-05",
+            "MTH-06"
+          ],
+          "completion_rule": "Capability repair + actual shared owner/consumers + retired old decisions + preserved behavior + effective anti-reintroduction checks; record authority and verification gaps honestly."
+        },
+        {
+          "id": "NI-04",
+          "title": "局部源码与依赖闭包",
+          "priority": "P0-P1",
+          "maps_to": [
+            "S1",
+            "S3"
+          ],
+          "covers": [
+            "AI-F11",
+            "MECH-06"
+          ],
+          "start_after": [],
+          "owner_slots": [
+            "C-import",
+            "I-core"
+          ],
+          "outcome": "闭包与编译统一URL解析；当前依赖/权限/运行保存有效；源码执行字段不交模型",
+          "methodology_requirements": [
+            "MTH-01",
+            "MTH-02",
+            "MTH-03",
+            "MTH-05",
+            "MTH-06"
+          ],
+          "completion_rule": "Capability repair + actual shared owner/consumers + retired old decisions + preserved behavior + effective anti-reintroduction checks; record authority and verification gaps honestly."
+        },
+        {
+          "id": "NI-05",
+          "title": "长程上下文与压缩成本",
+          "priority": "P0-P1",
+          "maps_to": [
+            "S4",
+            "S5"
+          ],
+          "covers": [
+            "H1",
+            "H3"
+          ],
+          "start_after": [],
+          "engine_integration_after": [
+            "NI-01:request-facts",
+            "NI-02:outcome-facts"
+          ],
+          "owner_slots": [
+            "G-agent"
+          ],
+          "outcome": "同run和跨用户轮次增量覆盖/决策更新/回读正确，再接可选压缩模型并记总成本",
+          "methodology_requirements": [
+            "MTH-01",
+            "MTH-03",
+            "MTH-05",
+            "MTH-06"
+          ],
+          "completion_rule": "Capability repair + actual shared owner/consumers + retired old decisions + preserved behavior + effective anti-reintroduction checks; record authority and verification gaps honestly."
+        },
+        {
+          "id": "NI-06",
+          "title": "真实工具接线与Skill解耦",
+          "priority": "P0-P1",
+          "maps_to": [
+            "S1",
+            "S3",
+            "S5"
+          ],
+          "covers": [
+            "H2",
+            "MECH-10",
+            "MECH-09:research",
+            "X2:explicit-source-version"
+          ],
+          "start_after": [],
+          "owner_slots": [
+            "G-agent",
+            "A-realm",
+            "Root-config"
+          ],
+          "outcome": "搜索接实际授权提供方；六方法/共用软件指南/执行能力解耦，真实分发与发现同步；显式来源版本提示",
+          "methodology_requirements": [
+            "MTH-01",
+            "MTH-02",
+            "MTH-03",
+            "MTH-05",
+            "MTH-06"
+          ],
+          "completion_rule": "Capability repair + actual shared owner/consumers + retired old decisions + preserved behavior + effective anti-reintroduction checks; record authority and verification gaps honestly."
+        },
+        {
+          "id": "NI-07",
+          "title": "通用执行与运行中协作",
+          "priority": "P1",
+          "maps_to": [
+            "S4",
+            "S5"
+          ],
+          "covers": [
+            "H4",
+            "H5",
+            "X1:bounded-read-only-or-candidate"
+          ],
+          "start_after": [],
+          "leaf_dependencies": {
+            "process": [
+              "NI-02:job-facts"
+            ],
+            "steering": [
+              "NI-01:target-lifecycle"
+            ],
+            "subtask": [
+              "NI-05:context-handoff",
+              "NI-02:job-facts"
+            ]
+          },
+          "owner_slots": [
+            "G-agent",
+            "A-realm",
+            "U-lifecycle",
+            "Root-config"
+          ],
+          "outcome": "受明确权限控制的本地工具链；安全边界steering；复用原循环的有限隔离子任务",
+          "methodology_requirements": [
+            "MTH-01",
+            "MTH-02",
+            "MTH-03",
+            "MTH-05",
+            "MTH-06"
+          ],
+          "completion_rule": "Capability repair + actual shared owner/consumers + retired old decisions + preserved behavior + effective anti-reintroduction checks; record authority and verification gaps honestly."
+        },
+        {
+          "id": "NI-08",
+          "title": "差量验收与原主线收口",
+          "priority": "continuous",
+          "maps_to": [
+            "S5",
+            "S6"
+          ],
+          "covers": [
+            "C0",
+            "H6",
+            "teacher-local-compute:remaining-consumers",
+            "existing-U-S:unclosed-non-office-leaves"
+          ],
+          "start_after": [],
+          "final_journey_requires": [
+            "relevant-core-blockers-closed",
+            "stable-related-builds",
+            "latest-explicit-implementation-and-fee-authority"
+          ],
+          "owner_slots": [
+            "Root-config"
+          ],
+          "outcome": "早期三代表任务同行；原S6真实新完整创作与保存运行交付；证据分层、非Office剩余有事实处置",
+          "methodology_requirements": [
+            "MTH-02",
+            "MTH-03",
+            "MTH-04",
+            "MTH-06"
+          ],
+          "completion_rule": "Capability repair + actual shared owner/consumers + retired old decisions + preserved behavior + effective anti-reintroduction checks; record authority and verification gaps honestly."
+        }
+      ],
+      "wave_order": [
+        [
+          "NI-08:methodology-first-slice",
+          "NI-01",
+          "NI-02",
+          "NI-04",
+          "NI-06:search-discovery",
+          "NI-05:replay-preparation",
+          "NI-06:skill-structure"
+        ],
+        [
+          "NI-03:ready-domain-leaves",
+          "NI-05:engine-integration"
+        ],
+        [
+          "NI-07:independent-ready-leaves"
+        ]
+      ],
+      "cross_cutting": [
+        "NI-08",
+        "MECH-01 per migrated use case",
+        "MECH-10 per production schema change",
+        "one writer per shared physical file"
+      ],
+      "completion_boundary": "All AI-F01..11 mapped; AI-R01 verified then fixed or evidence-based excluded; non-Office MECH residuals, H1..H6 and bounded X1/X2 slices included. External unmet prerequisites remain explicit incomplete leaves, never disguised pass. No automatic release/Owner acceptance. Methodology completion additionally requires MTH-01..06 evidence; local checks, independent review and remote hard enforcement are distinct, never inferred from documentation.",
+      "methodology": {
+        "date": "2026-10-08",
+        "status": "planned-not-implemented",
+        "canonical_record": "EXECUTION_PLAN.md#enforced-capability-methodology",
+        "current_authorization": "Owner-start-prompt-implementation-20261008",
+        "not_product_execution_authorization": false,
+        "preserve_fee_host_release_pauses": true,
+        "dispatch_model": "cross-cutting deliverables of existing NI packages; no second task board or standalone governance program",
+        "completion_contract": [
+          "one domain owner for each in-scope business decision",
+          "all required production consumers actually call the shared use case",
+          "old duplicated decisions and mechanical model bookkeeping retire in the same slice",
+          "evidence-backed current and non-cancelled V9 user behaviors remain valid",
+          "executable checks reject reintroduction of retired bypasses",
+          "rule and acceptance weakening cannot be approved solely by the implementer"
+        ],
+        "mechanisms": [
+          {
+            "id": "MTH-01",
+            "title": "意图与宿主准备事实分离",
+            "status": "planned",
+            "integrated_into": [
+              "NI-01",
+              "NI-02",
+              "NI-03",
+              "NI-04",
+              "NI-05",
+              "NI-06",
+              "NI-07"
+            ],
+            "owner_slots": [
+              "I-core",
+              "G-agent",
+              "A-realm",
+              "existing-domain-owner"
+            ],
+            "implementation_anchors": [
+              "src/core/tools/ToolRegistration.ts",
+              "src/core/tools/DocumentToolGateway.ts",
+              "src/core/tools/HostToolServices.ts",
+              "existing domain planners and real UI consumers"
+            ],
+            "deliverable": "Existing capability intent inputs exclude host execution facts; trusted preparation and typed results feed UI/builtin/MCP adapters without a second dispatcher or writer.",
+            "minimum_evidence": [
+              "ordinary intent suffices without platform bookkeeping",
+              "forged execution fields cannot override host facts",
+              "required production entrypoints preserve equivalent semantics and legitimate differences",
+              "old schemas/preparation routes retired"
+            ],
+            "limits": [
+              "author variables and third-party business arguments remain content",
+              "types alone do not enforce runtime authority",
+              "no all-tools migration gate"
+            ]
+          },
+          {
+            "id": "MTH-02",
+            "title": "可执行边界与存量例外棘轮",
+            "status": "planned",
+            "integrated_into": [
+              "NI-08",
+              "NI-01",
+              "NI-02",
+              "NI-03",
+              "NI-04",
+              "NI-06",
+              "NI-07"
+            ],
+            "owner_slots": [
+              "I-core",
+              "Root-config",
+              "existing-domain-owner"
+            ],
+            "implementation_anchors": [
+              "scripts/check-g20-import-boundaries.ts",
+              "existing applicable ratchet fixtures and boundary tests"
+            ],
+            "deliverable": "Exact reviewed rule/edge exceptions can shrink but cannot silently expand; retired paths, aliases and necessary consumers are checked with existing boundary and behavior infrastructure.",
+            "minimum_evidence": [
+              "reintroduced forbidden edge fails",
+              "equal-count violation substitution fails",
+              "legitimate adapter passes",
+              "unused shared import does not hide a disconnected production consumer"
+            ],
+            "limits": [
+              "no second legacy inventory",
+              "static checks do not prove arbitrary business-code equivalence",
+              "existing confirmed defects remain required repairs"
+            ]
+          },
+          {
+            "id": "MTH-03",
+            "title": "用户行为基线与可重放序列",
+            "status": "planned",
+            "integrated_into": [
+              "NI-08",
+              "NI-01",
+              "NI-02",
+              "NI-03",
+              "NI-04",
+              "NI-05",
+              "NI-06",
+              "NI-07"
+            ],
+            "owner_slots": [
+              "existing-domain-owner",
+              "independent-T",
+              "Root-config"
+            ],
+            "implementation_anchors": [
+              "existing tests/unit",
+              "existing tests/integration",
+              "existing tests/e2e",
+              "evidence-backed V9/current samples referenced from the execution plan"
+            ],
+            "deliverable": "Behavior expectations precede changed implementation; V9 normal behavior is retained via version-specific fixtures without reinstating production V9 compatibility.",
+            "minimum_evidence": [
+              "fixture migration preserves semantic assertions",
+              "known counterexample is detected before correction",
+              "one evidenced V9 behavior passes the current entrypoint",
+              "reproducible target/history/save/recovery sequences"
+            ],
+            "limits": [
+              "no random ID/revision/whole-archive byte golden",
+              "old defects are not acceptable golden behavior",
+              "uncertain historical evidence is explicit, not silently excluded"
+            ]
+          },
+          {
+            "id": "MTH-04",
+            "title": "独立验收权限与可信CI入口",
+            "status": "planned",
+            "integrated_into": [
+              "NI-08"
+            ],
+            "owner_slots": [
+              "Root-config",
+              "independent-reviewer",
+              "Owner-or-independent-repository-administrator"
+            ],
+            "implementation_anchors": [
+              ".github/workflows/check-contracts.yml",
+              "package.json validation entrypoints",
+              "actual remote protection settings to inspect before implementation"
+            ],
+            "deliverable": "Trusted scope/result evaluation and independently protected policy changes; candidate jobs lack admin credentials; actual integration candidate and required executed tests are identified.",
+            "minimum_evidence": [
+              "required test deletion/skip/zero execution fails",
+              "candidate cannot silently weaken selector/exception/snapshot policy",
+              "wrong candidate or missing report fails",
+              "genuine unaffected documentation is explicitly not applicable",
+              "actual developer role cannot bypass configured remote protections when enabled"
+            ],
+            "limits": [
+              "CODEOWNERS or local hooks alone are not hard authority isolation",
+              "remote permissions were not inspected or changed in this planning turn",
+              "unavailable remote protection remains incomplete, not disguised pass",
+              "no privileged execution of untrusted candidate code"
+            ]
+          },
+          {
+            "id": "MTH-05",
+            "title": "Skill方法、共用指南与能力解耦",
+            "status": "planned",
+            "integrated_into": [
+              "NI-06",
+              "NI-01",
+              "NI-02",
+              "NI-03",
+              "NI-04",
+              "NI-05",
+              "NI-07"
+            ],
+            "owner_slots": [
+              "NI-06-designated-skill-writer",
+              "Root-config",
+              "existing-domain-owner"
+            ],
+            "implementation_anchors": [
+              ".agents/skills/orchestrate-courseware",
+              ".agents/skills/edit-content",
+              ".agents/skills/build-courseware-project",
+              ".agents/skills/research-and-report",
+              ".agents/skills/data-and-report",
+              ".agents/skills/office-content",
+              "scripts/install-courseware-skills.ps1",
+              "actual bundled/scoped skill loaders and method mappings"
+            ],
+            "proposed_shared_reference_path": ".agents/skills/workbench-usage/ (candidate name, not yet created)",
+            "deliverable": "Task methods own content judgement; shared usage references own software guidance; existing software capabilities own deterministic execution. All real distribution/discovery consumers migrate together.",
+            "minimum_evidence": [
+              "short edit succeeds without creation Skill",
+              "teaching/research/data tasks share software-operation sources",
+              "interface change does not require rewriting all task methods",
+              "runtime skill discovery and reference reads return new content",
+              "scripts do not implement a second formal writer"
+            ],
+            "limits": [
+              "preserve existing six entrypoints and user-customized installs",
+              "do not add compulsory skill loading to short edits",
+              "Office guide cleanup is not Office feature development",
+              "moving bookkeeping into references/scripts alone is not completion"
+            ]
+          },
+          {
+            "id": "MTH-06",
+            "title": "差量验题与真实集成边界",
+            "status": "planned",
+            "integrated_into": [
+              "NI-08",
+              "NI-01",
+              "NI-02",
+              "NI-03",
+              "NI-04",
+              "NI-05",
+              "NI-06",
+              "NI-07"
+            ],
+            "owner_slots": [
+              "independent-T",
+              "existing-domain-owner",
+              "Root-config"
+            ],
+            "implementation_anchors": [
+              "existing scoped validation workflow and tests",
+              "real PayloadCompiler/Gateway/DocumentSession",
+              "real compute/image job identity and delivery consumers"
+            ],
+            "deliverable": "Small fixed critical behavior set plus affected consumers plus current counterexamples; dynamic wiring and generated consumers supplement static related selection; test the actual integrated candidate.",
+            "minimum_evidence": [
+              "relevant production failure boundary is not mocked out",
+              "affected dynamic consumer is selected",
+              "narrow injected counterexample proves each new guard works",
+              "reports distinguish passed/not-applicable/missing/failed/unverified"
+            ],
+            "limits": [
+              "1-3 is organization, never a behavior coverage cap",
+              "no automatic all-format/model/install matrix",
+              "unchanged valid evidence may be reused",
+              "paid/GUI tasks keep current authorization boundaries"
+            ]
+          }
+        ],
+        "first_slice": {
+          "before_risky_domain_change": [
+            "protect relevant behavior expectations and rule source",
+            "one existing boundary guard with a failing counterexample",
+            "trusted expected-versus-executed reporting for the selected slice"
+          ],
+          "parallel_work": [
+            "NI-01/02/04 failure baselines and safe candidate implementation",
+            "NI-06 shared-guide design",
+            "NI-05 replay preparation"
+          ],
+          "not_global_prerequisites": [
+            "all 83 registrations migrated",
+            "all historical baselines collected",
+            "all Skill prose rewritten",
+            "remote administrator action before any local candidate work"
+          ]
+        },
+        "evidence_state": {
+          "product_implementation": "not-started",
+          "skill_files_changed": false,
+          "ci_files_changed": false,
+          "remote_authority_configured": false,
+          "product_tests_run": false,
+          "independent_review": "not-performed-in-this-turn"
+        },
+        "reporting_rule": "Documentation consistency is not implementation or independent review. Record local enforcement, remote authority, user-behavior and real-model verification separately. Preserve queued task states and Office deferral."
+      },
+      "latest_planning_update": "2026-10-08: Current product batch paused and preserved by Owner; workflow organization follows WORKING_PROTOCOL. NI targets, dependencies, author models, fees and acceptance remain; no automatic dispatch, push or release."
+    },
+    "methodology_section": "EXECUTION_PLAN.md#enforced-capability-methodology"
+  }
 }

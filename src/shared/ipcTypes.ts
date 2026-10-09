@@ -1,6 +1,7 @@
 import type { MaterialRequest, MaterialRecordV1 } from './materialContract'
 import type { DynamicAdmissionRequest, DynamicAdmissionResult } from './dynamicAdmissionContract'
 import type { SaveDirectoryContext } from './workbench/desktop'
+import type { SpatialViewportRequest, SpatialViewportCapture } from './workbench/spatialViewport'
 import type {
   ComponentCatalogPackageFile,
   ComponentCatalogSnapshot,
@@ -200,6 +201,10 @@ export interface DesktopAPI {
   setDirtyState(dirty: boolean): Promise<void>
   onRequestSave(handler: () => void): () => void
   onRequestFocusDocument?(handler: (documentId: string) => void): () => void
+  onRequestPrepareDocumentInput?(handler: (documentId: string) => Promise<void>): () => void
+  onRequestCaptureSpatialViewport?(handler: (input: SpatialViewportRequest) => Promise<SpatialViewportCapture>): () => void
+  onRequestCaptureMediaCopy?(handler: (source: string, kind: 'file' | 'directory') => readonly import('./workbench/mediaFiles').MediaFileDraftInput[] | Promise<readonly import('./workbench/mediaFiles').MediaFileDraftInput[]>): () => void
+  onMediaArtifactBindingChanged?(handler: (change: import('./workbench/mediaFiles').MediaArtifactBindingChanged) => void): () => void
   onRequestPreserveAndClose?(handler: (documentIds?: readonly string[]) => Promise<PreserveAndCloseResult>): () => void
   onRequestSaveAndClose(handler: (documentIds?: readonly string[]) => Promise<PreserveAndCloseResult>): () => void
   onRequestDiscardAndClose?(handler: (documentIds: readonly string[]) => Promise<boolean>): () => void
@@ -283,6 +288,13 @@ export const IPC_CHANNELS = {
   launchFiles: 'app:launch-files',
   launchFilesChanged: 'app:launch-files-changed',
   requestFocusDocument: 'app:request-focus-document',
+  requestPrepareDocumentInput: 'document-input:prepare-request',
+  prepareDocumentInputResult: 'document-input:prepare-result',
+  requestCaptureSpatialViewport: 'spatial-viewport:capture-request',
+  captureSpatialViewportResult: 'spatial-viewport:capture-result',
+  requestCaptureMediaCopy: 'media-copy:capture-request',
+  captureMediaCopyResult: 'media-copy:capture-result',
+  mediaArtifactBindingChanged: 'media-file:binding-changed',
   requestSaveAndClose: 'app:request-save-and-close',
   requestDiscardAndClose: 'app:request-discard-and-close',
   discardAndCloseResult: 'app:discard-and-close-result',

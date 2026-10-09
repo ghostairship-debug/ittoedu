@@ -1,3 +1,4 @@
+import { isNativeProjectFilename } from '../shared/nativeProjectFile'
 import { authorizeWorkspaceFilesRoot } from './workbench/workspaceFilesDesktopService'
 import { app, dialog, shell, type BrowserWindow } from 'electron'
 import { promises as fs } from 'node:fs'
@@ -51,7 +52,7 @@ export async function operateLessonDesktop(window: BrowserWindow, request: unkno
     case 'remove-project': return { projects: await projects.remove(input.directory, input.path) }
     case 'open-project': {
       const filename = await fs.realpath(input.path)
-      if (path.extname(filename).toLowerCase() !== '.h5lesson') throw new Error('请选择 H5 演示文件（.h5lesson）')
+      if (!isNativeProjectFilename(filename)) throw new Error('请选择 果铃工程文件（.glx）')
       return { projectFile: await openSelectedProjectFile(filename) }
     }
     case 'recent-workspaces': return { recent: await recentWorkspaces() }

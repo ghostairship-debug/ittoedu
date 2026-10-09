@@ -1,6 +1,25 @@
 {
-  "description": "应用已观察的工程路径，用content或授权工作区from。对象content保留人工位置、顺序和其他对象；页面结构可用insert、redo及surface.add/move/remove/title。theme.css修改整课主题；body.html/body.md修改连续正文，保留浮层；spatial.json修改镜头与路径，软件维护身份。components/源码修改共享定义；页面内源码只改该实例。源码、资产与正式内容为一次可撤销操作并进入恢复稿，不自动存盘。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。",
+  "description": "应用已观察的工程路径，用content或授权工作区from。project.json 可提供 title/background/designTokens/playback 设置补丁，软件维护身份和版本。已有内容时content只修改原对象的内容，保留人工位置、顺序和其他对象；页面结构insert追加独立内容，redo重做所选范围的整体布局，另可surface.add/move/remove/title。theme.css修改整课主题；body.html/body.md修改连续正文，保留浮层；spatial.json修改镜头与路径，软件维护身份。components/源码修改共享定义；页面内源码只改该实例。源码、资产与正式内容为一次可撤销操作并进入恢复稿，不自动存盘。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。",
   "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema1": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema2": {
+        "enum": [
+          "content",
+          "insert",
+          "style",
+          "redo"
+        ],
+        "type": "string"
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "anyOf": [
       {
@@ -10,21 +29,13 @@
             "type": "string"
           },
           "intent": {
-            "enum": [
-              "content",
-              "insert",
-              "style",
-              "redo"
-            ],
-            "type": "string"
+            "$ref": "#/$defs/__schema2"
           },
           "path": {
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema1"
           },
           "project": {
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema0"
           }
         },
         "required": [
@@ -44,21 +55,13 @@
             "type": "string"
           },
           "intent": {
-            "enum": [
-              "content",
-              "insert",
-              "style",
-              "redo"
-            ],
-            "type": "string"
+            "$ref": "#/$defs/__schema2"
           },
           "path": {
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema1"
           },
           "project": {
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema0"
           }
         },
         "required": [
@@ -71,8 +74,7 @@
         "additionalProperties": false,
         "properties": {
           "before": {
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema1"
           },
           "intent": {
             "const": "surface.add",
@@ -91,8 +93,7 @@
             "type": "string"
           },
           "project": {
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema0"
           },
           "title": {
             "type": "string"
@@ -109,20 +110,17 @@
         "additionalProperties": false,
         "properties": {
           "before": {
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema1"
           },
           "intent": {
             "const": "surface.move",
             "type": "string"
           },
           "path": {
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema1"
           },
           "project": {
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema0"
           }
         },
         "required": [
@@ -139,12 +137,10 @@
             "type": "string"
           },
           "path": {
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema1"
           },
           "project": {
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema0"
           }
         },
         "required": [
@@ -161,12 +157,10 @@
             "type": "string"
           },
           "path": {
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema1"
           },
           "project": {
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema0"
           },
           "title": {
             "type": "string"

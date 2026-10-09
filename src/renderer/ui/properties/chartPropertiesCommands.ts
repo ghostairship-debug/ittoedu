@@ -1,5 +1,6 @@
 import { chartDataSchema, type ChartData } from '../../../components/chart/data'
-import { changeChartType, replaceChartTableData, patchChartStyle } from '../../../components/chart/contentOperations'
+import { changeChartType, patchChartStyle } from '../../../components/chart/contentOperations'
+import { editChartData } from '../../../components/chart/edit'
 import type { ChartPropertiesCommands } from './ChartProperties'
 
 /** Value-only editor adapter; target/revision/history are owned by its caller. */
@@ -17,6 +18,6 @@ export function createChartPropertiesCommands(
     patchTitle: title => run(() => ({ ...chart, title })),
     patchType: (type, series) => run(() => changeChartType(chart, type, series)),
     patchStyle: style => run(() => patchChartStyle(chart, style)),
-    commitTableData: data => apply(() => replaceChartTableData(chart, data)),
+    commitTableData: data => apply(() => editChartData(chart, { type: 'table-data', ...data })),
   }
 }

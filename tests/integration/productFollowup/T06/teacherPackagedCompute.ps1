@@ -226,7 +226,9 @@ try {
   }
   foreach ($directory in @($run, $workspace, $profile, $temporary)) { [void][IO.Directory]::CreateDirectory($directory) }
   $Candidate = [IO.Path]::GetFullPath($Candidate)
-  $exe = Join-Path $Candidate 'ittoedu-courseware-editor.exe'
+  $exe = Join-Path $Candidate 'guoling-workbench.exe'
+  # Existing frozen receipts still reference the original executable name.
+  if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { $exe = Join-Path $Candidate 'ittoedu-courseware-editor.exe' }
   $helper = Join-Path $Candidate 'resources\mcp-bootstrap\Connect-Guoling.ps1'
   Assert-True ((Test-Path -LiteralPath $exe -PathType Leaf) -and (Test-Path -LiteralPath $helper -PathType Leaf) `
     -and (Test-Path -LiteralPath (Join-Path $Candidate 'resources\app.asar') -PathType Leaf)) 'Packaged executable, self-locating helper, or app.asar is missing.'

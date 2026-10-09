@@ -5,7 +5,7 @@ const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/i, 'sha256 must contain 64
 export const coursewareEvidenceArtifactSchema = z.object({
   id: z.string().min(1),
   kind: z.enum([
-    'h5lesson',
+    'glx',
     'standalone-html',
     'web-package',
     'pdf',

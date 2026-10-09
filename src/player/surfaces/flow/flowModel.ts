@@ -137,7 +137,7 @@ export function toFlowPublishedPlayback(
 ): FlowPublishedPlaybackDocument {
   const surfaces = publishedFlowSurfaces(source)
   if (surfaces.length === 0) {
-    throw new Error('H5 演示没有 Flow 页面')
+    throw new Error('果铃工程没有 Flow 页面')
   }
   return {
     courseId: source.courseId,

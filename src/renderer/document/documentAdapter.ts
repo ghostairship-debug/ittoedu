@@ -1,8 +1,7 @@
 import { type Node as PMNode, type Mark } from 'prosemirror-model'
-import { documentContentSchema, documentTextSlots, normalizeDocumentText, type DocumentBlock, type DocumentContent, type FlowInline, type FlowTextContent } from '../../shared/document/content'
+import { documentContentSchema, documentVisibleTextSlots, normalizeDocumentText, type DocumentBlock, type DocumentContent, type FlowInline, type FlowTextContent } from '../../shared/document/content'
 import type { DocumentPoint, DocumentSlot } from '../../shared/document/ports'
 import { documentEditorSchema as schema } from './editorSchema'
-import { tableCellSpan } from '../../shared/tableMerge'
 
 function inlineNodes(content: FlowTextContent): PMNode[] {
   return content.inlines.flatMap(atom => {
@@ -40,23 +39,22 @@ function blockNode(block: DocumentBlock): PMNode {
   const attrs = { id, data }
   switch (block.type) {
     case 'table': {
+      const slots = documentVisibleTextSlots(block)
       const firstCell = block.headerEnabled === false ? schema.nodes.table_cell : schema.nodes.table_header
-      const header = schema.nodes.table_row.create(null, block.columns.map(column => firstCell.create(null,
-        schema.nodes.slot.create({ key: `column:${column.id}` }, inlineNodes(column.header)))))
-      const rows = block.rows.map(row => schema.nodes.table_row.create(null, block.columns.flatMap(column => {
-        const span = tableCellSpan(block, row.id, column.id)
-        if (span.covered) return []
-        return [schema.nodes.table_cell.create({ colspan: span.columnSpan, rowspan: span.rowSpan },
-          schema.nodes.slot.create({ key: `cell:${JSON.stringify([row.id, column.id])}` }, inlineNodes(row.cells[column.id])))]
-      })))
-      return schema.nodes.table_container.create(attrs, [...(block.caption ? [schema.nodes.slot.create({ key: 'caption' }, inlineNodes(block.caption))] : []), schema.nodes.table.create(null, [header, ...rows])])
+      const header = schema.nodes.table_row.create(null, slots.filter(slot => slot.tableCell?.rowId === null).map(slot => firstCell.create(null,
+        schema.nodes.slot.create({ key: slot.key }, inlineNodes(slot.content)))))
+      const rows = block.rows.map(row => schema.nodes.table_row.create(null, slots.filter(slot => slot.tableCell?.rowId === row.id).map(slot =>
+        schema.nodes.table_cell.create({ colspan: slot.tableCell!.columnSpan, rowspan: slot.tableCell!.rowSpan },
+          schema.nodes.slot.create({ key: slot.key }, inlineNodes(slot.content))))))
+      return schema.nodes.table_container.create(attrs, [...slots.filter(slot => !slot.tableCell).map(slot =>
+        schema.nodes.slot.create({ key: slot.key }, inlineNodes(slot.content))), schema.nodes.table.create(null, [header, ...rows])])
     }
     case 'paragraph': case 'heading': return schema.nodes[block.type].create(attrs, inlineNodes(block.content))
     case 'formula': return schema.nodes.formula.create(attrs)
     case 'code': return schema.nodes.code_block.create(attrs, block.code ? schema.text(block.code) : undefined)
     case 'section': return schema.nodes.section.create(attrs, [schema.nodes.slot.create({ key: 'title' }, inlineNodes(block.title)), ...block.blocks.map(blockNode)])
     default: {
-      const slots = documentTextSlots(block)
+      const slots = documentVisibleTextSlots(block)
       return slots.length ? schema.nodes.compound.create(attrs, slots.map(slot => schema.nodes.slot.create({ key: slot.key }, inlineNodes(slot.content)))) : schema.nodes.object.create(attrs)
     }
   }

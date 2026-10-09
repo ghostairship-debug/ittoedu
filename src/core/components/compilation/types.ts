@@ -1,6 +1,8 @@
 /** Transient compiler input. The document/resource owner supplies these files. */
 export interface ComponentModuleSource {
   entry: string
+  /** Declared source language applies to this owner's entry; sibling file types keep their authored extensions. */
+  entryLanguage?: 'javascript' | 'typescript'
   files: Readonly<Record<string, string>>
   /** Opaque source-workspace siblings, supplied unchanged for CSS url() consumers. */
   binaryFiles?: Readonly<Record<string, Uint8Array>>

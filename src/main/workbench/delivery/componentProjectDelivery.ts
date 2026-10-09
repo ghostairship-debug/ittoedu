@@ -7,6 +7,7 @@ import type { DocumentDeliveryServicePort } from '../../../shared/workbench/tool
 import type { ComponentProjectSnapshot } from '../../../core/projectFiles/componentPlatform'
 import { documentDeliveryReceiptResult } from '../../../core/tools/DocumentDeliveryTools'
 import { documentExportInputSchema } from '../../../core/tools/DocumentDeliveryTools'
+import { executeResolvedDocumentDelivery } from '../../../core/tools/DocumentDeliveryTools'
 
 export const componentProjectDeliverySchema = z.object({
   project: z.string().min(1).optional(), destination: z.string().min(1).optional(),
@@ -18,6 +19,7 @@ export interface ComponentProjectDeliveryContext {
   runId: string
   operationId: string
   requestDigest: string
+  signal?: AbortSignal
   /** Resolves the authorized current document, not a model-supplied epoch/revision or stale short handle. */
   current(project: string | undefined, access: 'write'): Promise<ComponentProjectSnapshot>
 }
@@ -29,14 +31,10 @@ export async function deliverComponentProject(service: DocumentDeliveryServicePo
   if (!parsed.success) return { kind: 'error', code: 'invalid-input', message: '保存/导出参数无效：' + parsed.error.issues.map(issue => issue.message).join('；') }
   const known = await service.lookup(context)
   if (known) return documentDeliveryReceiptResult(known)
+  context.signal?.throwIfAborted()
   const snapshot = await context.current(parsed.data.project, 'write')
   if (snapshot.model.kind !== 'course-v10') return { kind: 'error', code: 'unsupported-project', message: '此入口只交付当前 Project V10 工程。' }
-  const common = { runId: context.runId, operationId: context.operationId, requestDigest: context.requestDigest,
-    documentId: snapshot.documentId, epoch: snapshot.epoch, destination: parsed.data.destination }
-  const receipt = parsed.data.format
-    ? await service.export({ ...common, revision: snapshot.revision, format: parsed.data.format, options: parsed.data.options })
-    : await service.save({ ...common, baseRevision: snapshot.revision })
-  return documentDeliveryReceiptResult(receipt)
+  return executeResolvedDocumentDelivery(service, context, snapshot, parsed.data)
 }
 
 /** Used by the existing destination resolver before realpath(parent). No document or byte writer lives here. */

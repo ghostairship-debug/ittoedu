@@ -4,7 +4,8 @@ import type { EditorStoreKernel } from '../editorStoreKernel'
 import type { CourseAuthoringTarget } from '../../authoring/courseAuthoringSession'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import type { ComponentEdit, JsonValue } from '../../../shared/contracts/component-platform'
-import { owningContainer,containerChildIds } from '../../../shared/contracts/component-platform/project'
+import { surfaceSettingsEdits } from '../../../core/course/courseSemanticEdits'
+import { flowPlacementEdits, flowReadingOrderEdits } from '../../../core/course/courseFlowEdits'
 import type { FlowBlock } from '../../../shared/courseProjectTypes'
 import type { DocumentBlock } from '../../../shared/document/content'
 import type { DocumentSelection } from '../../../shared/document/ports'
@@ -129,11 +130,10 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
         }
         case 'update-document-draft': setDraft({ surfaceId: target.surfaceId!, revision: target.project.revision, source: intent.source, diagnostics: intent.diagnostics, composing: intent.composing },target.documentId); return { ok: true, historyEntry: false }
         case 'clear-document-draft': setDraft(null,target.documentId); return { ok: true, historyEntry: false }
-        case 'rename-page': return commit([{ type: 'surface.title.set', surfaceId: target.surfaceId!, title: intent.title }], undefined, target)
+        case 'rename-page': return commit(surfaceSettingsEdits(target.editingProject, target.surfaceId!, { title: intent.title }), undefined, target)
         case 'set-width-mode': case 'set-paper-background': {
-          const surface = target.project.surfaces.find(value => value.id === target.surfaceId)!
-          const layout = surface.flow?.layout ?? { widthMode: 'reading' as const, readingWidth: 860, wideContentWidth: 1100, paperBackgroundColor: '#ffffff' }
-          return commit([{ type: 'flow.set', surfaceId: target.surfaceId!, flow: { ...surface.flow, layout: { ...layout, ...(intent.kind === 'set-width-mode' ? { widthMode: intent.widthMode } : { paperBackgroundColor: intent.backgroundColor }) } } }], undefined, target)
+          return commit(surfaceSettingsEdits(target.editingProject, target.surfaceId!, { flowLayout: intent.kind === 'set-width-mode'
+            ? { widthMode: intent.widthMode } : { paperBackgroundColor: intent.backgroundColor } }), undefined, target)
         }
         case 'delete-blocks': return commit(intent.blockIds.map(id => ({ type: 'instance.remove', instanceId: id })), undefined, target)
         case 'patch-block': case 'patch-overlay-properties': if (!instance) throw new Error('请选择讲义对象'); return commit(Object.entries(intent.patch).map(([key,value]) => ({ type: 'data.set', instanceId: instance.id, path: [key], value: JSON.parse(JSON.stringify(value)) as JsonValue })), undefined, target)
@@ -141,18 +141,19 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
         case 'patch-overlay-paper-space': case 'patch-overlay-body-plane': case 'convert-overlay-to-document': case 'convert-block-to-overlay': {
           if (!instance) throw new Error('请选择讲义对象')
           const placement = instance.flowPlacement ?? { space: 'paper' as const, plane: 'overlay' as const }
-          const edits: ComponentEdit[] = [{ type: 'instance.flowPlacement.set', instanceId: instance.id, flowPlacement: intent.kind === 'convert-overlay-to-document' ? null : {
-            ...placement, ...(intent.kind === 'patch-overlay-paper-space' ? { space: intent.paperSpace } : intent.kind === 'patch-overlay-body-plane' ? { plane: intent.bodyPlane } : intent.kind === 'convert-block-to-overlay' && intent.paragraphAnchor ? { paragraphAnchor: intent.paragraphAnchor } : {}) } }]
-          if (intent.kind === 'convert-block-to-overlay' && !instance.frame) { const frame = intent.frame ?? { x: 80, y: 80, width: 240, height: 120 }; edits.unshift({ type: 'frame.set', instanceId: instance.id, frame: { width: frame.width, height: frame.height, transform: [1,0,0,1,frame.x,frame.y] } }) }
-          if(intent.kind==='convert-block-to-overlay' && owningContainer(target.project,instance.id)?.kind==='instance')edits.push({type:'instance.move',instanceId:instance.id,container:{kind:'surface',surfaceId:target.surfaceId!},index:containerChildIds(target.project,{kind:'surface',surfaceId:target.surfaceId!}).length})
+          const edits = flowPlacementEdits(target.editingProject, instance.id, intent.kind === 'convert-overlay-to-document'
+            ? { kind: 'document', surfaceId: target.surfaceId! }
+            : { kind: 'overlay', surfaceId: target.surfaceId!, placement: {
+              ...placement, ...(intent.kind === 'patch-overlay-paper-space' ? { space: intent.paperSpace }
+                : intent.kind === 'patch-overlay-body-plane' ? { plane: intent.bodyPlane }
+                : intent.kind === 'convert-block-to-overlay' && intent.paragraphAnchor ? { paragraphAnchor: intent.paragraphAnchor } : {}) },
+              ...(intent.kind === 'convert-block-to-overlay' && intent.frame ? { frame: { width: intent.frame.width, height: intent.frame.height,
+                transform: [1,0,0,1,intent.frame.x,intent.frame.y] } } : {}) })
           return commit(edits, undefined, target)
         }
         case 'move-block': {
-          if (!instance) throw new Error('请选择正文对象'); const container=owningContainer(target.project,instance.id)
-          if(!container)throw new Error('正文对象归属不存在')
-          const siblings=containerChildIds(target.project,container),index=siblings.indexOf(instance.id)+(intent.direction==='up' ? -1:1)
-          if (index < 0 || index >= siblings.length) return { ok: true, historyEntry: false }
-          return commit([{ type: 'instance.move', instanceId: instance.id, container, index }], undefined, target)
+          if (!instance) throw new Error('请选择正文对象')
+          return commit(flowReadingOrderEdits(target.editingProject, instance.id, intent.direction), undefined, target)
         }
         default: throw new Error(`当前讲义操作需要对应专业编辑入口：${intent.kind}`)
       }
@@ -185,7 +186,7 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
     undo: async () => { const documentId = kernel.readView().activeDocumentId; if (documentId && (await drain(documentId)).ok) await kernel.bridge.undo(documentId) },
     redo: async () => { const documentId = kernel.readView().activeDocumentId; if (documentId && (await drain(documentId)).ok) await kernel.bridge.redo(documentId) },
     renameProject: (title: string) => commit([{ type: 'project.title.set', title }]),
-    renameFlowPage: (surfaceId: string, title: string) => commit([{ type: 'surface.title.set', surfaceId, title }]),
+    renameFlowPage: (surfaceId: string, title: string) => commit(surfaceSettingsEdits(kernel.readDocument(), surfaceId, { title })),
     renameFlowHeading: renameHeading,
     activateFlowHeading(surfaceId: string, instanceId: string) { const target = kernel.captureTarget(); kernel.selectInstances([instanceId], surfaceId, target.documentId); requestFlowBlockSelection({ documentId: target.documentId, surfaceId, blockId: instanceId }); return true },
     activateBlock(instanceId: string) { const target = active(); kernel.selectInstances([instanceId], target.surfaceId, target.documentId); requestFlowBlockSelection({ documentId: target.documentId, surfaceId: target.surfaceId!, blockId: instanceId }); return true },

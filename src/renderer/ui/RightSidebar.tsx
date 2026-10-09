@@ -41,6 +41,8 @@ interface RightSidebarProps {
     entries: AvailableComponentCatalogPackage[],
   ): boolean | Promise<boolean>
   onUpdateCatalogComponent?(entry: AvailableComponentCatalogPackage): void
+  onExtractSelection?(title: string): Promise<void>
+  onDeleteCatalogComponent?(entry: AvailableComponentCatalogPackage): Promise<void>
 }
 
 const sidebarTabs = [
@@ -72,6 +74,8 @@ export function RightSidebar({
   onRefreshComponentCatalog,
   onAddCatalogComponents,
   onUpdateCatalogComponent,
+  onExtractSelection,
+  onDeleteCatalogComponent,
 }: RightSidebarProps) {
   const activeTab = useEditorStore((state) => state.activeTab)
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
@@ -168,7 +172,9 @@ export function RightSidebar({
             onRefreshComponentCatalog={onRefreshComponentCatalog}
             onAddCatalogComponents={onAddCatalogComponents}
             onUpdateCatalogComponent={onUpdateCatalogComponent}
-            onReplaceComponent={onReplaceComponent} />
+            onReplaceComponent={onReplaceComponent}
+            onExtractSelection={onExtractSelection}
+            onDeleteCatalogComponent={onDeleteCatalogComponent} />
         </div>}
         {visited.has('layers') && <div className="sidebar-section" hidden={activeTab !== 'layers'}><NodesTab /></div>}
         {visited.has('properties') && <div className="sidebar-section" hidden={activeTab !== 'properties'}>

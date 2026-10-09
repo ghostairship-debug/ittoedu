@@ -1,10 +1,13 @@
 {
-  "description": "把已准备的本任务图片资源插入已授权页面；软件登记资源和组件身份。frame 可省略，由宿主按图片比例放置；插入和撤销均经过正式文档事务。",
+  "description": "把来源返回的 source 或已授权文件路径插入已授权页面，支持图片、音频和视频；target 为页面句柄，或用 project.list/read 返回的页面 path（project 可选）。软件读取字节、登记资源并分配组件身份。frame 可省略，由宿主按媒体尺寸放置；一次正式事务可撤销。",
   "inputSchema": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "additionalProperties": false,
-    "properties": {
-      "fit": {
+    "$defs": {
+      "__schema0": {
+        "maxLength": 100,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema1": {
         "enum": [
           "contain",
           "cover",
@@ -12,39 +15,39 @@
         ],
         "type": "string"
       },
-      "frame": {
+      "__schema2": {
         "additionalProperties": false,
         "properties": {
           "height": {
-            "exclusiveMinimum": 0,
-            "type": "number"
+            "$ref": "#/$defs/__schema3",
+            "exclusiveMinimum": 0
           },
           "transform": {
             "prefixItems": [
               {
-                "type": "number"
+                "$ref": "#/$defs/__schema3"
               },
               {
-                "type": "number"
+                "$ref": "#/$defs/__schema3"
               },
               {
-                "type": "number"
+                "$ref": "#/$defs/__schema3"
               },
               {
-                "type": "number"
+                "$ref": "#/$defs/__schema3"
               },
               {
-                "type": "number"
+                "$ref": "#/$defs/__schema3"
               },
               {
-                "type": "number"
+                "$ref": "#/$defs/__schema3"
               }
             ],
             "type": "array"
           },
           "width": {
-            "exclusiveMinimum": 0,
-            "type": "number"
+            "$ref": "#/$defs/__schema3",
+            "exclusiveMinimum": 0
           }
         },
         "required": [
@@ -54,26 +57,121 @@
         ],
         "type": "object"
       },
-      "resource": {
-        "minLength": 1,
-        "type": "string"
-      },
-      "target": {
-        "maxLength": 100,
-        "minLength": 1,
-        "type": "string"
+      "__schema3": {
+        "type": "number"
       }
     },
-    "required": [
-      "target",
-      "resource"
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "anyOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "fit": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "frame": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "source": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "target",
+          "source"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "fit": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "frame": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "resource": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "target",
+          "resource"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "fit": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "frame": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "source"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "fit": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "frame": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "resource": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "resource"
+        ],
+        "type": "object"
+      }
     ],
     "type": "object"
   },
   "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
   "manual": {
     "group": "edit",
-    "label": "插入图片",
+    "label": "插入媒体",
     "targetKinds": [
       "course-surface"
     ]

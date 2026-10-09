@@ -1053,7 +1053,7 @@ async function main(): Promise<void> {
     assert(process.platform === 'win32', 'W3 Windows 可移植性验证只能在 Windows 上运行')
     assert(process.arch === 'x64', `W3 目标为 Windows x64，当前为 ${process.arch}`)
     assert(APP_VERSION === packageJson.version, '源码应用版本与 package.json 不一致')
-    assert(APP_PRODUCT_NAME === 'ittoedu Courseware Editor', '产品名称不是 ittoedu')
+    assert(APP_PRODUCT_NAME === '果铃工作台', '产品名称不是果铃工作台')
     for (const requiredPath of [
       sourceUnpackedExecutable,
       sourcePortableExecutable,

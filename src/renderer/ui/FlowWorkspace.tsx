@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentEdit, ComponentFrame, CourseProjectV10, ComponentInstance, JsonValue } from '../../shared/contracts/component-platform'
-import { componentDefinitionBuiltinKey, owningContainer, containerChildIds, isComponentVisibleAtSurface, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, owningContainer, isComponentVisibleAtSurface, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
 import { layoutTable } from '../../components/table/render'
 import { parseTableData } from '../../components/table/data'
 import { createRoot } from 'react-dom/client'
@@ -26,7 +26,8 @@ import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, flowP
 import { resolveComponentOuterPresentation } from '../../shared/componentPresentation'
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../document'
 import { prepareDocumentSelection, prepareDocumentTextEdit, requestDocumentSelection, type DocumentSelectionAdapter } from '../document/documentSelectionCommands'
-import { observeFlowParagraphLayout, measureFlowParagraphLayout, flowReadingMove, flowDocumentInsertionAt, flowFloatingModeEdits, flowContentClientMatrix, type FlowFloatingMode } from './flow/flowParagraphLayout'
+import { observeFlowParagraphLayout, measureFlowParagraphLayout, flowDocumentInsertionAt, flowFloatingModeEdits, flowContentClientMatrix, type FlowFloatingMode } from './flow/flowParagraphLayout'
+import { flowPlacementEdits, flowReadingOrderEdits } from '../../core/course/courseFlowEdits'
 import { projectFlowDocument,flowDocumentBlock } from '../componentPlatform/surfaces/flow/documentProjection'
 import { flowSurface } from '../componentPlatform/surfaces/flow/model'
 import { useCourseV10Runtime } from '../components/CourseV10RuntimeView'
@@ -40,7 +41,7 @@ import { FreeTransformGesture, freeSurfaceTargets, type FreeResizeHandle } from 
 import type { WorkspaceMediaDropHandler } from '../lessonWorkspace/workspaceMediaDrop'
 import type { ImportedImageAsset } from '../project/assetManager'
 import { useEditorStore } from '../store/editorStore'
-import { captureCourseInstanceSelection, captureCourseInstanceRange, workbenchSelection } from '../workbench/SelectionContextController'
+import { captureCourseInstanceSelection, captureFlowSelection, workbenchSelection } from '../workbench/SelectionContextController'
 import { ElementAiButton } from '../workbench/elementCards/ElementAiCard'
 import { TextAiButton } from '../workbench/elementCards/ElementTextCards'
 import { TextComponentEditor, FormulaComponentEditor } from '../../components/text/editor'
@@ -50,7 +51,6 @@ import type { SlideContentEdit } from '../store/slices/slideAuthoringSlice'
 import { frameContainsPoint, invertMatrix, transformPoint } from '../../core/components/geometry'
 import { componentFrameStyle } from '../componentPlatform/surfaces/slide'
 import { CanvasPlainTextEditor } from './CanvasPlainTextEditor'
-import { flowRangeDataPath } from '../componentPlatform/surfaces/flow/documentSelection'
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../lessonWorkspace/workspaceMediaDrag'
 import { useWorkspaceMediaSource } from '../lessonWorkspace/workspaceMediaSourceContext'
 import { deliverWorkspaceMediaDrop } from '../lessonWorkspace/workspaceMediaDrop'
@@ -303,14 +303,8 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     if (target.mode !== 'layout' || !target.selection) throw new Error('请回到正文选择内容后修改')
     if (snapshot.model.kind !== 'course-v10' || snapshot.epoch !== captured.epoch || snapshot.model.project.id !== captured.project.id
       || target.revision !== String(snapshot.revision)) throw new Error('正文选区已改变，请重新选择')
-    const selectedProject = resolveComponentPresentation(snapshot.model.project, surfaceId, captured.activeStateId)
-    const range = flowRangeDataPath(selectedProject, target.selection)
-    if (range) {
-      return captureCourseInstanceRange(snapshot, surfaceId, range.instanceId, range.path, range.from, range.to, target.label, captured.activeStateId, range.root)
-    }
-    const ids = target.selection.kind === 'object' ? [target.selection.blockId] : target.selection.kind === 'cells' ? [target.selection.tableId]
-      : [...new Set([target.selection.anchor.blockId, target.selection.head.blockId])]
-    if (target.selection.kind === 'text') throw new Error('跨正文对象的文字范围请分段选择后修改')
+    if (target.selection.kind === 'text') return captureFlowSelection(snapshot, surfaceId, target, captured.activeStateId)
+    const ids = target.selection.kind === 'object' ? [target.selection.blockId] : [target.selection.tableId]
     return captureCourseInstanceSelection(snapshot, surfaceId, ids, target.label, captured.activeStateId)
     }
   }
@@ -400,7 +394,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     }
     const commands = {
       moveSelectedBlock(direction: 'up'|'down') {
-        const edits = flowReadingMove(target.project, id, direction)
+        const edits = flowReadingOrderEdits(target.editingProject, id, direction)
         if (edits.length) safe(commit(edits))
       },
       deleteSelectedBlocks() { safe(commit([{type:'instance.remove',instanceId:id}])) },
@@ -421,10 +415,8 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
         },cancel: () => {draft.cancel();setCaption(current => current === opened ? null : current)}}
         setCaption(opened)
       },
-      convertToOverlay: () => safe(commit([
-        ...(!instance.frame ? [{type:'frame.set' as const,instanceId:id,frame:{width:400,height:240,transform:[1,0,0,1,72,72] as [number,number,number,number,number,number]}}] : []),
-        {type:'instance.flowPlacement.set',instanceId:id,flowPlacement:{space:'paper',plane:'overlay'}},
-        ...(owningContainer(target.project,id)?.kind==='instance' ? [{type:'instance.move' as const,instanceId:id,container:{kind:'surface' as const,surfaceId},index:containerChildIds(target.project,{kind:'surface',surfaceId}).length}]:[])])),
+      convertToOverlay: () => safe(commit(flowPlacementEdits(target.editingProject, id, { kind: 'overlay', surfaceId,
+        placement: { space: 'paper', plane: 'overlay' }, origin: 'quickbar' }))),
     } : undefined
     return { block:{instance,mediaKind:kind,structureDisabledReason},commands,replaceMedia:replace,mediaTools:tools,
       openProperties: () => {
@@ -571,8 +563,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
           onContextualTargetChange={target => { if (target?.mode === 'layout') void contextual(target).then(value => workbenchSelection.observe(documentId, project.revision, () => value)).catch(() => {}) }}
           onContextualCommand={async (instruction, target) => { await requestDocumentSelection(documentId, target, instruction, captureContextual()) }}
           renderAiButton={(target, issue) => {
-            const range = target.selection && flowRangeDataPath(project, target.selection)
-            if (range && range.to > range.from) return <TextAiButton documentId={documentId} selectionIdentity={JSON.stringify([project.revision,target.selection])}
+            if (target.selection?.kind === 'text') return <TextAiButton documentId={documentId} selectionIdentity={JSON.stringify([project.revision,target.selection])}
               disabledReason={issue} start={() => prepareDocumentTextEdit(documentId, target, captureContextual())} />
             const id = target.selection?.kind === 'object' ? target.selection.blockId : null
             return id ? <ElementAiButton documentId={documentId} target={{ kind:'course-instance',surfaceId,instanceId:id }} label={target.label}
@@ -720,10 +711,19 @@ function FlowFloatingInstance({ project, instanceId, selected, readOnly, paperWi
     ? flowParagraphAnchoredFrame(placement.paragraphAnchor, { x: stored.transform[4], y: stored.transform[5], width: stored.width, height: stored.height }, paperWidth, paragraphRects) : null
   const frame = anchored && !preview ? { ...stored, transform: [...stored.transform.slice(0, 4), anchored.x, anchored.y] as typeof stored.transform } : stored
   const structureDisabledReason = flowStructureDisabledReason(project, instanceId)
-  const updatePlacement = (value: typeof placement | null) => onEdits([{ type: 'instance.flowPlacement.set', instanceId, flowPlacement: value ?? null }])
+  const owner = owningContainer(project, instanceId)
+  const surfaceId = owner?.kind === 'surface' ? owner.surfaceId : undefined
+  const updatePlacement = (value: typeof placement | null) => {
+    if (!surfaceId) return
+    onEdits(flowPlacementEdits(project, instanceId, value ? { kind: 'overlay', surfaceId, placement: value } : { kind: 'document', surfaceId }))
+  }
   const changeMode = (mode: FlowFloatingMode) => {
-    if (!placement) return
-    onEdits(flowFloatingModeEdits(instanceId, frame, placement, mode, paperWidth, paragraphRects, readPaperOffset?.() ?? { x: 0, y: 0 }))
+    if (!placement || !surfaceId) return
+    const measured = flowFloatingModeEdits(instanceId, frame, placement, mode, paperWidth, paragraphRects, readPaperOffset?.() ?? { x: 0, y: 0 })
+    const nextFrame = measured.find(value => value.type === 'frame.set')
+    const nextPlacement = measured.find(value => value.type === 'instance.flowPlacement.set')
+    if (nextFrame?.type === 'frame.set' && nextFrame.frame && nextPlacement?.type === 'instance.flowPlacement.set' && nextPlacement.flowPlacement)
+      onEdits(flowPlacementEdits(project, instanceId, { kind: 'overlay', surfaceId, frame: nextFrame.frame, placement: nextPlacement.flowPlacement }))
   }
   const begin = (event: React.PointerEvent, resize: boolean) => {
     if (readOnly || structureDisabledReason) return
@@ -763,7 +763,8 @@ function FlowFloatingInstance({ project, instanceId, selected, readOnly, paperWi
         }} onPointerUp={event => {
           if (!drag.current) return; const shown = preview ?? frame, next={...instance.frame!,transform:shown.transform}; drag.current = null; setPreview(null)
           const anchor = placement?.space === 'paper' && placement.paragraphAnchor ? flowParagraphAnchorAt({ x: next.transform[4], y: next.transform[5], width: next.width, height: next.height }, paperWidth, paragraphRects) : undefined
-          onEdits([{ type: 'frame.set', instanceId, frame: next }, ...(placement && anchor ? [{ type: 'instance.flowPlacement.set' as const, instanceId, flowPlacement: { ...placement, paragraphAnchor: anchor } }] : [])])
+          onEdits(placement && surfaceId ? flowPlacementEdits(project, instanceId, { kind: 'overlay', surfaceId, frame: next,
+            placement: anchor ? { ...placement, paragraphAnchor: anchor } : placement }) : [{ type: 'frame.set', instanceId, frame: next }])
         }} onPointerCancel={() => { drag.current = null; setPreview(null) }}>移动</button>
         {placement && <>
           <select aria-label="浮层定位模式" disabled={Boolean(structureDisabledReason)} value={placement.space === 'viewport' ? 'viewport' : placement.paragraphAnchor ? 'paragraph' : 'fixed'}

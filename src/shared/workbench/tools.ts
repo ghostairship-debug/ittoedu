@@ -9,6 +9,8 @@ import type { ComponentAuthorRecord } from '../contracts/component-platform/runt
 export type ToolTarget =
   | { kind: 'document' }
   | { kind: 'markdown-range'; from: number; to: number }
+  /** One visible selection may span disjoint source ranges or ordered Flow text slots. */
+  | { kind: 'text-selection'; fragments: { target: TextFragmentTarget; separatorBefore?: string }[] }
   | { kind: 'html-author-field'; authorKey: string; field: 'text' | 'src'; record: ComponentAuthorRecord;
     source?: { from: number; to: number; quote?: '"' | "'" | '' } }
   /** V10 instance/subtree or a data field. Text offsets count code points; math is one atom. */
@@ -17,7 +19,7 @@ export type ToolTarget =
   | { kind: 'course-sound'; soundId: string }
   | { kind: 'course-asset'; assetId: string }
   | { kind: 'spatial-graph'; surfaceId: string; graph: 'path' | 'relation'; graphId: string }
-  | { kind: 'course-surface'; surfaceId: string }
+  | { kind: 'course-surface'; surfaceId: string; stateId?: string | null }
   | { kind: 'course-location'; locationId: string }
   | { kind: 'course-owner'; locationId: string; owner: 'scene' | 'global' | 'surface' | 'world'; stateId?: string; insertionOrigin?: { x: number; y: number } }
   | { kind: 'course-state'; locationId: string; stateId: string }
@@ -27,6 +29,9 @@ export type ToolTarget =
   | { kind: 'flow-block'; surfaceId: string; blockId: string; parentId: string | null }
   | { kind: 'flow-range'; surfaceId: string; blockId: string; parentId: string | null; slot: DocumentSlot; from: number; to: number }
   | { kind: 'course-background'; owner: 'course' | 'surface' | 'scene'; surfaceId?: string; sceneId?: string; stateId?: string }
+
+export type TextFragmentTarget = Extract<ToolTarget, { kind: 'markdown-range' }>
+  | (Extract<ToolTarget, { kind: 'course-instance' }> & { dataPath: string[]; from: number; to: number })
 
 export interface ToolRunGrant {
   runId: string
@@ -51,10 +56,29 @@ export interface ToolDefinition {
   manual: { label: string; group: 'read' | 'edit'; targetKinds: readonly ToolTarget['kind'][] }
 }
 /** Non-blocking feedback about the committed result; it never changes the receipt status. */
-export interface ToolAdvisory { step: number; code: 'native-text-shrink' | 'native-text-transparent-background' | 'native-text-low-contrast' | 'html-import-warning'; message: string }
+export interface ToolAdvisory { step: number; code: 'native-text-shrink' | 'native-text-transparent-background' | 'native-text-low-contrast' | 'html-import-warning' | 'authoring-preserved'; message: string }
+/** Host-owned image references; transports prepare these through the resource owner. */
+export interface ToolResultImage {
+  kind: 'image'
+  source: 'preview' | 'observation' | 'mcp'
+  resourceId: string
+  mimeType: string
+  byteLength?: number
+  label?: string
+  detail?: 'auto' | 'low' | 'high'
+}
+export interface PreparedToolImage {
+  kind: 'image'
+  /** Stable host-owned provenance used when settling diagnostics for this exact image. */
+  source?: string
+  bytes: Uint8Array
+  mimeType: string
+  label?: string
+  detail?: 'auto' | 'low' | 'high'
+}
 export type ToolResult =
   | { kind: 'document-operation'; result: DocumentOperationResult; affected: readonly string[]; advisories?: readonly ToolAdvisory[] }
-  | { kind: 'read'; data: unknown; nextCursor?: string }
+  | { kind: 'read'; data: unknown; nextCursor?: string; images?: readonly ToolResultImage[] }
   | { kind: 'error'; code: string; message: string; data?: unknown }
 
 export interface ToolGateway {

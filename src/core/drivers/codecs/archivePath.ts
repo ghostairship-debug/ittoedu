@@ -14,7 +14,7 @@ function archiveError(kind: ArchiveKind, message: string): UserFacingError {
   return new UserFacingError(
     '工程文件损坏',
     message,
-    '请重新选择有效的 .h5lesson 工程文件，或从备份恢复。',
+    '请重新选择有效的 .glx 工程文件，或从备份恢复。',
   )
 }
 

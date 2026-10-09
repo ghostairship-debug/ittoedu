@@ -1,7 +1,7 @@
 import type { ComponentFrame, ComponentInstance, ComponentRuntimeImplementation } from '../../shared/contracts/component-platform'
 import type { ImageNode } from '../../shared/contracts/native-v1/types'
 import { renderImageNodeCanvas } from '../../shared/imageEffects'
-import { clampCrop, cropGeometry } from '../../renderer/editing/crop/imageCrop'
+import { clampCrop, cropGeometry } from '../../shared/imageCrop'
 import { imageDataSchema, type ImageData } from './data'
 
 export interface ResolvedImageAsset {

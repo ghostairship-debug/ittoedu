@@ -1,3 +1,4 @@
+import { isNativeProjectFilename, nativeProjectStem } from '../../shared/nativeProjectFile'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
@@ -124,7 +125,7 @@ export class WorkspaceFilesDesktopService {
       case 'resolve': return this.files.resolveEntry(input.workspaceId, input.entryId)
       case 'read-media': {
         const resolved = await this.files.resolveEntry(input.workspaceId, input.entryId)
-        if (resolved.kind !== 'file') throw new Error('只能将媒体文件拖入 H5 演示')
+        if (resolved.kind !== 'file') throw new Error('只能将媒体文件拖入 果铃工程')
         const media = await readWorkspaceMediaSelection(resolved.resolvedPath)
         const current = await this.files.resolveEntry(input.workspaceId, input.entryId)
         if (current.kind !== 'file' || pathKey(current.resolvedPath) !== pathKey(resolved.resolvedPath)) throw new Error('媒体文件已变化，请重新拖入')
@@ -132,7 +133,7 @@ export class WorkspaceFilesDesktopService {
       }
       case 'read-pptx': {
         const resolved = await this.files.resolveEntry(input.workspaceId, input.entryId)
-        if (resolved.kind !== 'file' || !/\.pptx$/i.test(resolved.resolvedPath)) throw new Error('只能把 .pptx 文件导入为 H5 演示')
+        if (resolved.kind !== 'file' || !/\.pptx$/i.test(resolved.resolvedPath)) throw new Error('只能把 .pptx 文件导入为 果铃工程')
         const bytes = new Uint8Array(await fs.readFile(resolved.resolvedPath))
         const current = await this.files.resolveEntry(input.workspaceId, input.entryId)
         if (current.kind !== 'file' || pathKey(current.resolvedPath) !== pathKey(resolved.resolvedPath)) throw new Error('PPT 文件已变化，请重新选择')
@@ -140,7 +141,7 @@ export class WorkspaceFilesDesktopService {
       }
       case 'create-markdown': return this.files.createFile({ ...input, format: 'markdown', bytes: Buffer.from(`# ${input.name.replace(/\.md$/i, '')}\n\n`, 'utf8') })
       case 'create-text': {
-        if (/\.h5lesson$/i.test(input.name)) throw new Error('H5 演示请使用“新建 H5 演示”，不能创建空的 .h5lesson 文件')
+        if (isNativeProjectFilename(input.name)) throw new Error('果铃工程请使用“新建 果铃工程”，不能创建空的 .glx 文件')
         return this.files.createFile({ ...input, format: 'file', bytes: new Uint8Array() })
       }
       case 'create-course': {
@@ -150,10 +151,10 @@ export class WorkspaceFilesDesktopService {
         const old = this.preparedCourses.get(input.operationId)
         if (old && old.input !== identity) throw new Error('同一文件操作不能改变参数')
         if (!old && archive) {
-          try { openCourseProjectV10Archive(archive) } catch { throw new UserFacingError('无法新建 H5 演示', '此入口只支持 Project V10 归档，原文件未修改。', '请保留原件；对应导入功能接入后再导入。') }
+          try { openCourseProjectV10Archive(archive) } catch { throw new UserFacingError('无法新建 果铃工程', '此入口只支持 Project V10 归档，原文件未修改。', '请保留原件；对应导入功能接入后再导入。') }
           this.preparedCourses.set(input.operationId, { input: identity, bytes: Uint8Array.from(archive) })
         } else if (!old) {
-          const project = createBlankCourseProjectV10(input.name.replace(/\.h5lesson$/i, ''))
+          const project = createBlankCourseProjectV10(nativeProjectStem(input.name))
           if (input.canvas) project.surfaces[0].designSize = { width: input.canvas.width, height: input.canvas.height }
           this.preparedCourses.set(input.operationId, { input: identity, bytes: createCourseProjectV10Archive({ project, resources: { assets: {}, components: {} } }) })
         }

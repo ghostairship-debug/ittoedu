@@ -40,7 +40,7 @@ describe('file contextual editing in mounted UI', () => {
     fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }))
     const card = await screen.findByRole('dialog', { name: 'AI 修改：“加粗”' })
     expect(card).toHaveTextContent('这里的 AI 只改选中的文字')
-    expect(elementCards.texts()).toMatchObject([{ kind: 'text', target: { kind: 'markdown-range', from: 6, to: 8 } }])
+    expect(elementCards.texts()).toMatchObject([{ kind: 'text', target: { kind: 'text-selection', fragments: [{ target: { kind: 'markdown-range', from: 6, to: 8 } }] } }])
     fireEvent.click(within(card).getByRole('button', { name: '关闭 AI 卡' }))
     await waitFor(() => expect(elementCards.texts()).toEqual([]))
     act(() => editor.view.dispatch(editor.view.state.tr.insertText('新词')))
@@ -50,7 +50,7 @@ describe('file contextual editing in mounted UI', () => {
     const f = fixture(), handle = createRef<LessonDocumentEditorHandle>()
     render(<LessonDocumentEditor ref={handle} documentRef={f.ref} port={f.port} />)
     await screen.findByText('加粗')
-    fireEvent.click(screen.getByRole('button', { name: /^源文$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^源码$/ }))
     const node = screen.getByLabelText('正文源文编辑'), view = EditorView.findFromDOM(node)!
     act(() => view.dispatch({ selection: { anchor: 4, head: 10 } }))
     expect(handle.current?.getContextualEditTarget()).toMatchObject({ mode: 'source', selection: null, ranges: [{ from: 4, to: 10, before: '**加粗**' }] })

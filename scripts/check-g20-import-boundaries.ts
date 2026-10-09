@@ -13,7 +13,7 @@ export interface ImportEdge {
 }
 
 export interface BoundaryViolation {
-  rule: 'core-runtime' | 'renderer-cli' | 'wrapper-canvas' | 'tool-schema-source'
+  rule: 'core-runtime' | 'renderer-cli' | 'wrapper-canvas' | 'tool-schema-source' | 'semantic-owner'
   detail: string
 }
 
@@ -76,9 +76,10 @@ function resolveLocalImport(root: string, from: string, specifier: string): stri
   return local(path) ? path : null
 }
 
-export function collectImportEdges(root: string): ImportEdge[] {
+export function collectImportEdges(root: string, selectedFiles?: readonly string[]): ImportEdge[] {
+  const filenames = selectedFiles ? selectedFiles.map(file => resolve(root, file)) : sourceFiles(join(root, 'src'))
   const api = new API({ cwd: root })
-  const snapshot = api.updateSnapshot({ openProjects: [join(root, 'tsconfig.json'), join(root, 'tsconfig.electron.json')] })
+  const snapshot = api.updateSnapshot({ openProjects: [join(root, 'tsconfig.json'), join(root, 'tsconfig.electron.json')], openFiles: filenames })
   const edges: ImportEdge[] = []
   try {
     const parsed = new Map<string, SourceFile>()
@@ -90,7 +91,7 @@ export function collectImportEdges(root: string): ImportEdge[] {
         if (source) parsed.set(path, source)
       }
     }
-    for (const filename of sourceFiles(join(root, 'src'))) {
+    for (const filename of filenames) {
       const from = slash(relative(root, filename))
       const source = parsed.get(from)
       if (!source) throw new Error(`TypeScript AST unavailable: ${from}`)
@@ -105,7 +106,7 @@ export function collectImportEdges(root: string): ImportEdge[] {
   return edges
 }
 
-/** These are the four S11 import boundaries, not a general architecture policy. */
+/** Existing S11 boundaries plus the concrete shared semantic adapters changed by S2. */
 export function checkImportBoundaries(edges: readonly ImportEdge[], files: ReadonlySet<string>): BoundaryViolation[] {
   const violations: BoundaryViolation[] = []
   const add = (rule: BoundaryViolation['rule'], detail: string) => violations.push({ rule, detail })
@@ -130,6 +131,23 @@ export function checkImportBoundaries(edges: readonly ImportEdge[], files: Reado
     if (!files.has(from) || !files.has(to) || !edges.some(edge => edge.from === from && edge.to === to)) {
       add('tool-schema-source', `required tool definition edge missing: ${from} -> ${to}`)
     }
+  }
+  // Preserve the actual shared planning edges. This is a dependency check;
+  // consumer behavior and retirement of duplicated decisions still require review.
+  const semanticOwners: readonly [string, readonly string[]][] = [
+    [gateway, ['src/core/course/courseSemanticEdits.ts', 'src/core/course/courseObjectEdits.ts', 'src/core/course/courseSurfaceStructure.ts',
+      'src/core/course/componentDataEdits.ts', 'src/core/course/courseFlowEdits.ts', 'src/core/course/courseLogicAuthoringCommands.ts', 'src/core/course/courseMediaEdits.ts']],
+    ['src/renderer/ui/properties/CourseGlobalPropertiesContextBuilder.ts', ['src/core/course/courseSemanticEdits.ts', 'src/core/course/courseObjectEdits.ts']],
+    ['src/renderer/composition/properties/usePropertiesAuthoringBinding.tsx', ['src/core/course/componentDataEdits.ts', 'src/core/course/courseSemanticEdits.ts', 'src/core/tools/coursePresentationEdits.ts']],
+    ['src/renderer/store/slices/slideAuthoringSlice.ts', ['src/core/course/componentDataEdits.ts', 'src/core/tools/coursePresentationEdits.ts']],
+    ['src/renderer/composition/crossSurfaceCommands.ts', ['src/core/course/courseObjectEdits.ts', 'src/core/course/componentDataEdits.ts']],
+    ['src/renderer/composition/selection/selectionObjectCommands.ts', ['src/core/course/courseObjectEdits.ts']],
+    ['src/renderer/store/slices/courseStructureSlice.ts', ['src/core/course/courseSurfaceStructure.ts', 'src/core/course/courseSemanticEdits.ts']],
+    ['src/main/workbench/contentApply/application/plan.ts', ['src/core/course/componentDataEdits.ts']],
+  ]
+  for (const [from, owners] of semanticOwners) for (const to of owners) {
+    if (!files.has(from) || !files.has(to) || !edges.some(edge => edge.from === from && edge.to === to))
+      add('semantic-owner', `shared authoring edge missing: ${from} -> ${to}`)
   }
   // Transport wrappers receive their tool schema from the Gateway. Their own
   // connection/protocol schemas are separate; only these business-tool entrypoints

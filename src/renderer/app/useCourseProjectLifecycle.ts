@@ -184,7 +184,7 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
   const newProjectFrom = useCallback((make: () => Promise<CourseProjectContent>, options?: CourseProjectReplacementOptions) => replace(async () => {
     const content = await make()
     const create = service().createFrom
-    if (!create) throw new Error('当前界面不能从已有内容新建 H5 演示')
+    if (!create) throw new Error('当前界面不能从已有内容新建 果铃工程')
     await create(content)
   }, options), [replace])
   const newFlowProject = useCallback((options?: CourseProjectReplacementOptions) => replace(() => service().create('flow'), options), [replace])

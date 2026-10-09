@@ -143,7 +143,7 @@ describe('sharedDocumentEditor', () => {
       const end = editor.view.domAtPos(5)
       document.getSelection()!.collapse(end.node, end.offset)
       expect(editor.view.state.selection.empty).toBe(false)
-      fireEvent.pointerDown(rendered.getByRole('toolbar'))
+      fireEvent.pointerDown(rendered.getByRole('toolbar', { name: '正文工具' }))
       fireEvent.change(rendered.getByLabelText('字体'), { target: { value: 'KaiTi' } })
       fireEvent.change(rendered.getByLabelText('字号'), { target: { value: '32' } })
       expect(editor.view.state.selection.empty).toBe(true)

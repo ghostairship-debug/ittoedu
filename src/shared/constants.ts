@@ -1,9 +1,9 @@
-export const APP_NAME = '果铃编辑器'
-export const APP_PRODUCT_NAME = 'ittoedu Courseware Editor'
+export const APP_NAME = '果铃工作台'
+export const APP_PRODUCT_NAME = '果铃工作台'
 export const APP_COMPANY = 'ittoedu'
 export const APP_ID = 'com.ittoedu.courseware-editor'
-export const APP_EXECUTABLE_NAME = 'ittoedu-courseware-editor'
-export const APP_USER_DATA_DIRECTORY_NAME = APP_EXECUTABLE_NAME
+export const APP_EXECUTABLE_NAME = 'guoling-workbench'
+export const APP_USER_DATA_DIRECTORY_NAME = 'ittoedu-courseware-editor'
 export const APP_PREVIEW_TEMP_DIRECTORY_NAME = `${APP_EXECUTABLE_NAME}-preview`
 export const APP_PDF_TEMP_FILE_PREFIX = 'ittoedu-courseware-pdf-'
 export const APP_E2E_TEMP_DIRECTORY_NAME = `${APP_EXECUTABLE_NAME}-e2e`

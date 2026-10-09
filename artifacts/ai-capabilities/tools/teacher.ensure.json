@@ -1,0 +1,27 @@
+{
+  "description": "为已观察演示页准备教师控制台；复用已有控制台，否则使用人工插入默认、共享层和软件身份创建。涉及全局层时需要整课授权，一次事务可撤销。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "target": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "target"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "准备教师控制台",
+    "targetKinds": [
+      "course-surface"
+    ]
+  },
+  "name": "teacher.ensure",
+  "version": 1
+}

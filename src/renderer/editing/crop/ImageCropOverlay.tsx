@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { commitCrop, cropGeometry, dragCropBox, type CropEdges, type CropHandle, type CropImage, type CropRect } from './imageCrop'
+import { commitCrop, cropGeometry, dragCropBox, type CropEdges, type CropHandle, type CropImage, type CropRect } from '../../../shared/imageCrop'
 import './imageCrop.css'
 
 const HANDLES: readonly CropHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']

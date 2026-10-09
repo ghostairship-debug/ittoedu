@@ -50,6 +50,23 @@ function setup() {
   return { api, state }
 }
 
+it('NI05 exposes optional compression in existing model settings and saves only an explicit selection', async () => {
+  const { api, state } = setup()
+  state.connections = [connected('connection')]
+  render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
+  const region = await screen.findByRole('region', { name: '上下文压缩（可选）配置' })
+  expect(within(region).getByText(/未配置时使用当前任务的主模型/)).toBeInTheDocument()
+  fireEvent.change(within(region).getByLabelText('上下文压缩（可选）连接'), { target: { value: 'connection' } })
+  await waitFor(() => expect(within(region).getByRole('option', { name: /available-model/ })).toBeInTheDocument())
+  fireEvent.change(within(region).getByLabelText('上下文压缩（可选）模型'), { target: { value: 'available-model' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存模型角色' }))
+  await waitFor(() => expect(api.saveProfile).toHaveBeenCalledWith({ expectedRevision: 0, roles: {
+    conversation: null, vision: null, imageGenerate: null, imageEdit: null,
+    compression: { connectionId: 'connection', model: 'available-model', parameters: {} },
+  } }))
+  expect(api.probeCapabilities).not.toHaveBeenCalled()
+})
+
 it('saves a write-only key, clears it, edits role parameters and revokes without claiming verified capability', async () => {
   const { api } = setup()
   const close = vi.fn()

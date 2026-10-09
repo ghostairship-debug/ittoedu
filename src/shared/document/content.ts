@@ -138,6 +138,23 @@ export function documentTextSlots(block: DocumentBlock): { key: string; content:
     default: return []
   }
 }
+export interface DocumentVisibleTextSlot {
+  key: string
+  content: FlowTextContent
+  tableCell?: { rowId: string | null; columnId: string; rowSpan: number; columnSpan: number }
+}
+/** Editor order is caption, header, then visible cells in declared column order. */
+export function documentVisibleTextSlots(block: DocumentBlock): DocumentVisibleTextSlot[] {
+  if (block.type !== 'table') return documentTextSlots(block)
+  return [...(block.caption ? [{ key: 'caption', content: block.caption }] : []),
+    ...block.columns.map(column => ({ key: `column:${column.id}`, content: column.header,
+      tableCell: { rowId: null, columnId: column.id, rowSpan: 1, columnSpan: 1 } })),
+    ...block.rows.flatMap(row => block.columns.flatMap(column => {
+      const span = tableCellSpan(block, row.id, column.id)
+      return span.covered ? [] : [{ key: `cell:${JSON.stringify([row.id, column.id])}`, content: row.cells[column.id],
+        tableCell: { rowId: row.id, columnId: column.id, rowSpan: span.rowSpan, columnSpan: span.columnSpan } }]
+    }))]
+}
 export function walkDocument(blocks: readonly DocumentBlock[], visit: (block: DocumentBlock) => void): void {
   for (const block of blocks) { visit(block); if (block.type === 'section') walkDocument(block.blocks, visit) }
 }

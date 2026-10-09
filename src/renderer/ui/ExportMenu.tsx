@@ -54,7 +54,7 @@ export function ExportMenu({ busy, hasFlowSurface, onExport, onExportSettings, v
       </button>
       <button type="button" role="menuitem" data-testid={testId('export-web-package')} className="export-menu__item" onClick={(event) => choose(event, 'web-package')}>
         <Archive size={18} />
-        <span><strong>网页包</strong><small>资源独立存放，推荐大型 H5 演示使用</small></span>
+        <span><strong>网页包</strong><small>资源独立存放，推荐大型 果铃工程使用</small></span>
       </button>
       <button type="button" role="menuitem" data-testid={testId('export-pptx')} className="export-menu__item" onClick={(event) => choose(event, 'pptx')}>
         <Presentation size={18} />

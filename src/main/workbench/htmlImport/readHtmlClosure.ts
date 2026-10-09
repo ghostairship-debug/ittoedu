@@ -8,6 +8,7 @@ export interface ReadHtmlClosureInput {
   htmlPath: string
   rootDir?: string
   sourceHtml?: string
+  currentSource?(filename: string): Promise<string | undefined>
 }
 
 export interface ReadHtmlClosureResult extends ExtractHtmlResourcesResult {
@@ -30,7 +31,7 @@ export async function readHtmlClosure(input: ReadHtmlClosureInput): Promise<Read
   const base = dirname(htmlFile)
   const root = await realpath(input.rootDir ?? dirname(htmlFile))
   if (!confined(root, htmlFile)) throw new Error('HTML 文件不在批准的资源根目录内')
-  const html = input.sourceHtml !== undefined ? input.sourceHtml : (await readFile(htmlFile)).toString('utf8')
+  const html = input.sourceHtml ?? await input.currentSource?.(htmlFile) ?? (await readFile(htmlFile)).toString('utf8')
   const files = new Map<string, Uint8Array>()
   let result = extractHtmlResources({ html, siblingFiles: files })
   for (;;) {
@@ -44,8 +45,9 @@ export async function readHtmlClosure(input: ReadHtmlClosureInput): Promise<Read
       let target: string
       try { target = await realpath(path) } catch { continue }
       if (!confined(root, target)) continue
-      const bytes = await readFile(target)
-      files.set(key, new Uint8Array(bytes))
+      const current = await input.currentSource?.(target)
+      const bytes = current === undefined ? new Uint8Array(await readFile(target)) : new TextEncoder().encode(current)
+      files.set(key, bytes)
       added = true
     }
     if (!added) break

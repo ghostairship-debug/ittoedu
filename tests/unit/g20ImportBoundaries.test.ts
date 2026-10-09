@@ -34,10 +34,12 @@ describe('S11 determined import boundaries', () => {
     const violations = checkImportBoundaries(edges, new Set([catalog, gateway, engine, external, transport,
       'src/main/workbench/providers/OpenAIChatProvider.ts',
       'src/main/workbench/providers/ChatGPTResponsesProvider.ts']))
-    expect(violations.map(value => value.rule)).toEqual([
+    expect(violations.filter(value => value.rule !== 'semantic-owner').map(value => value.rule)).toEqual([
       'core-runtime', 'renderer-cli', 'renderer-cli', 'tool-schema-source', 'tool-schema-source', 'wrapper-canvas',
     ])
     expect(violations.some(value => value.detail.includes(`${external} -> ${gateway}`))).toBe(true)
     expect(violations.some(value => value.detail === `${transport} -> zod`)).toBe(true)
+    // This synthetic graph omits the independently required semantic consumers.
+    expect(violations).toContainEqual({ rule: 'semantic-owner', detail: `shared authoring edge missing: ${gateway} -> src/core/course/courseSemanticEdits.ts` })
   })
 })

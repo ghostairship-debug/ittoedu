@@ -2,6 +2,7 @@
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
@@ -52,13 +53,13 @@ it('republishes the same complete Windows checkpoint once after EPERM without re
   expect((await fs.readdir(h.directory)).filter(name => name.endsWith('.tmp'))).toEqual([])
 })
 
-it('reports persistent EPERM after two publications and preserves the old record and complete candidate', async () => {
+it('reports persistent EPERM after bounded publications and preserves the old record and complete candidate', async () => {
   const h = await fixture(), candidate = { ...h.record, version: 2 }
   const rename = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => { throw denied(String(from), String(to)) })
   const failed = h.store.save(candidate)
   await expect(failed).rejects.toMatchObject({ code: 'EPERM', syscall: 'rename', dest: h.filename })
-  expect(rename).toHaveBeenCalledTimes(2)
-  expect(rename.mock.calls[1]).toEqual(rename.mock.calls[0])
+  expect(rename).toHaveBeenCalledTimes(5)
+  expect(rename.mock.calls.every(call => JSON.stringify(call) === JSON.stringify(rename.mock.calls[0]))).toBe(true)
   expect(await h.store.read(h.record.runId)).toEqual(h.record)
   const preserved = (await fs.readdir(h.directory)).filter(name => name.endsWith('.tmp'))
   expect(preserved).toHaveLength(1)
@@ -68,3 +69,33 @@ it('reports persistent EPERM after two publications and preserves the old record
   await h.store.save({ ...h.record, version: 3 })
   expect((await h.store.read(h.record.runId))?.version).toBe(3)
 })
+
+it.runIf(platform.value === 'win32')('publishes after a real Windows reader releases its no-delete-sharing file handle', async () => {
+  const h = await fixture(), candidate = { ...h.record, version: 2 }
+  const locker = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    "$locked=[IO.File]::Open($env:GUOLING_CHECKPOINT_LOCK_PATH,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite); try { [Console]::Out.WriteLine('ready'); [Console]::Out.Flush(); [void][Console]::In.ReadLine() } finally { $locked.Dispose() }"],
+    { windowsHide: true, env: { ...process.env, GUOLING_CHECKPOINT_LOCK_PATH: h.filename }, stdio: ['pipe', 'pipe', 'pipe'] })
+  const exited = new Promise<number | null>((resolve, reject) => { locker.once('exit', resolve); locker.once('error', reject) })
+  try {
+    await new Promise<void>((resolve, reject) => {
+      locker.stdout.on('data', bytes => { if (String(bytes).includes('ready')) resolve() })
+      locker.once('error', reject)
+      locker.once('exit', code => reject(new Error(`Native lock helper exited before release: ${code}`)))
+    })
+    expect(await h.store.read(h.record.runId)).toEqual(h.record)
+    const open = vi.spyOn(fs, 'open'), rename = vi.spyOn(fs, 'rename')
+    const publication = h.store.save(candidate)
+    setTimeout(() => locker.stdin.end('release\n'), 125)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(JSON.parse(await fs.readFile(h.filename, 'utf8'))).toEqual(h.record)
+    await publication
+    expect(await exited).toBe(0)
+    expect(rename.mock.calls.length).toBeGreaterThan(1)
+    expect(open).toHaveBeenCalledTimes(1)
+    expect(await h.store.read(h.record.runId)).toEqual(candidate)
+    expect((await fs.readdir(h.directory)).filter(name => name.endsWith('.tmp'))).toEqual([])
+  } finally {
+    if (!locker.stdin.destroyed) locker.stdin.end('release\n')
+    await exited
+  }
+}, 10_000)

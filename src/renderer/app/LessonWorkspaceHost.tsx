@@ -24,12 +24,17 @@ export interface LessonWorkspaceHostProps {
   documents?: DocumentHostAPI
   onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void
   onImportHtml?(directory: SaveDirectoryContext, sourceEntryId?: string): void
+  toolbarExtras?: ReactNode
   children: ReactNode
 }
 export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, LessonWorkspaceHostProps>(function LessonWorkspaceHost(props, ref) {
   const shell = useRef<LessonWorkspaceShellHandle>(null)
   const assistant = useRef<ExecutionAssistantHandle>(null)
   useImperativeHandle(ref, () => ({
+    captureMediaDrafts: (source, kind) => {
+      if (!shell.current) throw new Error('文档视图尚未就绪')
+      return shell.current.captureMediaDrafts(source, kind)
+    },
     showProject: () => shell.current?.showProject(),
     detachLesson: () => shell.current?.detachLesson(),
     flushAll: () => shell.current?.flushAll() ?? Promise.resolve(true),
@@ -52,10 +57,10 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
   const documents = props.documents ?? api?.documents
   const port = useMemo(() => api?.lessonFiles && documents ? createDesktopDocumentPort(api.lessonFiles, documents) : null, [api?.lessonFiles, documents])
   useEffect(() => workbenchSelection.setFallback(async id => {
-    await props.prepareCourseDocuments?.([id])
+    if (props.courseDocuments?.documents.some(document => document.documentId === id)) await props.prepareCourseDocuments?.([id])
     if (!api?.documents) throw new Error('文档服务尚未就绪')
     return api.documents.read(id)
-  }), [api?.documents, props.prepareCourseDocuments])
+  }), [api?.documents, props.courseDocuments?.documents, props.prepareCourseDocuments])
   if (!api?.lesson || !api.workspaceFiles || !port) return <><p role="alert">工作台服务不可用，请重新打开应用。</p>{props.children}</>
   const material = (sourcePath: string | undefined, lesson: LessonWorkspace | null) => {
     const service = api.lessonMaterials
@@ -68,7 +73,7 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
       list={() => service.list(target)} importMaterial={input => service.importMaterial(target, input)} read={input => service.read(target, input)} />
   }
   return <><LessonWorkspaceShell ref={shell} {...props} lessonOperation={api.lesson} workspaceFiles={api.workspaceFiles} documentPort={port}
-    prepareCurrentCopy={async () => { await props.prepareCourseDocuments?.(); return true }}
+    toolbarExtras={<>{props.toolbarExtras}<WorkspaceRecoveryPanel api={documents!} onRestored={id => shell.current?.focusDocument(id) ?? Promise.reject(new Error('文档视图尚未就绪'))} /></>}
     renderAssistant={(root, documentTarget, isCourse, drainDocuments, lesson) => {
       const lessonKey = lesson ? lesson.identity.normalizedDirectory + ':' + lesson.identity.lessonId : null
       activeLessonKey.current = lessonKey
@@ -103,6 +108,5 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
       }} /> : <p role="alert">创作助手服务不可用，请重新打开应用。</p>
     }}
     renderMaterial={(filename, lesson) => material(filename, lesson)} renderMaterials={lesson => material(undefined, lesson)} />
-    <WorkspaceRecoveryPanel api={api.documents!} onRestored={id => shell.current?.focusDocument(id) ?? Promise.reject(new Error('文档视图尚未就绪'))} />
   </>
 })

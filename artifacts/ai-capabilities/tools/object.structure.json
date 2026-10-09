@@ -1,0 +1,76 @@
+{
+  "description": "删除、复制、移动或调层序。target为整对象句柄；复制保持全部展示状态、局部规则、判题反馈和资源引用；移动调整当前页或全局平面内的父子归属，用已观察容器destination句柄并保持世界几何。软件维护对象身份、父子关系和一次撤销，不接受手写childIds。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema1": {
+        "enum": [
+          "remove",
+          "duplicate",
+          "move",
+          "reorder"
+        ],
+        "type": "string"
+      },
+      "__schema2": {
+        "$ref": "#/$defs/__schema3",
+        "description": "move/duplicate 的已观察页面或容器句柄；省略duplicate保留原归属。"
+      },
+      "__schema3": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema4": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "__schema5": {
+        "enum": [
+          "front",
+          "back",
+          "forward",
+          "backward"
+        ],
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "$ref": "#/$defs/__schema1"
+      },
+      "destination": {
+        "$ref": "#/$defs/__schema2"
+      },
+      "direction": {
+        "$ref": "#/$defs/__schema5"
+      },
+      "index": {
+        "$ref": "#/$defs/__schema4"
+      },
+      "target": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    "required": [
+      "target",
+      "action"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "对象结构",
+    "targetKinds": [
+      "course-instance"
+    ]
+  },
+  "name": "object.structure",
+  "version": 1
+}

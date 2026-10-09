@@ -5,7 +5,15 @@ import { componentOperationBatchSchema, courseProjectV10Schema } from '../../sha
 import { componentInteractionDataSchema } from '../../shared/componentInteractionData'
 import type { ComponentFrame } from '../../shared/contracts/component-platform/frame'
 import { DEFAULT_SLIDE_CANVAS, sharedSlideFrameMapping } from '../../shared/slideCanvas'
-import { multiplyMatrices, type AffineMatrix } from '../components/geometry'
+import { IDENTITY_MATRIX, multiplyMatrices, type AffineMatrix } from '../components/geometry'
+
+/** The formal parent chain defines coordinates for every authoring entry. */
+export function componentParentMatrix(project: CourseProjectV10, id: string): AffineMatrix {
+  const owner = owningContainer(project, id)
+  if (owner?.kind !== 'instance') return IDENTITY_MATRIX
+  const parent = project.instances[owner.instanceId]
+  return multiplyMatrices(componentParentMatrix(project, parent.id), parent.frame?.transform ?? IDENTITY_MATRIX)
+}
 
 export class ComponentOperationConflict extends Error {
   readonly code = 'component-field-conflict'
@@ -395,6 +403,11 @@ export function presentationComponentEdits(project: CourseProjectV10, surfaceId:
   const result: ComponentEdit[] = []
   let changed = false
   for (const edit of edits) {
+    if (edit.type === 'surface.background.set' && edit.surfaceId === surfaceId) {
+      if (edit.background === null) delete state.background
+      else state.background = structuredClone(edit.background)
+      changed = true; continue
+    }
     if (edit.type === 'instance.insert') {
       let owner: ComponentContainer | null = edit.container
       while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)

@@ -5,9 +5,12 @@ import { createTableData, TABLE_DEFINITION } from '../../../components/table'
 import { createChartData, CHART_DEFINITION, chartDataSchema } from '../../../components/chart'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import type { EditorStoreKernel } from '../editorStoreKernel'
-import { addSpatialCameraFrameEdit, deleteSpatialCameraFrameEdit, fitSpatialComponentWorld, renameSpatialCameraFrameEdit, reorderSpatialCameraFramesEdit, setSpatialCameraHomeEdit, spatialAuthoringEdit, updateSpatialCameraFrameEdit, updateSpatialCameraFrameTargetEdit } from '../../componentPlatform/surfaces/spatial/cameraCommands'
+import { fitSpatialComponentWorld } from '../../componentPlatform/surfaces/spatial/cameraCommands'
+import { addSpatialCameraFrameEdit, deleteSpatialCameraFrameEdit, renameSpatialCameraFrameEdit, reorderSpatialCameraFramesEdit, setSpatialCameraHomeEdit,
+  updateSpatialCameraFrameEdit, updateSpatialCameraFrameTargetEdit, addSpatialGraphItemEdit, updateSpatialGraphItemEdit, deleteSpatialGraphItemEdit } from '../../../core/course/courseSpatialEdits'
 import { spatialFramePose } from '../../../player/surfaces/spatial/componentPlatform/graph'
 import { spatialWorldTargets } from '../../componentPlatform/surfaces/spatial/targets'
+import type { SpatialViewportRequest, SpatialViewportCapture } from '../../../shared/workbench/spatialViewport'
 
 export type SpatialGraphSelection = { kind: 'path' | 'relation'; id: string } | null
 export interface SpatialSurfaceViewState {
@@ -47,10 +50,6 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
   }).catch(error => {
     kernel.setFeedback({ errorMessage: error instanceof Error ? error.message : String(error), statusMessage: null }); throw error
   })
-  const author = (id: string, change: (value: ComponentSpatialAuthoring) => void, message: string, captured?: CapturedCourseTarget) => {
-    const frozen = target(captured)
-    return apply([spatialAuthoringEdit(frozen.project, id, change)], frozen, message)
-  }
   const insert = async (definition: ComponentDefinition, data: unknown, width: number, height: number, x?: number, y?: number) => {
     const frozen = target(), surface = frozen.project.surfaces.find(value => value.id === frozen.surfaceId && value.kind === 'spatial')
     if (!surface) throw new Error('请先选择一个空间页面')
@@ -93,6 +92,16 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
     commitTextEdit: () => ports.content?.commit() ?? Promise.resolve(),
     cancelTextEdit: () => ports.content?.cancel(),
     readSpatialView: read,
+    captureSpatialViewport(input: SpatialViewportRequest): SpatialViewportCapture {
+      const visible = kernel.readView(), frozen = kernel.captureTarget(input.documentId)
+      const view = ports.read().spatialViewStates[input.documentId]?.[input.surfaceId]
+      if (frozen.epoch !== input.epoch) throw new Error('原空间文档身份已变化，请重新观察。')
+      if (visible.activeDocumentId !== input.documentId || visible.surfaceId !== input.surfaceId
+        || !frozen.project.surfaces.some(surface => surface.id === input.surfaceId && surface.kind === 'spatial') || !view?.viewport)
+        throw new Error('当前空间视口尚未运行，请打开原空间视口后重试。')
+      return { ...input, revision: frozen.project.revision, pose: structuredClone(view.camera),
+        viewport: { ...view.viewport }, source: 'spatial-view-state' }
+    },
     captureSpatialTarget: () => target(),
     initializeSpatialView(id: string, documentId?: string) { patchView(id, {}, documentId) },
     setSpatialViewport(viewport: { width: number; height: number }, id = surfaceId(), documentId?: string) {
@@ -158,31 +167,40 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
       patchView(id, { camera: fitSpatialComponentWorld(project, id, size, { scope, zoom: view.camera.zoom }) })
     },
     addSpatialPath(id: string, input: Omit<NonNullable<ComponentSpatialAuthoring['paths']>[number], 'id' | 'frameIds'> & { frameIds?: string[] }, captured?: CapturedCourseTarget) {
-      return author(id, value => { (value.paths ??= []).push({ ...input, id: crypto.randomUUID(), frameIds: input.frameIds ?? [] }) }, '已添加路径', captured)
+      const frozen = target(captured)
+      return apply([addSpatialGraphItemEdit(frozen.project, id, 'paths', { ...input, frameIds: input.frameIds ?? [] })], frozen, '已添加路径')
     },
     updateSpatialPath(id: string, pathId: string, patch: Partial<Omit<NonNullable<ComponentSpatialAuthoring['paths']>[number], 'id'>>, captured?: CapturedCourseTarget) {
-      return author(id, value => { const path = value.paths?.find(path => path.id === pathId); if (!path) throw new Error('路径已不存在'); Object.assign(path, patch) }, '路径已更新', captured)
+      const frozen = target(captured)
+      return apply([updateSpatialGraphItemEdit(frozen.project, id, 'paths', pathId, patch)], frozen, '路径已更新')
     },
     deleteSpatialPath(id: string, pathId: string, captured?: CapturedCourseTarget) {
-      return author(id, value => { value.paths = value.paths?.filter(path => path.id !== pathId) }, '已删除路径', captured)
+      const frozen = target(captured)
+      return apply([deleteSpatialGraphItemEdit(frozen.project, id, 'paths', pathId)], frozen, '已删除路径')
     },
     addSpatialRelation(id: string, input: Omit<NonNullable<ComponentSpatialAuthoring['relations']>[number], 'id'>, captured?: CapturedCourseTarget) {
-      return author(id, value => { (value.relations ??= []).push({ ...input, id: crypto.randomUUID() }) }, '已添加关系', captured)
+      const frozen = target(captured)
+      return apply([addSpatialGraphItemEdit(frozen.project, id, 'relations', input)], frozen, '已添加关系')
     },
     updateSpatialRelation(id: string, relationId: string, patch: Partial<Omit<NonNullable<ComponentSpatialAuthoring['relations']>[number], 'id'>>, captured?: CapturedCourseTarget) {
-      return author(id, value => { const relation = value.relations?.find(relation => relation.id === relationId); if (!relation) throw new Error('关系已不存在'); Object.assign(relation, patch) }, '关系已更新', captured)
+      const frozen = target(captured)
+      return apply([updateSpatialGraphItemEdit(frozen.project, id, 'relations', relationId, patch)], frozen, '关系已更新')
     },
     deleteSpatialRelation(id: string, relationId: string, captured?: CapturedCourseTarget) {
-      return author(id, value => { value.relations = value.relations?.filter(relation => relation.id !== relationId) }, '已删除关系', captured)
+      const frozen = target(captured)
+      return apply([deleteSpatialGraphItemEdit(frozen.project, id, 'relations', relationId)], frozen, '已删除关系')
     },
     addSpatialSemanticZoomRule(id: string, input: Omit<NonNullable<ComponentSpatialAuthoring['semanticZoom']>[number], 'id'>, captured?: CapturedCourseTarget) {
-      return author(id, value => { (value.semanticZoom ??= []).push({ ...input, id: crypto.randomUUID() }) }, '已添加语义缩放规则', captured)
+      const frozen = target(captured)
+      return apply([addSpatialGraphItemEdit(frozen.project, id, 'semanticZoom', input)], frozen, '已添加语义缩放规则')
     },
     updateSpatialSemanticZoomRule(id: string, ruleId: string, patch: Partial<Omit<NonNullable<ComponentSpatialAuthoring['semanticZoom']>[number], 'id'>>, captured?: CapturedCourseTarget) {
-      return author(id, value => { const rule = value.semanticZoom?.find(rule => rule.id === ruleId); if (!rule) throw new Error('规则已不存在'); Object.assign(rule, patch) }, '规则已更新', captured)
+      const frozen = target(captured)
+      return apply([updateSpatialGraphItemEdit(frozen.project, id, 'semanticZoom', ruleId, patch)], frozen, '规则已更新')
     },
     deleteSpatialSemanticZoomRule(id: string, ruleId: string, captured?: CapturedCourseTarget) {
-      return author(id, value => { value.semanticZoom = value.semanticZoom?.filter(rule => rule.id !== ruleId) }, '已删除语义缩放规则', captured)
+      const frozen = target(captured)
+      return apply([deleteSpatialGraphItemEdit(frozen.project, id, 'semanticZoom', ruleId)], frozen, '已删除语义缩放规则')
     },
   }
   return actions

@@ -29,7 +29,8 @@ class ProtocolError extends Error {
 }
 class TruncatedStreamError extends Error {}
 class ProviderResponseError extends Error {
-  constructor(readonly code: 'chatgpt-provider-sse-error' | 'chatgpt-provider-response-failed' | 'chatgpt-provider-response-incomplete') { super(code) }
+  constructor(readonly code: 'chatgpt-provider-sse-error' | 'chatgpt-provider-response-failed' | 'chatgpt-provider-response-incomplete',
+    readonly incompleteReason?: 'max_output_tokens' | 'content_filter') { super(code) }
 }
 type Payload = Pick<ModelRequest, 'selection' | 'messages' | 'tools'>
 
@@ -203,7 +204,11 @@ class ResponsesProvider implements ModelProvider {
         // These are explicit provider terminal events. Never forward their untrusted error text or payload.
         if (chunk.type === 'error') throw new ProviderResponseError('chatgpt-provider-sse-error')
         if (chunk.type === 'response.failed') throw new ProviderResponseError('chatgpt-provider-response-failed')
-        if (chunk.type === 'response.incomplete') throw new ProviderResponseError('chatgpt-provider-response-incomplete')
+        if (chunk.type === 'response.incomplete') {
+          const reason = object(chunk.response) && object(chunk.response.incomplete_details) ? chunk.response.incomplete_details.reason : undefined
+          throw new ProviderResponseError('chatgpt-provider-response-incomplete',
+            reason === 'max_output_tokens' || reason === 'content_filter' ? reason : undefined)
+        }
         if (object(chunk.response)) {
           const native = chunk.response
           if (!text(native.id) || native.model !== undefined && !text(native.model)) throw new ProtocolError()
@@ -330,7 +335,7 @@ class ResponsesProvider implements ModelProvider {
           ?? (isProtocol ? (error instanceof ProtocolError ? error.code : error instanceof TruncatedStreamError ? 'chatgpt-stream-truncated' : 'chatgpt-protocol-mismatch')
             : 'chatgpt-transport')
       const message = providerFailure ? providerFailure.code === 'chatgpt-provider-response-incomplete'
-        ? `${providerLabel} 明确报告响应未完成；结果未知，是否重试由执行器决定，已提交工具不会重放。`
+        ? `${providerLabel} 明确报告响应未完成${providerFailure.incompleteReason ? `（${providerFailure.incompleteReason}）` : ''}；结果未知，是否重试由执行器决定，已提交工具不会重放。`
         : `${providerLabel} 明确报告响应失败；是否重试由执行器决定，已提交工具不会重放。`
         : error instanceof TruncatedStreamError && !aborted ? `${providerLabel} 响应流在完成前结束；结果未知，是否重试由执行器决定，已提交工具不会重放。`
           : aborted ? '任务已停止，模型请求被撤销；上游结果未知，未自动重发'

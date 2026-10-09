@@ -92,6 +92,11 @@ export function readHtmlDocumentText(nodes: readonly DocumentHtmlNode[], options
       const tag = tagOf(node)
       if (tag === 'br') { out.push({ text: '\n', br: true, context }); continue }
       if (tag === 'img' || tag === 'video' || tag === 'audio' || tag === 'figure' || tag === 'iframe') { options.onMedia?.(node); continue }
+      if (tag === 'svg' || tag === 'canvas') {
+        if (options.onMedia) options.onMedia(node)
+        else throw new Error('正文文字不能无损承载图形或媒体，请保留原内容并使用组件 HTML 源码入口')
+        continue
+      }
       if (tag === 'script' || tag === 'style' || tag === 'template') continue
       let next: InlineContext = { ...context, style: htmlTextStyle(context.style, node) }
       if (tag === 'strong' || tag === 'b') next.style = { ...next.style, bold: true }

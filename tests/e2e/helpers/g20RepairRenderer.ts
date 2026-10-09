@@ -76,7 +76,9 @@ function card(kind: 'element' | 'text') {
   clear()
   const target = { kind: 'course-object' as const, locationId: 'scene', itemId: 'title' }
   const key = kind === 'element' ? elementCards.ensure({ documentId: 'fixture', target, label: 'Card fixture' })
-    : elementCards.openText({ documentId: 'fixture', target, label: 'Card fixture', content: 'text', anchor: { left: 30, top: 120 } })
+    : elementCards.openText({ documentId: 'fixture', target,
+      capture: { documentId: 'fixture', epoch: 'fixture', revision: 0, targets: [target], label: 'Card fixture' },
+      label: 'Card fixture', content: 'text', anchor: { left: 30, top: 120 } })
   // Only the view state is seeded. The production component and all layout rules render unchanged.
   const record = (elementCards as unknown as { cards: Map<string, { entries: unknown[]; error: string }> }).cards.get(key)!
   record.entries = Array.from({ length: 12 }, (_, index) => ({ submissionId: `s-${index}`, text: `Request ${index}`, state: 'completed',

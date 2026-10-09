@@ -52,8 +52,9 @@ async function run(vision: 'supported' | 'unsupported') {
   const original = gateway.execute.bind(gateway)
   const execute = vi.spyOn(gateway, 'execute').mockImplementation(async (runId, callId, call) => call.name !== 'image.preview' ? original(runId, callId, call)
     : { kind: 'read', data: { status: 'prepared', previews: [{ image: 'img1', resourceId: 'preview-3', mimeType: 'image/jpeg', byteLength: bytes.length, width: 480, height: 320 }],
-      failures: [{ image: 'img2', reason: '预览图下载失败' }] } })
-  const read = vi.spyOn(gateway, 'readOpenImagePreview').mockResolvedValue({ mimeType: 'image/jpeg', bytes })
+      failures: [{ image: 'img2', reason: '预览图下载失败' }] },
+      images: [{ kind: 'image', source: 'preview', resourceId: 'preview-3', mimeType: 'image/jpeg', byteLength: bytes.length, label: '图片 img1：' }] })
+  const read = vi.spyOn(gateway, 'prepareResultImages').mockResolvedValue([{ kind: 'image', mimeType: 'image/jpeg', bytes, label: '图片 img1：' }])
   const input: ExecutionStart = { conversationId: 'conversation', taskId: 'task', instruction: '为“枫叶”页挑一张照片', selection: selection(vision), documents: [] }
   const started = await engine.start(input), final = await engine.wait(started.runId)
   return { final, requests, execute, read, bytes }
@@ -62,7 +63,7 @@ async function run(vision: 'supported' | 'unsupported') {
 it('attaches prepared previews to the next model request, each labelled with its candidate handle', async () => {
   const { final, requests, read, bytes } = await run('supported')
   expect(final.status).toBe('completed')
-  expect(read).toHaveBeenCalledWith(final.runId, 'preview-3')
+  expect(read).toHaveBeenCalledWith(final.runId, expect.objectContaining({ images: [expect.objectContaining({ resourceId: 'preview-3' })] }))
   expect(final.tools[0]?.result).toMatchObject({ kind: 'read', data: { status: 'prepared', failures: [{ image: 'img2' }] } })
   const attached = requests[1]!.messages.find(message => Array.isArray(message.content)
     && message.content.some(part => (part as { type?: string }).type === 'image_url'))

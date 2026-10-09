@@ -32,7 +32,7 @@ const connectionSchema = configSchema.omit({ authKind: true }).extend({ id: iden
   auth: z.object({ kind: z.enum(['api-key', 'oauth']), credentialRef: identity }).strict() }).strict()
 const selectionSchema = z.object({ connectionId: identity, model: identity, parameters: parameters.optional(), capabilityModel: identity.optional() }).strict()
 const rolesSchema = z.object({ conversation: selectionSchema.nullable(), vision: selectionSchema.nullable(),
-  imageGenerate: selectionSchema.nullable(), imageEdit: selectionSchema.nullable() }).strict()
+  imageGenerate: selectionSchema.nullable(), imageEdit: selectionSchema.nullable(), compression: selectionSchema.nullable().optional() }).strict()
 const profileSchema = z.object({ revision: z.number().int().nonnegative(), updatedAt: z.string().datetime(), roles: rolesSchema }).strict()
 const observationSchema = z.object({ requestId: identity, operationId: identity, observedAt: z.number().finite().nonnegative(), result: z.enum(['progressive', 'operation-only']) }).strict()
 const bodyStreamingSchema = z.object({ connectionId: identity, connectionRevision: z.number().int().positive(), model: identity,
@@ -362,7 +362,9 @@ export class ExecutionSettingsStore {
         if (!supportsChatGPTOAuthImages(connection) && !supportsOpenAIImages(connection))
           throw new ExecutionSettingsError('unsupported-image-connection', '图片角色需要明确启用 OpenAI Images API 的连接或已登录的 ChatGPT 连接。')
       }
-      state.profile = { revision: state.profile.revision + 1, updatedAt: this.now().toISOString(), roles: parsed.roles }
+      state.profile = { revision: state.profile.revision + 1, updatedAt: this.now().toISOString(), roles: { ...parsed.roles,
+        ...(!Object.hasOwn(parsed.roles, 'compression') && state.profile.roles.compression !== undefined
+          ? { compression: state.profile.roles.compression } : {}) } }
       await this.persist(state)
       return structuredClone(state.profile)
     })

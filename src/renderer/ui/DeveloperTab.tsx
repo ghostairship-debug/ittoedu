@@ -1,6 +1,7 @@
 import { Braces, Code2, CopyPlus, Play, ShieldCheck, WandSparkles } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import type { ComponentEdit, ComponentInstance } from '../../shared/contracts/component-platform'
+import type { ComponentEdit, ComponentInstance, CourseProjectV10 } from '../../shared/contracts/component-platform'
+import { componentDataEdits, type ComponentDataTarget } from '../../core/course/componentDataEdits'
 import { componentInstanceSchema, componentDefinitionSchema } from '../../shared/contracts/component-platform/schema'
 import { interactionRuleSchema } from '../../shared/interactionSchema'
 import { ComponentSourceEditor, independentComponentSourceEdits } from '../components/ComponentSourceEditor'
@@ -119,8 +120,9 @@ function captureDeveloperJsonSession(bridge: CourseV10DocumentBridge, target: Ca
   if (context.kind === 'object') {
     const current = target.editingProject.instances[context.instanceId]
     if (!current) throw new Error('对象已经不存在，原输入已保留。')
-    initial = componentObjectJsonEdits(current, current); baseline = current
-    plan = raw => componentObjectJsonEdits(current, componentInstanceSchema.parse(JSON.parse(raw)))
+    const dataTarget = { surfaceId: target.surfaceId, stateId: target.activeStateId, instanceId: current.id }
+    initial = componentObjectJsonEdits(target.project, dataTarget, current, current); baseline = current
+    plan = raw => componentObjectJsonEdits(target.project, dataTarget, current, componentInstanceSchema.parse(JSON.parse(raw)))
   } else if (context.kind === 'definition') {
     const current = target.project.definitions[context.definitionId]
     if (!current) throw new Error('组件定义已不存在，原输入已保留。')
@@ -208,12 +210,12 @@ export function CodeDocumentEditor({ title, description, value, bindingKey, lang
   </section>
 }
 
-export function componentObjectJsonEdits(current: ComponentInstance, next: ComponentInstance): ComponentEdit[] {
+export function componentObjectJsonEdits(project: CourseProjectV10, target: ComponentDataTarget, current: ComponentInstance, next: ComponentInstance): ComponentEdit[] {
   if (next.id !== current.id || next.definitionId !== current.definitionId) throw new Error('对象身份和定义不可在对象 JSON 中修改。')
   if (JSON.stringify(next.childIds ?? []) !== JSON.stringify(current.childIds ?? [])) throw new Error('请通过图层与组合操作修改子对象顺序。')
   if (current.frame && !next.frame) throw new Error('请通过对象布局入口修改 frame；对象 JSON 不支持删除 frame。')
   return [
-    { type: 'data.set', instanceId: current.id, path: [], value: next.data },
+    ...componentDataEdits(project, target, { kind: 'replace', data: next.data }),
     { type: 'style.set', instanceId: current.id, path: [], value: next.style ?? {} },
     ...(next.frame ? [{ type: 'frame.set' as const, instanceId: current.id, frame: next.frame }] : []),
     { type: 'instance.patch', instanceId: current.id, patch: { name: next.name ?? current.name ?? '', visible: next.visible ?? true,

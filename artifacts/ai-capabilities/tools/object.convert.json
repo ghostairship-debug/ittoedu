@@ -1,26 +1,54 @@
 {
   "description": "将当前表格转换为可编辑专业图表，保留对象身份、位置、样式和其它对象。用已观察的 target 或 path，to=chart；chartType 可选 bar/line/area/pie/donut。categoryColumn/valueColumns 按列从1计数，默认首列类别、其余列数值。软件读取当前表格及声明表头、产生图表身份并一次提交；不要求复制原表格数据或内部编号。",
   "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "const": "chart",
+        "type": "string"
+      },
+      "__schema1": {
+        "enum": [
+          "bar",
+          "line",
+          "area",
+          "pie",
+          "donut"
+        ],
+        "type": "string"
+      },
+      "__schema2": {
+        "type": "string"
+      },
+      "__schema3": {
+        "description": "Category column, counted from 1. Defaults to the first column.",
+        "exclusiveMinimum": 0,
+        "maximum": 9007199254740991,
+        "type": "integer"
+      },
+      "__schema4": {
+        "description": "Numeric series columns, counted from 1. Defaults to all columns except the category column.",
+        "items": {
+          "$ref": "#/$defs/__schema5"
+        },
+        "minItems": 1,
+        "type": "array"
+      },
+      "__schema5": {
+        "exclusiveMinimum": 0,
+        "maximum": 9007199254740991,
+        "type": "integer"
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "anyOf": [
       {
         "additionalProperties": false,
         "properties": {
           "categoryColumn": {
-            "description": "Category column, counted from 1. Defaults to the first column.",
-            "exclusiveMinimum": 0,
-            "maximum": 9007199254740991,
-            "type": "integer"
+            "$ref": "#/$defs/__schema3"
           },
           "chartType": {
-            "enum": [
-              "bar",
-              "line",
-              "area",
-              "pie",
-              "donut"
-            ],
-            "type": "string"
+            "$ref": "#/$defs/__schema1"
           },
           "target": {
             "maxLength": 100,
@@ -28,21 +56,13 @@
             "type": "string"
           },
           "title": {
-            "type": "string"
+            "$ref": "#/$defs/__schema2"
           },
           "to": {
-            "const": "chart",
-            "type": "string"
+            "$ref": "#/$defs/__schema0"
           },
           "valueColumns": {
-            "description": "Numeric series columns, counted from 1. Defaults to all columns except the category column.",
-            "items": {
-              "exclusiveMinimum": 0,
-              "maximum": 9007199254740991,
-              "type": "integer"
-            },
-            "minItems": 1,
-            "type": "array"
+            "$ref": "#/$defs/__schema4"
           }
         },
         "required": [
@@ -55,20 +75,10 @@
         "additionalProperties": false,
         "properties": {
           "categoryColumn": {
-            "description": "Category column, counted from 1. Defaults to the first column.",
-            "exclusiveMinimum": 0,
-            "maximum": 9007199254740991,
-            "type": "integer"
+            "$ref": "#/$defs/__schema3"
           },
           "chartType": {
-            "enum": [
-              "bar",
-              "line",
-              "area",
-              "pie",
-              "donut"
-            ],
-            "type": "string"
+            "$ref": "#/$defs/__schema1"
           },
           "path": {
             "minLength": 1,
@@ -80,21 +90,13 @@
             "type": "string"
           },
           "title": {
-            "type": "string"
+            "$ref": "#/$defs/__schema2"
           },
           "to": {
-            "const": "chart",
-            "type": "string"
+            "$ref": "#/$defs/__schema0"
           },
           "valueColumns": {
-            "description": "Numeric series columns, counted from 1. Defaults to all columns except the category column.",
-            "items": {
-              "exclusiveMinimum": 0,
-              "maximum": 9007199254740991,
-              "type": "integer"
-            },
-            "minItems": 1,
-            "type": "array"
+            "$ref": "#/$defs/__schema4"
           }
         },
         "required": [

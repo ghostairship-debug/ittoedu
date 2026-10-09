@@ -536,7 +536,7 @@ export function mutatePasteSlideSceneClipboard(
     throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, SLIDE_CLIPBOARD_WRONG_OWNER_REASON)
   }
   if (clipboard.projectId !== draft.id) {
-    throw new Error('剪贴板不属于当前 H5 演示，请重新复制')
+    throw new Error('剪贴板不属于当前 果铃工程，请重新复制')
   }
   const derivedReferences = collectSlideClipboardResourceReferences(
     clipboard.items.map((entry) => entry.item),
@@ -590,7 +590,7 @@ export function mutatePasteSlideGlobalClipboard(
     )
   }
   if (clipboard.projectId !== draft.id) {
-    throw new Error('剪贴板不属于当前 H5 演示，请重新复制')
+    throw new Error('剪贴板不属于当前 果铃工程，请重新复制')
   }
   if (clipboard.items.some(({ entry }) => isTeacherController(entry.item))) {
     throw new Error(SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON)

@@ -4,7 +4,7 @@ import type { ToolTarget } from '../../../shared/workbench/tools'
 import { DocumentRegistry } from '../../../core/documents/DocumentRegistry'
 import type { DocumentToolGateway } from '../../../core/tools/DocumentToolGateway'
 import { documentDigest } from '../../../core/documents/documentDigest'
-import { courseInstanceContext, mapMarkdownRange, readCourseInstanceText, readTarget, targetFootprint } from '../../../core/tools/ToolTargets'
+import { courseInstanceContext, mapMarkdownRange, readCourseInstanceText, readTarget, readEditableTargetContent, targetFootprint } from '../../../core/tools/ToolTargets'
 
 type EditGateway = Pick<DocumentToolGateway, 'resolveEditTarget' | 'operationIdentity'>
 interface Entry {
@@ -26,6 +26,11 @@ export class EditSessionError extends Error {
 }
 
 function editable(model: DocumentModel, target: ToolTarget): EditTarget {
+  if (target.kind === 'text-selection') {
+    readEditableTargetContent(model, target)
+    for (const fragment of target.fragments) editable(model, fragment.target)
+    return target
+  }
   readTarget(model, target)
   if (target.kind === 'markdown-range') return target
   if (target.kind === 'course-instance') {
@@ -123,6 +128,11 @@ export class EditSessionService {
       if (target.kind === 'markdown-range') {
         if (!isSourceDocumentModel(entry.model) || !isSourceDocumentModel(event.snapshot.model)) throw new Error('正文格式已改变')
         target = mapMarkdownRange(entry.model.source, event.snapshot.model.source, target)
+      }
+      if (target.kind === 'text-selection' && isSourceDocumentModel(entry.model) && isSourceDocumentModel(event.snapshot.model)) {
+        const before = entry.model.source, after = event.snapshot.model.source
+        target = { ...target, fragments: target.fragments.map(fragment => ({ ...fragment,
+          target: fragment.target.kind === 'markdown-range' ? mapMarkdownRange(before, after, fragment.target) : fragment.target })) }
       }
       if (targetFootprint(event.snapshot.model, target) !== entry.footprint) throw new Error('生成目标与新的文档修改重叠或已失效')
       const changed = event.snapshot.revision !== entry.snapshot.revision || documentDigest(target) !== documentDigest(entry.snapshot.target)

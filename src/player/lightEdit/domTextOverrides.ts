@@ -5,8 +5,11 @@ import {
 } from '../../shared/contracts/runtime/lightEdit'
 import { managedHtmlDocuments, watchManagedHtmlDocuments } from './htmlDocumentRoots'
 
+
+/** Shared finite matching primitives also used by the Phaser adapter. */
+export function createLightEditTextPrimitives(lightEditOverrideKey: typeof import('../../shared/contracts/runtime/lightEdit').lightEditOverrideKey) {
 /** Elements whose text is not visible page copy, or is typed by the viewer. */
-const SKIPPED_SELECTOR = 'script,style,noscript,template,textarea,option,title,[contenteditable]:not([contenteditable="false"])'
+
 const MAX_REGION_DEPTH = 4
 const LIVE_TEXT_WINDOW_MS = 5_000
 const LIVE_TEXT_CHANGES = 3
@@ -15,19 +18,19 @@ const LIVE_TEXT_CHANGES = 3
  * Text the program computes (scores, timers, counters) is edited through AI only (M15):
  * text without any letter, or text the Runtime rewrote several times within a few seconds.
  */
-export function isLiveComputedText(original: string, writes: readonly number[]): boolean {
+function isLiveComputedText(original: string, writes: readonly number[]): boolean {
   if (!/\p{L}/u.test(original)) return true
   return writes.length >= LIVE_TEXT_CHANGES && writes[writes.length - 1]! - writes[writes.length - LIVE_TEXT_CHANGES]! <= LIVE_TEXT_WINDOW_MS
 }
 
 /** Keeps the last few Runtime write times of one text. */
-export function recordTextWrite(writes: number[]): void {
+function recordTextWrite(writes: number[]): void {
   writes.push(Date.now())
   if (writes.length > LIVE_TEXT_CHANGES) writes.splice(0, writes.length - LIVE_TEXT_CHANGES)
 }
 
 /** Where a text node renders: the tag path of its nearest ancestors inside `root`. */
-export function domTextRegion(node: Text, root: Node): string {
+function domTextRegion(node: Text, root: Node): string {
   const tags: string[] = []
   for (let element = node.parentElement; element && element !== root && tags.length < MAX_REGION_DEPTH; element = element.parentElement) {
     tags.unshift(element.localName)
@@ -35,12 +38,8 @@ export function domTextRegion(node: Text, root: Node): string {
   return tags.length ? tags.join('>') : 'root'
 }
 
-function skipped(node: Text): boolean {
-  return Boolean(node.parentElement?.closest(SKIPPED_SELECTOR))
-}
-
 /** The rule for one occurrence: a region-specific rule wins over one that applies everywhere. */
-export function matchLightEditRule(
+function matchLightEditRule(
   rules: ReadonlyMap<string, LightEditTextOverride>,
   original: string,
   region: string,
@@ -49,16 +48,15 @@ export function matchLightEditRule(
     ?? rules.get(lightEditOverrideKey({ original }))
 }
 
-export function lightEditRuleMap(rules: readonly LightEditTextOverride[]): Map<string, LightEditTextOverride> {
+function lightEditRuleMap(rules: readonly LightEditTextOverride[]): Map<string, LightEditTextOverride> {
   return new Map(rules.map(rule => [lightEditOverrideKey(rule), rule]))
 }
 
-/** Keep the author's surrounding whitespace so inline layout does not shift. */
-function padded(raw: string, text: string): string {
-  const leading = /^\s*/.exec(raw)?.[0] ?? ''
-  const trailing = raw.length > leading.length ? /\s*$/.exec(raw)?.[0] ?? '' : ''
-  return leading + text + trailing
+
+  return { isLiveComputedText, recordTextWrite, domTextRegion, matchLightEditRule, lightEditRuleMap }
 }
+const primitives = createLightEditTextPrimitives(lightEditOverrideKey)
+export const { isLiveComputedText, recordTextWrite, domTextRegion, matchLightEditRule, lightEditRuleMap } = primitives
 
 interface TextRecord {
   /** Text as the Runtime wrote it. */
@@ -72,6 +70,8 @@ interface TextRecord {
 export interface DomTextSample {
   readonly node: Text
   readonly root: Node
+  /** Exact program text, including surrounding whitespace, for source-address matching. */
+  readonly raw: string
   /** Normalized text the Runtime rendered, before any rule. */
   readonly original: string
   readonly region: string
@@ -82,23 +82,55 @@ export interface DomTextSample {
   readonly live: boolean
 }
 
-/**
- * Applies light-edit rules to text a Runtime or Component renders into its DOM roots.
- * The Runtime keeps writing its own text; this host rewrites matching nodes after every
- * change and restores the Runtime's text when a rule is removed, so undo stays exact.
- */
+
 /** The root's own window observer: an observer from another realm rejects the node. */
 export function observerFor(root: Node): typeof MutationObserver | undefined {
   const view = (root.ownerDocument ?? (root as Document)).defaultView as (Window & typeof globalThis) | null
   return view?.MutationObserver ?? (typeof MutationObserver === 'undefined' ? undefined : MutationObserver)
 }
 
+
+export interface DomTextOverrideController {
+  setRules(rules: readonly LightEditTextOverride[]): void
+  applyAll(): void
+  samples(): DomTextSample[]
+  originalText(node: Text): string
+  setLocalText(node: Text, text: string | null): void
+  destroy(): void
+}
+interface DomTextOverrideDependencies extends ReturnType<typeof createLightEditTextPrimitives> {
+  normalizeLightEditText: typeof normalizeLightEditText
+  observerFor: typeof observerFor
+  managedHtmlDocuments(root: HTMLElement): readonly { root: Node }[]
+  watchManagedHtmlDocuments(root: HTMLElement, changed: () => void): () => void
+}
+/** One algorithm with explicit realm dependencies; no writer or source mutation. */
+export function createDomTextOverrides(roots: readonly Node[], rules: readonly LightEditTextOverride[],
+  onChange: (() => void) | undefined, dependencies: DomTextOverrideDependencies): DomTextOverrideController {
+  const { normalizeLightEditText, observerFor, managedHtmlDocuments, watchManagedHtmlDocuments,
+    isLiveComputedText, recordTextWrite, domTextRegion, matchLightEditRule, lightEditRuleMap } = dependencies
+  const SKIPPED_SELECTOR = 'script,style,noscript,template,textarea,option,title,[contenteditable]:not([contenteditable="false"])'
+function skipped(node: Text): boolean {
+  return Boolean(node.parentElement?.closest(SKIPPED_SELECTOR))
+}
+
+
+/** Keep the author's surrounding whitespace so inline layout does not shift. */
+function padded(raw: string, text: string): string {
+  const leading = /^\s*/.exec(raw)?.[0] ?? ''
+  const trailing = raw.length > leading.length ? /\s*$/.exec(raw)?.[0] ?? '' : ''
+  return leading + text + trailing
+}
+
+
 function isElementRoot(root: Node): root is HTMLElement {
   return root.nodeType === 1 && 'querySelectorAll' in root
 }
 
-export class DomTextOverrides {
+
+class DomTextOverrideOwner {
   private readonly records = new WeakMap<Text, TextRecord>()
+  private readonly localText = new WeakMap<Text, string>()
   private readonly observers = new Map<Node, MutationObserver>()
   private readonly roots: Node[]
   private readonly unwatch: Array<() => void> = []
@@ -173,7 +205,7 @@ export class DomTextOverrides {
         if (!original) continue
         const region = domTextRegion(node, root)
         samples.push({
-          node, root, original, region,
+          node, root, raw: record.raw, original, region,
           shown: normalizeLightEditText(node.nodeValue ?? ''),
           rule: matchLightEditRule(this.rules, original, region),
           live: isLiveComputedText(original, record.writes),
@@ -181,6 +213,15 @@ export class DomTextOverrides {
       }
     }
     return samples
+  }
+
+  originalText(node: Text): string { return this.record(node).raw }
+
+  /** The exact author object owns this occurrence; page rules still own other occurrences. */
+  setLocalText(node: Text, text: string | null): void {
+    this.record(node)
+    if (text === null) this.localText.delete(node)
+    else this.localText.set(node, text)
   }
 
   destroy(): void {
@@ -218,7 +259,7 @@ export class DomTextOverrides {
     const current = node.nodeValue ?? ''
     const known = this.records.get(node)
     // Anything other than our own last write is the Runtime writing new text.
-    if (known && current === (known.applied ?? known.raw)) return known
+    if (known && (current === (known.applied ?? known.raw) || current === this.localText.get(node))) return known
     const fresh: TextRecord = { raw: current, applied: null, writes: known?.writes ?? [] }
     if (known) recordTextWrite(fresh.writes)
     this.records.set(node, fresh)
@@ -229,6 +270,7 @@ export class DomTextOverrides {
   private process(node: Text, root: Node): boolean {
     if (skipped(node)) return false
     const record = this.record(node)
+    if (this.localText.has(node)) return false
     const original = normalizeLightEditText(record.raw)
     const rule = original ? matchLightEditRule(this.rules, original, domTextRegion(node, root)) : undefined
     const desired = rule ? padded(record.raw, rule.text) : record.raw
@@ -237,4 +279,30 @@ export class DomTextOverrides {
     node.nodeValue = desired
     return true
   }
+}
+
+  return new DomTextOverrideOwner(roots, rules, onChange)
+}
+
+/** Existing host callers retain the same managed-document adapter. */
+export class DomTextOverrides implements DomTextOverrideController {
+  private readonly owner: DomTextOverrideController
+  constructor(roots: readonly Node[], rules: readonly LightEditTextOverride[], onChange?: () => void) {
+    this.owner = createDomTextOverrides(roots, rules, onChange, { ...primitives,
+      normalizeLightEditText, observerFor, managedHtmlDocuments, watchManagedHtmlDocuments })
+  }
+  setRules(rules: readonly LightEditTextOverride[]): void { this.owner.setRules(rules) }
+  applyAll(): void { this.owner.applyAll() }
+  samples(): DomTextSample[] { return this.owner.samples() }
+  originalText(node: Text): string { return this.owner.originalText(node) }
+  setLocalText(node: Text, text: string | null): void { this.owner.setLocalText(node, text) }
+  destroy(): void { this.owner.destroy() }
+}
+
+/** Child parser documents instantiate this same owner inside their own realm. */
+export function domTextOverrideRealmSource(): string {
+  return `const createPageTextOverrides=(roots,rules)=>(${createDomTextOverrides.toString()})(roots,rules,undefined,{
+    ...(${createLightEditTextPrimitives.toString()})((${lightEditOverrideKey.toString()})),
+    normalizeLightEditText:(${normalizeLightEditText.toString()}),observerFor:(${observerFor.toString()}),
+    managedHtmlDocuments:()=>[],watchManagedHtmlDocuments:()=>()=>{}});`
 }

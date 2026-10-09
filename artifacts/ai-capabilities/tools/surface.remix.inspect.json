@@ -1,0 +1,28 @@
+{
+  "description": "读取参考页可替换的正文槽位、原文及局部问题。后续 surface.remix 使用返回的槽位引用，不需提供对象身份或字段路径。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "target": {
+        "maxLength": 100,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "target"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "读取参考页槽位",
+    "targetKinds": [
+      "course-surface"
+    ]
+  },
+  "name": "surface.remix.inspect",
+  "version": 1
+}

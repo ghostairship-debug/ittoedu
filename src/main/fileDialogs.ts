@@ -1,3 +1,7 @@
+import { isNativeProjectFilename, nativeProjectFilename, NATIVE_PROJECT_OPEN_EXTENSIONS } from '../shared/nativeProjectFile'
+import { nativeProjectSaveSelection } from './nativeProjectSaveSelection'
+import { publishNewFile } from './workbench/publishNewFile'
+import { DocumentSaveFailure } from '../shared/workbench/documentSave'
 import crypto from 'node:crypto'
 import path from 'node:path'
 import { projectFileStatus, prepareProjectFileObservation, rememberProjectFileBytes } from './projectFileObservation'
@@ -105,7 +109,7 @@ function isApprovedProjectPath(value: string): boolean {
 }
 
 function sanitizeSuggestedName(value: string, extension: string): string {
-  const fallback = `未命名 H5 演示${extension}`
+  const fallback = `未命名 果铃工程${extension}`
   const baseName = path
     .basename(value)
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
@@ -287,7 +291,7 @@ async function selectFileBatch<T extends OpenBinaryFileResult>(
   }
 }
 
-async function atomicWrite(filePath: string, data: Uint8Array | string): Promise<void> {
+async function atomicWrite(filePath: string, data: Uint8Array | string, overwriteConfirmed = true): Promise<void> {
   const directory = path.dirname(filePath)
   const temporaryPath = path.join(
     directory,
@@ -296,9 +300,10 @@ async function atomicWrite(filePath: string, data: Uint8Array | string): Promise
 
   try {
     await fs.writeFile(temporaryPath, data, { flag: 'wx' })
-    await fs.rename(temporaryPath, filePath)
+    if (overwriteConfirmed) await fs.rename(temporaryPath, filePath)
+    else { await publishNewFile(temporaryPath, filePath); await fs.unlink(temporaryPath).catch(() => undefined) }
   } catch (error) {
-    await fs.unlink(temporaryPath).catch(() => undefined)
+    if (!(error instanceof DocumentSaveFailure && error.publication === 'unknown')) await fs.unlink(temporaryPath).catch(() => undefined)
     throw error
   }
 }
@@ -307,8 +312,8 @@ export async function openProjectFile(
   window: BrowserWindow,
 ): Promise<OpenProjectFileResult | null> {
   const result = await dialog.showOpenDialog(window, {
-    title: '打开 H5 演示',
-    filters: [{ name: 'H5 演示', extensions: ['h5lesson'] }],
+    title: '打开 果铃工程',
+    filters: [{ name: '果铃工程', extensions: [...NATIVE_PROJECT_OPEN_EXTENSIONS] }],
     properties: ['openFile', 'dontAddToRecent'],
   })
   if (result.canceled || result.filePaths.length === 0) return null
@@ -328,8 +333,8 @@ export async function openSelectedProjectFile(filePath: string): Promise<OpenPro
     throw new DesktopOperationError(
       'PROJECT_ARCHIVE_INVALID',
       '工程打开失败',
-      '所选文件不是有效的 H5 演示，或文件已经损坏。',
-      '请重新选择 .h5lesson 文件，或从备份恢复该工程。',
+      '所选文件不是有效的 果铃工程，或文件已经损坏。',
+      '请重新选择 .glx 文件，或从备份恢复该工程。',
     )
   }
 
@@ -355,7 +360,7 @@ export async function openRecentProjectFile(
     throw new DesktopOperationError(
       'PROJECT_ARCHIVE_INVALID',
       '最近工程打开失败',
-      '该文件不是有效的 H5 演示，或文件已经损坏。',
+      '该文件不是有效的 果铃工程，或文件已经损坏。',
       '请从备份恢复该工程，或将它从最近工程列表中移除。',
     )
   }
@@ -384,10 +389,11 @@ export async function saveProjectFile(
 
   let targetPath =
     input.path &&
-    path.extname(input.path).toLocaleLowerCase('en-US') === '.h5lesson' &&
+    isNativeProjectFilename(input.path) &&
     isApprovedProjectPath(input.path)
       ? input.path
       : undefined
+  let overwriteConfirmed = true
 
   if (targetPath) {
     const status = await projectFileStatus(targetPath)
@@ -398,22 +404,27 @@ export async function saveProjectFile(
 
   if (!targetPath) {
     const result = await dialog.showSaveDialog(window, {
-      title: '保存 H5 演示',
-      defaultPath: input.suggestedDirectory ? path.join(input.suggestedDirectory, sanitizeSuggestedName(input.suggestedName, '.h5lesson')) : sanitizeSuggestedName(input.suggestedName, '.h5lesson'),
-      filters: [{ name: 'H5 演示', extensions: ['h5lesson'] }],
+      title: '保存 果铃工程',
+      defaultPath: input.suggestedDirectory ? path.join(input.suggestedDirectory, sanitizeSuggestedName(nativeProjectFilename(input.suggestedName), '.glx')) : sanitizeSuggestedName(nativeProjectFilename(input.suggestedName), '.glx'),
+      filters: [{ name: '果铃工程', extensions: ['glx'] }],
       properties: ['showOverwriteConfirmation', 'dontAddToRecent'],
     })
     if (result.canceled || !result.filePath) return null
-    targetPath = ensureExtension(result.filePath, '.h5lesson')
+    const selected = nativeProjectSaveSelection(result.filePath)
+    targetPath = selected.path; overwriteConfirmed = selected.overwriteConfirmed
   }
 
   try {
-    await atomicWrite(targetPath, input.bytes)
+    await atomicWrite(targetPath, input.bytes, overwriteConfirmed)
   } catch (error) {
+    if (!overwriteConfirmed && (error as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new DesktopOperationError('PROJECT_SAVE_TARGET_EXISTS', '另存目标已存在',
+        `实际保存目标 ${targetPath} 已存在，尚未确认覆盖该文件。`, '请重新选择实际 .glx 文件确认覆盖，或使用新文件名。', { cause: error })
+    }
     throw new DesktopOperationError(
       'PROJECT_SAVE_FAILED',
       '工程保存失败',
-      'H5 演示未能写入所选位置。',
+      '果铃工程未能写入所选位置。',
       '请确认文件未被占用并选择有足够空间的位置后重试。',
       { cause: error },
     )
@@ -719,7 +730,7 @@ export async function peekProjectArchiveFile(
   const resolved = path.resolve(filePath)
   if (
     !path.isAbsolute(resolved) ||
-    path.extname(resolved).toLocaleLowerCase('en-US') !== '.h5lesson'
+    !isNativeProjectFilename(resolved)
   ) return null
   try {
     const bytes = await readSelectedFile(

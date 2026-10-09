@@ -2,9 +2,10 @@ import type { ModelConnectionSnapshot } from '../../../shared/workbench/modelPro
 import type { ExecutionSettingsView } from '../../../shared/workbench/executionSettings'
 import type { SearchProviderPage, SearchProviderPort, WebSearchHit } from './WebResearchService'
 
-/** Wire mapping follows DeepSeek's MIT-licensed official web-search provider (commit 639ed015).
+/** Wire mapping checked against DeepSeek's official provider b38da295 (2026-10-08).
  * Reuses only the documented native Messages search protocol, not the DSH runtime.
- * https://github.com/deepseek-ai/deepseek-harness/tree/639ed015397290b3745d163aafe02ffee4aa3f84/packages/web/web-search-deepseek */
+ * https://github.com/deepseek-ai/deepseek-harness/blob/b38da295170f8232aba21c9acf630dde3822cc72/packages/web/web-search-deepseek/src/provider.ts
+ * The API guide documents deepseek-flash; DSH's different default is not this product's alias. */
 export interface NativeSearchSelection { connection: ModelConnectionSnapshot; model: string }
 export class WebSearchProviderError extends Error {
   constructor(readonly status: 'not-configured' | 'rejected' | 'failed', message: string) { super(message) }

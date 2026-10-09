@@ -1,0 +1,60 @@
+{
+  "description": "调用已安装的原生 EXE 工具。宿主先展示实际可执行路径、参数、隔离副本目录和冻结输入，逐次批准后执行；工作空间权限不授予命令执行。sources 是已授权文件或文本材料来源，复制后的 name 位于 cwd；cwd 是副本内相对目录，stdin 为标准输入，outputs 点名相对成果。返回 job，用 job.wait/logs/read 与 artifact.save 读取或交付；失败退出或未知结果不重放。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "args": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "command": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "cwd": {
+        "$ref": "#/$defs/__schema0"
+      },
+      "outputs": {
+        "items": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "type": "array"
+      },
+      "sources": {
+        "items": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "type": "array"
+      },
+      "stdin": {
+        "type": "string"
+      },
+      "timeoutMs": {
+        "exclusiveMinimum": 0,
+        "maximum": 9007199254740991,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "command"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "local.run",
+    "targetKinds": []
+  },
+  "name": "local.run",
+  "version": 1
+}

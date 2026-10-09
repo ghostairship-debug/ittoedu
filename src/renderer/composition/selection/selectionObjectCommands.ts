@@ -1,18 +1,11 @@
 import type { ObjectCommandPorts } from '../../editing/commands/objectCommands'
 import type { LayerOrderMove } from '../../editing/quickbar/layerOrder'
-import { containerChildIds, owningContainer } from '../../../shared/contracts/component-platform/project'
+import { courseObjectOrder } from '../../../core/course/courseObjectEdits'
 import { selectEditingScope, useEditorStore } from '../../store/editorStore'
 
 function planOrder(itemId: string, move: LayerOrderMove): string[] | null {
   const project = useEditorStore.getState().courseView.editingProject
-  if (!project || project.instances[itemId]?.locked) return null
-  const owner = owningContainer(project,itemId)
-  if (!owner) return null
-  const ids = [...containerChildIds(project,owner)], index = ids.indexOf(itemId)
-  const target = move==='front'?ids.length-1:move==='back'?0:index+(move==='forward'?1:-1)
-  if(index<0 || target<0 || target>=ids.length || target===index) return null
-  ids.splice(index,1); ids.splice(target,0,itemId)
-  return ids
+  return project ? courseObjectOrder(project, itemId, move) : null
 }
 /** The original quickbar and context menus share the canonical cross-surface actions. */
 export const selectionObjectCommands = {

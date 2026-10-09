@@ -1,27 +1,55 @@
 {
-  "description": "resource 使用宿主图片资源；asset 只读引用当前文档已有图片句柄。Project V10 的整张专业图片可原位替换，保留身份、frame、专业效果与未指定字段；可用于当前元素授权范围。",
+  "description": "使用来源返回的 source 或已授权文件路径，原位替换同类型图片、音频或视频；软件读取实际字节并登记资源。保留对象身份、frame、专业效果与未指定字段；asset 可引用当前文档已有图片句柄。",
   "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "maxLength": 100,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema1": {
+        "enum": [
+          "contain",
+          "cover",
+          "stretch"
+        ],
+        "type": "string"
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "anyOf": [
       {
         "additionalProperties": false,
         "properties": {
           "fit": {
-            "enum": [
-              "contain",
-              "cover",
-              "stretch"
-            ],
+            "$ref": "#/$defs/__schema1"
+          },
+          "source": {
+            "minLength": 1,
             "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "target",
+          "source"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "fit": {
+            "$ref": "#/$defs/__schema1"
           },
           "resource": {
             "minLength": 1,
             "type": "string"
           },
           "target": {
-            "maxLength": 100,
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema0"
           }
         },
         "required": [
@@ -34,22 +62,13 @@
         "additionalProperties": false,
         "properties": {
           "asset": {
-            "maxLength": 100,
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema0"
           },
           "fit": {
-            "enum": [
-              "contain",
-              "cover",
-              "stretch"
-            ],
-            "type": "string"
+            "$ref": "#/$defs/__schema1"
           },
           "target": {
-            "maxLength": 100,
-            "minLength": 1,
-            "type": "string"
+            "$ref": "#/$defs/__schema0"
           }
         },
         "required": [

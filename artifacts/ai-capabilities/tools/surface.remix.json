@@ -1,0 +1,37 @@
+{
+  "description": "完整复制已观察参考页，再替换 surface.remix.inspect 返回的正文槽位。保留人工布局、富文本、互动、展示状态与内部引用，软件维护复制身份；需要整课写入授权。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "replacements": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "propertyNames": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "target": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "target",
+      "replacements"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "参考页面改写",
+    "targetKinds": [
+      "course-surface"
+    ]
+  },
+  "name": "surface.remix",
+  "version": 1
+}

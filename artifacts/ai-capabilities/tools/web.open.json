@@ -1,30 +1,49 @@
 {
   "description": "打开公网 http(s) 页面或本任务搜索来源；裸公网域名自动使用 https。相对素材路径请使用 file.*，此工具不读取本地文件。返回正文、URL 和版本；逐跳校验公网目标，长文用 offset 续读。",
   "inputSchema": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "additionalProperties": false,
-    "properties": {
-      "limit": {
-        "maximum": 9007199254740991,
-        "minimum": 1,
-        "type": "integer"
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
       },
-      "offset": {
+      "__schema1": {
+        "$ref": "#/$defs/__schema2"
+      },
+      "__schema2": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema3": {
+        "$ref": "#/$defs/__schema2"
+      },
+      "__schema4": {
         "maximum": 9007199254740991,
         "minimum": 0,
         "type": "integer"
       },
+      "__schema5": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "limit": {
+        "$ref": "#/$defs/__schema5"
+      },
+      "offset": {
+        "$ref": "#/$defs/__schema4"
+      },
       "sourceId": {
-        "minLength": 1,
-        "type": "string"
+        "$ref": "#/$defs/__schema1"
       },
       "url": {
-        "minLength": 1,
-        "type": "string"
+        "$ref": "#/$defs/__schema0"
       },
       "version": {
-        "minLength": 1,
-        "type": "string"
+        "$ref": "#/$defs/__schema3"
       }
     },
     "type": "object"

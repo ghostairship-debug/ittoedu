@@ -13,8 +13,9 @@ export async function operateMediaFiles(request: MediaFilesRequest): Promise<Med
     return service.open(await host.artifacts.bind(entry.resolvedPath))
   }
   if (input.type === 'media-file.open-path') return service.open(await host.artifacts.bind(await assertAuthorizedWorkspacePath(input.path)))
-  await assertAuthorizedWorkspacePath(input.binding.path)
-  if (input.type === 'media-file.reload') return service.open(await host.artifacts.bind(input.binding.path))
-  if (input.type === 'media-file.preview') return service.preview(input.binding, input.operations)
-  return service.save(input.binding, input.operations)
+  const binding = host.artifacts.resolveBinding(input.binding)
+  await assertAuthorizedWorkspacePath(binding.path)
+  if (input.type === 'media-file.reload') return service.open(await host.artifacts.bind(binding.path))
+  if (input.type === 'media-file.preview') return service.preview(binding, input.operations)
+  return service.save(binding, input.operations)
 }

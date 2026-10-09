@@ -1,6 +1,50 @@
 # 教师首发与统一内容协作：实施结果
 
-当前摘要更新：2026-10-08。Owner 已全文启动 [START_PROMPT](../20261008-core-experience-unified/START_PROMPT.md)，覆盖讨论／暂不开发状态。本轮计划内开发、分批源码集成、相应独立 review、普通教师旅程与原三路续作已收口；最后多状态跨表面粘贴按Owner选择直接拒绝，没有待选实施叶，发行继续暂停。接手源码 `423a96dc` 和用户未提交方案文档保全；下述历史首稿失败、旧 source cut 与有效证据均保留。当前入口见 [CURRENT_STATUS](../CURRENT_STATUS.md)、[执行包](../20261008-core-experience-unified/README.md)、[首次交付审查](evidence/core-experience-20261007/FIRST_DELIVERY_REVIEW.md)。
+当前摘要更新：2026-10-08。Owner 已全文启动 START_PROMPT，接手HEAD `3095ea02` 与有效未提交成果，持续实施 S0–S6、独立 review 与新完整创作验证，发行继续暂停。首轮分批源码集成、对应独立review、选定教师旅程及原三路续作证据保留，产品源码cut `95ce7eaf`；多状态跨表面粘贴已按Owner选择直接拒绝。**首轮有限收口不证明共同业务全集统一，也不证明最终版本从空白单请求完整MCP/内置创作通过。** 执行见[EXECUTION_PLAN§7](../20261008-core-experience-unified/EXECUTION_PLAN.md#7-共同业务实质统一与完整创作收口方案)，当前事实见[CURRENT_STATUS](../CURRENT_STATUS.md)。下述首次失败、旧cut与有效产品证据保留，不回填原首次。
+
+## 本轮 S0–S6 后续实际实施
+
+S0 四领域与独立 T 已反查人工入口、正式操作/文件 binding、公开工具及服务入口，有限覆盖置于唯一执行计划§7.3。发现当前媒体 rename/move 续编与媒体未保存 current-copy 两个同根消费者差额，已纳现有文件/媒体 owner；Office 原格式服务同源复用，系统Office未保存栈不冒充产品Session支持。
+
+Root已按原writer清单原样集成U/C/A资源/X/A专业/G前一稳定版及媒体/F实体。U原五题＋输入prepare/ACK/current-copy新增题通过，C当前入口/递归依赖三题通过；独立源码review通过。媒体重定位、pending preview current-copy、Office移出授权根再重建旧名、旧入口门退出及并发同路径双开七题通过并独立签收。A成果/授权/typed载荷单题、X真实V10/PPTX/unknown/Stop三题通过，工程阶段真实生图新增零。
+
+I/F/A实际人工、公开工具与ContentApply已接同源语义planner，状态重定父、全局对象发现、页面复制、Flow正文/浮层、专业判题/chart/interaction/logic/media差额已通过限定独立review。I五条代表题、F四条原题和嵌套转浮层新增因果题、A专业差额证据复用；实际22源码315导入边检查通过，不宣称全仓tsc或旧AST runner通过。G typed图片/目标接续/显式delivery与恢复证据已补审，empty data:{}不能伪恢复的真实Gateway题通过。
+
+最后S1范围路径/依赖、同捕获分页、同名改序跨scope alias、named-state data/style只改override及基态源码边界已通过source独立补签；S4当前snapshot事实进入Engine普通/压缩与MCP，同save→edit真实题及独立补签通过。Root按I26 owned清单和G最后三文件原样集成。主树范围/dirty事实两题组合PASS（13:08:26，9.20s），AI能力索引和默认组件源码按真实consumer生成。Main/Player/Renderer构建exit0；Main快照union导致的三条TS2339由原G一行收窄后通过，未变Player/Renderer不重跑。没有冒称全仓tsc通过。
+
+两路新作者均Luna/medium：MCP01首份已冻结失败；MCP02与真实内置01分别新空白任务，原始记录独立保留。Root不写作品；未变字体/运行/正文/保存证据复用，发行暂停。
+
+### S6-MCP-01 首次冻结与实际新差额
+
+正常ownedMain63680/公开SDK真实执行，主作者Luna/medium。策划及3页V10实际保存：`output/core-experience-20261007/authors/mcp/s6-single-request-01/串联电路：一处断开会怎样.h5lesson`，saved/currentRevision=6、dirty=false；公开HTML预览中开关/解释/复位、判断错答/正确/重试有作者证据，尚不由此代签独立QA。正式首页未应用新图，**首次不通过**，后续不能回填本次结果。
+
+作者验证脚本每次connect→call→detach导致run/短句柄结束；常驻Main始终运行，该执行误用不等于常驻服务回退。首image-tool:6e5228c581e8b3d229b6f84dab3541aae4f9b3e2658ec2abe2d55c3916365015 在05:13:18.469Z→.624Z stopped/not-sent/image-aborted，无image.fetch.invoked，无Ready资源，不记已发送生图。修会话方式后第二job image-tool:51e591d639651e83804ba1befd35e11b658c6e255aed930eb941d31165910d4c Ready/stopped=false，PNG1254×1254/2,059,052bytes，GPT OAuth请求gpt-image-2/订阅，usage145+515=660tokens，金额未知。请求medium，服务响应resolvedOutput low；原provider原样发送/记录，无本地改档证据，成功图不重生。
+
+Ready source是正式文档af23729b-d877-4aa3-8e66-c26035a51901，原同宿主image.status当前授权可读；artifact.save却调用workspace-only readStandaloneImage，在文件writer之前invalid-operation。S3必要消费差额已由A接共同readGeneratedImageReference，离线真实V10/PNG保存及授权反例1/1通过（13:30:27，9.58s），review_resources_outcomes独立补签PASS，相关Main增量构建exit0。停止/source/grant和文件writer保持。project.apply过期/错误域短句柄的ENOENT、mcp.resource错误域及打开前采目录的作者使用差异保留；SDK单连接打开后刷新目录、生成/应用/保存/导出、最后detach。`task.finish`仅内置loop，公开MCP正常保存/导出是合法差异。
+
+完整原始回执与脚本在`output/core-experience-20261008/authors/mcp-single-request-s6-01/`。诊断中本地MCP token误输出，未外发/写作品；Root经既有GUI轮换且旧token401证实撤销，报告不载token。原Main63680正常exit0，新Main61792公开SDK驻留并正常GUI升格，临时closeAction已恢复ask。
+
+### S6 后续真实消费差额
+
+新Main正常file.open同原H5得到24a94e67…会话身份；原Ready仍绑定af23729b…，image.status因精确grant拒绝。U/A/I复用既有journal保存路径+V10项目与savedDocumentBinding证明，在原owner区分immutable图片source和current授权文档。最终真实离线Host source保存后dirty→cold新ID→动态grant→status→PNG保存解码→media.insert正式应用1/1PASS（14:18:41，9.41s），独立资源review PASS，错误资源/无授权/只读/换path/换project拒绝。无新身份登记、dirty/version门、普通open/恢复稿或旧grant变化。相关Mainbuild0；新Main66836实际公开SDK cold原H5→原Ready status=ready/stopped=false可读、签新合法handle，证据`output/core-experience-20261008/software-cold-ready/calls.jsonl`，原图未重生，Root未写作品。
+
+MCP02持续连接正常SDK已保存策划并创建空rev0工程；真实内置01正常GUI新空白会话、Luna/medium和不引用旧文档已核，唯一初始请求后保存策划、新GPT图Ready。两端新工程随后读取均报“保全输入时文档已关闭”：LessonWorkspaceHost fallback把Main-only文档误交无该输入owner的Renderer courseInputs。U两行只筛实际输入owner修复，真实React Host/controller因果1PASS（14:13:16）、source独审PASS；未变注册preparer优先/失败不降读、mounted pending先ACK、真关闭拒读。Renderer9.33s build0后正常reload，Main61792公开SDK原MCP02 file.open→project.list10files实际通过；首次Control+r未装入新JS的失败保留，不冒新候选失败。证据`output/core-experience-20261008/software-input-route/calls.jsonl`，未写课/付费。file.create/mkdir父目录/name描述按真实解析校正、能力索引consumer生成后最终Renderer8.47s0，Player复用。
+
+内置01 run c21877bf-fdaf-4abc-95f6-efd354b1b29c终态partial；12条文本请求407,473in/1,447out，checkpoint跨度80.418s不是端到端作者活跃时间。新图bffb6ec3… ready，PNG1254×1254/1,956,584bytes，GPT OAuth请求gpt-image-2/订阅金额未知，未应用；详细白名单回执在builtin-single-request-s6-01/RUN_RECEIPTS.md。Main61792在两作者终态/客户端detach后正常mcp-stop exit0；当前Main66836驻留GUI，MCP03/内置02新空白任务正在执行，旧结果和成功图保全，不把续作补救记首次PASS。
+
+### 当前交付合同与新完整任务进展
+
+内置02 run59120934-c2c7-4380-a90d-d446f6f32331终态partial：三页正式H5 saved5/clean，html-offline导出及task.delivery因旧创建句柄content footprint被拒。真实新图Ready1254×1254/2,045,551bytes、请求medium/响应low、usage99+515=614，金额未知；正式H5仅project.json、assets空、图片src为字面IMAGE，不能以timeline applied或preview签嵌入。21条有计量Luna请求882,675in/2,562out，另1failed无usage；149.792s仅checkpoint跨度。原回执已纠正H5保存与HTML导出、正文applied与图片嵌入的区别，首partial保留。
+
+I复用currentDeliveryDocument整份身份/同run/epoch/可写非readOnly/current grant/stop/prepare ACK→drain读取当前revision；project.save/file.save/export/task.finish均接这个原owner，只退出delivery误用content footprint/conflicted，generic编辑/Office CAS不变。独立资源review核现公开“当前正式内容”合同，非新取舍。X唯一新真实createoldtarget→2规范编辑→人工输入ACK到rev3→4交付当前内容/H5/PPTX消费873CAD，旧内容编辑CAS/跨run/只读拒绝1PASS（14:41:12，11.03s），独审PASS；首红仅fixture固定默认另存路径，修成当前binding后通过，旧3不重跑。相关Main增量build0，未变Renderer/Player证据复用。
+
+MCP03新任务已保存7/clean、真实新图media.insert2→3、离线HTMLwritten7；T独立正式包与原job核PNG1254×1254/2,231,537bytes及guoling.image绑定，真实file浏览器新图decode、三页导航、开闭/另一断点/复位/两灯与解释同步、判断错对及空console/errors PASS。动态HTML离线依赖静态未知警告不否定实际成功；首页已亮照片影响预测提示属于内容备注。QA_RECORD.json在mcp-single-request-s6-03/independent-qa，Main冷开与GUI副本Undo尚待，不冒全PASS。Main66836正常exit0；当前新Main62796正常驻留GUI，T公开冷开MCP03与新空白内置03任务并行准备，原成功图不重生。
+
+## 本次方案生成与待开发边界
+
+本节保留启动前的方案生成时点。此前只更新既有执行计划/包表/启动提示词及必要状态和协议，无产品源码、测试、GUI或真实模型运行。开发方案覆盖：事实导出的有限能力全集、唯一业务owner及完整消费者、当前状态按需源码及依赖、已存在局部源码/文件编辑、机械接力、按当前必要目标的结果判定、防回退/防再分叉，以及新的单请求真实创作验收。独立方案review与文档定向检查记录在原[REVIEW_RESULT](../20261008-core-experience-unified/REVIEW_RESULT.md)，其通过不等于产品实现或验收。
+
+当前图片预览MCP载荷、非HTML当前源/依赖、公开正式能力读写及完成结算的源码缺口已确认；覆盖全集仍待核对。首轮MCP具体授权拒绝和模型提前结束原因未唯一还原。软件修改和新完整任务都未开始，不将计划、原续作或只读/窄修completed写成已完成。
 
 ## 10 月 8 日实际实施结果
 
@@ -221,3 +265,11 @@ GPT OAuth 后续免费检查当时确认：真实产品 profile 的原 secureSto
 Windows dir 默认入口已实际连接、执行随包计算并交付三项 written 资源。随后的 GUI 工作区续接问题已有窄候选与独立三例；完整 GUI 延续及退出仍缺完成证据，完整安装消费未通过。私有端口、隐藏启动等续验支线已停止，不再表述为“正在续验”；各局部证据及限制见[复审记录](evidence/teacher-compute-review.md)。这些限制不清零已证免 WSL 计算、OAuth 生成/参考编辑及可控全链14.6秒结果，也不把它们扩成完整打包验收。
 
 新增源码仍是 `162aee26` 上的未提交候选，Git 元数据只读；原38包/20候选及 S09 已合入的事实保留。核心文件关闭/保存/History、普通输入与插入/属性、公式、HTML 轻编辑、三表面视口/控制台、整窗放弃与恢复问题尚未修复。完整三路真实首产出质量/耗时比较、Owner 接受、全仓旧类型/测试债及历史 native trap 根因均未宣称完成。新窗口按实际核心旅程推进，不恢复旧全矩阵或把历史条件改绿。
+
+## 10月8日 §9＋§10 启动后的实施增量
+
+上文10月7日暂停和基线仅为当时事实。Owner 现已明确按[启动提示词](../20261008-core-experience-unified/START_PROMPT.md)开始并要求继续；Root 接手 `3095ea02` 及当前未提交成果，原145份已保全，不回退作品或旧有效证据。
+
+独审后已合主树：模块闭包／百分号文件、最终请求与队列基线、六方法／共用指南／安装读取、已ACK源码诊断输入、资源／材料／媒体来源及MCP查证、文本卡原捕获与折叠草稿恢复、图表／表格／Flow专业首片。逐项实际基线、审查者、有效测试、组合条件和首审发现见唯一[REVIEW_RESULT末节](../20261008-core-experience-unified/REVIEW_RESULT.md)。能力索引已据真实Skill分发变化重生成；无产品提交／推送／发布。
+
+尚在候选：有序正文范围与可见slot、源码语言入口、Recipe数字排序、上下文／Tracker／真实Desktop资源续作、专业插入／对齐／控制器、Spatial及嵌套引用、受控进程／steering／有限子任务、可信差量验证。重要结构由另一作者独审，真实错写／数据身份问题优先；已通过且未变检查不重跑。当前新组合构建／正常GUI、新完整MCP和内置单请求创作均未记通过。既有OAuth图片、原模型费用／首次partial／续作以及免WSL计算证据保持原范围，发行继续暂停。

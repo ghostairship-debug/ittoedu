@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 /** Issued by the existing file owner. A changed path/binding or disk version invalidates it. */
 export interface FileArtifactBinding { path: string; fileVersion: string; bindingVersion: number }
+export interface MediaArtifactBindingChanged { before: FileArtifactBinding; binding: FileArtifactBinding }
 
 const fraction = z.number().finite().min(0).max(1)
 const point = z.object({ x: fraction, y: fraction }).strict()
@@ -31,9 +32,11 @@ export type MediaFileContent =
   | { kind: 'image'; bytes: Uint8Array; mimeType: string; width: number; height: number; editable: boolean; editReason?: string }
   | { kind: 'pdf'; bytes: Uint8Array; mimeType: 'application/pdf'; pages: Array<{ width: number; height: number; rotation: number }>; editable: true }
 export interface MediaFileSnapshot { binding: FileArtifactBinding; content: MediaFileContent }
+export interface MediaFileDraftInput { binding: FileArtifactBinding; operations: readonly MediaFileOperation[] }
 
 export const fileArtifactBindingSchema = z.object({ path: z.string().min(1), fileVersion: z.string().min(1), bindingVersion: z.number().int().positive() }).strict()
 const edit = { binding: fileArtifactBindingSchema, operations: z.array(mediaFileOperationSchema) }
+export const mediaFileDraftInputSchema = z.object(edit).strict()
 export const mediaFilesRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('media-file.open'), workspaceId: z.string().min(1), entryId: z.string().min(1) }).strict(),
   z.object({ type: z.literal('media-file.open-path'), path: z.string().min(1) }).strict(),

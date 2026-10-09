@@ -3,12 +3,15 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import { createPortal } from 'react-dom'
 import { QuickBarButton } from '../../editing/quickbar/SelectionQuickBar'
 import type { ExecutionSelectionTarget } from '../../../shared/workbench/executionDesktop'
+import type { ExecutionSendInput } from '../../../shared/workbench/executionDesktop'
+import type { SelectionCapture } from '../SelectionContextController'
 import { ElementAiCard } from './ElementAiCard'
 import { elementCards, useTextCards, type ElementCardView } from './elementCardController'
 import './elementCards.css'
 
 /** What a text card starts from: the selected range, a name for it, and what the range holds now. */
-export interface TextCardStart { target: ExecutionSelectionTarget; label: string; content: string | null }
+export interface TextCardStart { target: ExecutionSelectionTarget; capture: SelectionCapture;
+  contentOutput?: ExecutionSendInput['contentOutput']; label: string; content: string | null }
 
 /** A short name for selected text, as a card title. */
 export function textCardLabel(text: string): string {
@@ -103,8 +106,9 @@ export function TextAiButton({ documentId, selectionIdentity, start, disabledRea
         } else {
           if (rebindKey) setRebind(null)
           const same = elementCards.texts().find(card => card.documentId === documentId && card.textLost === null
-            && JSON.stringify(card.target) === JSON.stringify(value.target))
+            && elementCards.matchesTextCapture(card.key, value.capture))
           key = same?.key ?? elementCards.openText({ documentId, ...value, anchor: position })
+          if (same) elementCards.revealText(key, position)
         }
         attachAnchor(key, textAnchor ?? anchor.current, value.target, openingIdentity, Boolean(textAnchor))
       }).catch(reason => setError(reason instanceof Error ? reason.message : String(reason)))
@@ -118,6 +122,14 @@ function TextCardPanel({ card }: { card: ElementCardView }) {
   const holder = useRef<HTMLDivElement>(null)
   const pendingRebind = useSyncExternalStore(subscribeRebind, requestedRebind, () => null) === card.key
   const [position, setPosition] = useState(() => ({ left: card.anchor?.left ?? 24, top: card.anchor?.top ?? 24, detached: false }))
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      if (event.composedPath().includes(holder.current!)) return
+      elementCards.dismissText(card.key)
+    }
+    document.addEventListener('pointerdown', dismiss)
+    return () => document.removeEventListener('pointerdown', dismiss)
+  }, [card.key])
   useEffect(() => {
     let observed: HTMLElement | null = null
     const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
@@ -161,9 +173,19 @@ function TextCardPanel({ card }: { card: ElementCardView }) {
   </div>
 }
 
-/** Floats the open text cards over the workbench; closing one ends it. */
+/** Floats visible text cards; folded unsent cards remain in their original lifetime. */
 export function ElementTextCardLayer() {
   const cards = useTextCards()
   if (!cards.length) return null
-  return createPortal(<>{cards.map(card => <TextCardPanel key={card.key} card={card} />)}</>, document.body)
+  const foldedDrafts = cards.filter(card => card.dismissed && card.draft.length > 0)
+  return createPortal(<>
+    {cards.filter(card => !card.dismissed).map(card => <TextCardPanel key={card.key} card={card} />)}
+    {foldedDrafts.length > 0 && <aside className="element-text-card-drafts" aria-label="未发送的 AI 草稿">
+      <strong>未发送的 AI 草稿</strong>
+      {foldedDrafts.map(card => <button key={card.key} type="button" aria-label={`恢复 AI 草稿：${card.label}`} title={card.draft}
+        onClick={() => elementCards.revealText(card.key, card.anchor ?? { left: 24, top: 24 })}>
+        <span>恢复草稿：{card.label}</span><small>{card.draft}</small>
+      </button>)}
+    </aside>}
+  </>, document.body)
 }

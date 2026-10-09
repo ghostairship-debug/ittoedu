@@ -60,7 +60,7 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
   const project = view.project
   const liveStore = () => {
     const state = useEditorStore.getState()
-    if (state.courseView.activeDocumentId !== documentId) { state.setError('文档已切换，请在当前 H5 演示重新选择页面。'); return null }
+    if (state.courseView.activeDocumentId !== documentId) { state.setError('文档已切换，请在当前 果铃工程重新选择页面。'); return null }
     return state
   }
   const goTo = (node: CourseTreeNode) => {

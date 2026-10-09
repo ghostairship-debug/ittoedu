@@ -28,7 +28,10 @@ $currentSkillNames = @(
   'orchestrate-courseware',
   'build-courseware-project',
   'edit-content',
-  'office-content'
+  'office-content',
+  'research-and-report',
+  'data-and-report',
+  'workbench-usage'
 )
 $retiredSkillNames = @(
   'build-project-v7-courseware',

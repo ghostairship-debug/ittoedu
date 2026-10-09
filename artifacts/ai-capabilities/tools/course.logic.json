@@ -1,0 +1,426 @@
+{
+  "description": "编辑课程状态、导航守卫或课程网络声明。使用整文档句柄；状态改名同步当前规则和命名状态里的引用，删除被引用状态给出可修原因；软件维护新守卫身份。网络声明不赋予凭据或宿主权限。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema1": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "defaultValue": {
+                "type": "boolean"
+              },
+              "key": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "valueType": {
+                "const": "boolean",
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "valueType",
+              "defaultValue"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "defaultValue": {
+                "type": "number"
+              },
+              "key": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "valueType": {
+                "const": "number",
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "valueType",
+              "defaultValue"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "defaultValue": {
+                "type": "string"
+              },
+              "key": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "valueType": {
+                "const": "string",
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "valueType",
+              "defaultValue"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "defaultValue": {
+                "type": "null"
+              },
+              "key": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "valueType": {
+                "const": "null",
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "valueType",
+              "defaultValue"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "__schema2": {
+        "maxLength": 240,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema3": {
+        "const": "block",
+        "type": "string"
+      },
+      "__schema4": {
+        "items": {
+          "$ref": "#/$defs/__schema5"
+        },
+        "type": "array"
+      },
+      "__schema5": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema6": {
+        "items": {
+          "$ref": "#/$defs/__schema5"
+        },
+        "type": "array"
+      },
+      "__schema7": {
+        "enum": [
+          "all",
+          "any"
+        ],
+        "type": "string"
+      },
+      "__schema8": {
+        "items": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "exists": {
+                  "type": "boolean"
+                },
+                "key": {
+                  "$ref": "#/$defs/__schema2"
+                },
+                "type": {
+                  "const": "exists",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "key",
+                "exists"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "$ref": "#/$defs/__schema2"
+                },
+                "operator": {
+                  "enum": [
+                    "eq",
+                    "neq",
+                    "gt",
+                    "gte",
+                    "lt",
+                    "lte"
+                  ],
+                  "type": "string"
+                },
+                "type": {
+                  "const": "compare",
+                  "type": "string"
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "key",
+                "operator",
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "type": "array"
+      },
+      "__schema9": {
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "change": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "declaration": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "kind": {
+                "const": "course-state.add",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "declaration"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "declaration": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "key": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "kind": {
+                "const": "course-state.update",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "key",
+              "declaration"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "kind": {
+                "const": "course-state.delete",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "key"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "guard": {
+                "additionalProperties": false,
+                "properties": {
+                  "conditions": {
+                    "$ref": "#/$defs/__schema8"
+                  },
+                  "effect": {
+                    "$ref": "#/$defs/__schema3"
+                  },
+                  "fromSurfaceIds": {
+                    "$ref": "#/$defs/__schema4"
+                  },
+                  "match": {
+                    "$ref": "#/$defs/__schema7"
+                  },
+                  "message": {
+                    "$ref": "#/$defs/__schema9"
+                  },
+                  "toSurfaceIds": {
+                    "$ref": "#/$defs/__schema6"
+                  }
+                },
+                "required": [
+                  "effect",
+                  "toSurfaceIds",
+                  "match",
+                  "conditions",
+                  "message"
+                ],
+                "type": "object"
+              },
+              "kind": {
+                "const": "navigation-guard.add",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "guard"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "guard": {
+                "additionalProperties": false,
+                "properties": {
+                  "conditions": {
+                    "$ref": "#/$defs/__schema8"
+                  },
+                  "effect": {
+                    "$ref": "#/$defs/__schema3"
+                  },
+                  "fromSurfaceIds": {
+                    "$ref": "#/$defs/__schema4"
+                  },
+                  "match": {
+                    "$ref": "#/$defs/__schema7"
+                  },
+                  "message": {
+                    "$ref": "#/$defs/__schema9"
+                  },
+                  "toSurfaceIds": {
+                    "$ref": "#/$defs/__schema6"
+                  }
+                },
+                "required": [
+                  "effect",
+                  "toSurfaceIds",
+                  "match",
+                  "conditions",
+                  "message"
+                ],
+                "type": "object"
+              },
+              "guardId": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "kind": {
+                "const": "navigation-guard.update",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "guardId",
+              "guard"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "guardId": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "kind": {
+                "const": "navigation-guard.delete",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "guardId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "network",
+                "type": "string"
+              },
+              "network": {
+                "additionalProperties": false,
+                "properties": {
+                  "connectOrigins": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind",
+              "network"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "target": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    "required": [
+      "target",
+      "change"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "课程逻辑",
+    "targetKinds": [
+      "document"
+    ]
+  },
+  "name": "course.logic",
+  "version": 1
+}

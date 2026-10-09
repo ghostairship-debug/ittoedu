@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopAPI } from '../shared/ipcTypes'
 import type { AttachmentReadProgress } from '../shared/workbench/attachmentsDesktop'
+import type { SpatialViewportRequest } from '../shared/workbench/spatialViewport'
 
 // Sandboxed preloads cannot require local CommonJS modules at runtime. Keep this
 // whitelist self-contained; the shared declaration remains the source of API types.
@@ -24,6 +25,13 @@ const IPC_CHANNELS = {
   workspaceFilesChanged: 'workspace-files:changed',
   documents: 'documents:operate',
   documentEvent: 'documents:event',
+  requestPrepareDocumentInput: 'document-input:prepare-request',
+  prepareDocumentInputResult: 'document-input:prepare-result',
+  requestCaptureSpatialViewport: 'spatial-viewport:capture-request',
+  captureSpatialViewportResult: 'spatial-viewport:capture-result',
+  requestCaptureMediaCopy: 'media-copy:capture-request',
+  captureMediaCopyResult: 'media-copy:capture-result',
+  mediaArtifactBindingChanged: 'media-file:binding-changed',
   flowDocumentRecovery: 'flow-document-recovery:operate',
   lessonMaterial: 'lesson-material:operate',
   lessonDocument: 'lesson-document:operate',
@@ -429,6 +437,48 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.requestSave, listener)
     }
+  },
+  onRequestPrepareDocumentInput: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, requestId: unknown, documentId: unknown) => {
+      if (typeof requestId !== 'string' || typeof documentId !== 'string') return
+      void Promise.resolve().then(() => handler(documentId)).then(
+        () => ipcRenderer.send(IPC_CHANNELS.prepareDocumentInputResult, requestId, true),
+        error => ipcRenderer.send(IPC_CHANNELS.prepareDocumentInputResult, requestId, false, error instanceof Error ? error.message : String(error)),
+      )
+    }
+    ipcRenderer.on(IPC_CHANNELS.requestPrepareDocumentInput, listener)
+    return () => { ipcRenderer.removeListener(IPC_CHANNELS.requestPrepareDocumentInput, listener) }
+  },
+  onRequestCaptureSpatialViewport: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, requestId: unknown, raw: unknown) => {
+      if (typeof requestId !== 'string' || !raw || typeof raw !== 'object') return
+      const input = raw as SpatialViewportRequest
+      if (typeof input.documentId !== 'string' || typeof input.epoch !== 'string' || typeof input.surfaceId !== 'string') return
+      void Promise.resolve().then(() => handler(input)).then(
+        value => ipcRenderer.send(IPC_CHANNELS.captureSpatialViewportResult, requestId, true, value),
+        error => ipcRenderer.send(IPC_CHANNELS.captureSpatialViewportResult, requestId, false, error instanceof Error ? error.message : String(error)),
+      )
+    }
+    ipcRenderer.on(IPC_CHANNELS.requestCaptureSpatialViewport, listener)
+    return () => { ipcRenderer.removeListener(IPC_CHANNELS.requestCaptureSpatialViewport, listener) }
+  },
+  onRequestCaptureMediaCopy: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, requestId: unknown, input: unknown) => {
+      if (typeof requestId !== 'string' || !input || typeof input !== 'object') return
+      const { source, kind } = input as { source?: unknown; kind?: unknown }
+      if (typeof source !== 'string' || kind !== 'file' && kind !== 'directory') return
+      void Promise.resolve().then(() => handler(source, kind)).then(
+        drafts => ipcRenderer.send(IPC_CHANNELS.captureMediaCopyResult, requestId, true, drafts),
+        error => ipcRenderer.send(IPC_CHANNELS.captureMediaCopyResult, requestId, false, error instanceof Error ? error.message : String(error)),
+      )
+    }
+    ipcRenderer.on(IPC_CHANNELS.requestCaptureMediaCopy, listener)
+    return () => { ipcRenderer.removeListener(IPC_CHANNELS.requestCaptureMediaCopy, listener) }
+  },
+  onMediaArtifactBindingChanged: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, change: import('../shared/workbench/mediaFiles').MediaArtifactBindingChanged) => handler(change)
+    ipcRenderer.on(IPC_CHANNELS.mediaArtifactBindingChanged, listener)
+    return () => { ipcRenderer.removeListener(IPC_CHANNELS.mediaArtifactBindingChanged, listener) }
   },
   onRequestPreserveAndClose: handler => {
     if (typeof handler !== 'function') throw new TypeError('关闭前恢复稿处理器必须是函数。')

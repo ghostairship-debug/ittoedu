@@ -1,0 +1,105 @@
+{
+  "description": "按普通查找替换或项目颜色意图修改内容，软件扫描并复用人工批量编辑算法；无需逐字段生成补丁。target 是已观察页面；page 只改本页，surface 包含全局层，course 扫描整课。后两种范围需要整课授权。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "request": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "find": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "text",
+                "type": "string"
+              },
+              "replacement": {
+                "type": "string"
+              },
+              "scope": {
+                "enum": [
+                  "page",
+                  "surface",
+                  "course"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "scope",
+              "find",
+              "replacement"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "color",
+                "type": "string"
+              },
+              "property": {
+                "enum": [
+                  "text",
+                  "fill",
+                  "stroke",
+                  "background",
+                  "all"
+                ],
+                "type": "string"
+              },
+              "scope": {
+                "enum": [
+                  "page",
+                  "surface",
+                  "course"
+                ],
+                "type": "string"
+              },
+              "tokenId": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "required": [
+              "kind",
+              "scope",
+              "tokenId",
+              "property"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "target": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    "required": [
+      "target",
+      "request"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "批量内容与颜色",
+    "targetKinds": [
+      "course-surface"
+    ]
+  },
+  "name": "course.productivity",
+  "version": 1
+}

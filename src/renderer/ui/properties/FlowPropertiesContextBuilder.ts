@@ -1,5 +1,5 @@
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
-import type { ComponentBackground, JsonValue } from '../../../shared/contracts/component-platform/project'
+import type { ComponentBackground, ComponentFlowBodyLayout, JsonValue } from '../../../shared/contracts/component-platform/project'
 import type { DocumentSelection } from '../../../shared/document/ports'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { PropertiesOwnerReadModel } from '../../composition/properties/PropertiesAuthoringReadModel'
@@ -10,8 +10,8 @@ import { flowBodyIds, projectFlowBlock } from '../../componentPlatform/surfaces/
 import { flowTextStyleEdits } from '../../componentPlatform/surfaces/flow/documentSelection'
 import type { FlowPropertiesCommands, FlowPropertiesContext, FlowPropertiesView } from './FlowPropertiesPanel'
 import type { PropertiesPatch, SlideNativePropertiesContext } from './SlideNativePropertiesPanel'
-import { componentParentMatrix } from '../../composition/crossSurfaceCommands'
-import { composeMatrices, reparentFrame, IDENTITY_MATRIX } from '../../../core/components/geometry'
+import { surfaceSettingsEdits } from '../../../core/course/courseSemanticEdits'
+import { flowBodyLayoutEdits, flowPlacementEdits } from '../../../core/course/courseFlowEdits'
 import { componentPropertiesEdits, propertiesEffectiveBackground } from './componentProperties'
 import { assertFlowStructureEditsAllowed, flowStructureDisabledReason } from '../../authoring/flowStructureEdits'
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
@@ -51,8 +51,8 @@ export function buildFlowPropertiesOwner(input: {
       ...(selection.anchor.slot.kind === 'header' ? { tableColumnId: selection.anchor.slot.columnId } : {}) } : null
   const run = (fn: () => unknown) => { try { void Promise.resolve(fn()).catch(report) } catch (error) { report(error) } }
   const intent = async (value: FlowAuthoringIntent) => { const receipt = await actions.runFlowAuthoringIntent(liveTarget(), value); if (!receipt.ok) throw new Error(receipt.reason) }
-  const backgroundValue = (value: { backgroundMode?: 'inherit' | 'own'; backgroundColor?: string; backgroundAssetId?: string | null }, current?: ComponentBackground): ComponentBackground => ({
-    ...current, ...(value.backgroundMode === undefined ? {} : { mode: value.backgroundMode }),
+  const backgroundValue = (value: { backgroundMode?: 'inherit' | 'own'; backgroundColor?: string; backgroundAssetId?: string | null }): ComponentBackground => ({
+    ...(value.backgroundMode === undefined ? {} : { mode: value.backgroundMode }),
     ...(value.backgroundColor === undefined ? {} : { color: value.backgroundColor, mode: 'own' as const }),
     ...(value.backgroundAssetId === undefined ? {} : { assetId: value.backgroundAssetId, mode: 'own' as const }) })
   const unavailable = () => report('请使用所选组件的专业属性控件。')
@@ -84,27 +84,30 @@ export function buildFlowPropertiesOwner(input: {
     setWidthMode: widthMode => run(() => intent({ kind: 'set-width-mode', widthMode })),
     renamePage: (_surfaceId, title) => run(() => intent({ kind: 'rename-page', title })),
     setPaperBackground: (_surfaceId, backgroundColor) => run(() => intent({ kind: 'set-paper-background', backgroundColor })),
-    updateSurfaceBackground: value => run(() => { const target = liveTarget(); submit([{ type: 'surface.background.set', surfaceId: surface.id,
-      background: backgroundValue(value, target.project.surfaces.find(value => value.id === surface.id)?.background) }], target) }),
-    previewSurfaceBackground: value => run(() => input.preview(value.backgroundColor == null ? null : [{ type: 'surface.background.set', surfaceId: surface.id,
-      background: { ...background, mode: 'own', color: value.backgroundColor } }], 'surface')),
+    updateSurfaceBackground: value => run(() => { const target = liveTarget(); submit(surfaceSettingsEdits(target.editingProject, surface.id,
+      { background: backgroundValue(value) }), target) }),
+    previewSurfaceBackground: value => run(() => input.preview(value.backgroundColor == null ? null : surfaceSettingsEdits(liveTarget().editingProject, surface.id,
+      { background: { mode: 'own', color: value.backgroundColor } }), 'surface')),
     importSurfaceBackgroundAsset: file => run(() => { const target = liveTarget(), id = crypto.randomUUID(); submit([
       { type: 'asset.add', asset: { id, path: `assets/${id}/${file.name}`, filename: file.name, mimeType: file.mimeType, kind: 'image', byteLength: file.bytes.byteLength }, bytes: file.bytes },
-      { type: 'surface.background.set', surfaceId: surface.id, background: { ...background, mode: 'own', assetId: id } }], target) }),
+      ...surfaceSettingsEdits(target.editingProject, surface.id, { background: { mode: 'own', assetId: id } })], target) }),
     patchSelectedBlock: patch => {
       try {
         const target = liveTarget(), instance = target.instanceId ? target.editingProject.instances[target.instanceId] : null
         if (!instance) throw new Error('请先选择正文块。')
         const impl = target.project.definitions[instance.definitionId]?.implementation
         const isText = impl?.kind === 'builtin' && impl.key === 'guoling.text'
+        const layoutPatch: Partial<ComponentFlowBodyLayout> = {}
         const edits: ComponentEdit[] = Object.entries(patch).flatMap(([key, value]): ComponentEdit[] => {
           if (value === undefined) return []
-          if (key === 'wrap' || key === 'layout' || (key === 'caption' && impl?.kind === 'builtin' && ['guoling.image', 'guoling.video', 'guoling.audio'].includes(impl.key))) return [{ type: 'instance.flowLayout.set', instanceId: instance.id,
-            flowLayout: { width: instance.flowLayout?.width ?? 'content-width', ...instance.flowLayout,
-              ...(key === 'wrap' ? { wrap: value as 'none' | 'left' | 'right' } : key === 'layout' ? { width: value as 'content-width' | 'wide' | 'full-width' } : { caption: value as NonNullable<typeof instance.flowLayout>['caption'] }) } }]
+          if (key === 'wrap' || key === 'layout' || (key === 'caption' && impl?.kind === 'builtin' && ['guoling.image', 'guoling.video', 'guoling.audio'].includes(impl.key))) {
+            Object.assign(layoutPatch, key === 'wrap' ? { wrap: value } : key === 'layout' ? { width: value } : { caption: value })
+            return []
+          }
           return [{ type: 'data.set', instanceId: instance.id, path: isText && (key === 'textAlign' || key === 'lineSpacing') ? ['appearance', key === 'textAlign' ? 'align' : key]
             : key === 'altText' && impl?.kind === 'builtin' ? [impl.key === 'guoling.image' ? 'alt' : 'title'] : [key], value: json(value) }]
         })
+        if (Object.keys(layoutPatch).length) edits.push(...flowBodyLayoutEdits(target.editingProject, instance.id, layoutPatch))
         assertFlowStructureEditsAllowed(target.editingProject, edits)
         submit(edits, target); return null
       } catch (error) { report(error); return error instanceof Error ? error.message : String(error) }
@@ -118,14 +121,8 @@ export function buildFlowPropertiesOwner(input: {
       if (signal?.aborted) return
       const target = liveTarget(), id = target.instanceId
       if (!id) throw new Error('请先选择浮层组件。')
-      const container = destination?.parentBlockId ? { kind: 'instance' as const, instanceId: destination.parentBlockId } : { kind: 'surface' as const, surfaceId: surface.id }
-      const instance = target.project.instances[id]!
-      const edits: ComponentEdit[] = [{ type: 'instance.flowPlacement.set', instanceId: id, flowPlacement: null }]
-      const parent = destination?.parentBlockId ? target.project.instances[destination.parentBlockId] : null
-      const parentMatrix = parent ? composeMatrices(componentParentMatrix(target.project, parent.id), parent.frame?.transform ?? IDENTITY_MATRIX) : IDENTITY_MATRIX
-      if (destination) edits.push({ type: 'instance.move', instanceId: id, container, index: destination.index,
-        ...(instance.frame ? { frame: reparentFrame(instance.frame, componentParentMatrix(target.project, id), parentMatrix) } : {}) },
-        { type: 'instance.flowLayout.set', instanceId: id, flowLayout: { width: instance.flowLayout?.width ?? 'content-width', ...instance.flowLayout, wrap: destination.wrap ?? 'none' } })
+      const edits = flowPlacementEdits(target.editingProject, id, { kind: 'document', surfaceId: surface.id,
+        ...(destination ? { parentId: destination.parentBlockId ?? null, index: destination.index, wrap: destination.wrap ?? 'none' } : {}) })
       assertFlowStructureEditsAllowed(target.editingProject, edits)
       await input.kernel.editCaptured(input.kernel.capture(edits, target))
     },

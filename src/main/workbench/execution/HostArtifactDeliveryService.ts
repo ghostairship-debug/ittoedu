@@ -18,7 +18,7 @@ function inside(root: string, target: string): boolean {
   return relative === '' || relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
 }
 
-export type ArtifactSourceKind = 'image' | 'compute'
+export type ArtifactSourceKind = 'image' | 'compute' | 'delegation'
 export interface ArtifactDeliveryInput {
   runId: string
   operationId: string
@@ -193,7 +193,7 @@ export class HostArtifactDeliveryService {
   async deliver(input: ArtifactDeliveryInput): Promise<ArtifactDeliveryResult> {
     if (this.stoppedRuns.has(input.runId)) throw new DeliveryStopped()
     if (!input.runId || !input.sourceId
-      || !['image', 'compute'].includes(input.sourceKind)) throw new Error('成果来源身份无效')
+      || !['image', 'compute', 'delegation'].includes(input.sourceKind)) throw new Error('成果来源身份无效')
     if (!(input.bytes instanceof Uint8Array)) throw new Error('成果字节无效')
     const bytes = Uint8Array.from(input.bytes), digest = hash(bytes)
     const scope = await this.preflight(input)

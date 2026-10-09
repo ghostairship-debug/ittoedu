@@ -29,7 +29,7 @@ const connectionPresets: { label: string; connection: ConnectionDraft }[] = [
   { label: 'DeepSeek API', connection: { provider: 'deepseek', protocol: 'openai-chat', imageProtocol: null, baseURL: 'https://api.deepseek.com/v1', accountId: '默认账号', authKind: 'api-key', billing: { kind: 'metered' } } },
   { label: 'ChatGPT 登录', connection: oauthConnection() },
 ]
-const roleLabels: Record<ExecutionRole, string> = { conversation: '对话与规划', vision: '视觉理解', imageGenerate: '图片生成', imageEdit: '图片编辑' }
+const roleLabels: Record<ExecutionRole, string> = { conversation: '对话与规划', vision: '视觉理解', imageGenerate: '图片生成', imageEdit: '图片编辑', compression: '上下文压缩（可选）' }
 const isImageRole = (role: ExecutionRole) => role === 'imageGenerate' || role === 'imageEdit'
 const isOAuthImageConnection = (entry: ExecutionConnectionView) => supportsChatGPTOAuthImages(entry.connection)
 const isApiImageConnection = (entry: ExecutionConnectionView) => supportsOpenAIImages(entry.connection)
@@ -179,7 +179,7 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
       })
     }
   }, [open, api, settings, roles.conversation.connectionId, roles.vision.connectionId,
-    roles.imageGenerate.connectionId, roles.imageEdit.connectionId, imageConnectionId, catalogs])
+    roles.imageGenerate.connectionId, roles.imageEdit.connectionId, roles.compression.connectionId, imageConnectionId, catalogs])
   if (!open) return null
 
   const close = () => { if (!busy) { setApiKey(''); onClose() } }
@@ -214,7 +214,8 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
     setStatus(saved.hasCredential ? '连接设置已保存，模型能力尚未验证。' : '连接设置已保存，尚未接通凭据。')
   })
   const saveRoles = () => perform(async () => {
-    const selections = Object.fromEntries(executionRoles.map(role => {
+    const selections = Object.fromEntries(executionRoles.filter(role => role !== 'compression'
+      || Boolean(roles.compression.connectionId || settings?.profile.roles.compression)).map(role => {
       const draft = roles[role]
       if (!draft.connectionId) return [role, null]
       let parameters: Record<string, unknown>
@@ -505,6 +506,7 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
            const modelLabel = imageRole ? `${roleLabels[role]}图片模型` : `${roleLabels[role]}模型`
            return <section key={role} aria-label={`${roleLabels[role]}配置`} style={{ borderTop: '1px solid var(--border-color, #d0d5dd)', paddingTop: 12 }}>
             <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>{roleLabels[role]}</h3>
+            {role === 'compression' && <p style={{ margin: '0 0 10px', fontSize: 13 }}>未配置时使用当前任务的主模型。选定后，退出活跃上下文的内容会发送到这个连接整理；费用按所选连接计算。该模型不调用工具，也不能修改文档或授权。</p>}
             {imageRole && <p style={{ margin: '0 0 10px', fontSize: 13 }}>图片使用本次任务冻结的 ChatGPT OAuth 或已启用 OpenAI Images API 的连接。可点选目录中的图片模型或手动填写准确 ID；保存名称不代表能力已验证。API 路径当前仅支持单张参考图编辑。</p>}
             <div style={grid}>
               <label style={field}>{roleLabels[role]}连接<select aria-label={`${roleLabels[role]}连接`} value={roles[role].connectionId} onChange={event => chooseRoleConnection(role, event.target.value)}>

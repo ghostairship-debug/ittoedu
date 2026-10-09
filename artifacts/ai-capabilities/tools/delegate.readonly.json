@@ -1,0 +1,54 @@
+{
+  "description": "提交有明确目标、来源与输出/时长预算的只读子任务，使用父任务冻结的模型连接。sources 原样传入已授权文件路径或材料文本来源；子任务没有工具、主文档 writer 或再次委派权限。返回 job；候选保留来源引用，父任务回读审阅后决定正式应用。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "budget": {
+        "additionalProperties": false,
+        "properties": {
+          "maxDurationMs": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "maxOutputTokens": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "maxOutputTokens",
+          "maxDurationMs"
+        ],
+        "type": "object"
+      },
+      "goal": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "sources": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "goal",
+      "sources",
+      "budget"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "delegate.readonly",
+    "targetKinds": []
+  },
+  "name": "delegate.readonly",
+  "version": 1
+}

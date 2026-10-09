@@ -2,7 +2,7 @@ import type { ModelConnectionSnapshot, ModelJsonObject, ModelSelection } from '.
 import type { BodyStreamingRecord } from './bodyStreaming'
 import type { ModelCapabilityRecord } from './modelCapabilities'
 
-export const executionRoles = ['conversation', 'vision', 'imageGenerate', 'imageEdit'] as const
+export const executionRoles = ['conversation', 'vision', 'imageGenerate', 'imageEdit', 'compression'] as const
 /** Conversation covers dialogue and planning; the other model roles remain independent. */
 export type ExecutionRole = typeof executionRoles[number]
 export interface ExecutionRoleSelection {
@@ -20,7 +20,7 @@ export interface ExecutionModelFavorite {
 export interface ExecutionProfile {
   revision: number
   updatedAt: string
-  roles: Record<ExecutionRole, ExecutionRoleSelection | null>
+  roles: Record<Exclude<ExecutionRole, 'compression'>, ExecutionRoleSelection | null> & { compression?: ExecutionRoleSelection | null }
 }
 export type ExecutionConnectionConfiguration = Omit<ModelConnectionSnapshot, 'id' | 'revision' | 'auth'> & {
   authKind: ModelConnectionSnapshot['auth']['kind']

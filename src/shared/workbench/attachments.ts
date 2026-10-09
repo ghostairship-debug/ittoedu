@@ -65,9 +65,10 @@ export interface PayloadManifest {
   selectionSource?: { role: 'conversation' | 'vision'; reason: string; profileRevision?: number }
   payloadDigest: string
   totals: { serializedBytes: number; originalBytes: number; representationBytes: number; imageBytes: number; textCharacters: number; base64Characters: number }
+  userMessageIndex?: number
   userText: { messageIndex: number; characters: number; digest: string } | null
   automaticContext: { messageIndex: number; provenance: InputContextProvenance; digest: string; serializedBytes: number }[]
-  explicitAttachments: { messageIndex: number; contentIndex: number; attachmentId: string; representationId: string; name: string; role?: 'reference' | 'target'; delivery?: 'source' | 'inline'; originalDigest: string; representationDigest: string; mediaType: string; provenance: AttachmentProvenance }[]
+  explicitAttachments: { messageIndex: number; contentIndex: number; contentDigest?: string; attachmentId: string; representationId: string; name: string; role?: 'reference' | 'target'; delivery?: 'source' | 'inline'; originalDigest: string; representationDigest: string; mediaType: string; provenance: AttachmentProvenance }[]
   tools: { name: string; digest: string }[]
   delivery: { status: 'prepared' } | { status: 'sent'; requestId: string; acceptedAt: number }
   readStatus: 'unknown'

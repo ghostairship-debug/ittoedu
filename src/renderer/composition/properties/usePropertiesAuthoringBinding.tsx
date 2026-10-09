@@ -5,7 +5,7 @@ import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBrid
 import type { TextRunEdit } from '../../../shared/textRuns'
 import { formatTextComponentRange, replaceTextComponentRange, textComponentDataSchema, type TextComponentData } from '../../../components/text/data'
 import { parseTableData, tableCellContent } from '../../../components/table/data'
-import { editTableData, type TableEdit } from '../../../components/table/edit'
+import type { TableEdit } from '../../../components/table/edit'
 import { createChartPropertiesCommands } from '../../ui/properties/chartPropertiesCommands'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import { useEditorStore, selectEditingScope } from '../../store/editorStore'
@@ -19,7 +19,10 @@ import { buildSpatialPropertiesOwner } from '../../ui/properties/SpatialProperti
 import type { BackgroundPreviewTarget } from '../../authoring/backgroundPreview'
 import { buildCourseGlobalPropertiesOwner } from '../../ui/properties/CourseGlobalPropertiesContextBuilder'
 import { buildRuntimePropertiesContexts } from '../../ui/properties/RuntimePropertiesContextBuilder'
-import { applyComponentOperation, captureComponentOperation, resizeComponentSurfacesEdits } from '../../../core/drivers/courseV10Operations'
+import { applyComponentOperation, captureComponentOperation } from '../../../core/drivers/courseV10Operations'
+import { surfaceSettingsEdits } from '../../../core/course/courseSemanticEdits'
+import { coursePresentationEdits } from '../../../core/tools/coursePresentationEdits'
+import { componentDataEdits, componentTableDataEdits } from '../../../core/course/componentDataEdits'
 import { inspectComponentInputRules, configureComponentInputRules } from '../../../components/input/authoring'
 import { chartDataSchema } from '../../../components/chart/data'
 import { useCourseEditorActions } from '../../documents/CourseEditorActionsContext'
@@ -95,6 +98,10 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       edits = edits.filter(edit => !draftEdits.includes(edit))
       if (!edits.length) return Promise.resolve()
     }
+    const data = new Map<string, Array<{ path: string[]; value: JsonValue }>>()
+    for (const edit of edits) if (edit.type === 'data.set') data.set(edit.instanceId, [...data.get(edit.instanceId) ?? [], { path: edit.path, value: edit.value }])
+    if (data.size) edits = [...edits.filter(edit => edit.type !== 'data.set'), ...[...data].flatMap(([instanceId, fields]) =>
+      componentDataEdits(target.project, { surfaceId: target.surfaceId, instanceId, stateId: target.activeStateId }, { kind: 'fields', fields }))]
     const pending = kernel.editCaptured(kernel.capture(edits, target), group).then(() => undefined)
     // Event-only consumers still report failures; buffered consumers receive the original ACK.
     void pending.catch(report)
@@ -203,12 +210,10 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
     }),
   }
   const node = read.selectedView, selected = read.selectedInstance
-  const tableChange = (edit: TableEdit | ((source: ReturnType<typeof parseTableData>) => TableEdit)) => run(() => {
+  const tableChange = (edit: TableEdit) => run(() => {
     const target = liveTarget(), instanceId = target.instanceId
     if (!instanceId) return
-    const source = parseTableData(read.project!.instances[instanceId].data)
-    const next = editTableData(source, typeof edit === 'function' ? edit(source) : edit)
-    submit([{ type: 'data.set', instanceId, path: [], value: json(next) }], target)
+    submit(componentTableDataEdits(target.project, { surfaceId: target.surfaceId, instanceId, stateId: target.activeStateId }, edit), target)
   })
   const tableCell = (cellId: string) => {
     const target = liveTarget(), instanceId = target.instanceId
@@ -227,11 +232,6 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
     let offset = 0
     const style = content.inlines.find(inline => { offset += inline.type === 'text' ? Array.from(inline.text).length : 1; return offset >= edit.start })?.style
     return replaceTextComponentRange(data, edit.start, edit.end, { inlines: edit.replacement ? [{ type: 'text', text: edit.replacement, ...(style ? { style } : {}) }] : [] }).content
-  }
-  const moved = (ids: string[], id: string, direction: -1 | 1) => {
-    const index = ids.indexOf(id), next = index + direction
-    if (index >= 0 && next >= 0 && next < ids.length) { ids.splice(index, 1); ids.splice(next, 0, id) }
-    return ids
   }
   const table: SlideNativePropertiesContext['commands']['table'] = node?.type === 'table' ? {
     beginCellEdit: cellId => run(() => {
@@ -278,10 +278,10 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
     setColumnWidth: (columnId, width) => tableChange({ kind: 'column-width', columnId, width }),
     insertRow: (referenceRowId, position) => tableChange({ kind: 'insert-row', referenceRowId, position }),
     deleteRow: rowId => tableChange({ kind: 'delete-row', rowId }),
-    moveRow: (rowId, direction) => tableChange(source => ({ kind: 'reorder-rows', orderedRowIds: moved(source.rows.map(row => row.id), rowId, direction) })),
+    moveRow: (rowId, direction) => tableChange({ kind: 'move-row', rowId, direction: direction === -1 ? 'up' : 'down' }),
     insertColumn: (referenceColumnId, position) => tableChange({ kind: 'insert-column', referenceColumnId, position }),
     deleteColumn: columnId => tableChange({ kind: 'delete-column', columnId }),
-    moveColumn: (columnId, direction) => tableChange(source => ({ kind: 'reorder-columns', orderedColumnIds: moved(source.columns.map(column => column.id), columnId, direction) })),
+    moveColumn: (columnId, direction) => tableChange({ kind: 'move-column', columnId, direction: direction === -1 ? 'left' : 'right' }),
   } : null
   const chartData = node?.type === 'chart' && selected ? chartDataSchema.parse(selected.data) : null
   const chart = node?.type === 'chart' && chartData ? createChartPropertiesCommands(chartData, next => {
@@ -325,9 +325,8 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       clearPresentationOverride: () => run(() => {
         const target = liveTarget(), surface = target.project.surfaces.find(value => value.id === target.surfaceId)
         if (!surface?.presentation || !target.activeStateId || !target.instanceId) return
-        const presentation = structuredClone(surface.presentation)
-        delete presentation.states.find(state => state.id === target.activeStateId)!.overrides[target.instanceId]
-        submit([{ type: 'surface.presentation.set', surfaceId: surface.id, presentation }], target)
+        submit(coursePresentationEdits(target.project, { kind: 'course-surface', surfaceId: surface.id }, {
+          action: 'clear-object-overrides', state: target.activeStateId, objects: [target.instanceId] }), target)
       }),
       openAutomation, openProfessionalAutomation: openAutomation, text: textCommands, table, chart,
       input: node.type === 'input' && read.project && read.surface ? {
@@ -362,27 +361,26 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
   const activeState = baseSurface.presentation?.states.find(value => value.id === read.activeStateId) ?? null
   const backgroundFields = { backgroundMode: background?.mode ?? 'inherit' as const, backgroundColor: background?.color, backgroundAssetId: background?.assetId }
   const updateBackground = (value: { backgroundMode?: 'inherit' | 'own'; backgroundColor?: string; backgroundAssetId?: string | null }) => run(() => {
-    const target = liveTarget(), current = target.project.surfaces.find(item => item.id === surface.id)?.background
-    submit([{ type: 'surface.background.set', surfaceId: surface.id, background: { ...current,
+    const target = liveTarget()
+    submit(surfaceSettingsEdits(target.project, surface.id, { background: {
       ...(value.backgroundMode === undefined ? {} : { mode: value.backgroundMode }),
       ...(value.backgroundColor === undefined ? {} : { color: value.backgroundColor, mode: 'own' }),
       ...(value.backgroundAssetId === undefined ? {} : { assetId: value.backgroundAssetId, mode: 'own' }),
-    } }], target)
+    } }), target)
   })
   const importBackground = (file: { name: string; mimeType: string; bytes: Uint8Array }) => run(() => {
     const target = liveTarget(), id = crypto.randomUUID()
     submit([{ type: 'asset.add', asset: { id, path: `assets/${id}/${file.name}`, mimeType: file.mimeType }, bytes: file.bytes },
-      { type: 'surface.background.set', surfaceId: surface.id, background: { ...background, mode: 'own', assetId: id } }], target)
+      ...surfaceSettingsEdits(target.project, surface.id, { background: { mode: 'own', assetId: id } })], target)
   })
   const changeStateBackground = (value: { backgroundColor?: string; backgroundAssetId?: string | null }, inherit?: 'color' | 'assetId') => run(() => {
     const target = liveTarget(), current = target.project.surfaces.find(value => value.id === surface.id)
     if (!current?.presentation || !target.activeStateId) throw new Error('请先选择展示状态。')
-    const presentation = structuredClone(current.presentation), state = presentation.states.find(value => value.id === target.activeStateId)!
-    const background = { ...state.background, ...(value.backgroundColor === undefined ? {} : { color: value.backgroundColor, mode: 'own' as const }),
-      ...(value.backgroundAssetId === undefined ? {} : { assetId: value.backgroundAssetId, mode: 'own' as const }) }
-    if (inherit) delete background[inherit]
-    state.background = background
-    submit([{ type: 'surface.presentation.set', surfaceId: surface.id, presentation }], target)
+    submit(coursePresentationEdits(target.project, { kind: 'course-surface', surfaceId: surface.id }, {
+      action: 'background', state: target.activeStateId,
+      background: { ...(value.backgroundColor === undefined ? {} : { color: value.backgroundColor, mode: 'own' as const }),
+        ...(value.backgroundAssetId === undefined ? {} : { assetId: value.backgroundAssetId, mode: 'own' as const }) },
+      ...(inherit ? { inherit: [inherit] } : {}) }), target)
   })
   const previewSurface = (value: { backgroundColor?: string | null }) => run(() => preview(value.backgroundColor == null ? null : [
     { type: 'surface.background.set', surfaceId: surface.id, background: { ...background, mode: 'own', color: value.backgroundColor } }], 'surface'))
@@ -396,11 +394,10 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       canvas: { effective: surface.designSize ?? { width: 1280, height: 720 }, inherited: !surface.designSize,
         ...(surface.kind === 'slide' ? { scope: { currentSurfaceId: surface.id,
           pages: read.project.surfaces.filter(value => value.kind === 'slide').map(value => ({ id: value.id, label: value.title })) } } : {}) } }, runtime: null,
-    commands: { updateName: title => run(() => submit([{ type: 'surface.title.set', surfaceId: surface.id, title }])),
+    commands: { updateName: title => run(() => { const target = liveTarget(); submit(surfaceSettingsEdits(target.project, surface.id, { title }), target) }),
       resizeCanvas: (designSize, options = {}) => run(() => {
         const captured = liveTarget(), target = { ...captured, activeStateId: null, editingProject: captured.project }
-        return submit(resizeComponentSurfacesEdits(target.project, { surfaceIds: options.surfaceIds ?? [surface.id], designSize,
-          mode: options.mode ?? 'preserve', ...(options.mode === 'contain' && options.includeGlobal ? { globalReferenceSurfaceId: surface.id } : {}) }), target)
+        return submit(surfaceSettingsEdits(target.project, surface.id, { resize: { ...options, designSize } }), target)
       }),
       updateSceneBackground: updateBackground, updateSlideSurfaceBackground: updateBackground,
       previewSceneBackground: previewSurface, previewSlideSurfaceBackground: previewSurface,

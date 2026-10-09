@@ -104,6 +104,7 @@ test('M10-T05 deleting a dirty document cancels safely, then stops AI and retain
     page = await app.firstWindow()
     page.on('pageerror', error => errors.push(error.message))
     const recovery = page.getByRole('complementary', { name: '未保存文档的恢复稿' })
+    await page.locator('.lesson-workspace-toolbar').getByRole('button', { name: /^恢复稿（\d+）$/ }).click()
     await expect(recovery).toContainText('selection.md')
     const recoverable = await page.evaluate(() => window.desktopAPI!.documents!.recoverable())
     expect(recoverable.find(item => item.documentId === document.documentId)).toMatchObject({

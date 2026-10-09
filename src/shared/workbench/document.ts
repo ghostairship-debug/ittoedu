@@ -4,6 +4,7 @@ import type { CourseProjectDocument } from '../courseProjectTypes'
 import type { CompositionContentEdit } from '../composition/edit'
 import type { CourseProjectV10 } from '../contracts/component-platform/project'
 import type { ComponentAppliedChanges, ComponentOperationBatch } from '../contracts/component-platform/operations'
+import type { ToolTarget } from './tools'
 
 /** Document identity is independent of the file's project ID and its path. */
 export type DocumentId = string
@@ -40,6 +41,10 @@ export type DocumentCommand =
 export interface DocumentTextChanges {
   source: Array<{ from: number; to: number; inserted: number }>
   flow: Array<{ surfaceId: string; parentId: string | null; blockId: string; slot: DocumentSlot; from: number; to: number; inserted: number }>
+  /** Exact aggregate selection ACKs from the host planner, persisted in this same operation. */
+  aggregateMappings?: Array<{ before: Extract<ToolTarget, { kind: 'text-selection' }>; after: Extract<ToolTarget, { kind: 'text-selection' }>;
+    /** Indexes into source above, in its actual execution order; other batch groups are not owned. */
+    sourceIndexes: number[] }>
 }
 
 /** Actual source facts for range continuation; resources and Undo remain in the document History. */

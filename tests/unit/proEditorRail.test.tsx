@@ -7,7 +7,10 @@ import { proEditorRailController } from '@/renderer/ui/proEditorRailController'
 vi.mock('@/renderer/ui/ElementsTab', () => ({
   ElementsTab: () => <input aria-label="元素面板草稿" defaultValue="初稿" />,
 }))
-vi.mock('@/renderer/ui/ComponentsTab', () => ({ ComponentsTab: () => <p>组件面板</p> }))
+vi.mock('@/renderer/ui/ComponentsTab', () => ({ ComponentsTab: ({ onExtractSelection, onDeleteCatalogComponent }: {
+  onExtractSelection?: (title: string) => Promise<void>; onDeleteCatalogComponent?: (entry: any) => Promise<void>
+}) => <div>组件面板<button onClick={() => void onExtractSelection?.('提炼课件')}>提炼所选</button>
+  <button onClick={() => void onDeleteCatalogComponent?.({ id: 'selected-package' })}>删除所选库组件</button></div> }))
 vi.mock('@/renderer/ui/NodesTab', () => ({ NodesTab: () => <p>图层面板</p> }))
 vi.mock('@/renderer/ui/PropertiesTab', () => ({ PropertiesTab: () => <p>属性面板</p> }))
 vi.mock('@/renderer/ui/AutomationTab', () => ({ AutomationTab: () => <p>互动面板</p> }))
@@ -20,6 +23,17 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   proEditorRailController.close()
+})
+
+it('passes the existing extraction and catalog deletion ports through the editor rail', () => {
+  const extract = vi.fn(async () => {}), remove = vi.fn(async () => {})
+  render(<RightSidebar onAddImage={() => {}} onReplaceImage={() => {}} onAddVideo={() => {}}
+    onImportAudio={() => {}} onImportVideo={() => {}} onExtractSelection={extract} onDeleteCatalogComponent={remove} />)
+  fireEvent.click(screen.getByRole('tab', { name: '组件' }))
+  fireEvent.click(screen.getByRole('button', { name: '提炼所选' }))
+  fireEvent.click(screen.getByRole('button', { name: '删除所选库组件' }))
+  expect(extract).toHaveBeenCalledExactlyOnceWith('提炼课件')
+  expect(remove).toHaveBeenCalledExactlyOnceWith({ id: 'selected-package' })
 })
 
 it('keeps the editor canvas space until a tool is requested and retains the mounted draft when collapsed', () => {

@@ -28,9 +28,7 @@
     },
     "required": [
       "attachmentId",
-      "representationId",
-      "offset",
-      "maxChars"
+      "representationId"
     ],
     "type": "object"
   },

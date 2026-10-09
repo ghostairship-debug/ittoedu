@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
-import { executionDesktopRequestSchema, executionSelectionTargetSchema, matchesDisclosedSelection, type ConversationHomeInput, type ExecutionDocumentReference, type ExecutionSendInput, type ExecutionSendResult, type ExecutionSubmissionRecord, type RendererTimingStamp } from '../../../shared/workbench/executionDesktop'
+import { executionDesktopRequestSchema, executionDocumentReferenceSchema, executionContentOutputSchema, executionSelectionTargetSchema, matchesDisclosedSelection, type ConversationHomeInput, type ExecutionDocumentReference, type ExecutionSendInput, type ExecutionSendResult, type ExecutionSubmissionRecord, type RendererTimingStamp } from '../../../shared/workbench/executionDesktop'
 import type { ConversationRecord } from '../../../shared/workbench/conversations'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { ExecutionEvent, ExecutionEventInput } from '../../../shared/workbench/executionEvents'
@@ -92,11 +92,11 @@ function targetStillExists(snapshot: DocumentSnapshot, target: ExecutionDocument
 /** A mapped field keeps its original selected slot and grant; only its source location follows. */
 function mappedContentOutput(input: ExecutionSendInput, documents: ExecutionDocumentReference[]): ExecutionSendInput['contentOutput'] {
   const output = input.contentOutput
-  if (output?.target.kind !== 'html-author-field' || !output.target.source) return output
+  if (!output) return output
   const original = input.documents.find(document => document.documentId === output.documentId)
   const index = original?.selection?.findIndex(target => JSON.stringify(target) === JSON.stringify(output.target)) ?? -1
   const target = index >= 0 ? documents.find(document => document.documentId === output.documentId)?.selection?.[index] : undefined
-  return target?.kind === 'html-author-field' ? { ...output, target } : output
+  return target ? executionContentOutputSchema.parse({ ...output, target }) : output
 }
 /** Main owns spaces, task freezes and runs. Mounting a view only reads/subscribes. */
 export class ExecutionDesktopService {
@@ -255,11 +255,16 @@ export class ExecutionDesktopService {
         const submissions = await this.submissions.list()
         for (const record of submissions.filter(value => ['queued', 'starting', 'accepted'].includes(value.state))) {
           try {
-          const run = refreshed.find(value => value.input.taskId === record.submissionId)
+          const run = refreshed.find(value => record.steeringRunId
+            ? value.runId === record.steeringRunId && value.steering?.some(adjustment => adjustment.submissionId === record.submissionId)
+            : value.input.taskId === record.submissionId)
           const conversation = await this.conversations.readConversation(record)
           if (!conversation) { await this.retireOrphanedSubmission(record, run); continue }
           if (run) await this.bindRun(record, run)
-          else if (record.state === 'starting') await this.submissions.update(record.submissionId, { updatedAt: Date.now(),
+          else if (record.steeringRunId) {
+            await this.submissions.update(record.submissionId, { state: 'failed', updatedAt: Date.now(), failure: { code: 'steering-unconfirmed', message: '原任务没有确认这份调整；输入已保留，未作为新任务自动发送。' } })
+            await this.restoreFailedDraft(record)
+          } else if (record.state === 'starting') await this.submissions.update(record.submissionId, { updatedAt: Date.now(),
             failure: { code: 'submission-outcome-unknown', message: '应用中断时启动结果未知；未自动重发，请核对后重试新消息。' } })
           } catch { this.recoveryIssues.set(record.submissionId, '一项旧提交无法恢复，已保留；其他会话仍可使用。') }
         }
@@ -476,15 +481,15 @@ export class ExecutionDesktopService {
       catch (error) { throw executionInputError('document-session-changed', error) }
       if (snapshot.epoch !== reference.epoch) throw executionInputError('document-session-changed')
       if (snapshot.binding.kind === 'file') readOnlyRoots.push(path.dirname(snapshot.binding.path))
-      if (snapshot.revision !== reference.revision && [...reference.writable, ...(reference.selection ?? [])]
-        .some(target => target.kind === 'html-author-field' && target.source)) {
+      if (snapshot.revision !== reference.revision) {
         try { reference = await continueDocumentTargets(this.options.documents.registry.get(reference.documentId), reference, new Set()) }
         catch (error) { throw executionInputError('document-range-changed', error) }
       }
       // M15: an object or a document block stays the same target while it exists; a text range only while nothing changed.
       if (snapshot.revision !== reference.revision && [...(reference.selection ?? []), ...reference.writable.filter(target => target.kind !== 'document')]
         .some(target => !targetStillExists(snapshot, target))) throw executionInputError('document-range-changed')
-      documents.push({ documentId: reference.documentId, writable: reference.writable, ...(reference.selection?.length ? { selection: reference.selection } : {}) })
+      documents.push({ documentId: reference.documentId, epoch: reference.epoch, revision: reference.revision,
+        writable: reference.writable, ...(reference.selection?.length ? { selection: reference.selection } : {}) })
       preparedReferences.push(reference)
     }
     const contentOutput = mappedContentOutput(input, preparedReferences)
@@ -538,6 +543,15 @@ export class ExecutionDesktopService {
       try { visionSelection = await select('vision') }
       catch (error) { visionUnavailableReason = error instanceof Error ? error.message : '视觉模型连接不可用' }
     } else visionUnavailableReason = '任务接受时未配置视觉模型角色'
+    let compressionSelection: ModelSelection | undefined, compressionUnavailableReason: string | undefined
+    if ((await this.options.settings.read()).profile.roles.compression) {
+      try {
+        compressionSelection = await this.options.settings.snapshot('compression')
+      } catch (error) { compressionUnavailableReason = error instanceof Error ? error.message : '压缩模型连接不可用' }
+      if (compressionSelection && input.disclosedSettings
+        && !matchesDisclosedSelection(input.disclosedSettings, compressionSelection as Awaited<ReturnType<ExecutionSettingsStore['snapshot']>>))
+        throw executionInputError('disclosed-settings-changed')
+    }
     const now = Date.now(), attachmentIds = [...new Set(attachments.map(reference => reference.attachmentId))]
     return { schemaVersion: 1, submissionId: input.submissionId, workspaceId: input.workspaceId, conversationId: input.conversationId,
       state: 'queued', mode: input.mode ?? 'queue', text: input.text, documents: structuredClone(input.documents), attachments: structuredClone(attachments), permission,
@@ -547,6 +561,7 @@ export class ExecutionDesktopService {
       model: { provider: selection.connection.provider, model: selection.model, accountId: selection.connection.accountId, billing: selection.connection.billing.kind },
       createdAt: now, updatedAt: now, digest, attachmentIds,
       start: { conversationId: current.conversationId, taskId: input.submissionId, instruction: input.text, selection, documents,
+        ...(compressionSelection ? { compressionSelection } : {}), ...(compressionUnavailableReason ? { compressionUnavailableReason } : {}),
         ...(contentOutput ? { contentOutput: structuredClone(contentOutput) } : {}),
         ...(input.materials ? { materials: structuredClone(input.materials) } : {}),
         ...(input.webAuthorization ? { webAuthorization: structuredClone(input.webAuthorization) } : {}),
@@ -702,6 +717,11 @@ export class ExecutionDesktopService {
     const digest = this.digest(input), existing = await this.submissions.read(input.submissionId)
     if (existing) {
       if (existing.digest !== digest || existing.workspaceId !== input.workspaceId || existing.conversationId !== input.conversationId) throw executionInputError('submission-conflict')
+      if (existing.steeringRunId && existing.state === 'starting') {
+        const original = await this.runs.read(existing.steeringRunId)
+        if (original?.steering?.some(value => value.submissionId === existing.submissionId)) await this.bindRun(existing, original)
+        return this.submissionResult((await this.submissions.read(existing.submissionId))!)
+      }
       return this.submissionResult(existing)
     }
     let previous: ExecutionRunRecord | null = null
@@ -724,6 +744,8 @@ export class ExecutionDesktopService {
     }
     const current = await this.required(input.workspaceId, input.conversationId)
     if (current.revision !== input.expectedRevision) throw executionInputError('conversation-draft-changed')
+    const adjustmentRun = !previous && input.mode === 'adjust' ? await this.activeRun(current) : null
+    if (adjustmentRun) return this.steerSubmission(input, current, digest, adjustmentRun)
     if (previous && await this.activeRun(current)) throw refused('当前会话仍有运行中的任务，请等待结束后继续原任务')
     if (previous && (current.inputDraft && current.inputDraft !== input.text
       || current.inputAttachments.length && JSON.stringify(current.inputAttachments) !== JSON.stringify(input.attachments ?? [])
@@ -778,13 +800,46 @@ export class ExecutionDesktopService {
     const active = await this.activeRun(await this.required(input.workspaceId, input.conversationId))
     if (active && record.mode === 'queue') return this.submissionResult(record)
     if (active && record.mode === 'adjust') {
-      const stopped = await this.engine.stop(active.runId)
-      if (!stopped || ['queued', 'running', 'stopping'].includes(stopped.status)) throw refused('当前任务尚未停止，立即调整仍在等待')
-      record = await this.submissions.update(record.submissionId, { continuation: this.continuation(stopped), updatedAt: Date.now() })
-      record = await this.startSubmission(record, record.continuation)
-      return this.submissionResult(record)
+      // The conversation serial owner admitted a new live run during preparation.
+      // Keep this input for an explicit next task; never stop that run to pretend steering.
+      await this.submissions.update(record.submissionId, { state: 'failed', updatedAt: Date.now(), failure: { code: 'steering-raced-start', message: '任务开始时机已变化；输入保留，请再次调整当前任务。' } })
+      await this.restoreFailedDraft(record)
+      return this.submissionResult((await this.submissions.read(record.submissionId))!)
     }
     await this.startNext(record.conversationId, undefined, true)
+    return this.submissionResult((await this.submissions.read(record.submissionId))!)
+  }
+  private async steerSubmission(input: ExecutionSendInput, current: ConversationRecord, digest: string, original: ExecutionRunRecord): Promise<ExecutionSendResult> {
+    if (!input.text.trim()) throw refused('调整当前任务需要补充文字')
+    if (input.attachments?.length || input.materials || input.webAuthorization
+      || input.permission !== undefined && input.permission !== (original.input.permission ?? DEFAULT_PERMISSION_MODE))
+      throw refused('当前调整沿用原任务的材料、权限与范围；新增材料或权限请加入队列作为新任务。')
+    const now = Date.now(), documents: ExecutionDocumentReference[] = original.input.documents.map(document => executionDocumentReferenceSchema.parse({
+      documentId: document.documentId, epoch: document.epoch!, revision: document.revision!, writable: [...document.writable],
+      ...(document.selection ? { selection: [...document.selection] } : {}),
+    }))
+    let record: StoredExecutionSubmission = { schemaVersion: 1, digest, submissionId: input.submissionId, workspaceId: input.workspaceId,
+      conversationId: input.conversationId, state: 'starting', mode: 'adjust', steeringRunId: original.runId, text: input.text,
+      documents, attachments: [], attachmentIds: [], createdAt: now, updatedAt: now, permission: original.input.permission,
+      model: { provider: original.input.selection.connection.provider, model: original.input.selection.model,
+        accountId: original.input.selection.connection.accountId, billing: original.input.selection.connection.billing.kind },
+      ...(original.input.contentOutput ? { contentOutput: structuredClone(original.input.contentOutput) } : {}),
+      start: { ...structuredClone(original.input), taskId: input.submissionId, instruction: input.text } }
+    record = (await this.submissions.create(record)).record
+    try {
+      record = await this.acceptSubmission(record, current)
+      const acknowledged = await this.engine.steer(original.runId, input.submissionId, input.text)
+      await this.bindRun(record, acknowledged)
+    } catch (error) {
+      // A lost acknowledgement is queried from the same run and submission ID.
+      const acknowledged = await this.runs.read(original.runId)
+      if (acknowledged?.steering?.some(value => value.submissionId === input.submissionId)) await this.bindRun(record, acknowledged)
+      else {
+        record = await this.submissions.update(record.submissionId, { state: 'failed', updatedAt: Date.now(),
+          failure: { code: 'steering-not-accepted', message: error instanceof Error ? error.message : '任务调整未接受，输入已保留。' } })
+        await this.restoreFailedDraft(record).catch(() => undefined)
+      }
+    }
     return this.submissionResult((await this.submissions.read(record.submissionId))!)
   }
   private async collectReply(run: ExecutionRunRecord) {

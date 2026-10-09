@@ -1,0 +1,122 @@
+{
+  "description": "在已观察页面或容器内插入文字、公式、图形、表格、图表或填空。只提供类型、正文及所需位置尺寸；软件复用人工插入默认、准备容器、专业数据和身份，正式事务可撤销。Flow destination=document 为正文，paper 为纸张浮层。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "center": {
+        "additionalProperties": false,
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "type": "object"
+      },
+      "chartType": {
+        "enum": [
+          "bar",
+          "line",
+          "area",
+          "pie",
+          "donut"
+        ],
+        "type": "string"
+      },
+      "destination": {
+        "enum": [
+          "document",
+          "paper"
+        ],
+        "type": "string"
+      },
+      "height": {
+        "exclusiveMinimum": 0,
+        "type": "number"
+      },
+      "index": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "kind": {
+        "enum": [
+          "text",
+          "formula",
+          "shape",
+          "table",
+          "chart",
+          "input"
+        ],
+        "type": "string"
+      },
+      "shapeType": {
+        "enum": [
+          "rectangle",
+          "rounded-rectangle",
+          "ellipse",
+          "triangle",
+          "diamond",
+          "line",
+          "arrow-left",
+          "arrow-right",
+          "arrow-up",
+          "arrow-down",
+          "arrow-left-right",
+          "elbow-arrow",
+          "brace-left",
+          "brace-right",
+          "brace-top",
+          "brace-bottom",
+          "brace-pair-horizontal",
+          "brace-pair-vertical",
+          "bracket-left",
+          "bracket-right",
+          "emphasis-dot",
+          "emphasis-triangle"
+        ],
+        "type": "string"
+      },
+      "target": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "text": {
+        "type": "string"
+      },
+      "width": {
+        "exclusiveMinimum": 0,
+        "type": "number"
+      },
+      "x": {
+        "type": "number"
+      },
+      "y": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "target",
+      "kind"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "插入专业元素",
+    "targetKinds": [
+      "course-surface",
+      "course-instance"
+    ]
+  },
+  "name": "object.insert",
+  "version": 1
+}

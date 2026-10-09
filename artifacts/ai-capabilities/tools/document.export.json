@@ -1,6 +1,19 @@
 {
-  "description": "将已授权课件的当前内容导出为离线单 HTML、在线单 HTML、网页包、PPTX、PDF 或 Flow 讲义 DOCX，消费与人工导出相同的 V10 格式生产器。DOCX 为每份 Flow 自动命名；静态格式保留可映射内容并报告互动或对象差异。返回 generated 或 written 的真实状态。同任务同文档的既有导出未被修改时可原位更新，其他同名文件不覆盖。",
+  "description": "将已授权课件的当前内容导出；省略 format 默认离线单 HTML，保留互动并可直接运行。也可明确选择 html-online、web-package、pptx、pdf 或 Flow 讲义 docx；PPTX/PDF/DOCX 是静态格式，不承载自编程序互动。相对 destination 使用任务工作空间根目录。消费与人工导出相同的 V10 格式生产器。返回 generated 或 written 的真实状态。同任务同文档的既有导出未被修改时可原位更新，其他同名文件不覆盖。",
   "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "items": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "minItems": 1,
+        "type": "array"
+      },
+      "__schema1": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
@@ -32,13 +45,8 @@
             "type": "string"
           },
           "pageIds": {
-            "description": "静态格式页面选择与顺序：surfaceId 或 Spatial 的 surfaceId:frameId；省略时按作品顺序输出。",
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "minItems": 1,
-            "type": "array"
+            "$ref": "#/$defs/__schema0",
+            "description": "静态格式页面选择与顺序：surfaceId 或 Spatial 的 surfaceId:frameId；省略时按作品顺序输出。"
           },
           "pageSize": {
             "enum": [
@@ -58,8 +66,7 @@
       }
     },
     "required": [
-      "target",
-      "format"
+      "target"
     ],
     "type": "object"
   },

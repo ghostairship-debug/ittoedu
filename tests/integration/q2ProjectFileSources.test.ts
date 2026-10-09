@@ -7,9 +7,13 @@ import { DocumentHostService } from '../../src/main/workbench/DocumentHostServic
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { componentProjectFiles } from '../../src/core/projectFiles/componentPlatform'
 import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
-import { TEXT_DEFINITION } from '../../src/components/text/adapters'
+import { TEXT_DEFINITION, textDataEdit } from '../../src/components/text/adapters'
 import { createTextComponentData } from '../../src/components/text/data'
+import { styledTextContent } from '../../src/components/text/render'
+import { textComponentDataSchema } from '../../src/components/text/data'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
+import { WEB_DEFINITION } from '../../src/components/web/data'
+import { IMAGE_DEFINITION, createImageData } from '../../src/components/image'
 
 const encode = (value: string) => new TextEncoder().encode(value)
 const source = 'export default { mount(){return {update(){},dispose(){}}} };'
@@ -19,6 +23,186 @@ function model(snapshot: DocumentSnapshot) {
   if (snapshot.model.kind !== 'course-v10') throw new Error('Expected V10')
   return snapshot.model
 }
+
+it('uses compact opaque handles and names the same uniquely observed page through Session and Undo', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-unique-page-'))
+  try {
+    const host = new DocumentHostService(path.join(root, 'recovery')), project = createBlankCourseProjectV10('原课')
+    project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
+    project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: textDataEdit('text', createTextComponentData('原内容')).value, frame }
+    project.surfaces[0]!.childIds = ['text']
+    const original = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'lesson.h5lesson')
+    await host.tools.beginRun({ runId: 'unique', actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }] })
+    const target = await host.tools.issueTarget('unique', original.documentId, { kind: 'document' })
+    const nextTarget = await host.tools.issueTarget('unique', original.documentId, { kind: 'document' })
+    expect(target).toMatch(/^t[\w-]{22}$/)
+    expect(nextTarget).not.toBe(target)
+    expect(await host.tools.execute('unique', 'read-handle', { name: 'read', input: { target } })).toMatchObject({ kind: 'read' })
+    expect(await host.tools.execute('unique', 'bad-handle', { name: 'read', input: { target: target + 'x' } })).toMatchObject({ kind: 'error', code: 'invalid-target' })
+    await host.tools.beginRun({ runId: 'foreign', actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }] })
+    expect(await host.tools.execute('foreign', 'foreign-handle', { name: 'read', input: { target } })).toMatchObject({ kind: 'error' })
+    await host.tools.execute('unique', 'list', { name: 'project.list', input: {} })
+    expect(await host.tools.execute('unique', 'title', { name: 'project.apply', input: { path: 'pages', intent: 'surface.title', title: '第一课' } })).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
+    const after = await host.internalAPI.read(original.documentId)
+    expect(model(after).project.surfaces).toEqual([{ ...project.surfaces[0], title: '第一课' }])
+    expect(model(after).project.instances).toEqual(project.instances)
+    expect(after.revision).toBe(original.revision + 1)
+    await host.internalAPI.dispatch({ documentId: after.documentId, epoch: after.epoch, baseRevision: after.revision,
+      actor: 'human', operationId: 'undo-title', mutation: { type: 'undo' } })
+    expect(model(await host.internalAPI.read(original.documentId)).project.surfaces).toEqual(project.surfaces)
+    await host.tools.stop('unique'); await host.tools.stop('foreign')
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+
+it('refuses ambiguous or human-expanded pages title and preserves observed title conflicts', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-page-title-conflict-'))
+  try {
+    const host = new DocumentHostService(path.join(root, 'recovery')), project = createBlankCourseProjectV10('原课')
+    const original = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'lesson.h5lesson')
+    await host.tools.beginRun({ runId: 'observed', actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }] })
+    await host.tools.execute('observed', 'list', { name: 'project.list', input: {} })
+    await host.internalAPI.dispatch({ documentId: original.documentId, epoch: original.epoch, baseRevision: original.revision,
+      actor: 'human', operationId: 'human-title', mutation: { type: 'command', command: captureComponentOperation(project, [{ type: 'surface.title.set', surfaceId: project.surfaces[0]!.id, title: '人工标题' }]) } })
+    expect(await host.tools.execute('observed', 'stale-title', { name: 'project.apply', input: { path: 'pages', intent: 'surface.title', title: '覆盖' } })).toMatchObject({ kind: 'read', data: { commit: 'not_committed' } })
+    expect(model(await host.internalAPI.read(original.documentId)).project.surfaces[0]!.title).toBe('人工标题')
+    await host.tools.beginRun({ runId: 'human', actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }] })
+    expect(await host.tools.execute('human', 'add', { name: 'project.apply', input: { path: 'pages', intent: 'surface.add', kind: 'slide', title: '第二页' } })).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
+    const expanded = await host.internalAPI.read(original.documentId)
+    expect(await host.tools.execute('observed', 'ambiguous-title', { name: 'project.apply', input: { path: 'pages', intent: 'surface.title', title: '猜第一页' } })).toMatchObject({ kind: 'error', code: 'target-not-found', data: { pages: expect.any(Array) } })
+    await host.tools.execute('human', 'list-two', { name: 'project.list', input: {} })
+    expect(await host.tools.execute('human', 'ambiguous-fresh', { name: 'project.apply', input: { path: 'pages', intent: 'surface.title', title: '猜第一页' } })).toMatchObject({ kind: 'error', code: 'target-not-found' })
+    expect((await host.internalAPI.read(original.documentId)).revision).toBe(expanded.revision)
+    await host.tools.stop('observed'); await host.tools.stop('human')
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+
+it('absorbs project metadata through the shared settings owner, retains structural identity, and keeps manual conflict and field settlement scopes', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-project-settings-'))
+  try {
+    const host = new DocumentHostService(path.join(root, 'recovery')), project = createBlankCourseProjectV10('原课')
+    const original = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'settings.h5lesson')
+    await host.tools.beginRun({ runId: 'settings', actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: root } })
+    await host.tools.execute('settings', 'read', { name: 'project.read', input: { path: 'project.json' } })
+    const call = { name: 'project.apply', input: { path: 'project.json', content: JSON.stringify({ schemaVersion: 10, revision: 0, title: '正式标题' }) } }
+    expect(await host.tools.effectTargets('settings', call)).toEqual([{ documentId: original.documentId, epoch: original.epoch, target: { kind: 'document' } }])
+    const expectedScopes = [{ documentId: original.documentId, epoch: original.epoch, paths: [['title']] }]
+    expect(await host.tools.effectWriteScopes('settings', call)).toEqual(expectedScopes)
+    expect(await host.tools.execute('settings', 'metadata', call)).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
+    const after = await host.internalAPI.read(original.documentId)
+    expect(model(after).project).toEqual({ ...project, revision: after.revision, title: '正式标题' })
+    const target = await host.tools.issueTarget('settings', after.documentId, { kind: 'document' })
+    expect(await host.tools.effectWriteScopes('settings', { name: 'course.configure', input: { target, settings: { title: '语义标题' } } })).toEqual(expectedScopes)
+    expect(await host.tools.execute('settings', 'structural-overwrite', { name: 'project.apply', input: { path: 'project.json', content: JSON.stringify({ surfaces: [] }) } })).toMatchObject({ kind: 'error' })
+    const current = await host.internalAPI.read(original.documentId)
+    await host.internalAPI.dispatch({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision,
+      actor: 'human', operationId: 'human-title', mutation: { type: 'command', command: captureComponentOperation(model(current).project, [{ type: 'project.title.set', title: '人工标题' }]) } })
+    expect(await host.tools.execute('settings', 'stale-title', call)).toMatchObject({ kind: 'read', data: { commit: 'not_committed' } })
+    const filename = path.join(root, 'settings.h5lesson')
+    await host.internalAPI.save(original.documentId, filename)
+    expect(model(await new DocumentHostService(path.join(root, 'cold')).internalAPI.open(filename)).project.title).toBe('人工标题')
+    await host.tools.stop('settings')
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+
+it('reads the complete mixed page and edits native text through the captured group without losing image, frame, formula or undo', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-mixed-source-'))
+  try {
+    const project = createBlankCourseProjectV10('Mixed page')
+    for (const definition of [WEB_DEFINITION, TEXT_DEFINITION, IMAGE_DEFINITION]) project.definitions[definition.id] = definition
+    project.assets.photo = { id: 'photo', path: 'assets/photo.svg', filename: 'photo.svg', mimeType: 'image/svg+xml', width: 30, height: 20, byteLength: encode(svg).length }
+    project.instances.group = { id: 'group', definitionId: WEB_DEFINITION.id, data: { html: '<section><div id="background">原背景</div></section>' }, frame, childIds: ['text', 'image'] }
+    project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: textDataEdit('text', createTextComponentData({ inlines: [
+      { type: 'text', text: '旧标题' }, { type: 'text', text: '显式正常', style: { bold: false } },
+      { type: 'math', formulaId: 'original-formula', latex: 'x+1', accessibleText: 'x加1' },
+    ] })).value, frame: { ...frame, transform: [1, 0, 0, 1, 7, 9] } }
+    project.instances.image = { id: 'image', definitionId: IMAGE_DEFINITION.id, data: { ...createImageData('photo', '原照片'), flipX: true, crop: { left: 0.1, top: 0, right: 0, bottom: 0 } }, frame }
+    project.surfaces[0]!.childIds = ['group']
+    const host = new DocumentHostService(path.join(root, 'recovery'))
+    const original = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: { photo: encode(svg) }, components: {} } }, 'mixed.h5lesson')
+    await host.tools.beginRun({ runId: 'mixed', actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: root } })
+    const page = componentProjectFiles(project, model(original).resources).find(file => file.kind === 'page')!
+    expect(page.content).toContain('旧标题')
+    expect(page.content).toContain('assets/photo.svg')
+    const read = await host.tools.execute('mixed', 'read', { name: 'project.read', input: { path: page.path } })
+    expect(read).toMatchObject({ kind: 'read' })
+    const content = (read as { kind: 'read'; data: { content: string } }).data.content.replace('旧标题', '新标题')
+    expect(await host.tools.execute('mixed', 'edit', { name: 'project.apply', input: { path: page.path, content } })).toMatchObject({ kind: 'read', data: { commit: 'committed', usability: 'usable' } })
+    const changed = await host.internalAPI.read(original.documentId)
+    expect(model(changed).project.instances.image).toEqual(project.instances.image)
+    expect(model(changed).project.instances.group).toEqual(project.instances.group)
+    expect(model(changed).project.instances.text!.frame).toEqual(project.instances.text!.frame)
+    expect(model(changed).project.instances.text!.data).toMatchObject({ content: { inlines: [
+      { type: 'text', text: '新标题' }, { type: 'text', text: '显式正常', style: { bold: false } },
+      { type: 'math', formulaId: 'original-formula', latex: 'x+1' },
+    ] } })
+    const plain = textComponentDataSchema.parse(model(changed).project.instances.text!.data).content.inlines[0]!
+    expect(plain.style).toBeUndefined()
+    const textFile = componentProjectFiles(model(changed).project, model(changed).resources).find(file => file.kind === 'data' && file.target?.kind === 'instance' && file.target.instanceId === 'text')!
+    await host.tools.execute('mixed', 'read-native', { name: 'project.read', input: { path: textFile.path } })
+    expect(await host.tools.execute('mixed', 'whole-bold', { name: 'object.update', input: { path: textFile.path,
+      properties: { data: { appearance: { bold: true } } } } })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    const bold = await host.internalAPI.read(original.documentId)
+    const effective = styledTextContent(textComponentDataSchema.parse(model(bold).project.instances.text!.data))
+    const first = effective.inlines[0]!, explicit = effective.inlines[1]!
+    if (first.type !== 'text' || explicit.type !== 'text') throw new Error('Expected original text runs')
+    expect(first.style?.bold).toBe(true)
+    expect(explicit.style?.bold).toBe(false)
+    expect(await host.internalAPI.dispatch({ documentId: bold.documentId, epoch: bold.epoch, baseRevision: bold.revision,
+      operationId: 'undo-whole-bold', actor: 'human', mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
+    const beforeUndo = await host.internalAPI.read(original.documentId)
+    expect(await host.internalAPI.dispatch({ documentId: beforeUndo.documentId, epoch: beforeUndo.epoch, baseRevision: beforeUndo.revision,
+      operationId: 'undo-mixed', actor: 'human', mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
+    expect(model(await host.internalAPI.read(original.documentId)).project.instances).toEqual(project.instances)
+    await host.tools.execute('mixed', 'reread-native-after-undo', { name: 'project.read', input: { path: textFile.path } })
+    await host.tools.execute('mixed', 'read-pages', { name: 'project.read', input: { path: 'pages' } })
+    const added = await host.tools.execute('mixed', 'add-copy', { name: 'project.apply', input: { path: 'pages', intent: 'surface.add', kind: 'slide', title: '源码副本' } })
+    if (added.kind !== 'read') throw new Error(JSON.stringify(added))
+    const copy = await host.tools.execute('mixed', 'copy-source', { name: 'project.apply', input: {
+      path: (added.data as { path: string }).path, intent: 'insert', content: page.content!,
+    } })
+    expect(copy).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
+    expect((copy as { data: { diagnostics: { code: string }[] } }).data.diagnostics.some(issue => ['image-resource-unavailable', 'missing-local-resource', 'local-resource-unavailable'].includes(issue.code))).toBe(false)
+    const saved = await host.internalAPI.read(original.documentId)
+    const filename = path.join(root, 'mixed.h5lesson')
+    await host.internalAPI.save(original.documentId, filename)
+    expect(model(await new DocumentHostService(path.join(root, 'cold')).internalAPI.open(filename)).project.instances).toEqual(model(saved).project.instances)
+    await host.tools.stop('mixed')
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+
+it('resolves a ready run image in HTML and accepts the observed page path for media insertion without admitting a foreign resource', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-html-result-source-'))
+  try {
+    const host = new DocumentHostService(path.join(root, 'recovery'))
+    const project = createBlankCourseProjectV10('Ready HTML image')
+    const original = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'images.h5lesson')
+    const begin = (runId: string) => host.tools.beginRun({ runId, actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: root } })
+    await begin('images')
+    const page = componentProjectFiles(project, model(original).resources).find(file => file.kind === 'structure')!
+    await host.tools.execute('images', 'read-page', { name: 'project.read', input: { path: page.path } })
+    const bytes = await fs.readFile(path.resolve('tests/fixtures/g20M17/local-media.png'))
+    const resource = await host.tools.provideImage('images', original.documentId, { filename: 'ready.png', mimeType: 'image/png', bytes })
+    const reference = `cw-result:${encodeURIComponent(resource)}`
+    const content = `<!doctype html><html><body><img src="${reference}" alt="实物"><button id="switch">开关</button><script>document.querySelector('#switch').onclick=()=>document.body.dataset.on='true';</script></body></html>`
+    const applied = await host.tools.execute('images', 'html-image', { name: 'project.apply', input: { path: page.path, intent: 'insert', content } })
+    expect(applied).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
+    const current = await host.internalAPI.read(original.documentId)
+    expect(Object.values(model(current).resources.assets).some(value => Buffer.from(value).equals(bytes)), JSON.stringify({ applied,
+      assets: Object.values(model(current).project.assets), resourceSizes: Object.entries(model(current).resources.assets).map(([key, value]) => [key, value.length]) })).toBe(true)
+    expect(JSON.stringify(model(current).project.instances)).not.toContain('cw-result:')
+    const pagePath = componentProjectFiles(model(current).project, model(current).resources).find(file => file.kind === 'structure')!.path
+    expect(await host.tools.execute('images', 'media-path', { name: 'media.insert', input: { target: pagePath, resource } })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    await begin('foreign')
+    await host.tools.execute('foreign', 'foreign-read', { name: 'project.read', input: { path: pagePath } })
+    expect(await host.tools.execute('foreign', 'foreign-resource', { name: 'project.apply', input: { path: pagePath, intent: 'insert', content } })).toMatchObject({ kind: 'error' })
+    await host.tools.stop('images')
+    expect(await host.tools.execute('images', 'after-stop', { name: 'media.insert', input: { path: pagePath, resource } })).toMatchObject({ kind: 'error' })
+    await host.tools.stop('foreign')
+    const filename = path.join(root, 'images.h5lesson')
+    await host.internalAPI.save(original.documentId, filename)
+    expect(model(await new DocumentHostService(path.join(root, 'cold')).internalAPI.open(filename)).resources.assets).toEqual(model(await host.internalAPI.read(original.documentId)).resources.assets)
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
 
 it('uses live project tools for shared/private source, confined relative imports, conflict ACK and resource save/cold reopen', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-q2-source-'))
@@ -134,8 +318,8 @@ it('round-trips HTML/Markdown professional body and software-owned spatial targe
     project.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
     project.instances.paragraph = { id: 'paragraph', definitionId: TEXT_DEFINITION.id, data: { ...text, content: { inlines: [{ type: 'text', text: '旧正文' }] } } }
     project.instances.opaque = { id: 'opaque', definitionId: 'web', data: { html: '<button>原互动</button>' }, frame }
-    project.instances.float = { id: 'float', definitionId: TEXT_DEFINITION.id, data: text, frame, flowPlacement: { space: 'paper', plane: 'overlay' } }
-    project.instances.spatial = { id: 'spatial', definitionId: TEXT_DEFINITION.id, data: text, frame }
+    project.instances.float = { id: 'float', definitionId: TEXT_DEFINITION.id, data: textDataEdit('float', text).value, frame, flowPlacement: { space: 'paper', plane: 'overlay' } }
+    project.instances.spatial = { id: 'spatial', definitionId: TEXT_DEFINITION.id, data: textDataEdit('spatial', text).value, frame }
     project.surfaces.push({ id: 'flow', kind: 'flow', title: '讲义', childIds: ['paragraph', 'opaque', 'float'], flow: { layout: { readingWidth: 800, wideContentWidth: 1000 } } },
       { id: 'spatial', kind: 'spatial', title: '空间', childIds: ['spatial'], spatial: { home: { x: 0, y: 0, zoom: 1 },
         frames: [{ id: 'camera', pose: { x: 50, y: 40, zoom: 1 }, targetInstanceId: 'spatial' }] } })

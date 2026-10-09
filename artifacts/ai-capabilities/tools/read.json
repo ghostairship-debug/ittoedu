@@ -1,6 +1,19 @@
 {
   "description": "分页读取目标文字或属性；返回 data.target 是当前内容的新短句柄，后续编辑应使用它。nextCursor 续读仍配原调用的 target；外部修改目标时明确冲突。",
   "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
@@ -12,6 +25,10 @@
         "maximum": 9007199254740991,
         "minimum": 1,
         "type": "integer"
+      },
+      "state": {
+        "$ref": "#/$defs/__schema0",
+        "description": "页面或对象的展示状态名称或身份；null读取母版。返回句柄固定此状态，不改变编辑器选择。"
       },
       "target": {
         "maxLength": 100,
@@ -33,6 +50,7 @@
       "markdown-range",
       "html-author-field",
       "course-instance",
+      "text-selection",
       "course-surface",
       "course-asset"
     ]

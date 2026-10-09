@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { HostImageInput } from '../../../core/tools/imageResource'
 import type { ImageGenerationRequest, ImageJobSnapshot, ImageJobTimingMark, ImageResourceReference } from '../../../shared/workbench/images'
+import { parseGeneratedImageReference } from '../../../shared/workbench/images'
 import { prepareImageResource } from '../admittedImageResource'
 import { captureMainTiming } from '../execution/ExecutionEventStore'
 import type { ImageProviderPort, ImageProviderReference } from './ImageProviderPort'
@@ -110,8 +111,8 @@ export class ImageGenerationService {
   /** Main result cards prove conversation ownership before admitting an exact parent result. */
   async editFromResult(input: Omit<ImageGenerationRequest, 'operation' | 'referenceIds'>,
     parent: { jobId: string; runId: string; resourceId: string }): Promise<ImageJobSnapshot> {
-    const image = await this.readCompletedResourceFromJob({ jobId: parent.jobId, sourceRunId: parent.runId,
-      sourceDocumentId: input.documentId, resourceId: parent.resourceId }, true)
+    const image = await this.readOwnedResultResourceFromJob({ jobId: parent.jobId, sourceRunId: parent.runId,
+      sourceDocumentId: input.documentId, resourceId: parent.resourceId })
     const referenceId = `${parent.jobId}@${parent.resourceId}`
     return structuredClone(await this.launch({ ...input, operation: 'edit', referenceIds: [referenceId] }, {},
       [{ ...image, referenceId }]).promise)
@@ -176,14 +177,14 @@ export class ImageGenerationService {
         const admitted = admittedReferences?.find(reference => reference.referenceId === referenceId)
         if (admitted) source = admitted
         else if (request.documentId.startsWith('workspace:')) {
-          const match = /^(image-tool:[a-f0-9]{64})@(image_[a-f0-9]{64})$/.exec(referenceId)
-          if (!match || match[1] === request.jobId) throw new ImageGenerationError('reference-unavailable', '独立参考图须来自本任务已完成的另一图片作业。')
+          const reference = parseGeneratedImageReference(referenceId)
+          if (!reference || reference.jobId === request.jobId) throw new ImageGenerationError('reference-unavailable', '独立参考图须来自本任务已完成的另一图片作业。')
           // Public workspace lookup already permits a Ready result from an
           // earlier run in this exact workspace. Use its durable producer here,
           // while the completed-resource reader retains the same scope check.
-          const parent = await this.read(match[1]!)
-          source = await this.readReadyResourceFromJob({ jobId: match[1]!, sourceRunId: parent.runId,
-            sourceDocumentId: request.documentId, resourceId: match[2]! })
+          const parent = await this.read(reference.jobId)
+          source = await this.readReadyResourceFromJob({ jobId: reference.jobId, sourceRunId: parent.runId,
+            sourceDocumentId: request.documentId, resourceId: reference.resourceId })
         } else {
           if (!this.options.resolveReference) throw new ImageGenerationError('reference-unavailable', '未配置已授权的参考图读取入口。')
           source = await this.options.resolveReference(request.runId, request.documentId, referenceId)
@@ -347,6 +348,10 @@ export class ImageGenerationService {
    * same workspace result; this service verifies the exact persisted source and ready bytes. */
   async readReadyResourceFromJob(input: { jobId: string; sourceRunId: string; sourceDocumentId: string; resourceId: string }): Promise<HostImageInput> {
     return this.readCompletedResourceFromJob(input, false)
+  }
+  /** An explicit result-card action proves durable conversation ownership. Late results remain usable by that owner. */
+  async readOwnedResultResourceFromJob(input: { jobId: string; sourceRunId: string; sourceDocumentId: string; resourceId: string }): Promise<HostImageInput> {
+    return this.readCompletedResourceFromJob(input, true)
   }
   private async readCompletedResourceFromJob(input: { jobId: string; sourceRunId: string; sourceDocumentId: string; resourceId: string }, allowUnapplied: boolean): Promise<HostImageInput> {
     const filename = this.key(input.jobId)

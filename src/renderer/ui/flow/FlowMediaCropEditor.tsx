@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ComponentInstance } from '../../../shared/contracts/component-platform/project'
 import type { ImageData } from '../../../components/image/data'
-import { clampCrop, cropGeometry } from '../../editing/crop/imageCrop'
+import { clampCrop, cropGeometry } from '../../../shared/imageCrop'
 
 export type FlowImageCropPatch = Pick<ImageData, 'crop' | 'cropX' | 'cropY'>
 const EDGES = [{ key: 'left', label: '左裁剪' }, { key: 'right', label: '右裁剪' }, { key: 'top', label: '上裁剪' }, { key: 'bottom', label: '下裁剪' }] as const

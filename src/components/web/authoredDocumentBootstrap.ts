@@ -1,6 +1,8 @@
 import { parse, type DefaultTreeAdapterTypes } from 'parse5'
 import type { WebModuleGraph, WebRuntimeData } from './moduleGraph'
 import { webResourceReferenceMarker } from './resources'
+import { domTextOverrideRealmSource, type DomTextOverrideController } from '../../player/lightEdit/domTextOverrides'
+import type { LightEditTextOverride } from '../../shared/contracts/runtime/lightEdit'
 
 export interface AuthoredDocumentPrograms {
   graph?: WebModuleGraph
@@ -9,6 +11,7 @@ export interface AuthoredDocumentPrograms {
   classic: Record<string, string>
   resources: Record<string, string>
   resourceBindings?: Readonly<Record<string, string>>
+  textOverrides?: readonly LightEditTextOverride[]
 }
 
 /** Runs synchronously in the child's parser, before any authored script. */
@@ -58,7 +61,7 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
   const prefix = `guoling-module:${encodeURIComponent(options.instanceId)}/${options.nonce}/${documentPath ? `${documentPath}/` : ''}`
   const property = `__guoling_parser_${options.nonce.replace(/-/g, '_')}`
   const programs: AuthoredDocumentPrograms = { graph: data.moduleGraph, prefix, property, classic: {},
-    resources: options.resources, resourceBindings: data.resourceBindings }
+    resources: options.resources, resourceBindings: data.resourceBindings, textOverrides: data.textOverrides }
   const edits: Array<{ start: number; end: number; value: string }> = []
   let index = 0, iframeIndex = 0
   const quote = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
@@ -111,9 +114,32 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
     ?? doctype?.sourceCodeLocation?.endOffset ?? 0
   const marker = webResourceReferenceMarker({ $text: options.resourceCss ?? data.css ?? '' }, data.resourceBindings ?? {}, id => options.resources[id])
   const style = [options.themeCss ? `<style data-component-initial-theme>${options.themeCss.replace(/<\/style/gi, '<\\/style')}</style>` : '', data.css ? `<style${marker ? ` data-component-resource-bindings="${quote(marker)}"` : ''}>${data.css.replace(/<\/style/gi, '<\\/style')}</style>` : ''].join('')
-  const bootstrap = `<meta charset="utf-8"><script>${options.bridge(programs).replace(/<\/script/gi, '<\\/script')}</script>${style}`
+  const textBootstrap = `${domTextOverrideRealmSource()}(${installParsedPageTextOverrides.toString()})(${JSON.stringify(programs.textOverrides ?? [])},${JSON.stringify(property)},createPageTextOverrides);`
+  const bootstrap = `<meta charset="utf-8"><script>${(textBootstrap + options.bridge(programs)).replace(/<\/script/gi, '<\\/script')}</script>${style}`
   if (!options.nestedOnly) edits.push({ start: insertion, end: insertion, value: bootstrap })
   let result = source
   for (const edit of edits.sort((a, b) => b.start - a.start)) result = result.slice(0, edit.start) + edit.value + result.slice(edit.end)
   return result
+}
+
+/** Each owned parser document uses its own observer and receives only its parent's rule updates. */
+export function installParsedPageTextOverrides(rules: readonly LightEditTextOverride[], token: string,
+  factory: (roots: readonly Node[], rules: readonly LightEditTextOverride[]) => DomTextOverrideController) {
+  const owner = factory([document.documentElement], rules)
+  const cascade = (next: readonly LightEditTextOverride[]) => {
+    owner.setRules(next)
+    for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]'))
+      frame.contentWindow?.postMessage({ type: 'guoling.page-copy.update', token, rules: next }, '*')
+  }
+  const receive = (event: MessageEvent) => {
+    if (event.source === parent && event.data?.type === 'guoling.page-copy.update' && event.data.token === token
+      && Array.isArray(event.data.rules)) cascade(event.data.rules)
+  }
+  const consumer: DomTextOverrideController = { setRules: cascade, applyAll: () => owner.applyAll(), samples: () => owner.samples(),
+    originalText: node => owner.originalText(node), setLocalText: (node, text) => owner.setLocalText(node, text),
+    destroy() { owner.destroy(); window.removeEventListener('message', receive) } }
+  Object.defineProperty(window, '__cwPageTextOverrides', { configurable: true, value: consumer })
+  window.addEventListener('message', receive)
+  window.addEventListener('pagehide', () => consumer.destroy(), { once: true })
+  owner.applyAll()
 }

@@ -12,7 +12,11 @@ import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { createDocumentJournal } from '../../src/main/workbench/documentJournal'
 import { estimateSerializedTokens, modelContextBudget } from '../../src/core/execution/modelContextBudget'
 import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
+import { ComputeJobService } from '../../src/main/workbench/compute/ComputeJobService'
+import { HostJobService } from '../../src/main/workbench/jobs/HostJobService'
+import { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
 import { HostArtifactDeliveryService } from '../../src/main/workbench/execution/HostArtifactDeliveryService'
+import { artifactDeliverySource } from '../../src/core/tools/HostArtifactTools'
 import { runEndSummary } from '../../src/main/workbench/execution/executionOutcome'
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
@@ -21,7 +25,7 @@ import { ChatGPTResponsesProvider, CHATGPT_RESPONSES_BASE_URL, serializeChatGPTR
 import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { OpenAIChatProvider, serializeModelRequest } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import type { ExecutionStart } from '../../src/shared/workbench/execution'
-import type { ModelEvent, ModelJsonObject, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
+import type { ModelChatMessage, ModelEvent, ModelJsonObject, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
 
 const cleanup: (() => Promise<unknown>)[] = []
 afterEach(async () => { vi.restoreAllMocks(); for (const action of cleanup.splice(0).reverse()) await action() })
@@ -41,12 +45,27 @@ async function fixture(provider: ModelProvider, withArtifacts = false) {
   if (withArtifacts) await fs.mkdir(path.join(workspaceRoot, 'exports'), { recursive: true })
   const artifacts = withArtifacts ? new HostArtifactDeliveryService({ journalDirectory: path.join(directory, 'artifact-deliveries'),
     withFileOperation: work => work() }) : undefined
+  const computeExecute = vi.fn(async () => ({ done: Promise.resolve({ exitCode: 0, stdout: 'ready', stderr: '', truncated: false, cancelled: false,
+    outputs: [{ name: 'result.txt', bytes: Buffer.from('owner verified result\n') }] }), cancel: async () => true }))
+  const compute = withArtifacts ? new ComputeJobService({ directory: path.join(directory, 'compute'),
+    backend: { kind: 'pyodide', availability: async () => ({ available: true }), start: computeExecute } }) : undefined
+  if (artifacts && compute) {
+    const images = new ImageGenerationService({ directory: path.join(directory, 'images'), provider: { generate: async () => { throw new Error('No image model in compute fixture') } } })
+    gateway.configureHostServices({ compute, jobs: new HostJobService({ images, compute }), artifacts: {
+      preflight: ({ grant, destination }) => artifacts.preflight({ workspaceRoot: grant.fileAccess!.workspaceRoot,
+        permission: grant.fileAccess!.permission, destination }),
+      lookup: (runId, operationId) => artifacts.lookup(operationId, runId),
+      save: ({ grant, operationId, source, bytes, assertActive }) => artifacts.deliver({ runId: grant.runId, operationId,
+        workspaceRoot: grant.fileAccess!.workspaceRoot, permission: grant.fileAccess!.permission, destination: source.destination,
+        ...artifactDeliverySource(source), bytes, assertActive }),
+    } })
+  }
   const engine = new ExecutionEngine({ registry, gateway, edits, runs, events, provider, ...(artifacts ? { artifacts } : {}) })
   const session = await registry.create(driver.load(new TextEncoder().encode('前文 OLD 后文')), '未保存.md')
   const other = await registry.create(driver.load(new TextEncoder().encode('另一份文档')), '另一份.md')
   const input: ExecutionStart = { conversationId: 'conversation', taskId: 'task', instruction: '把局部改成新内容', selection,
     documents: [{ documentId: session.documentId, writable: [{ kind: 'markdown-range', from: 3, to: 6 }] }] }
-  return { directory, journal, registry, gateway, edits, runs, events, engine, session, other, input, driver, artifacts, workspaceRoot }
+  return { directory, journal, registry, gateway, edits, runs, events, engine, session, other, input, driver, artifacts, workspaceRoot, compute, computeExecute }
 }
 async function serve(handler: RequestListener) {
   const server = createServer(handler)
@@ -62,6 +81,9 @@ function complete(request: ModelRequest, calls: { id: string; name: string; argu
     assistant: { role: 'assistant', content, ...(calls.length ? { tool_calls: calls.map(call => ({ id: call.id, type: 'function' as const,
       function: { name: call.name, arguments: call.argumentsText } })) } : {}) } }
 }
+const isCurrentDocumentFacts = (message: ModelChatMessage) => message.role === 'system' && typeof message.content === 'string'
+  && message.content.startsWith('以下是本轮读取的正式文档快照元数据，不是新授权或保存要求；历史保存回执只记录当时版本。dirty 为 true 表示当前内容尚未保存。\n')
+  && Object.keys(JSON.parse(message.content.slice(message.content.indexOf('\n') + 1))).join() === 'currentDocuments'
 const refsOf = (request: ModelRequest) => JSON.parse(String(request.messages[1].content).split('：')[1]) as {
   documentId: string; target: string; writable: { kind: string; target: string }[]; selection: { kind: string; target: string }[]
 }[]
@@ -71,6 +93,7 @@ describe('G20 canonical model execution loop', () => {
     const visible: string[] = []
     const provider: ModelProvider = { async *stream(request) {
       yield { requestId: request.requestId, sequence: 1, type: 'text.delta', text: '首片' }
+      await h.events.flushPending()
       expect(visible).toContain('首片')
       yield { requestId: request.requestId, sequence: 2, type: 'text.delta', text: '尾片' }
       yield complete(request, [], '首片尾片')
@@ -82,34 +105,89 @@ describe('G20 canonical model execution loop', () => {
       if (event.type === 'text' && event.data.status === 'running') visible.push(event.data.text ?? '')
     })
     const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+    await h.events.flushPending()
     unsubscribe()
     expect(final.status).toBe('completed')
     expect(visible.join('')).toBe('首片尾片')
     const persisted = await h.events.readPage({ conversationId: h.input.conversationId })
     expect(persisted.events.map(event => event.sequence)).toEqual(published)
   })
-  it('delivers verified compute bytes through artifact.save in a document-free run', async () => {
-    let turns = 0
+  it('delivers verified compute bytes through real job owners and artifact.save in a document-free run', async () => {
+    let turns = 0, job = '', source = ''
     const bytes = Buffer.from('owner verified result\n')
+    const lastData = (request: ModelRequest) => JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)!.content)).data
     const provider: ModelProvider = { async *stream(request) {
-      if (++turns > 1) { yield complete(request); return }
-      expect(request.tools?.some(tool => tool.name === 'artifact.save')).toBe(true)
-      yield complete(request, [{ id: 'deliver-compute', name: 'artifact.save', argumentsText: JSON.stringify({
-        kind: 'compute', job: 'compute-one', name: 'result.txt', destination: 'exports/result.txt',
-      }) }])
+      turns++
+      if (turns === 1) { yield complete(request, [{ id: 'compute-once', name: 'compute.run', argumentsText: '{"code":"result = 42"}' }]); return }
+      if (turns === 2) {
+        job = lastData(request).job
+        yield complete(request, [{ id: 'ready-original', name: 'job.wait', argumentsText: JSON.stringify({ job, milliseconds: 1000 }) }]); return
+      }
+      if (turns === 3) {
+        const receipt = lastData(request)
+        expect(receipt.status).toBe('ready'); source = receipt.snapshot.artifacts[0].source
+        expect(source).toEqual(expect.any(String))
+        yield complete(request, [{ id: 'deliver-compute', name: 'artifact.save', argumentsText: JSON.stringify({ source, destination: 'exports/result.txt' }) }]); return
+      }
+      yield complete(request)
     } }
     const h = await fixture(provider, true)
-    h.input.documents = []
-    h.input.workspaceRoot = h.workspaceRoot
-    vi.spyOn(h.gateway, 'readComputeArtifact').mockResolvedValue({ artifact: {
-      name: 'result.txt', digest: 'owner-digest', byteLength: bytes.length, mimeType: 'text/plain',
-    }, bytes })
+    h.input.documents = []; h.input.workspaceRoot = h.workspaceRoot
     const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
     expect(final.status).toBe('completed')
-    expect(h.gateway.readComputeArtifact).toHaveBeenCalledWith(started.runId, 'compute-one', 'result.txt')
-    expect(final.tools[0]?.result).toMatchObject({ kind: 'read', data: { status: 'written', sourceKind: 'compute',
-      sourceId: 'compute-one@result.txt' } })
+    expect(final.tools.find(tool => tool.call.name === 'artifact.save')?.result).toMatchObject({ kind: 'read', data: { status: 'written', sourceKind: 'compute', sourceId: `${job}@result.txt` } })
     expect(await fs.readFile(path.join(h.workspaceRoot, 'exports', 'result.txt'))).toEqual(bytes)
+    expect(await h.compute!.status(started.runId, job)).toMatchObject({ status: 'ready', stopped: false })
+    expect(h.computeExecute).toHaveBeenCalledOnce()
+  })
+  it('Engine grants only same-task ancestor reads, keeps the original producer and current save grant, and rejects foreign workspaces', async () => {
+    let originalRun = '', job = '', originalTurns = 0, currentTurns = 0, mode: 'create' | 'read' | 'new-task' = 'create', readingAllowed = true
+    const provider: ModelProvider = { async *stream(request) {
+      if (mode === 'create') {
+        if (++originalTurns === 1) { yield complete(request, [{ id: 'original-compute', name: 'compute.run', argumentsText: '{"code":"result = 42"}' }]); return }
+        if (originalTurns === 2) {
+          job = JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)!.content)).data.job
+          yield complete(request, [{ id: 'original-ready', name: 'job.wait', argumentsText: JSON.stringify({ job, milliseconds: 1000 }) }]); return
+        }
+        yield complete(request); return
+      }
+      if (mode === 'new-task') { yield complete(request); return }
+      if (++currentTurns === 1) { yield complete(request, [{ id: 'reuse-original', name: 'job.status', argumentsText: JSON.stringify({ job }) }]); return }
+      if (readingAllowed && currentTurns === 2) { yield complete(request, [{ id: 'wait-original', name: 'job.wait', argumentsText: JSON.stringify({ job, milliseconds: 0 }) }]); return }
+      if (readingAllowed && currentTurns === 3) {
+        const returned = JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)!.content)).data
+        yield complete(request, [{ id: 'save-from-original', name: 'artifact.save', argumentsText: JSON.stringify({ source: returned.snapshot.artifacts[0].source, destination: 'exports/continued.txt' }) }]); return
+      }
+      if (readingAllowed && currentTurns === 4) { yield complete(request, [{ id: 'cancel-original-denied', name: 'job.cancel', argumentsText: JSON.stringify({ job }) }]); return }
+      yield complete(request)
+    } }
+    const h = await fixture(provider, true)
+    h.input.documents = []; h.input.workspaceRoot = h.workspaceRoot
+    const initial = await h.engine.start(h.input); originalRun = initial.runId; await h.engine.wait(initial.runId)
+    mode = 'read'
+    const continued = await h.engine.start({ ...h.input, taskId: 'continued' }, { runId: initial.runId, facts: '', sameTask: true })
+    const final = await h.engine.wait(continued.runId)
+    expect(final.tools.find(tool => tool.call.name === 'job.status')?.result).toMatchObject({ kind: 'read', data: { status: 'ready', snapshot: { runId: originalRun } } })
+    expect(final.tools.find(tool => tool.call.name === 'job.wait')?.result).toMatchObject({ kind: 'read', data: { status: 'ready', snapshot: { runId: originalRun } } })
+    const delivery = final.tools.find(tool => tool.call.name === 'artifact.save')!.result!
+    expect(delivery).toMatchObject({ kind: 'read', data: { status: 'written' } })
+    const operationId = delivery.kind === 'read' ? (delivery.data as { operationId: string }).operationId : ''
+    expect(operationId).toEqual(expect.any(String))
+    expect(await h.artifacts!.lookup(operationId, continued.runId)).toEqual(delivery.kind === 'read' ? delivery.data : undefined)
+    await expect(h.artifacts!.lookup(operationId, originalRun)).rejects.toThrow('不属于当前运行')
+    expect(await fs.readFile(path.join(h.workspaceRoot, 'exports/continued.txt'), 'utf8')).toBe('owner verified result\n')
+    expect(final.tools.find(tool => tool.call.name === 'job.cancel')?.result).toMatchObject({ kind: 'error', code: 'job-not-authorized' })
+    await expect(h.engine.start({ ...h.input, taskId: 'foreign', workspaceRoot: path.join(h.workspaceRoot, 'foreign') },
+      { runId: initial.runId, facts: '', sameTask: true })).rejects.toThrow('工作空间')
+    mode = 'new-task'
+    const fresh = await h.engine.start({ ...h.input, taskId: 'new-user-task', instruction: '这是新的任务' }, { runId: initial.runId, facts: '', sameTask: false })
+    await h.engine.wait(fresh.runId)
+    mode = 'read'; currentTurns = 0; readingAllowed = false
+    const freshContinuation = await h.engine.start({ ...h.input, taskId: 'new-user-continuation', instruction: '继续新的任务' }, { runId: fresh.runId, facts: '', sameTask: true })
+    const denied = await h.engine.wait(freshContinuation.runId)
+    expect(denied.tools.find(tool => tool.call.name === 'job.status')?.result).toMatchObject({ kind: 'error', code: 'job-not-authorized' })
+    expect(await h.compute!.status(originalRun, job)).toMatchObject({ runId: originalRun, status: 'ready', stopped: false })
+    expect(h.computeExecute).toHaveBeenCalledOnce()
   })
   it('blocks a new image request after a saved 429 in the same run while other tools continue', async () => {
     let turns = 0, imageDispatches = 0
@@ -420,7 +498,10 @@ describe('G20 canonical model execution loop', () => {
     const stopped = h.engine.stop(started.runId); release.resolve(); await stopped
     expect(begin).toHaveBeenCalledTimes(1)
     expect(execute).not.toHaveBeenCalled()
-    expect(await h.engine.wait(started.runId)).toMatchObject({ status: 'stopped' })
+    const final = await h.engine.wait(started.runId)
+    expect(final).toMatchObject({ status: 'stopped' })
+    expect(final.requests[0]!.argumentDrafts).toEqual([{ state: 'incomplete-prefix', providerCallId: 'stopped-preview',
+      toolName: 'text.replace', argumentsText: JSON.stringify({ target: refsOf({ messages: final.messages } as ModelRequest)[0]!.writable[0]!.target, content: 'LATE' }).slice(0, -3) }])
     expect(h.session.read()).toMatchObject({ revision: 0, undoDepth: 0, model: { source: '前文 OLD 后文' } })
   })
 
@@ -606,9 +687,10 @@ describe('G20 canonical model execution loop', () => {
     expect(final.tools[2].result).toMatchObject({ kind: 'error', code: 'not-authorized' })
     expect(final.compacted?.atRequest).toBe(1)
     expect(final.compacted?.facts).toContain('applied'); expect(final.compacted?.facts).toContain('not-authorized')
-    expect(requests[1].messages.slice(0, final.initialMessageCount)).toEqual(requests[0].messages)
+    expect(requests[1].messages.slice(0, final.initialMessageCount)).toEqual(requests[0].messages.slice(0, final.initialMessageCount))
+    expect(requests[1].messages.some(message => String(message.content).includes('currentDocuments') && String(message.content).includes('\"revision\":1'))).toBe(true)
     expect(refsOf(requests[1])[1].writable).toEqual([])
-    const nativeRound = requests[1].messages.slice(final.initialMessageCount + 1)
+    const nativeRound = requests[1].messages.slice(final.initialMessageCount + 1).filter(message => !isCurrentDocumentFacts(message))
     expect(nativeRound.map(message => message.role)).toEqual(['assistant', 'tool', 'tool', 'tool'])
     expect(nativeRound.slice(1).map(message => message.tool_call_id)).toEqual(['read', 'allowed', 'denied'])
     expect(String(nativeRound[0]!.content)).not.toContain('完整的中间推理与过程。')
@@ -771,6 +853,9 @@ it('M26 one ordinary generation retry retains unknown usage and fragments but ne
   expect(final.status).toBe('completed')
   expect(final.requests.map(request => request.state)).toEqual(['completed', 'failed', 'completed', 'completed'])
   expect(final.requests[1]!.failure?.outcome).toBe('unknown')
+  expect(final.requests[1]!.argumentDrafts).toEqual([{ state: 'incomplete-prefix', providerCallId: 'unfinished',
+    toolName: 'text.replace', argumentsText: expect.stringContaining('"content":"BROKEN') }])
+  expect(final.requests.filter(request => request.state === 'completed').every(request => !request.argumentDrafts)).toBe(true)
   expect(new Set(final.requests.map(request => request.requestId)).size).toBe(4)
   expect(final.tools.map(tool => tool.call.name)).toEqual(['read', 'text.replace'])
   expect(h.session.read()).toMatchObject({ revision: 1, undoDepth: 1, model: { source: '前文 NEW 后文' } })
@@ -780,6 +865,28 @@ it('M26 one ordinary generation retry retains unknown usage and fragments but ne
   expect(final.requests[1]!.requestId.split('.attempt-')[0]).toBe(final.requests[2]!.requestId.split('.attempt-')[0])
   expect(final.requests[2]!.requestId.endsWith('.attempt-2')).toBe(true)
 }, 15_000)
+
+it('preserves incomplete project arguments locally without executing or replaying them', async () => {
+  const prefix = '{"project":"observed-target","path":"pages/01.html","content":"<article>未完成'
+  let requests = 0
+  const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {
+    requests++
+    yield { requestId: request.requestId, sequence: 1, type: 'tool.delta', index: 0, id: 'unfinished-project', name: 'project.apply', argumentsDelta: prefix.slice(0, 50) }
+    yield { requestId: request.requestId, sequence: 2, type: 'tool.delta', index: 0, id: 'unfinished-project', name: 'project.apply', argumentsDelta: prefix.slice(50) }
+    yield { requestId: request.requestId, sequence: 3, type: 'response.failed', failure: { outcome: 'unknown', kind: 'server', code: 'chatgpt-provider-response-incomplete', message: 'provider incomplete' } }
+  } }
+  const h = await fixture(provider), execute = vi.spyOn(h.gateway, 'execute')
+  const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.requests[0]!.argumentDrafts).toEqual([{ state: 'incomplete-prefix', providerCallId: 'unfinished-project', toolName: 'project.apply', argumentsText: prefix }])
+  expect(final.requests[0]!.failure?.outcome).toBe('unknown')
+  expect(final.tools).toEqual([])
+  expect(final.messages.some(message => JSON.stringify(message).includes('未完成'))).toBe(false)
+  expect(execute).not.toHaveBeenCalled()
+  expect(h.session.read()).toMatchObject({ revision: 0, undoDepth: 0, model: { source: '前文 OLD 后文' } })
+  await h.engine.recover(started.runId)
+  expect(requests).toBe(1)
+  expect((await h.runs.read(started.runId))!.requests[0]!.argumentDrafts?.[0]!.argumentsText).toBe(prefix)
+})
 
 it('stops both short and long same-task cooldowns without sending a replacement request', async () => {
   let requests = 0, retryAfterMs = 1000
@@ -803,20 +910,39 @@ it('stops both short and long same-task cooldowns without sending a replacement 
   expect(requests).toBe(2)
 })
 
-it('M26 ordinary transport retry stops after exactly three attempts and records all unknown outcomes', async () => {
+it('M26 ordinary transport retry waits on the real bounded schedule and records every unknown outcome', async () => {
   let count = 0
+  const arrivals = Array.from({ length: 6 }, () => deferred()), delays: number[] = []
   const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {
-    count++
+    arrivals[count++]!.resolve()
     yield { requestId: request.requestId, sequence: 1, type: 'response.failed', failure: { outcome: 'unknown', kind: 'server', httpStatus: 503, code: 'http-503', message: '临时不可用' } }
   } }
-  const h = await fixture(provider), started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
-  expect(count).toBe(3)
-  expect(final.status).toBe('failed')
-  expect(final.requests).toHaveLength(3)
-  expect(final.requests.every(request => request.failure?.outcome === 'unknown')).toBe(true)
-  expect(final.tools).toEqual([])
-  expect(h.session.read().revision).toBe(0)
-}, 15_000)
+  const h = await fixture(provider), realTimeout = globalThis.setTimeout
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  const fakeTimeout = globalThis.setTimeout
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: (...args: any[]) => void, milliseconds?: number, ...args: any[]) => {
+    delays.push(milliseconds ?? 0); return fakeTimeout(callback, milliseconds, ...args)
+  }) as typeof setTimeout)
+  try {
+    const started = await h.engine.start(h.input), result = h.engine.wait(started.runId)
+    const schedule = [1000, 5000, 10000, 30000, 60000]
+    for (const [index, delay] of schedule.entries()) {
+      await arrivals[index]!.promise
+      for (let spins = 0; vi.getTimerCount() === 0 && spins < 1000; spins++) await new Promise(resolve => realTimeout(resolve, 2))
+      expect(delays[index]).toBe(delay)
+      await vi.advanceTimersByTimeAsync(delay - 1); expect(count).toBe(index + 1)
+      await vi.advanceTimersByTimeAsync(1)
+    }
+    await arrivals[5]!.promise
+    const final = await result
+    expect(count).toBe(6); expect(delays).toEqual(schedule)
+    expect(final.status).toBe('failed')
+    expect(final.requests).toHaveLength(6)
+    expect(new Set(final.requests.map(request => request.requestId)).size).toBe(6)
+    expect(final.requests.every(request => request.failure?.outcome === 'unknown')).toBe(true)
+    expect(final.tools).toEqual([]); expect(h.session.read().revision).toBe(0)
+  } finally { vi.useRealTimers() }
+}, 15000)
 
 
 it('M26 context.read uses an actual stored source, rejects another run, and puts selected images after the full native tool round', async () => {
@@ -834,11 +960,12 @@ it('M26 context.read uses an actual stored source, rejects another run, and puts
       ]); return
     }
     if (turns === 2) {
-      expect(request.messages.slice(-3).map(message => message.role)).toEqual(['tool', 'tool', 'user'])
-      expect(request.messages.at(-1)?.content).toEqual(expect.arrayContaining([{ type: 'image_url', image_url: { url: image } }]))
+      const native = request.messages.filter(message => !isCurrentDocumentFacts(message))
+      expect(native.slice(-3).map(message => message.role)).toEqual(['tool', 'tool', 'user'])
+      expect(native.at(-1)?.content).toEqual(expect.arrayContaining([{ type: 'image_url', image_url: { url: image } }]))
       yield complete(request, [{ id: 'foreign-context', name: 'context.read', argumentsText: JSON.stringify({ sourceId: 'run:unrelated-run:0' }) }]); return
     }
-    expect(request.messages.at(-1)?.content).toContain('context-read-failed')
+    expect(request.messages.findLast(message => message.role === 'tool')?.content).toContain('context-read-failed')
     yield complete(request)
   } }
   const h = await fixture(provider)

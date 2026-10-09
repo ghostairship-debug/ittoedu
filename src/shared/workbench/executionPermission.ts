@@ -21,6 +21,7 @@ export const approvalDecisionSchema = z.enum(['allow', 'deny', 'allow-all'])
 export type ApprovalDecision = z.infer<typeof approvalDecisionSchema>
 /** What the approval card shows before a modification runs. Never contains credentials or raw binary. */
 export const approvalViewSchema = z.object({
+  kind: z.literal('local-command').optional(),
   summary: z.string().min(1).max(500),
   documents: z.array(z.string().max(2048)).max(20),
   reason: z.enum(['ask', 'outside-workspace']),

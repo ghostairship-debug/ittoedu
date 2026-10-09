@@ -68,11 +68,13 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   useEffect(() => {
     if (!session.documentId) return
     return workbenchSelection.register(session.documentId, async () => {
-      const current = activeDraft()
+      const current = session.committedDocument?.model.kind === 'markdown' ? await editor.current?.drainSource() : activeDraft()
       if (current && !current.ready) throw new Error('请先完成当前输入。')
       if (current) session.edit(current.source, operationGroup.current)
-      if (!await session.drain() || !session.committedDocument) throw new Error('正文输入尚未确认。')
-      return session.committedDocument
+      if (!await session.drain()) throw new Error('正文输入尚未确认。')
+      const committed = session.committedDocument
+      if (!committed || current && ((committed.model.kind !== 'markdown' && committed.model.kind !== 'text') || committed.model.source !== current.source)) throw new Error('正文输入尚未确认。')
+      return committed
     })
   }, [session, session.documentId])
   const committed = session.committedDocument

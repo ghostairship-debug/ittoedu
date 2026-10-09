@@ -81,8 +81,20 @@ export class WindowsCodexSandboxBoundary implements CodexDelegationBoundaryPort 
     return spawn(input.executable, [...input.args], { ...input.options, stdio: 'pipe' })
   }
 
+  /** No model invocation. The caller separately owns the human's exact command approval. */
+  launchToolRestricted(input: { copyRoot: string; sandboxExecutable: string; executable: string; args: readonly string[];
+    options: Parameters<CodexDelegationBoundaryPort['launchRestricted']>[0]['options'] }): ChildProcessWithoutNullStreams {
+    const key = this.key(input.copyRoot, 'workspace', input.sandboxExecutable), verified = this.verified.get(key)
+    if (!verified || Date.now() - verified > 60_000 || input.options.cwd !== input.copyRoot
+      || !path.isAbsolute(input.executable) || input.options.shell)
+      throw new Error('本地工具的受限执行边界尚未对批准工作副本验证')
+    this.verified.delete(key)
+    return spawn(input.sandboxExecutable, ['sandbox', '-P', profile('workspace'), '-C', input.copyRoot, '--',
+      input.executable, ...input.args], { ...input.options, stdio: 'pipe' })
+  }
+
   async stopRestricted(child: ChildProcessWithoutNullStreams): Promise<boolean> {
-    if (child.exitCode !== null) return false
+    if (child.exitCode !== null) return true
     if (!child.pid) return false
     const taskkill = this.options.taskkillExecutable
       ?? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe')

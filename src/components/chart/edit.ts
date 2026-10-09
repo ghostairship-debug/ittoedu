@@ -1,5 +1,6 @@
 import type { ComponentEdit, JsonValue } from '../../shared/contracts/component-platform'
 import { chartDataSchema, type ChartData } from './data'
+import { replaceChartTableData, type ChartCandidateData } from './contentOperations'
 
 export type ChartEdit =
   | { type: 'title'; value: string }
@@ -8,9 +9,11 @@ export type ChartEdit =
   | { type: 'point'; seriesId: string; categoryId: string; value: number }
   | { type: 'style'; patch: Record<string, unknown> }
   | { type: 'data'; categories: ChartData['categories']; series: ChartData['series'] }
+  | ({ type: 'table-data' } & ChartCandidateData)
 
 /** Returns a detached candidate; DocumentSession owns submission and undo. */
 export function editChartData(data: ChartData, edit: ChartEdit): ChartData {
+  if (edit.type === 'table-data') return replaceChartTableData(data, edit)
   const next = structuredClone(data)
   const requireTarget = <T>(value: T | undefined): T => { if (value === undefined) throw new Error('图表编辑目标已不存在'); return value }
   if (edit.type === 'title') next.title = edit.value

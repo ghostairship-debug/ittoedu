@@ -13,7 +13,7 @@ export interface WorkspaceRecoveryPanelProps {
 
 function nameOf(snapshot: DocumentSnapshot): string {
   if (snapshot.binding.kind === 'file') return snapshot.binding.path.split(/[\\/]/).pop() || snapshot.binding.path
-  if (snapshot.model.kind === 'course-v10') return `${snapshot.model.project.title}.h5lesson`
+  if (snapshot.model.kind === 'course-v10') return `${snapshot.model.project.title}.glx`
   return snapshot.binding.suggestedName
 }
 
@@ -25,9 +25,9 @@ function message(error: unknown, fallback: string): string {
 export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPanelProps) {
   const [items, setItems] = useState<RecoveryItem[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [confirming, setConfirming] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const [deferred, setDeferred] = useState(false)
+  const [open, setOpen] = useState(false)
+  const container = useRef<HTMLDivElement>(null)
   const inFlight = useRef<string | null>(null)
   const request = useRef(0)
   const operationGeneration = useRef(0)
@@ -60,6 +60,16 @@ export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPan
     return () => { request.current++; unsubscribe() }
   }, [api, refresh])
 
+  useEffect(() => { if (!items.length && !loadError) setOpen(false) }, [items.length, loadError])
+  useEffect(() => {
+    if (!open) return
+    const dismiss = (event: PointerEvent) => { if (event.target instanceof Node && !container.current?.contains(event.target)) setOpen(false) }
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    window.addEventListener('pointerdown', dismiss)
+    window.addEventListener('keydown', escape)
+    return () => { window.removeEventListener('pointerdown', dismiss); window.removeEventListener('keydown', escape) }
+  }, [open])
+
   const navigate = async (documentId: string) => {
     try {
       await onRestored(documentId)
@@ -72,7 +82,7 @@ export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPan
 
   const restore = async (documentId: string, alreadyRestored: boolean, mode?: 'unbound') => {
     if (inFlight.current) return
-    inFlight.current = documentId; operationGeneration.current++; setBusy(documentId); setConfirming(null)
+    inFlight.current = documentId; operationGeneration.current++; setBusy(documentId)
     try {
       if (!alreadyRestored) {
         if (mode) await api.restore(documentId, mode)
@@ -87,53 +97,55 @@ export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPan
     } finally { operationGeneration.current++; inFlight.current = null; setBusy(null) }
   }
 
-  const discard = async (documentId: string) => {
+  const discard = async (documentIds: string[]) => {
     if (inFlight.current) return
-    inFlight.current = documentId; operationGeneration.current++; setBusy(documentId)
+    if (!documentIds.length) return
+    inFlight.current = documentIds[0]; operationGeneration.current++; setBusy(documentIds.length === 1 ? documentIds[0] : 'all')
     try {
-      await api.discardRecovery(documentId)
-      operationGeneration.current++
-      setItems(current => current.filter(item => item.snapshot.documentId !== documentId))
-      setConfirming(null)
-    } catch (error) {
-      setItems(current => current.map(item => item.snapshot.documentId === documentId
-        ? { ...item, error: `丢弃失败：${message(error, '请稍后重试')}` } : item))
-      setConfirming(null)
+      for (const documentId of documentIds) {
+        inFlight.current = documentId
+        try {
+          await api.discardRecovery(documentId)
+          operationGeneration.current++
+          setItems(current => current.filter(item => item.snapshot.documentId !== documentId))
+        } catch (error) {
+          setItems(current => current.map(item => item.snapshot.documentId === documentId
+            ? { ...item, error: `丢弃失败：${message(error, '请稍后重试')}` } : item))
+        }
+      }
     } finally { operationGeneration.current++; inFlight.current = null; setBusy(null) }
   }
 
   if (!items.length && !loadError) return null
-  if (deferred) return <div className="workspace-recovery-trigger">
-    <button type="button" aria-expanded="false" aria-controls="workspace-recovery-panel-details" onClick={() => setDeferred(false)}>
-      恢复稿（{items.length}）{loadError ? ' · 列表读取失败' : ''}
+  return <div ref={container} className="workspace-recovery">
+    <button type="button" aria-expanded={open} aria-controls="workspace-recovery-panel-details" onClick={() => setOpen(value => !value)}>
+      {items.length ? `恢复稿（${items.length}）` : '恢复稿'}{loadError ? ' · 列表读取失败' : ''}
     </button>
-  </div>
-  return <aside id="workspace-recovery-panel-details" className="workspace-recovery-panel" aria-label="未保存文档的恢复稿">
+    {open && <aside id="workspace-recovery-panel-details" className="workspace-recovery-panel" aria-label="未保存文档的恢复稿">
     <div className="workspace-recovery-panel__header">
       <div><h2>发现未保存的恢复稿</h2><p>恢复稿保存在本机；恢复后仍需保存到文件。原文件若已移动或删除，可将恢复内容另存。</p></div>
       <div className="workspace-recovery-panel__header-actions">
-        <button type="button" onClick={() => void refresh()}>刷新列表</button>
-        <button type="button" onClick={() => { setConfirming(null); setDeferred(true) }}>稍后处理</button>
+        <button type="button" disabled={busy !== null} onClick={() => void refresh()}>刷新列表</button>
+        <button type="button" disabled={busy !== null || !items.some(item => !item.restored)}
+          title="丢弃全部尚未恢复的恢复稿，保留用户文件" onClick={() => void discard(items.filter(item => !item.restored).map(item => item.snapshot.documentId))}>丢弃全部恢复稿</button>
+        <button type="button" onClick={() => setOpen(false)}>关闭</button>
       </div>
     </div>
     {loadError && <p role="alert">{loadError}。请重试读取。</p>}
     <ul>{items.map(item => {
       const id = item.snapshot.documentId, name = nameOf(item.snapshot)
       return <li key={id}>
-        <div><strong>{name}</strong><span>{item.snapshot.model.kind === 'course-v10' ? 'H5 演示' : item.snapshot.model.kind === 'text' ? '纯文本文档' : 'Markdown 文档'} · {item.restored ? '已恢复，等待打开' : '尚未恢复'}</span>
+        <div><strong>{name}</strong><span>{item.snapshot.model.kind === 'course-v10' ? '果铃工程' : item.snapshot.model.kind === 'text' ? '纯文本文档' : 'Markdown 文档'} · {item.restored ? '已恢复，等待打开' : '尚未恢复'}</span>
           {item.snapshot.binding.kind === 'file' && <small title={item.snapshot.binding.path}>{item.snapshot.binding.path}</small>}</div>
         {item.error && <p role="alert">{item.error}</p>}
-        {confirming === id && !item.restored ? <div className="workspace-recovery-panel__confirm">
-          <span>只丢弃这份恢复稿，用户文件不会删除。确认丢弃？</span>
-          <button type="button" disabled={busy !== null} onClick={() => setConfirming(null)}>取消</button>
-          <button type="button" disabled={busy !== null} onClick={() => void discard(id)}>确认丢弃恢复稿</button>
-        </div> : <div className="workspace-recovery-panel__actions">
+        <div className="workspace-recovery-panel__actions">
           <button type="button" disabled={busy !== null} onClick={() => void restore(id, item.restored)}>{item.restored ? '打开已恢复稿' : '恢复并打开'}</button>
           {!item.restored && item.snapshot.binding.kind === 'file' && <button type="button" disabled={busy !== null}
             title="保留内容与撤销历史，重新选择保存位置；不改动原文件" onClick={() => void restore(id, false, 'unbound')}>恢复为未命名稿</button>}
-          {!item.restored && <button type="button" disabled={busy !== null} onClick={() => setConfirming(id)}>丢弃恢复稿</button>}
-        </div>}
+          {!item.restored && <button type="button" disabled={busy !== null} title="只丢弃这份恢复稿，保留用户文件" onClick={() => void discard([id])}>丢弃恢复稿</button>}
+        </div>
       </li>
     })}</ul>
-  </aside>
+    </aside>}
+  </div>
 }

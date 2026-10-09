@@ -3,10 +3,9 @@ import { useSyncExternalStore } from 'react'
 import type { DocumentContextSelection } from '../../shared/document/ports'
 import type { DocumentSnapshot } from '../../shared/workbench/document'
 import type { ExecutionDocumentReference, ExecutionSelectionTarget } from '../../shared/workbench/executionDesktop'
-import { containsTarget, readTarget, prepareExecutionContentOutput } from '../../core/tools/ToolTargets'
+import { containsTarget, readTarget, prepareExecutionContentOutput, flowTextSelectionTarget } from '../../core/tools/ToolTargets'
 import type { ExecutionContentOutput } from '../../shared/workbench/execution'
 import { isCourseInstanceRange, type CourseInstanceTarget } from '../../core/tools/ToolTargets'
-import type { DocumentSlot } from '../../shared/document/ports'
 
 export interface SelectionCapture {
   documentId: string
@@ -63,43 +62,13 @@ export function captureMarkdownSelection(snapshot: DocumentSnapshot, value: Docu
 export function captureFlowBlock(snapshot: DocumentSnapshot, surfaceId: string, blockId: string, label: string): SelectionCapture {
   return captureCourseInstanceSelection(snapshot, surfaceId, [blockId], label)
 }
-/** The document editor's semantic slot resolves once to its actual component data field. */
-export function courseInstanceSlotPath(data: unknown, slot: DocumentSlot): string[] {
-  const value = data as Record<string, unknown>
-  if (slot.kind === 'field') return [slot.field]
-  const index = (key: string, id: string) => {
-    const values = value[key]
-    const found = Array.isArray(values) ? values.findIndex(item => item?.id === id) : -1
-    if (found < 0) throw new Error('所选正文位置已不存在。')
-    return String(found)
-  }
-  if (slot.kind === 'item') return ['items', index('items', slot.itemId), 'content']
-  if (slot.kind === 'header') return ['columns', index('columns', slot.columnId), 'header']
-  const rowIndex = index('rows', slot.rowId), row = (value.rows as Array<{ cells: unknown }>)[Number(rowIndex)]!
-  if (Array.isArray(row.cells)) {
-    const cellIndex = row.cells.findIndex(cell => cell?.columnId === slot.columnId)
-    if (cellIndex < 0) throw new Error('所选表格单元格已不存在。')
-    const cell = row.cells[cellIndex] as Record<string, unknown>
-    return ['rows', rowIndex, 'cells', String(cellIndex), Object.hasOwn(cell, 'content') ? 'content' : 'text']
-  }
-  if (!row.cells || typeof row.cells !== 'object' || !Object.hasOwn(row.cells, slot.columnId)) throw new Error('所选表格单元格已不存在。')
-  return ['rows', rowIndex, 'cells', slot.columnId]
-}
-export function captureFlowSelection(snapshot: DocumentSnapshot, surfaceId: string, value: DocumentContextSelection): SelectionCapture {
+export function captureFlowSelection(snapshot: DocumentSnapshot, surfaceId: string, value: DocumentContextSelection, stateId?: string | null): SelectionCapture {
   if (snapshot.model.kind !== 'course-v10' || !value.selection) throw new Error('请在正文中选择要修改的内容。')
   const selected = value.selection
   if (selected.revision !== String(snapshot.revision)) throw new Error('正文选区已改变，请重新选择。')
   if (selected.kind === 'object') return captureFlowBlock(snapshot, surfaceId, selected.blockId, value.label)
   if (selected.kind !== 'text') throw new Error('请选择一个明确的正文或文字范围。')
-  if (selected.anchor.blockId !== selected.head.blockId || JSON.stringify(selected.anchor.slot) !== JSON.stringify(selected.head.slot)) {
-    throw new Error('跨正文块或跨字段选区请分别修改；不会扩大到整页。')
-  }
-  const instanceId = selected.anchor.blockId, instance = snapshot.model.project.instances[instanceId]
-  if (!instance) throw new Error('所选正文块已不存在。')
-  const caption = selected.anchor.slot.kind === 'field' && selected.anchor.slot.field === 'caption' && instance.flowLayout?.caption !== undefined
-  const path = courseInstanceSlotPath(caption ? instance.flowLayout : instance.data, selected.anchor.slot)
-  return captureCourseInstanceRange(snapshot, surfaceId, instanceId, path,
-    Math.min(selected.anchor.offset, selected.head.offset), Math.max(selected.anchor.offset, selected.head.offset), value.label, undefined, caption ? 'flowLayout' : 'data')
+  return captureSelection(snapshot, [flowTextSelectionTarget(snapshot.model, surfaceId, selected, stateId)], value.label)
 }
 
 /** Renderer selection/pin projection. It cannot dispatch edits or widen host write grants. */

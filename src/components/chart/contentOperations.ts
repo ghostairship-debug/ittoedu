@@ -21,8 +21,32 @@ export interface ChartCandidateData {
   }[]
 }
 
+/** Observed ids win. Ordinary value edits reuse matching labels/names, then in-place renames. */
+function retainedIds<T extends { readonly id?: string }, U extends { id: string }>(
+  inputs: readonly T[], previous: readonly U[], label: (input: T) => string, oldLabel: (value: U) => string,
+): (string | undefined)[] {
+  const used = new Set(inputs.flatMap(input => input.id ? [input.id] : []))
+  const ids = inputs.map(input => {
+    if (input.id) return input.id
+    const matched = previous.find(value => !used.has(value.id) && oldLabel(value) === label(input))
+    if (matched) used.add(matched.id)
+    return matched?.id
+  })
+  if (inputs.length === previous.length) for (const [index, input] of inputs.entries()) {
+    const fallback = previous[index]
+    if (!input.id && !ids[index] && !used.has(fallback.id)) { ids[index] = fallback.id; used.add(fallback.id) }
+  }
+  return ids
+}
+
 export function changeChartType(chart: ChartData, targetType: ChartType, retainedSeriesId?: string): ChartData {
-  if (chart.chartType === targetType) return structuredClone(chart)
+  return convertedChartType(chart, targetType, retainedSeriesId)
+}
+
+/** A prepared table may have the new series count before its chart type/style is converted. */
+function convertedChartType(chart: { chartType: ChartType; title: string; categories: ChartCategory[]; series: ChartSeries[]; style: ChartData['style'] },
+  targetType: ChartType, retainedSeriesId?: string): ChartData {
+  if (chart.chartType === targetType) return chartDataSchema.parse(structuredClone(chart))
 
   const isTargetSingleSeries = targetType === 'pie' || targetType === 'donut'
 
@@ -113,14 +137,15 @@ export function changeChartType(chart: ChartData, targetType: ChartType, retaine
 
 return chartDataSchema.parse(candidateChart)
 }
-export function replaceChartTableData(chart: ChartData, candidateData: ChartCandidateData, idFactory: () => string = nanoid): ChartData {
+export function replaceChartTableData(chart: ChartData, candidateData: ChartCandidateData, idFactory: () => string = nanoid,
+  targetType: ChartType = chart.chartType): ChartData {
   if (!candidateData.categories || candidateData.categories.length === 0) {
     throw new ChartContentError('invalid-data', '数据表格至少需要包含一个分类')
   }
   if (!candidateData.series || candidateData.series.length === 0) {
     throw new ChartContentError('invalid-data', '数据表格至少需要包含一个系列')
   }
-  if (chart.chartType === 'pie' || chart.chartType === 'donut') {
+  if (targetType === 'pie' || targetType === 'donut') {
     if (candidateData.series.length !== 1) {
       throw new ChartContentError('invalid-data', '饼图和环形图只支持单个系列')
     }
@@ -135,7 +160,7 @@ export function replaceChartTableData(chart: ChartData, candidateData: ChartCand
       if (!Number.isFinite(val)) {
         throw new ChartContentError('invalid-data', '数据表格中存在非数字或无效数值')
       }
-      if ((chart.chartType === 'pie' || chart.chartType === 'donut') && val < 0) {
+      if ((targetType === 'pie' || targetType === 'donut') && val < 0) {
         throw new ChartContentError('invalid-data', '饼图和环形图数值必须非负')
       }
     }
@@ -143,8 +168,9 @@ export function replaceChartTableData(chart: ChartData, candidateData: ChartCand
 
   // Build categories matching old IDs if available
   const oldCatMap = new Map(chart.categories.map((c) => [c.id, c]))
-  const nextCategories: ChartCategory[] = candidateData.categories.map((catInput) => {
-    const existing = catInput.id ? oldCatMap.get(catInput.id) : undefined
+  const categoryIds = retainedIds(candidateData.categories, chart.categories, input => input.label, value => value.label)
+  const nextCategories: ChartCategory[] = candidateData.categories.map((catInput, index) => {
+    const existing = categoryIds[index] ? oldCatMap.get(categoryIds[index]!) : undefined
     return {
       id: existing ? existing.id : `cat_${idFactory()}`,
       label: catInput.label,
@@ -153,8 +179,9 @@ export function replaceChartTableData(chart: ChartData, candidateData: ChartCand
 
   // Build series matching old IDs if available
   const oldSerMap = new Map(chart.series.map((s) => [s.id, s]))
-  const nextSeries: ChartSeries[] = candidateData.series.map((serInput) => {
-    const existingSer = serInput.id ? oldSerMap.get(serInput.id) : undefined
+  const seriesIds = retainedIds(candidateData.series, chart.series, input => input.name, value => value.name)
+  const nextSeries: ChartSeries[] = candidateData.series.map((serInput, index) => {
+    const existingSer = seriesIds[index] ? oldSerMap.get(seriesIds[index]!) : undefined
     const serId = existingSer ? existingSer.id : `ser_${idFactory()}`
     const color = serInput.color ?? existingSer?.color ?? '#2563eb'
 
@@ -176,19 +203,7 @@ export function replaceChartTableData(chart: ChartData, candidateData: ChartCand
     }
   })
 
-  const candidateChart: ChartData = (chart.chartType === 'pie' || chart.chartType === 'donut')
-    ? {
-        ...chart,
-        categories: nextCategories,
-        series: [nextSeries[0]!] as [ChartSeries],
-      }
-    : {
-        ...chart,
-        categories: nextCategories,
-        series: nextSeries,
-      }
-
-return chartDataSchema.parse(candidateChart)
+  return convertedChartType({ ...chart, categories: nextCategories, series: nextSeries }, targetType)
 }
 export function patchChartStyle(chart: ChartData, patch: Record<string, unknown>): ChartData {
   return chartDataSchema.parse({ ...chart, style: { ...chart.style, ...patch } })

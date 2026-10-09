@@ -56,7 +56,7 @@ export class FileGrepPages {
         try { file = await input.readFile(position.filename) }
         catch (error) {
           const reason = error instanceof Error ? error.message : String(error)
-          if (/二进制|UTF-8|相应的文档|H5 演示|超过 16 MiB/.test(reason)) {
+          if (/二进制|UTF-8|相应的文档|果铃工程|超过 16 MiB/.test(reason)) {
             state.excludedCount++
             if (excluded.length < 20) excluded.push({ path: position.filename, reason })
           } else {

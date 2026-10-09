@@ -83,8 +83,8 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
         <p>打开文件开始编辑，或在 AI 助手中描述目标，边创作边完善。</p>
         <div className="lesson-chat-empty-actions">
           <button type="button" onClick={() => void actions.run(() => tabs.createMarkdown())}>新建 Markdown</button>
-          <button type="button" onClick={() => void actions.run(actions.newCourse)}>新建 H5 演示</button>
-          <button type="button" disabled={state.busy} onClick={pptx.pick}>从 PPT 新建 H5 演示</button>
+          <button type="button" onClick={() => void actions.run(actions.newCourse)}>新建 果铃工程</button>
+          <button type="button" disabled={state.busy} onClick={pptx.pick}>从 PPT 新建 果铃工程</button>
           <button type="button" onClick={() => void actions.run(() => actions.openWorkspace())}>打开文件夹</button>
         </div>
       </section>}

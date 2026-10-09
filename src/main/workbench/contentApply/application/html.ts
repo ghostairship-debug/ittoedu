@@ -225,7 +225,7 @@ export function projectedHtmlElements(html: string, projection: HtmlContentProje
         parent = child
       }
     }
-    if (!node) throw new Error(`局部目标映射有歧义，保留输入等待修复：${instanceId}`)
+    if (!node) throw new Error(`局部目标映射有歧义，原对象和输入均保留：${instanceId}。content 只修改原对象内容；若要重做已授权范围的整体布局，请沿用该范围路径使用 intent: "redo"；若只追加独立内容，使用 intent: "insert"，它不会替换原对象。`)
     result.set(instanceId, node)
   }
   return result
@@ -241,7 +241,7 @@ function cloneWithout(node: Node, skip: Set<Element>): Node | undefined {
 }
 
 /** Target extraction precedes resource admission, so unrelated full-page input cannot add assets. */
-export function localHtmlInputs(project: CourseProjectV10, request: ContentChangeRequest): { instanceId: string; html: string }[] {
+export function localHtmlInputs(project: CourseProjectV10, request: ContentChangeRequest): { instanceId: string; html: string; unchanged?: boolean }[] {
   if (request.source.kind !== 'html') throw new Error('当前源不是 HTML')
   const ids = htmlContentTargetIds(project, request)
   if (request.source.scope !== 'projection') {
@@ -252,6 +252,7 @@ export function localHtmlInputs(project: CourseProjectV10, request: ContentChang
   }
   if (!request.projection) throw new Error('整页输入缺少当前软件投影，未扩大修改范围')
   const mapped = projectedHtmlElements(request.source.html, request.projection, ids)
+  const previous = projectedHtmlElements(request.projection.html, request.projection, ids)
   return ids.map(instanceId => {
     const instance = project.instances[instanceId]!
     const node = mapped.get(instanceId)!
@@ -267,7 +268,8 @@ export function localHtmlInputs(project: CourseProjectV10, request: ContentChang
     const skip = new Set((instance.childIds ?? []).map(id => mapped.get(id)).filter((value): value is Element => !!value))
     const cloned = cloneWithout(node, skip) as Element
     if (cloned.tagName === 'body') { cloned.tagName = 'div'; cloned.nodeName = 'div' }
-    return { instanceId, html: serializeOuter(cloned) }
+    const prior = cloneWithout(previous.get(instanceId)!, new Set((instance.childIds ?? []).map(id => previous.get(id)).filter((value): value is Element => !!value))) as Element
+    return { instanceId, html: serializeOuter(cloned), unchanged: serializeOuter(cloned) === serializeOuter(prior) }
   })
 }
 

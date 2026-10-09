@@ -45,13 +45,63 @@ function iframeScript(url: string, operation: 'rect' | 'navigate', loadId?: stri
   })()`
 }
 
+/** Consume the same live readiness used by formal capture, before reading DOM and screenshot together. */
+export function htmlObservationReadyScript(): string {
+  return `(async()=>{
+    let deadline;const timeout=new Promise((_,reject)=>{deadline=setTimeout(()=>reject(new Error('HTML 运行内容尚未就绪')),15000)});
+    try{await Promise.race([timeout,(async()=>{
+      const player=window.coursePlayerReady ? await window.coursePlayerReady : window.coursePlayer;
+      if(player?.waitForCaptureReady) await player.waitForCaptureReady();
+      await document.fonts?.ready;
+      await Promise.all(Array.from(document.images).filter(image=>image.getBoundingClientRect().width>0).map(image=>image.decode().catch(()=>{})));
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    })()]);}finally{clearTimeout(deadline)}
+  })()`
+}
+
+function visibleChildFramesScript(): string {
+  return `(()=>{const frames=[];const visit=root=>{for(const node of root.querySelectorAll('*')){
+    if(node.shadowRoot)visit(node.shadowRoot);
+    if(node.localName==='iframe'){const rect=node.getBoundingClientRect();const style=getComputedStyle(node);
+      frames.push({name:node.name,url:node.hasAttribute('srcdoc')?'about:srcdoc':node.src||'about:blank',
+        visible:rect.width>0&&rect.height>0&&style.visibility!=='hidden'&&style.display!=='none'});
+    }
+  }};visit(document);return frames})()`
+}
+
+/** Only current visible descendants of this document's exact preview frame can supply handles. */
+async function visibleChildFrames(root: WebFrameMain): Promise<WebFrameMain[]> {
+  const result: WebFrameMain[] = []
+  const visit = async (parent: WebFrameMain) => {
+    const elements = await parent.executeJavaScript(visibleChildFramesScript()) as { name: string; url: string; visible: boolean }[]
+    for (const child of parent.frames) {
+      if (child.detached || child.isDestroyed()) continue
+      const named = child.name && elements.filter(element => element.name === child.name)
+      const matches = named && named.length === 1 ? named : elements.filter(element => element.url === child.url)
+      const siblings = parent.frames.filter(frame => named && named.length === 1 ? frame.name === child.name : frame.url === child.url)
+      if (matches.length !== 1 || siblings.length !== 1 || !matches[0]!.visible) continue
+      result.push(child); await visit(child)
+    }
+  }
+  await visit(root)
+  return result
+}
+
 /** Uses the existing sandboxed preview iframe. No page API gains host privileges. */
 export class HtmlActionDesktopPort implements HtmlActionFramePort {
   async frameToken(context: HtmlPreviewAutomationContext): Promise<string> { return frameFor(context).frame.frameToken }
 
   async observe(context: HtmlPreviewAutomationContext, frameToken: string): Promise<HtmlPageState> {
     const { frame } = frameFor(context, frameToken)
+    await frame.executeJavaScript(htmlObservationReadyScript())
+    frameFor(context, frameToken)
     const observed = await frame.executeJavaScript(htmlActionScript({ type: 'observe' })) as HtmlPageState
+    for (const child of await visibleChildFrames(frame)) {
+      const state = await child.executeJavaScript(htmlActionScript({ type: 'observe' })) as HtmlPageState
+      observed.structure.push(...state.structure)
+      observed.diagnostics.push(...state.diagnostics)
+      observed.elements.push(...state.elements.map(element => ({ ...element, frameToken: child.frameToken })))
+    }
     frameFor(context, frameToken)
     if (!observed || !sameHtmlPreviewDocumentUrl(observed.url, context.lease.url) || !Array.isArray(observed.elements))
       throw new Error('HTML 页面观察来源不匹配')
@@ -61,12 +111,11 @@ export class HtmlActionDesktopPort implements HtmlActionFramePort {
   async act(context: HtmlPreviewAutomationContext, frameToken: string,
     input: Extract<HtmlPageOperation, { type: 'click' | 'input' }>): Promise<HtmlPageActionResult> {
     const { frame } = frameFor(context, frameToken)
-    const result = await frame.executeJavaScript(htmlActionScript(input), true) as HtmlPageActionResult
+    const targetFrame = input.frameToken ? (await visibleChildFrames(frame)).find(child => child.frameToken === input.frameToken) : frame
+    if (!targetFrame) return { applied: false, reason: 'stale-element' }
+    const result = await targetFrame.executeJavaScript(htmlActionScript(input), true) as HtmlPageActionResult
     frameFor(context, frameToken)
     if (!result || typeof result.applied !== 'boolean') throw new Error('HTML 操作未返回真实结果')
-    // Allow the page's event handler and one paint turn to settle before capture.
-    await frame.executeJavaScript('new Promise(resolve => setTimeout(resolve, 80))')
-    frameFor(context, frameToken)
     return result
   }
 
@@ -99,7 +148,10 @@ export class HtmlActionDesktopPort implements HtmlActionFramePort {
     receive: (diagnostic: HtmlActionDiagnostic) => void): () => void {
     const contents = contentsFor(context)
     const listener = (event: Electron.Event<Electron.WebContentsConsoleMessageEventParams>) => {
-      if (event.frame?.frameToken !== frameToken || !['warning', 'error'].includes(event.level)) return
+      if (!['warning', 'error'].includes(event.level)) return
+      let source: WebFrameMain | null | undefined = event.frame
+      while (source && source.frameToken !== frameToken) source = source.parent
+      if (!source) return
       receive({ level: event.level as 'warning' | 'error', message: event.message.slice(0, 1000),
         source: event.sourceId.slice(0, 400), line: event.lineNumber })
     }

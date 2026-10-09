@@ -7,18 +7,9 @@
       "job": {
         "minLength": 1,
         "type": "string"
-      },
-      "kind": {
-        "enum": [
-          "image",
-          "compute",
-          "delegation"
-        ],
-        "type": "string"
       }
     },
     "required": [
-      "kind",
       "job"
     ],
     "type": "object"

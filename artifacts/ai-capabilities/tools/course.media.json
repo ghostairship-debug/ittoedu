@@ -1,0 +1,186 @@
+{
+  "description": "修改整课音量、声道、旁白压低及声音库。import-sounds 使用工程已有音频素材身份，软件分配声音身份；sound 修改已有声音，settings=null 删除声音。资源字节继续由现有素材服务管理。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema1": {
+        "$ref": "#/$defs/__schema2",
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      },
+      "__schema2": {
+        "type": "number"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "change": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "audio",
+                "type": "string"
+              },
+              "settings": {
+                "additionalProperties": false,
+                "properties": {
+                  "channelVolumes": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "music": {
+                        "$ref": "#/$defs/__schema1"
+                      },
+                      "narration": {
+                        "$ref": "#/$defs/__schema1"
+                      },
+                      "sfx": {
+                        "$ref": "#/$defs/__schema1"
+                      },
+                      "ui": {
+                        "$ref": "#/$defs/__schema1"
+                      },
+                      "video": {
+                        "$ref": "#/$defs/__schema1"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "defaultMuted": {
+                    "type": "boolean"
+                  },
+                  "masterVolume": {
+                    "$ref": "#/$defs/__schema1"
+                  },
+                  "narrationDucking": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "fadeMs": {
+                        "$ref": "#/$defs/__schema2",
+                        "minimum": 0
+                      },
+                      "musicVolume": {
+                        "$ref": "#/$defs/__schema1"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind",
+              "settings"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "sound",
+                "type": "string"
+              },
+              "settings": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "assetId": {
+                        "maxLength": 240,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "channel": {
+                        "enum": [
+                          "music",
+                          "narration",
+                          "sfx",
+                          "ui"
+                        ],
+                        "type": "string"
+                      },
+                      "defaultLoop": {
+                        "type": "boolean"
+                      },
+                      "defaultVolume": {
+                        "$ref": "#/$defs/__schema1"
+                      },
+                      "name": {
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "soundId": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "required": [
+              "kind",
+              "soundId",
+              "settings"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "assets": {
+                "items": {
+                  "$ref": "#/$defs/__schema0"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "kind": {
+                "const": "import-sounds",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "assets"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "target": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    "required": [
+      "target",
+      "change"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "课程媒体",
+    "targetKinds": [
+      "document"
+    ]
+  },
+  "name": "course.media",
+  "version": 1
+}

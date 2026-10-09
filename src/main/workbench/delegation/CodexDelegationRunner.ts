@@ -24,7 +24,7 @@ export interface DelegationArtifact {
 }
 
 export interface DelegationEvent {
-  kind: 'started' | 'activity' | 'message' | 'finished' | 'error'
+  kind: 'started' | 'activity' | 'message' | 'finished' | 'error' | 'stdout' | 'stderr'
   detail: string
 }
 
@@ -33,14 +33,18 @@ export interface DelegationVerification {
   detail: string
 }
 
-export interface CodexDelegationResult {
+/** One runner receipt; local work must not inherit the CLI's model/account claims. */
+export interface DelegationExecutionResult {
   taskId: string
   status: 'unconfigured' | 'verified' | 'failed' | 'cancelled' | 'unknown'
   /** Model and speed requested from the installed CLI, not an assertion about provider billing. */
-  configuredModel: 'gpt-6-luna'
-  configuredSpeed: 'priority'
+  configuredModel?: string
+  configuredSpeed?: string
   cliVersion?: string
-  account?: 'ChatGPT'
+  account?: string
+  actualModel?: string
+  connectionId?: string
+  usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number }
   threadId?: string
   exitCode?: number | null
   artifacts: DelegationArtifact[]
@@ -52,6 +56,11 @@ export interface CodexDelegationResult {
   diagnosticFile?: string
   /** External disk effects need FileService review; no document transaction is performed here. */
   externalChangesPossible: boolean
+}
+export interface CodexDelegationResult extends DelegationExecutionResult {
+  configuredModel: 'gpt-6-luna'
+  configuredSpeed: 'priority'
+  account?: 'ChatGPT'
 }
 
 export interface CodexDelegationRunOptions {

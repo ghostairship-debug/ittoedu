@@ -1,3 +1,4 @@
+import { isNativeProjectFilename, nativeProjectFilename, nativeProjectStem } from '../../../shared/nativeProjectFile'
 import { FileBrowsePages } from './FileBrowsePages'
 import { FileGrepPages } from './FileGrepPages'
 import { AgentFileText } from './AgentFileText'
@@ -5,7 +6,7 @@ import { sourceFileKind } from '../../../shared/workbench/sourceFileKind'
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
 import type { AgentFileContext, AgentFileMutationName, AgentFileOutcome, AgentFileService as AgentFilePort, AgentFileToolName } from '../../../core/tools/AgentFileTools'
-import { AgentFileOutcomeUnknown, agentFileSchemas } from '../../../core/tools/AgentFileTools'
+import { AgentFileMissingParent, AgentFileOutcomeUnknown, agentFileSchemas } from '../../../core/tools/AgentFileTools'
 import { officeContentSchemas, type OfficeContentToolName } from '../../../core/tools/OfficeContentTools'
 import type { FileArtifactBinding } from '../../../shared/workbench/mediaFiles'
 import type { OfficeFormat } from '../../../shared/workbench/officeFiles'
@@ -30,6 +31,13 @@ function createKind(name: string, requested?: 'markdown' | 'text' | 'html' | 'co
   if (kind === 'course-v9') throw new Error('此入口只创建 Project V10，旧格式原件不转换')
   if (kind !== detected && !(kind === 'text' && sourceFileKind(name) === 'text')) throw new Error(`文件名与${kind}格式不符`)
   return kind
+}
+function creationInput(raw: unknown) {
+  const input = agentFileSchemas['file.create'].parse(raw)
+  validateWorkspaceEntryName(input.name)
+  const extension = input.kind === 'course-v10' ? '.glx' : input.kind === 'markdown' ? '.md' : input.kind === 'html' ? '.html' : ''
+  if (input.kind === 'course-v10' || !input.kind && isNativeProjectFilename(input.name)) return { ...input, name: nativeProjectFilename(input.name) }
+  return extension && path.extname(input.name) === '' ? { ...input, name: input.name + extension } : input
 }
 function officeFormat(filename: string): OfficeFormat {
   const format = path.extname(filename).slice(1).toLowerCase()
@@ -92,7 +100,7 @@ export class AgentFileService implements AgentFilePort {
     return filename
   }
   async preflightCreate(context: AgentFileContext, raw: unknown): Promise<{ directory: string; outside: boolean }> {
-    const input = agentFileSchemas['file.create'].parse(raw)
+    const input = creationInput(raw)
     if (context.permission === 'read-only') throw new Error('只读任务不能创建文件')
     validateWorkspaceEntryName(input.name)
     createKind(input.name, input.kind)
@@ -103,13 +111,19 @@ export class AgentFileService implements AgentFilePort {
     if (context.permission === 'read-only') throw new Error('只读任务不能修改文件')
     let paths: string[]
     if (name === 'file.create') {
-      const input = agentFileSchemas[name].parse(raw), preflight = await this.preflightCreate(context, input)
+      const input = creationInput(raw), preflight = await this.preflightCreate(context, input)
       paths = [path.join(preflight.directory, input.name)]
     } else if (name === 'file.write') {
       const input = agentFileSchemas[name].parse(raw)
       if (input.mode === 'create') {
         validateWorkspaceEntryName(path.basename(input.path))
-        paths = [path.join((await this.directory(context, path.dirname(path.resolve(context.workspaceRoot, input.path)), true)).directory, path.basename(input.path))]
+        const wanted = path.resolve(context.workspaceRoot, input.path)
+        try { paths = [path.join((await this.directory(context, path.dirname(wanted), true)).directory, path.basename(input.path))] }
+        catch (error) {
+          if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')
+            throw new AgentFileMissingParent(error instanceof Error ? error.message : String(error), wanted)
+          throw error
+        }
       } else paths = [await this.filename(context, input.path, 'write', true)]
     } else if (name === 'file.reconcile') {
       const input = agentFileSchemas[name].parse(raw)
@@ -326,10 +340,10 @@ export class AgentFileService implements AgentFilePort {
       await this.requireMutationScope(context, scope.paths, sourceCount)
       return this.organize(context, name, raw, operationId, scope.paths)
     }
-    const input = agentFileSchemas['file.create'].parse(raw)
+    const input = creationInput(raw)
     const kind = createKind(input.name, input.kind)
     const bytes = kind === 'course-v10' ? (() => {
-      const project = createBlankCourseProjectV10(input.name.replace(/\.h5lesson$/i, ''))
+      const project = createBlankCourseProjectV10(nativeProjectStem(input.name))
       return createCourseProjectV10Archive({ project, resources: { assets: {}, components: {} } })
     })() : Buffer.from('', 'utf8')
     return this.createPreparedFile(context, input, kind, bytes, operationId)
@@ -352,6 +366,7 @@ export class AgentFileService implements AgentFilePort {
     kind: 'markdown' | 'text' | 'html' | 'course-v10', bytes: Uint8Array, operationId: string,
     creation?: { requestDigest: string; issues: readonly { page?: number; type: string; message: string }[] }): Promise<AgentFileOutcome> {
     if (context.permission === 'read-only') throw new Error('只读任务不能创建文件')
+    input = creationInput(input)
     const preflight = await this.preflightCreate(context, input)
     const { directory, fallback } = await this.directory(context, input.path, true)
     if (directory !== preflight.directory) throw new Error('目标文件夹已改变，请重新确认')
@@ -372,7 +387,11 @@ export class AgentFileService implements AgentFilePort {
     const snapshot = await this.host.open(created.targetPath).catch(() => null)
     if (!snapshot) return { data: { operation: receipt, path: created.targetPath, homeMissingFallback: fallback,
       openError: '文件已创建，但暂时无法打开；请检查目录后用 file.open 重试' } }
-    return { data: { operation: receipt, path: created.targetPath, homeMissingFallback: fallback, documentId: snapshot.documentId }, opened: {
+    const course = snapshot.model.kind === 'course-v10' ? { surfaceCount: snapshot.model.project.surfaces.length,
+      surfaces: snapshot.model.project.surfaces.map(surface => ({ title: surface.title, kind: surface.kind, childCount: surface.childIds.length })),
+      note: '这些页面已在新建工程内；用 project.list/read 接续其实际内容，已有空白页可以命名和填入框架。教师控制台由宿主管理。' } : undefined
+    return { data: { operation: receipt, path: created.targetPath, homeMissingFallback: fallback, documentId: snapshot.documentId,
+      ...(course ? { course } : {}) }, opened: {
       documentId: snapshot.documentId, kind: snapshot.model.kind, name: created.targetPath,
       writable: this.mayWrite(context, created.targetPath),
     } }

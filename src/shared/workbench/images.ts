@@ -44,6 +44,11 @@ export interface ImageResourceReference {
   height: number
   byteLength: number
 }
+/** Job identities are opaque: tool jobs and explicit result-card edits use the same resource reference. */
+export function parseGeneratedImageReference(value: string): { jobId: string; resourceId: string } | null {
+  const match = /^([^@\s]+)@(image_[a-f0-9]{64})$/.exec(value)
+  return match ? { jobId: match[1]!, resourceId: match[2]! } : null
+}
 /** Main-process observations only. An absent stage means it was not observed; none imply provider first content. */
 export interface ImageJobTimingMark {
   stage: 'image.references.started' | 'image.references.finished' | 'image.provider.started'

@@ -5,16 +5,14 @@
       "name": "orchestrate-courseware",
       "path": "skills/orchestrate-courseware/SKILL.md",
       "references": [
-        "skills/orchestrate-courseware/references/assets.md",
         "skills/orchestrate-courseware/references/interaction-design.md",
         "skills/orchestrate-courseware/references/main-progression.md",
-        "skills/orchestrate-courseware/references/project-files.md",
         "skills/orchestrate-courseware/references/teacher-controller.md",
         "skills/orchestrate-courseware/references/teaching-design-quality.md",
         "skills/orchestrate-courseware/references/web-composition-examples.md",
         "skills/orchestrate-courseware/scripts/assemble-html.mjs"
       ],
-      "version": "e32c421e5be767fb8a48b810002b3e3b58fb96cd89004c1a9479bdc4d954699c"
+      "version": "57321ca6d45a0e5a732c1db3ad4f813d2d54fbaa655105e58dd0d9c9aa984271"
     },
     {
       "description": "将已有第三方或外来 HTML 保真导入可编辑课件；适用于 HTML 转课件，不承担新课创作与已有工程续改。",
@@ -32,35 +30,50 @@
         "skills/build-courseware-project/references/validation-boundaries.md",
         "skills/build-courseware-project/scripts/resolve-editor-root.mjs"
       ],
-      "version": "233764d1c9daa2f800f17ce87919185e623676a3d47d89eb07801c917584df4f"
+      "version": "c090445c5038c9df2c8294d279ccfd68a7c27d8243846042018376fc7c2d1cda"
     },
     {
       "description": "修改已有课件、文档或 HTML 的局部文字、图表、布局与互动；保留未选内容、人工调整和既有设计。",
       "name": "edit-content",
       "path": "skills/edit-content/SKILL.md",
       "references": [],
-      "version": "49470dded205109eb79e6ab7cf7e3cc21d2b8c309d5691ee517dca592ef7c896"
+      "version": "3e2d77280efd4b57666942fa37fcb21d6fb7d924405858e746bb6b3ae782848d"
     },
     {
       "description": "新建或局部修改 Word、Excel、PowerPoint 原格式文件；适用于 DOCX 报告与表格、XLSX 数据与公式、PPTX 幻灯片文字，不用于课件导入或软件代码开发。",
       "name": "office-content",
       "path": "skills/office-content/SKILL.md",
       "references": [],
-      "version": "271e9660cdacb4642edebff2af02a95c61e1f680e3b3ffe708db4ef6d6ebdc9b"
+      "version": "e1917b0b8b7d39cfc8484b313e21718a8a83e68dba8190d5998abfa782d04b65"
     },
     {
       "description": "多来源研究并创作有可追溯引用的报告，支持材料阅读、网页核实和已有报告续写。",
       "name": "research-and-report",
       "path": "skills/research-and-report/SKILL.md",
       "references": [],
-      "version": "a61799cf0bdfd5c382557706e37992f123ff294affafbd6c83494546e99edeab"
+      "version": "8550d646badf876cd2cae296726d224fbf99c4df659dcbe2582e1d66f1ce9d26"
     },
     {
       "description": "读取数据、受限计算并交付真实图表与报告，保证数值可核查、结果资源实际保存。",
       "name": "data-and-report",
       "path": "skills/data-and-report/SKILL.md",
       "references": [],
-      "version": "4a88dd63cc631298d6a3b2c98dcbef9324ab3023ea307d16ef037cda4d2a72aa"
+      "version": "2d8de2f54ba0a7dd2a274bdc0c7b9280da9cbbc3d6aa8616311094f766ee2141"
+    },
+    {
+      "description": "果铃工作台的共享操作指南；在需要理解当前编辑、来源、资源、保存或观察语义时按主题读取，不替代内容方法或实际工具目录。",
+      "name": "workbench-usage",
+      "path": "skills/workbench-usage/SKILL.md",
+      "references": [
+        "skills/workbench-usage/references/discovery.md",
+        "skills/workbench-usage/references/files-and-delivery.md",
+        "skills/workbench-usage/references/observation.md",
+        "skills/workbench-usage/references/project-files.md",
+        "skills/workbench-usage/references/resources-and-artifacts.md",
+        "skills/workbench-usage/references/selection-and-editing.md",
+        "skills/workbench-usage/references/sources-and-continuation.md"
+      ],
+      "version": "19f0de54aaab7dbe81e544105f4b4ab329a4ad0ce2e9d8e4714a197a17a216f3"
     }
   ]
 }

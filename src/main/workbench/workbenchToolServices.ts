@@ -1,15 +1,18 @@
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import type { BrowserWindow } from 'electron'
 import type { HostToolServices } from '../../core/tools/HostToolServices'
+import { artifactDeliverySource } from '../../core/tools/HostArtifactTools'
 import type { ToolRunGrant } from '../../shared/workbench/tools'
+import { isSourceDocumentModel } from '../../shared/workbench/document'
 import type { AgentFileContext } from '../../core/tools/AgentFileTools'
 import { AgentFileOutcomeUnknown } from '../../core/tools/AgentFileTools'
-import { materialListSchema, materialReadSchema } from '../../core/tools/MaterialTools'
-import { dispatchMaterialTool } from './execution/MaterialReadTools'
+import { materialListSchema } from '../../core/tools/MaterialTools'
+import { dispatchMaterialTool, readMaterialImageSource } from './execution/MaterialReadTools'
 import { attachmentsDesktopService } from './attachments/attachmentsDesktopService'
-import type { ExportBuildReply, ExportBuildProgress } from '../../shared/workbench/toolPorts'
+import type { ExportBuildReply, ExportBuildProgress, PreparedTaskSource } from '../../shared/workbench/toolPorts'
+import type { ModelConnectionSnapshot } from '../../shared/workbench/modelProvider'
 import { IPC_CHANNELS } from '../../shared/ipcTypes'
 import { documentHost } from './documentHost'
 import { ScopedSkillService, type SkillRoot } from './skills/ScopedSkillService'
@@ -37,6 +40,12 @@ import type { EmbeddedBrowserViewport } from '../../shared/workbench/embeddedBro
 import { BrowserActionApprovals, type BrowserActionApproval, type BrowserTaskAction } from './externalTools/BrowserActionApprovals'
 import { MediaCapabilityService } from './media/MediaCapabilityService'
 import { DelegationJobService } from './delegation/DelegationJobService'
+import { ReadonlyTaskRunner } from './delegation/ReadonlyTaskRunner'
+import { OpenAIChatProvider } from './providers/OpenAIChatProvider'
+import { ChatGPTResponsesProvider, OpenAIResponsesProvider } from './providers/ChatGPTResponsesProvider'
+import { AnthropicMessagesProvider } from './providers/AnthropicMessagesProvider'
+import { routeModelProviders } from './providers/ModelProviderRouter'
+import { DeepSeekSearchProvider, nativeSearchSelection, type NativeSearchSelection } from './network/DeepSeekSearchProvider'
 import { ChatGPTImageProvider } from './images/ChatGPTImageProvider'
 import { OpenAIImagesApiProvider } from './images/OpenAIImagesApiProvider'
 import { imageRoute } from './images/imageRoute'
@@ -48,6 +57,7 @@ import { renderPdfFromHtml } from '../pdfExport'
 import { createHtmlActionServices } from './observation/TaskHtmlPreview'
 import type { HtmlPreviewService } from './htmlPreview/HtmlPreviewService'
 import { PptxCourseImportProducer } from './pptxImport/PptxCourseImportProducer'
+import { mediaFileInput } from './admittedMediaResource'
 
 let installed = false
 let imageService: ImageGenerationService | undefined
@@ -171,13 +181,24 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     runtimeDirectory: path.join(app.getAppPath(), computeDevURL ? 'public' : 'dist-renderer', 'vendor', 'compute-runtime') })
   const compute = new ComputeJobService({ directory: path.join(directory, 'compute'),
     backend: computeBackend })
+  const apiCredential = async (connection: Readonly<ModelConnectionSnapshot>) => (await executionSettingsStore()).resolveCredential(connection)
+  const readonlyProvider = routeModelProviders({
+    'openai-chat': new OpenAIChatProvider({ credentialResolver: apiCredential }),
+    'openai-responses': new OpenAIResponsesProvider({ credentialResolver: apiCredential }),
+    'anthropic-messages': new AnthropicMessagesProvider({ credentialResolver: apiCredential }),
+    'chatgpt-responses': new ChatGPTResponsesProvider({ credentialResolver: resolveOAuthCredential }),
+  })
+  const parentRuns = new ExecutionRunStore(path.join(directory, 'runs'))
   const delegation = new DelegationJobService({ directory: path.join(directory, 'delegation', 'jobs'),
-    copyRootBase: path.join(directory, 'delegation', 'copies') })
+    copyRootBase: path.join(directory, 'delegation', 'copies'), readonlyRunner: new ReadonlyTaskRunner({ provider: readonlyProvider,
+      parentSelection: async runId => (await parentRuns.read(runId))?.input.selection ?? null }) })
   // The installed Codex CLI rejected both real command and patch writes. An operator must
   // verify an actual authorized copy write before enabling product-paid delegation.
   const delegationWriteVerified = process.env.GUOLING_CODEX_DELEGATION_WRITE_VERIFIED === '1'
   const jobs = new HostJobService({ images, compute, delegation })
-  const webOptions: WebResearchOptions = {}
+  const frozenSearch = new Map<string, NativeSearchSelection | null>()
+  const webOptions: WebResearchOptions = { searchProvider: new DeepSeekSearchProvider({
+    selection: runId => frozenSearch.get(runId) ?? null, credential: apiCredential }) }
   const web = new WebResearchService(webOptions)
   const openImages = createWorkbenchOpenImageService(app.getVersion())
   const assetLibrary = new AssetLibraryService({ catalog: componentCatalogManager })
@@ -209,7 +230,6 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   const deliverySignals = new Map<string, AbortController>()
   const runGrants = new Map<string, ToolRunGrant>()
   const materialIds = new Map<string, Set<string>>()
-  const materialImages = new Map<string, Map<string, { mimeType: string; bytes: Uint8Array }>>()
   const fileContext = (runId: string, approvedPaths?: readonly string[], assertActive?: () => void): AgentFileContext => {
     const grant = runGrants.get(runId), access = grant?.fileAccess
     if (!access?.workspaceRoot) throw new Error('任务缺少已冻结的文件读取范围')
@@ -284,6 +304,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     signalForRun: runId => deliverySignals.get(runId)?.signal,
   })
   const services: HostToolServices = {
+    matchesSavedDocument: (sourceDocumentId, currentDocumentId) => host.matchesSavedDocument(sourceDocumentId, currentDocumentId),
     pptxImport: { lookup: async (runId, operationId, requestDigest) => {
       const previous = await host.agentFiles.lookupPreparedCourse(runId, operationId, requestDigest)
       return previous ? { kind: 'read', data: previous.data } : null
@@ -323,15 +344,52 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     } },
     artifacts: {
       lookup: (runId, operationId) => host.artifactDeliveries.lookup(operationId, runId),
+      preflight: ({ grant, destination }) => {
+        const access = fileContext(grant.runId)
+        return host.artifactDeliveries.preflight({ workspaceRoot: access.workspaceRoot, permission: access.permission, destination })
+      },
       save: ({ grant, operationId, source, bytes, approvedPaths, assertActive }) => {
         const access = fileContext(grant.runId, approvedPaths, assertActive)
         const destination = path.resolve(access.workspaceRoot, source.destination)
         return host.artifactDeliveries.deliver({ runId: grant.runId, operationId, workspaceRoot: access.workspaceRoot,
-          permission: access.permission, destination: source.destination, sourceKind: source.kind,
-          sourceId: source.kind === 'image' ? `${source.job}@${source.resourceId}` : `${source.job}@${source.name}`, bytes,
+          permission: access.permission, destination: source.destination, ...artifactDeliverySource(source), bytes,
           approvedTargetPath: approvedPaths?.find(value => path.resolve(value) === destination), assertActive: access.assertActive! })
       },
     },
+    mediaFiles: { read: async (runId, source) => mediaFileInput(await host.agentFiles.readAuthorizedFile(fileContext(runId), source)) },
+    taskInputs: { freeze: async (runId, sources) => {
+      const inputs: PreparedTaskSource[] = []
+      for (const source of sources) {
+        fileContext(runId).assertActive?.()
+        if (materialIds.get(runId)?.has(source)) {
+          const attachments = (await attachmentsDesktopService()).attachments
+          const snapshot = await attachments.readSnapshot(source)
+          const representations = snapshot.representations.filter(value => value.kind === 'text')
+          if (!representations.length) throw new Error('该材料尚无可读正文，请先使用 material.extract 提取原件')
+          const sections = []
+          for (const representation of representations) {
+            const read = await attachments.readRepresentation(source, representation.id)
+            sections.push({ representation: representation.id, version: representation.blobRef.digest,
+              provenance: representation.provenance, text: new TextDecoder('utf-8', { fatal: true }).decode(read.bytes) })
+          }
+          const bytes = new TextEncoder().encode(JSON.stringify({ name: snapshot.name, source: snapshot.id,
+            originalVersion: snapshot.digest, coverage: snapshot.coverage, gaps: snapshot.gaps, sections }))
+          inputs.push({ source, name: path.basename(snapshot.name) + '.txt', mimeType: 'text/plain', bytes,
+            version: createHash('sha256').update(bytes).digest('hex') })
+        } else {
+          const file = await host.agentFiles.readAuthorizedFile(fileContext(runId), source)
+          // FileService retains path authority; the existing input owner drains an opened source before capture.
+          // A dirty source is task input, never an implicit save or a second draft.
+          const opened = await host.readOpenedSource(file.path)
+          inputs.push(opened && isSourceDocumentModel(opened.model)
+            ? { source, name: file.name, mimeType: 'text/plain', bytes: new TextEncoder().encode(opened.model.source),
+              version: `document:${opened.documentId}:${opened.epoch}:${opened.revision}` }
+            : { source, name: file.name, mimeType: 'application/octet-stream', bytes: file.bytes, version: file.version })
+        }
+        fileContext(runId).assertActive?.()
+      }
+      return inputs
+    } },
     computeInputs: { freeze: async (runId, sources) => {
       const inputs = await Promise.all(sources.map(source => host.agentFiles.readAuthorizedFile(fileContext(runId), source)))
       if (new Set(inputs.map(input => input.name)).size !== inputs.length) throw new Error('计算输入文件重名；请先选择不同文件名')
@@ -362,21 +420,12 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
         }
         const result = await dispatchMaterialTool(attachments, ids, name, input, deliverySignals.get(runId)?.signal)
         if ('admittedSourceIds' in result) for (const id of result.admittedSourceIds ?? []) ids.add(id)
-        if (name === 'material.read' && 'modelMessage' in result && result.modelMessage) {
-          const requested = materialReadSchema.parse(input)
-          const image = await attachments.readRepresentation(requested.attachmentId, requested.representationId)
-          const resourceId = `material:${requested.attachmentId}:${requested.representationId}`
-          let resources = materialImages.get(runId)
-          if (!resources) { resources = new Map(); materialImages.set(runId, resources) }
-          resources.set(resourceId, { mimeType: image.representation.mediaType, bytes: image.bytes })
-          return { kind: 'read', data: { ...result.data, image: { resourceId, mimeType: image.representation.mediaType } } }
-        }
         return { kind: 'read', data: result.data }
       },
       readResource: async ({ runId, resourceId }) => {
-        const image = materialImages.get(runId)?.get(resourceId)
-        if (!image) throw new Error('材料图片不属于当前任务或已失效')
-        return image
+        const ids = materialIds.get(runId)
+        if (!ids) throw new Error('材料读取任务已停止')
+        return readMaterialImageSource((await attachmentsDesktopService()).attachments, ids, resourceId, deliverySignals.get(runId)?.signal)
       },
     },
     projectFiles: createProjectFileServices(host),
@@ -401,6 +450,10 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
         reason: delegationWriteVerified ? 'Codex Luna Fast 委派连接已显式验证可写'
           : '当前 Codex 委派写入被执行器策略阻断；本次未启动收费模型请求' }),
       startManaged: input => delegation.startManaged(input),
+      prepareLocal: input => delegation.prepareLocal(input),
+      authorizeLocal: input => delegation.authorizeLocal(input),
+      startLocal: input => delegation.startLocal(input),
+      startReadonly: input => delegation.startReadonly(input),
       readArtifact: (runId, jobId, name) => delegation.readArtifact(runId, jobId, name),
       cancel: (runId, jobId) => delegation.cancel(runId, jobId),
       cancelRun: runId => delegation.cancelRun(runId),
@@ -430,6 +483,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       if (grant.disclosedSettings && (await (await executionSettingsStore()).read()).profile.revision !== grant.disclosedSettings.profileRevision)
         throw new Error('模型或服务配置在发送时已变化；本次未请求模型，请核对后重新发送。')
       await roles.beginRun(grant.runId, grant.disclosedSettings)
+      frozenSearch.set(grant.runId, nativeSearchSelection(await (await executionSettingsStore()).read()))
       frozenSkillRoots.set(grant.runId, workbenchSkillRootsForGrant(grant))
       const controller = new AbortController()
       deliverySignals.set(grant.runId, controller)
@@ -444,9 +498,10 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
         media.beginRun(grant.runId, { writable: grant.actor === 'agent' && !!grant.fileAccess && grant.fileAccess.permission !== 'read-only', capabilities: [] })
       } catch (error) {
         controller.abort(); deliverySignals.delete(grant.runId)
-        runGrants.delete(grant.runId); materialIds.delete(grant.runId); materialImages.delete(grant.runId)
+        runGrants.delete(grant.runId); materialIds.delete(grant.runId)
         approvals.revokeRun(grant.runId)
         frozenSkillRoots.delete(grant.runId)
+        frozenSearch.delete(grant.runId)
         await Promise.allSettled([web.stopRun(grant.runId), mcp.endRun(grant.runId), media.stopRun(grant.runId)])
         web.endRun(grant.runId); media.endRun(grant.runId); openImages.endRun(grant.runId)
         throw error
@@ -458,9 +513,10 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       deliverySignals.get(runId)?.abort(); deliverySignals.delete(runId); observationImages.clearRun(runId); skills.release(runId)
       openImages.stopRun(runId)
       frozenSkillRoots.delete(runId)
-      runGrants.delete(runId); materialIds.delete(runId); materialImages.delete(runId); host.agentFiles.releaseRun(runId)
+      frozenSearch.delete(runId)
+      runGrants.delete(runId); materialIds.delete(runId); host.agentFiles.releaseRun(runId)
       await host.artifactDeliveries.stopRun(runId)
-      await Promise.allSettled([web.stopRun(runId), mcp.stopRun(runId), media.stopRun(runId), ...(compute ? [compute.cancelRun(runId)] : [])])
+      await Promise.allSettled([web.stopRun(runId), mcp.stopRun(runId), media.stopRun(runId), delegation.cancelRun(runId), ...(compute ? [compute.cancelRun(runId)] : [])])
     },
     images: { selection: (runId, _documentId, operation) => roles.selection(runId, operation),
       run: (request, options) => images.start(request, options), read: id => images.read(id),

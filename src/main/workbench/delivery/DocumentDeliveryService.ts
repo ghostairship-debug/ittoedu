@@ -103,6 +103,7 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
   async save(input: { runId: string; operationId: string; requestDigest: string; documentId: string; epoch: string; baseRevision: number; destination?: string }): Promise<SaveReceipt> {
     const known = await this.options.operations.lookup(input.runId, input.operationId)
     if (known) return (await this.lookup(input)) as SaveReceipt
+    this.options.signalForRun?.(input.runId)?.throwIfAborted()
     await this.started({ runId: input.runId, operationId: input.operationId, requestDigest: input.requestDigest, kind: 'save', status: 'started' })
     await this.options.operations.patch(input.runId, input.operationId, { documentId: input.documentId })
     let before: DocumentSnapshot | undefined
@@ -142,6 +143,7 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
   async export(input: Parameters<DocumentDeliveryServicePort['export']>[0]): Promise<ExportReceipt> {
     const known = await this.options.operations.lookup(input.runId, input.operationId)
     if (known) return (await this.lookup(input)) as ExportReceipt
+    this.options.signalForRun?.(input.runId)?.throwIfAborted()
     await this.started({ runId: input.runId, operationId: input.operationId, requestDigest: input.requestDigest, kind: 'export', status: 'started' })
     let writing = false, generated: ExportReceipt | undefined
     try {

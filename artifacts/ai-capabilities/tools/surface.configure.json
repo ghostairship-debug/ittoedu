@@ -1,0 +1,167 @@
+{
+  "description": "修改页面名称、背景、讲义宽度或演示画布尺寸。target 使用页面句柄；resize preserve 保留原几何，contain 等比适配并保留各展示状态和共享层语义。settings 只更改提供的字段。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema1": {
+        "type": "number"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "settings": {
+        "additionalProperties": false,
+        "properties": {
+          "background": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "assetId": {
+                    "anyOf": [
+                      {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "type": "string"
+                  },
+                  "fit": {
+                    "enum": [
+                      "cover",
+                      "contain",
+                      "fill"
+                    ],
+                    "type": "string"
+                  },
+                  "mode": {
+                    "enum": [
+                      "inherit",
+                      "own"
+                    ],
+                    "type": "string"
+                  },
+                  "source": {
+                    "$ref": "#/$defs/__schema0",
+                    "description": "来源返回的 source 或已授权图片路径；软件登记资源，不需要拼接 assetId。"
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "flowLayout": {
+            "additionalProperties": false,
+            "properties": {
+              "paperBackgroundColor": {
+                "type": "string"
+              },
+              "readingWidth": {
+                "$ref": "#/$defs/__schema1",
+                "exclusiveMinimum": 0
+              },
+              "wideContentWidth": {
+                "$ref": "#/$defs/__schema1",
+                "exclusiveMinimum": 0
+              },
+              "widthMode": {
+                "enum": [
+                  "fluid",
+                  "reading"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "resize": {
+            "additionalProperties": false,
+            "properties": {
+              "designSize": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "height": {
+                        "exclusiveMinimum": 0,
+                        "type": "number"
+                      },
+                      "width": {
+                        "exclusiveMinimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "width",
+                      "height"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "includeGlobal": {
+                "type": "boolean"
+              },
+              "mode": {
+                "enum": [
+                  "preserve",
+                  "contain"
+                ],
+                "type": "string"
+              },
+              "surfaceIds": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "designSize"
+            ],
+            "type": "object"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "target": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "target",
+      "settings"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "页面设置",
+    "targetKinds": [
+      "course-surface"
+    ]
+  },
+  "name": "surface.configure",
+  "version": 1
+}

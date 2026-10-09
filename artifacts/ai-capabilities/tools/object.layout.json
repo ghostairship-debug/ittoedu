@@ -1,0 +1,87 @@
+{
+  "description": "对同页同展示状态的已观察对象做对齐或等距分布。targets 使用对象句柄；软件复用人工世界坐标、父级逆变换与锁定规则，不需计算每个 frame，一次事务可撤销。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "intent": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "alignment": {
+                "enum": [
+                  "left",
+                  "center",
+                  "right",
+                  "top",
+                  "middle",
+                  "bottom"
+                ],
+                "type": "string"
+              },
+              "kind": {
+                "const": "align",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "alignment"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "axis": {
+                "enum": [
+                  "horizontal",
+                  "vertical"
+                ],
+                "type": "string"
+              },
+              "kind": {
+                "const": "distribute",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "axis"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "targets": {
+        "items": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "targets",
+      "intent"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "对齐与分布",
+    "targetKinds": [
+      "course-instance"
+    ]
+  },
+  "name": "object.layout",
+  "version": 1
+}

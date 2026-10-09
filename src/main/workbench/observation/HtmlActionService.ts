@@ -72,11 +72,12 @@ export class HtmlActionService {
   ): Promise<HtmlActionObservation | { identity: HtmlActionIdentity; errors: HtmlActionDiagnostic[] }> {
     const input = htmlActionToolSchemas[action.name].parse(action.input) as { index?: number; handle?: string; value?: string }
     const session = this.runs.get(runId)
-    if (session && (session.identity.documentId !== document.documentId || session.identity.epoch !== document.epoch))
+    const changedDocument = session && (session.identity.documentId !== document.documentId || session.identity.epoch !== document.epoch)
+    if (changedDocument && action.name !== 'html.observe')
       throw new Error('HTML 任务目标已变化，不能沿用其他文档的观察会话')
     if (action.name === 'html.observe') {
       if (!session) await this.beginDocumentRun(runId, document)
-      else if (session.identity.revision !== document.revision) await this.restartDocumentRun(runId, document)
+      else if (changedDocument || session.identity.revision !== document.revision) await this.restartDocumentRun(runId, document)
       return this.observe(runId)
     }
     if (!session || session.identity.revision !== document.revision)
@@ -102,24 +103,25 @@ export class HtmlActionService {
     return this.beginFromContext(runId, () => this.options.preview.automationContextForDocument({ ...input, runId }))
   }
 
-  /** Explicitly replace the observation epoch after a canonical source revision.
-   * The document, epoch, binding and run stay fixed; Stop is irreversible. */
+  /** Explicit observation captures the current authorized document or revision.
+   * Old handles retire; action identities remain spent and Stop stays irreversible. */
   async restartDocumentRun(runId: string, input: { documentId: string; epoch: string; revision: number;
     tabId?: string }): Promise<HtmlActionIdentity> {
     const old = this.require(runId)
     if (old.busy || this.opening.has(runId)) throw new Error('HTML 操作尚未完成，不能重开观察')
-    if (input.documentId !== old.identity.documentId || input.epoch !== old.identity.epoch
-      || !Number.isSafeInteger(input.revision) || input.revision < 0
-      || input.revision === old.identity.revision) throw new Error('HTML 重开必须使用同一文档的新正式版本')
+    const sameDocument = input.documentId === old.identity.documentId && input.epoch === old.identity.epoch
+    if (!input.documentId || !input.epoch || !Number.isSafeInteger(input.revision) || input.revision < 0
+      || sameDocument && input.revision === old.identity.revision) throw new Error('HTML 重开需要当前文档的新观察')
     this.opening.add(runId)
     try {
       const context = await this.options.preview.automationContextForDocument({ ...input, runId })
       const frameToken = await this.options.frames.frameToken(context)
       if (this.stoppedRuns.has(runId) || this.cancelledOpening.has(runId)
         || this.runs.get(runId) !== old || old.stopped) throw new Error('HTML 观察已停止')
-      if (context.lease.documentId !== old.identity.documentId || context.lease.epoch !== old.identity.epoch
-        || context.lease.bindingVersion !== old.identity.bindingVersion
-        || context.bindingPath !== old.context.bindingPath) throw new Error('HTML 文档绑定已变化，不能沿用本任务观察会话')
+      if (context.lease.documentId !== input.documentId || context.lease.epoch !== input.epoch
+        || context.lease.revision !== input.revision
+        || sameDocument && (context.lease.bindingVersion !== old.identity.bindingVersion
+          || context.bindingPath !== old.context.bindingPath)) throw new Error('HTML 文档绑定与本次观察不一致')
       this.retire(old)
       return this.attach(runId, context, frameToken)
     } finally { this.opening.delete(runId); this.cancelledOpening.delete(runId) }
@@ -192,7 +194,7 @@ export class HtmlActionService {
     const elements = state.elements.slice(0, 120).map(element => {
       const handle = randomUUID()
       session.handles.set(handle, element)
-      const { path: _path, fingerprint: _fingerprint, ...report } = element
+      const { path: _path, fingerprint: _fingerprint, frameToken: _frameToken, ...report } = element
       return { ...report, handle }
     })
     return { identity: session.identity, source: session.context.source === 'isolated' ? 'isolated-html-preview' : 'live-html-preview', generation: session.generation,
@@ -248,7 +250,7 @@ export class HtmlActionService {
         await this.assertCurrent(session)
         actionMayHaveApplied = true
         const result = await this.options.frames.act(session.context, session.frameToken,
-          { ...input, path: target.path, fingerprint: target.fingerprint })
+          { ...input, path: target.path, fingerprint: target.fingerprint, ...(target.frameToken ? { frameToken: target.frameToken } : {}) })
         actionMayHaveApplied = result.applied
         await this.assertCurrent(session)
         if (!result.applied) throw new Error(result.reason === 'stale-element'

@@ -1,4 +1,4 @@
-# Distributed with the Windows product. No Node, repository or client-global config.
+﻿# Distributed with the Windows product. No Node, repository or client-global config.
 # stdout is a one-use connection receipt, including its bearer; consume it directly,
 # never copy it into logs, a course project, or a published artifact.
 [CmdletBinding()]
@@ -18,12 +18,12 @@ function Quote-NativeArgument([string]$Value) {
 
 try {
   if (-not $Executable) {
-    $name = 'ittoedu-courseware-editor.exe'
+    $name = 'guoling-workbench.exe'
     # The portable/unpacked helper is next to its own product resources.
     $adjacent = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ('../../' + $name)))
     if (Test-Path -LiteralPath $adjacent -PathType Leaf) { $Executable = $adjacent }
     if (-not $Executable) {
-      $running = @(Get-Process -Name 'ittoedu-courseware-editor' -ErrorAction SilentlyContinue |
+      $running = @(Get-Process -Name 'guoling-workbench' -ErrorAction SilentlyContinue |
         ForEach-Object { try { $_.Path } catch {} } | Where-Object { $_ } | Select-Object -Unique)
       if ($running.Count -eq 1) { $Executable = $running[0] }
       elseif ($running.Count -gt 1) { throw 'More than one Guoling installation is running. Select the product executable for this task.' }
@@ -32,7 +32,7 @@ try {
       $roots = @([Environment]::GetFolderPath('LocalApplicationData'), [Environment]::GetFolderPath('ProgramFiles'))
       $installed = @($roots | Where-Object { $_ } | ForEach-Object {
         $base = $_
-        foreach ($relative in @('Programs/ittoedu Courseware Editor', 'ittoedu Courseware Editor')) {
+        foreach ($relative in @('Programs/果铃工作台', '果铃工作台')) {
           $candidate = Join-Path (Join-Path $base $relative) $name
           if (Test-Path -LiteralPath $candidate -PathType Leaf) { [IO.Path]::GetFullPath($candidate) }
         }

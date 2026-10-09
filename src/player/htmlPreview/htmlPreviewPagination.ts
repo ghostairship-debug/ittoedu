@@ -32,10 +32,13 @@ function editableTarget(target: EventTarget | null): boolean {
 export function mountPagination(doc: Document, sections: readonly HtmlSectionRef[], onState: (state: HtmlPreviewView) => void): HtmlPreviewPagination {
   const pages = pageElements(doc, sections)
   const win = doc.defaultView
+  // Authored visibility already selects pages (for example an .active navigation).
+  // Keep that consumer in charge instead of pinning its pages behind a second hidden class.
+  const authorPagination = pages.some(page => page.hidden || win?.getComputedStyle(page).display === 'none')
   const hiddenClass = `html-preview-hidden-page-${++paginationInstance}`
   const hiddenStyle = doc.createElement('style')
   hiddenStyle.textContent = `.${hiddenClass}{display:none!important}`
-  if (pages.length) doc.head.append(hiddenStyle)
+  if (pages.length && !authorPagination) doc.head.append(hiddenStyle)
   const pageScroll = new Map<number, number>()
   pageScroll.set(0, win?.scrollY ?? 0)
   let pageIndex = 0
@@ -45,12 +48,12 @@ export function mountPagination(doc: Document, sections: readonly HtmlSectionRef
   const readView = (): HtmlPreviewView => ({ pageIndex, perPageScroll: pageScroll.get(pageIndex) ?? win?.scrollY ?? 0 })
   const emit = () => { if (!destroyed) onState(readView()) }
   const show = (index: number) => {
-    pages.forEach((page, position) => { page.classList.toggle(hiddenClass, position !== index) })
+    if (!authorPagination) pages.forEach((page, position) => { page.classList.toggle(hiddenClass, position !== index) })
     geometry?.destroy()
     geometry = pages[index] ? mountHtmlPreviewGeometry(pages[index]!) : null
   }
   const navigate = (index: number) => {
-    if (destroyed || pages.length === 0 || !Number.isFinite(index)) return
+    if (destroyed || pages.length === 0 || authorPagination || !Number.isFinite(index)) return
     const next = Math.max(0, Math.min(pages.length - 1, Math.trunc(index)))
     if (next === pageIndex) return
     pageScroll.set(pageIndex, win?.scrollY ?? 0)
@@ -60,7 +63,7 @@ export function mountPagination(doc: Document, sections: readonly HtmlSectionRef
     emit()
   }
   const restore = (view: HtmlPreviewView) => {
-    if (destroyed || pages.length === 0) return
+    if (destroyed || pages.length === 0 || authorPagination) return
     const index = Number.isFinite(view.pageIndex) ? Math.max(0, Math.min(pages.length - 1, Math.trunc(view.pageIndex))) : 0
     const scroll = Number.isFinite(view.perPageScroll) ? Math.max(0, view.perPageScroll) : 0
     pageIndex = index
@@ -73,7 +76,7 @@ export function mountPagination(doc: Document, sections: readonly HtmlSectionRef
   const onCompositionStart = () => { composing = true }
   const onCompositionEnd = () => { composing = false }
   const onKeyDown = (event: KeyboardEvent) => {
-    if (destroyed || pages.length < 2 || event.defaultPrevented || event.isComposing || composing || editableTarget(event.target)) return
+    if (destroyed || authorPagination || pages.length < 2 || event.defaultPrevented || event.isComposing || composing || editableTarget(event.target)) return
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
     const next = pageIndex + (event.key === 'ArrowRight' ? 1 : -1)
@@ -85,13 +88,21 @@ export function mountPagination(doc: Document, sections: readonly HtmlSectionRef
   doc.addEventListener('compositionend', onCompositionEnd)
   win?.addEventListener('keydown', onKeyDown)
   win?.addEventListener('scroll', onScroll, { passive: true })
-  if (pages.length) show(pageIndex)
+  const syncAuthorPage = () => {
+    const index = pages.findIndex(page => !page.hidden && win?.getComputedStyle(page).display !== 'none')
+    if (index < 0 || index === pageIndex && geometry) return
+    pageIndex = index; show(index); emit()
+  }
+  const authorChanges = authorPagination && win ? new win.MutationObserver(syncAuthorPage) : null
+  if (authorChanges) for (const page of pages) authorChanges.observe(page, { attributes: true, attributeFilter: ['class', 'style', 'hidden'] })
+  if (pages.length) authorPagination ? syncAuthorPage() : show(pageIndex)
   emit()
   return {
     navigate, readView, restore,
     destroy: () => {
       if (destroyed) return
       destroyed = true
+      authorChanges?.disconnect()
       geometry?.destroy()
       doc.removeEventListener('compositionstart', onCompositionStart)
       doc.removeEventListener('compositionend', onCompositionEnd)

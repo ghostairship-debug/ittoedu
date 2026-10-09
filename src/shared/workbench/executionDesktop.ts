@@ -12,8 +12,15 @@ import { lessonAuthoringMaterialSelectionSchema } from '../lessonAuthoring'
 import { componentAuthorRecordSchema } from '../contracts/component-platform/schema'
 
 const id = z.string().min(1), index = z.number().int().nonnegative()
+const textFragmentSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('markdown-range'), from: index, to: index }).strict().refine(value => value.to >= value.from),
+  z.object({ kind: z.literal('course-instance'), surfaceId: id, instanceId: id, stateId: id.nullable().optional(),
+    fieldScope: z.enum(['data', 'flowLayout']).optional(), dataPath: z.array(id), from: index, to: index }).strict().refine(value => value.to >= value.from),
+])
 const executionEditTargetSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('markdown-range'), from: index, to: index }).strict().refine(value => value.to > value.from),
+  z.object({ kind: z.literal('text-selection'), fragments: z.array(z.object({ target: textFragmentSchema,
+    separatorBefore: z.string().optional() }).strict()).min(1) }).strict(),
   z.object({ kind: z.literal('html-author-field'), authorKey: id, field: z.enum(['text', 'src']), record: componentAuthorRecordSchema,
     source: z.object({ from: index, to: index, quote: z.enum(['"', "'", '']).optional() }).strict().refine(value => value.to >= value.from).optional() }).strict(),
   z.object({ kind: z.literal('course-instance'), surfaceId: id, instanceId: id, stateId: id.nullable().optional(),
@@ -45,6 +52,7 @@ const disclosedRoleSchema = z.object({ connectionId: id, connectionRevision: ind
 const disclosedSettingsSchema = z.object({ profileRevision: index, roles: z.object({
   conversation: disclosedRoleSchema.nullable(), vision: disclosedRoleSchema.nullable(),
   imageGenerate: disclosedRoleSchema.nullable(), imageEdit: disclosedRoleSchema.nullable(),
+  compression: disclosedRoleSchema.nullable().optional(),
 }).strict() }).strict()
 export type DisclosedExecutionSettings = z.infer<typeof disclosedSettingsSchema>
 /** Non-secret identity of the settings shown in the send disclosure. */
@@ -143,6 +151,8 @@ export interface ExecutionSendInput {
   permission?: ExecutionPermissionMode
 }
 export interface ExecutionSubmissionRecord {
+  /** Accepted steering remains attached to the existing run and its journal. */
+  steeringRunId?: string
   submissionId: string
   workspaceId: string
   conversationId: string
@@ -173,6 +183,9 @@ export interface ExecutionSendResult { submission: ExecutionSubmissionRecord; co
  */
 export interface ElementChangeView {
   submissionId: string
+  /** Same acknowledged snapshot as target/content; a new send must retain this baseline. */
+  epoch?: string
+  revision?: number
   state: 'pending' | 'none' | 'applied' | 'undone'
   fields: string[]
   unavailable?: string

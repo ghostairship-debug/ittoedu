@@ -7,16 +7,19 @@ import { componentRuleEdits, interactionBehavior, interactionRules } from '../..
 import { inputAnswerContent, inputDataSchema } from './data'
 import { equalComponentValue } from '../../core/drivers/courseV10Operations'
 import { normalizeShortAnswer } from '../../shared/assessmentEvaluators'
+import { prepareCourseInteractionAction, type CourseAuthoringReferences } from '../../core/course/courseAuthoringReferences'
 
 export function inputAuthoringContent(instance: ComponentInstance): NativeInputContent {
   return inputAnswerContent(instance.id, inputDataSchema.parse(instance.data))
 }
-function inputRuleOwner(project: CourseProjectV10, surfaceId: string, instanceId: string): ComponentTarget {
+function inputRuleOwner(project: CourseProjectV10, surfaceId: string | null, instanceId: string): ComponentTarget {
   const seen = new Set<string>()
   const contains = (id: string): boolean => { if (seen.has(id)) return false; seen.add(id); return id === instanceId || (project.instances[id]?.childIds ?? []).some(contains) }
-  return [...project.global.underlay, ...project.global.overlay].some(contains) ? { kind: 'project' } : { kind: 'surface', surfaceId }
+  if ([...project.global.underlay, ...project.global.overlay].some(contains)) return { kind: 'project' }
+  if (!surfaceId) throw new Error('填空目标页面已不存在')
+  return { kind: 'surface', surfaceId }
 }
-export function inspectComponentInputRules(project: CourseProjectV10, surfaceId: string, instanceId: string) {
+export function inspectComponentInputRules(project: CourseProjectV10, surfaceId: string | null, instanceId: string) {
   const instance = project.instances[instanceId]
   if (!instance) throw new Error('填空对象已不存在')
   return inspectInputRuleFamily(instanceId, inputAuthoringContent(instance), interactionRules(interactionBehavior(project, inputRuleOwner(project, surfaceId, instanceId))))
@@ -33,9 +36,9 @@ export function inputContentPatchEdits(instance: ComponentInstance,
   return [{ type: 'data.set', instanceId: instance.id, path: [], value: JSON.parse(JSON.stringify(data)) as JsonValue }]
 }
 export type ComponentInputRuleRequest = { mode: 'apply' | 'rebuild'; config: InputRuleConfig } | { mode: 'unmanage' }
-export function componentInputRuleEdits(target: Pick<CapturedCourseTarget, 'project' | 'surfaceId' | 'instanceId'>, request: ComponentInputRuleRequest): ComponentEdit[] {
+export function componentInputRuleEdits(target: Pick<CapturedCourseTarget, 'project' | 'surfaceId' | 'instanceId'>, request: ComponentInputRuleRequest, references?: CourseAuthoringReferences): ComponentEdit[] {
   const { project, surfaceId, instanceId } = target
-  if (!surfaceId || !instanceId || !project.instances[instanceId]) throw new Error('填空目标已不存在')
+  if (!instanceId || !project.instances[instanceId]) throw new Error('填空目标已不存在')
   const instance = project.instances[instanceId], current = inputDataSchema.parse(instance.data), content = inputAnswerContent(instanceId, current)
   const owner = inputRuleOwner(project, surfaceId, instanceId), rules = interactionRules(interactionBehavior(project, owner))
   const inspection = inspectInputRuleFamily(instanceId, content, rules)
@@ -47,6 +50,9 @@ export function componentInputRuleEdits(target: Pick<CapturedCourseTarget, 'proj
   if (request.mode === 'apply' && (inspection.managed && inspection.conflict || rules.some(rule => rule.trigger.type === 'input.submit' && rule.trigger.nodeId === instanceId && !content.ruleFamilyRuleIds.includes(rule.id)))) {
     throw new Error('判题规则已经手改，请保留手改或明确选择重建。')
   }
+  request = { ...request, config: { ...request.config,
+    correct: request.config.correct.map(action => prepareCourseInteractionAction(project, owner, action, references)),
+    error: request.config.error.map(action => prepareCourseInteractionAction(project, owner, action, references)) } }
   const answer = { ...content, answerType: request.config.answerType }
   const family = buildInputRuleFamily(instanceId, answer, request.config, () => crypto.randomUUID())
   const edited = inputContentPatchEdits(instance, { answerType: request.config.answerType, stateKey: content.stateKey,
@@ -64,7 +70,7 @@ export function componentInputRuleEdits(target: Pick<CapturedCourseTarget, 'proj
   return [...edited, { type: 'project.logic.set', logic }, ...componentRuleEdits(project, owner, [...rules.filter(rule => !content.ruleFamilyRuleIds.includes(rule.id)), ...family])]
 }
 /** An explicit accepted-answer property edit uses the existing managed grading owner. */
-export function componentInputDataPropertyEdits(project: CourseProjectV10, surfaceId: string, instanceId: string,
+export function componentInputDataPropertyEdits(project: CourseProjectV10, surfaceId: string | null, instanceId: string,
   nextData: JsonValue): ComponentEdit[] | null {
   const next = inputDataSchema.parse(nextData), inspection = inspectComponentInputRules(project, surfaceId, instanceId)
   if (!inspection.managed) return null

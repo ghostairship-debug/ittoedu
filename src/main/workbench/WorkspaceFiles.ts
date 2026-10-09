@@ -248,7 +248,7 @@ export class WorkspaceFiles {
         const previous = await this.lookupCreation(creation)
         if (previous) return previous.operation
       }
-      const expected = input.format === 'file' ? null : input.format === 'markdown' ? '.md' : '.h5lesson'
+      const expected = input.format === 'file' ? null : input.format === 'markdown' ? '.md' : '.glx'
       validateWorkspaceEntryName(input.name)
       if (expected && path.extname(input.name).toLowerCase() !== expected) throw new WorkspaceFilesError('format-extension-mismatch', `该格式要求 ${expected} 文件名`)
       const target = await this.destination(input.workspaceId, input.targetDirectoryId, input.name)

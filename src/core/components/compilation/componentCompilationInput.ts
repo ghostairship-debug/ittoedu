@@ -25,11 +25,11 @@ function sourceModule(implementation: SourceImplementation, resources: DocumentR
       if (value === null) binaryFiles[name] = Uint8Array.from(bytes)
       else text[name] = value
     }
-    return { entry, files: text, ...(Object.keys(binaryFiles).length ? { binaryFiles } : {}), moduleBindings }
+    return { entry, entryLanguage: implementation.language, files: text, ...(Object.keys(binaryFiles).length ? { binaryFiles } : {}), moduleBindings }
   }
   if (typeof implementation.source !== 'string') throw new Error('组件源码尚未提供')
   const entry = `component.${implementation.language === 'typescript' ? 'ts' : 'js'}`
-  return { entry, files: { [entry]: implementation.source }, moduleBindings }
+  return { entry, entryLanguage: implementation.language, files: { [entry]: implementation.source }, moduleBindings }
 }
 
 /** Resolve the required author entry; dependency availability is checked when an import actually resolves it. */

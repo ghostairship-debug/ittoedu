@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import type { ExecutionRunRecord } from '../../../shared/workbench/execution'
 import { executionContentOutputSchema } from '../../../shared/workbench/executionDesktop'
 
@@ -35,12 +36,16 @@ export class ExecutionRunStore {
         const file = await fs.open(temporary, 'wx')
         try { await file.writeFile(JSON.stringify(copy)); await file.sync() } finally { await file.close() }
         complete = true
-        try { await fs.rename(temporary, filename) }
-        catch (error) {
-          if (process.platform !== 'win32' || (error as NodeJS.ErrnoException).code !== 'EPERM') throw error
-          // Republish this closed, flushed checkpoint once in its existing file
-          // queue. No model request, tool or write of the snapshot is repeated.
-          await fs.rename(temporary, filename)
+        const retryDelays = [25, 75, 150, 300]
+        for (let attempt = 0; ; attempt++) {
+          try { await fs.rename(temporary, filename); break }
+          catch (error) {
+            if (process.platform !== 'win32' || (error as NodeJS.ErrnoException).code !== 'EPERM' || attempt >= retryDelays.length) throw error
+            // Let a transient Windows reader release the destination. Republish
+            // the same closed, flushed file in the existing queue; never rewrite
+            // its bytes, remove the old record or repeat model/tool execution.
+            await delay(retryDelays[attempt])
+          }
         }
         this.unavailable.delete(filename)
       } finally {

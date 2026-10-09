@@ -149,7 +149,7 @@ export function TopToolbar({
 
       <div className="toolbar__group">
         <div className="new-project-split">
-          <ToolButton label="新建" title="新建 H5 演示（Ctrl+N）" disabled={busy} onClick={onNew}>
+          <ToolButton label="新建" title="新建 果铃工程（Ctrl+N）" disabled={busy} onClick={onNew}>
             <FilePlus2 size={18} />
           </ToolButton>
           {onNewSpatial || onNewFlow ? (

@@ -171,6 +171,8 @@ export interface SharedDocumentEditorHandle {
   flush(): { ready: boolean; source: string; diagnostics: DocumentDiagnostic[] }
   /** Flush local input and wait for its actual commit ACK before save/history/navigation. */
   drain(): Promise<{ ready: boolean; source: string; diagnostics: DocumentDiagnostic[] }>
+  /** Prepare raw file source for its owner's formal ACK; layout diagnostics do not reject source repair. */
+  drainSource(): Promise<{ ready: boolean; source: string; diagnostics: DocumentDiagnostic[] }>
   /** Uses the same explicit discard as the draft UI, including the caller's cleanup. */
   discardDraft(): Promise<void>
   /** Focus an existing last paragraph, or create one on an explicit end-of-document click. */
@@ -586,7 +588,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     setFormat(readDocumentFormatting(editor.view.state, props.inlineStyleDefaults))
   }, [props.inlineStyleDefaults, mode])
   useEffect(() => {
-    if (sourceComposing.current || draftSession.retained || sourceInvalid.current || restoredDiagnostics.current) return
+    if (sourceComposing.current || draftSession.retained || (!isFileSource() && (sourceInvalid.current || restoredDiagnostics.current))) return
     const text = props.sourceDraft ?? serializeDocumentMarkdown(props.document, props.target)
     if (text === draft.current) return
     draft.current = text
@@ -599,7 +601,14 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       source.current.dispatch({ changes: { from, to: before, insert: text.slice(from, after) }, effects: sourcePreviewEffect.of(null) })
       syncingSource.current = false
     }
-    reportDiagnostics(documentScope ? parseDocumentMarkdown(text, { createId: () => crypto.randomUUID(), target: props.target, resolveImage: props.resolveImage }).diagnostics : [])
+    const parsed = documentScope ? parseDocumentMarkdown(text, { createId: () => crypto.randomUUID(), target: props.target, resolveImage: props.resolveImage }) : null
+    sourceInvalid.current = parsed !== null && parsed.status !== 'valid'
+    restoredDiagnostics.current = false
+    if (parsed?.status === 'valid') {
+      projection.current = suppliedProjection; mapRef.current = suppliedProjection.sourceMap
+      draftSession.receive(suppliedProjection.document)
+    }
+    reportDiagnostics(parsed?.diagnostics ?? [])
   }, [props.revision, props.sourceDraft, documentScope])
   useEffect(() => {
     if (layout.current) {
@@ -645,7 +654,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       return true
     },
     flush: () => ({ ready: !sourceComposing.current && !sourceInvalid.current && !restoredDiagnostics.current && (layout.current?.flush() ?? !draftSession.rejected), source: draft.current, diagnostics: diagnosticsRef.current }),
-    drain, discardDraft: discardLocalDraft,
+    drain, drainSource, discardDraft: discardLocalDraft,
     getContextualEditTarget: () => contextualTargetRef.current,
     focusEndParagraph: () => {
       const editor = layout.current
@@ -713,6 +722,13 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (sourceComposing.current || source.current?.composing || sourceInvalid.current || restoredDiagnostics.current) return { ready: false, source: draft.current, diagnostics: diagnosticsRef.current }
     const ready = layout.current ? await layout.current.drain() : await draftSession.drain()
     return { ready, source: draft.current, diagnostics: diagnosticsRef.current }
+  }
+  function isFileSource() { return latest.current.target === 'file' && mode === 'source' }
+  async function drainSource() {
+    if (!isFileSource()) return drain()
+    if (sourceComposing.current || source.current?.composing) return { ready: false, source: draft.current, diagnostics: diagnosticsRef.current }
+    const ready = await draftSession.drain()
+    return { ready: ready && !sourceComposing.current && !source.current?.composing, source: draft.current, diagnostics: diagnosticsRef.current }
   }
   async function navigateHistory(direction: 'undo' | 'redo') {
     const owner = draftSession.retained ? draftOwner.current ?? latest.current : latest.current
@@ -828,7 +844,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (!target || !latest.current.onContextualCommand) throw new Error('请重新选择要修改的内容。')
     const issue = contextualIssue(target)
     if (issue) throw new Error(issue)
-    if (diagnostics.length) throw new Error('源文尚有错误，请先修正或丢弃待修草稿。')
+    if (diagnostics.length && !isFileSource()) throw new Error('源文尚有错误，请先修正或丢弃待修草稿。')
     await latest.current.onContextualCommand(instruction, target)
     instructionRef.current = ''; setContextualInstruction(''); setCommandError('')
   }
@@ -940,7 +956,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       {documentScope && <label><input type="checkbox" checked={mathDraft.display} onChange={event => setMathDraft({ ...mathDraft, display: event.target.checked })} />独立公式</label>}
     </div>}
   </>
-  const quickBarIssue = contextualTarget ? contextualIssue(contextualTarget) ?? (diagnostics.length ? '源文尚有错误，请先修正或丢弃待修草稿。' : null) : null
+  const quickBarIssue = contextualTarget ? contextualIssue(contextualTarget) ?? (diagnostics.length && !isFileSource() ? '源文尚有错误，请先修正或丢弃待修草稿。' : null) : null
   // As on the objects' quick bar, an open popover closes when something else is selected, not when the same selection
   // is reported again at a new revision (after an element card's own edit, M15).
   const selectionKey = contextualTarget ? JSON.stringify(contextualTarget.selection

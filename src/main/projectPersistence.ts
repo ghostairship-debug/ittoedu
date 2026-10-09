@@ -1,3 +1,4 @@
+import { isNativeProjectFilename } from '../shared/nativeProjectFile'
 import crypto from 'node:crypto'
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
@@ -62,7 +63,7 @@ function canonicalPath(value: string): string {
 }
 
 function hasProjectExtension(value: string): boolean {
-  return path.extname(value).toLocaleLowerCase('en-US') === '.h5lesson'
+  return isNativeProjectFilename(value)
 }
 
 function hasZipSignature(bytes: Uint8Array): boolean {
@@ -324,7 +325,7 @@ export function writeRecoveryProject(input: RecoveryProjectInput): Promise<void>
       throw new DesktopOperationError(
         'RECOVERY_ARCHIVE_INVALID',
         '自动恢复保存失败',
-        '恢复数据不是有效的 H5 演示。',
+        '恢复数据不是有效的 果铃工程。',
         '请立即手动保存工程；若问题持续出现，请重新启动编辑器。',
       )
     }
@@ -393,7 +394,7 @@ export function readRecoveryProject(): Promise<RecoveryProjectResult | null> {
     const metadata = parseRecoveryMetadata(rawMetadata)
     const matchingMetadata = metadata?.sha256 === digest ? metadata : null
     return {
-      projectName: matchingMetadata?.projectName ?? '恢复的 H5 演示.h5lesson',
+      projectName: matchingMetadata?.projectName ?? '恢复的 果铃工程.glx',
       projectPath: matchingMetadata?.projectPath,
       savedAt: matchingMetadata?.savedAt ?? stats.mtimeMs,
       bytes,

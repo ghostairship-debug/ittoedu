@@ -27,7 +27,7 @@ function finish(project: CourseProjectDocument, next: CourseProjectDocument, now
   next.revision = project.revision + 1
   next.updatedAt = now
   const parsed = courseProjectDocumentSchema.safeParse(next)
-  if (!parsed.success) return { ok: false, reason: parsed.error.issues[0]?.message ?? '修改后的 H5 演示无效，未写入。' }
+  if (!parsed.success) return { ok: false, reason: parsed.error.issues[0]?.message ?? '修改后的 果铃工程无效，未写入。' }
   return { ok: true, status: 'planned', plan: { projectId: project.id, baseRevision: project.revision, nextDocument: parsed.data, resourceChanges } }
 }
 

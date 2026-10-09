@@ -17,6 +17,9 @@ import type { DocumentResources } from '../../../shared/workbench/document'
 import { extractHtmlAuthoringRecords, type HtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
 import { decodeHtmlEntities } from '../../../shared/html/htmlSourceScanner'
 import { parse, type DefaultTreeAdapterTypes } from 'parse5'
+import { textComponentDataSchema } from '../../../components/text/data'
+import { readHtmlDocumentText, type DocumentHtmlNode } from '../../../shared/document/htmlText'
+import { adoptFormulas } from '../../../shared/document/html'
 
 export type { ContentApplyRequest, ContentApplyResult, ContentApplyPlan, ContentApplySessionPort } from './application/types'
 
@@ -108,7 +111,7 @@ function resourceEdits(prepared: PreparedContentResources, createId: () => strin
     const reference = `cw-resource:${resource.key}`
     bindings[reference] = id
     const extension = resource.mediaType.split('/').at(-1)?.replace(/[^a-z0-9]/gi, '') || 'bin'
-    edits.push({ type: 'asset.add', asset: { id, path: `assets/${id}.${extension}`, mimeType: resource.mediaType }, bytes: resource.bytes })
+    edits.push({ type: 'asset.add', asset: { ...resource.image, id, path: `assets/${id}.${extension}`, mimeType: resource.mediaType }, bytes: resource.bytes })
     if (admitted.has(resource)) urls[reference] = `data:${resource.mediaType};base64,${Buffer.from(resource.bytes).toString('base64')}`
   }
   return { edits, bindings, urls }
@@ -168,6 +171,33 @@ export class ContentApplyService {
           signal?.throwIfAborted()
           const instance = project.instances[input.instanceId]!
           const definition = project.definitions[instance.definitionId]
+          if (input.unchanged) continue
+          const implementation = instance.implementationOverride ?? definition?.implementation
+          if (implementation?.kind === 'builtin' && implementation.key === 'guoling.text') {
+            const previous = textComponentDataSchema.parse(instance.data)
+            const document = parse(input.html)
+            const textNode = (node: DefaultTreeAdapterTypes.Node): DefaultTreeAdapterTypes.Element | undefined =>
+              'tagName' in node && node.attrs.some(attr => attr.name === 'data-text-component-content') ? node
+                : 'childNodes' in node ? node.childNodes.map(textNode).find(Boolean) : undefined
+            const node = textNode(document)
+            if (!node) throw new Error('文字源文缺少当前正文区域，请保留正文区域或修改专业数据文件')
+            const annotation = (node: DefaultTreeAdapterTypes.ChildNode): string | undefined =>
+              'tagName' in node && node.tagName === 'annotation' && node.attrs.some(attr => attr.name === 'encoding' && attr.value === 'application/x-tex')
+                ? node.childNodes.map(child => child.nodeName === '#text' ? (child as DefaultTreeAdapterTypes.TextNode).value : '').join('')
+                : 'childNodes' in node ? node.childNodes.map(annotation).find(value => value !== undefined) : undefined
+            const projected = (node: DefaultTreeAdapterTypes.ChildNode): DocumentHtmlNode => {
+              if (!('tagName' in node)) return { kind: node.nodeName === '#comment' ? 'comment' : 'text', text: node.nodeName === '#text' ? (node as DefaultTreeAdapterTypes.TextNode).value : '' }
+              const latex = node.attrs.some(attr => attr.name === 'data-formula-id') ? annotation(node) : undefined
+              return { kind: 'element', tagName: node.tagName, attributes: { ...Object.fromEntries(node.attrs.map(attr => [attr.name, attr.value])),
+                ...(latex === undefined ? {} : { class: 'math' }) }, children: latex === undefined ? node.childNodes.map(projected) : [{ kind: 'text', text: `\\(${latex}\\)` }] }
+            }
+            const content = adoptFormulas(readHtmlDocumentText(node.childNodes.map(projected), { createFormulaId: this.createId,
+              onMedia: () => { throw new Error('专业文字中的媒体应插入为独立对象，原文字与输入已保留') } })
+              , previous.content)
+            const value = textComponentDataSchema.parse({ ...previous, content })
+            if (!equalComponentValue(instance.data, value)) edits.push({ type: 'data.set', instanceId: input.instanceId, path: [], value: value as unknown as JsonValue })
+            continue
+          }
           if (definition?.implementation.kind !== 'builtin' || !['guoling.web', 'guoling.html-program'].includes(definition.implementation.key)) {
             throw new Error(`目标需要自己的专业数据 adapter：${input.instanceId}`)
           }

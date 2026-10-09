@@ -3,8 +3,12 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { waitForHostWork } from '../../../shared/workbench/jobWait'
 import type { ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
-import { CodexDelegationRunner, type DelegationEvent, type CodexDelegationResult } from './CodexDelegationRunner'
+import { CodexDelegationRunner, type DelegationEvent, type DelegationExecutionResult } from './CodexDelegationRunner'
 import { WindowsCodexSandboxBoundary } from './WindowsCodexSandboxBoundary'
+import { LocalToolRunner, type PreparedLocalCommand } from './LocalToolRunner'
+import type { ReadonlyTaskRunner } from './ReadonlyTaskRunner'
+import type { LocalToolRunIntent, LocalToolRunPreview, ReadonlyDelegationIntent, PreparedTaskSource } from '../../../shared/workbench/toolPorts'
+import { documentDigest } from '../../../core/documents/documentDigest'
 
 export interface DelegationJobInput {
   runId: string
@@ -37,9 +41,13 @@ export interface DelegationJobSnapshot {
   stopped: boolean
   createdAt: string
   updatedAt: string
-  configuredModel: 'gpt-6-luna'
-  configuredSpeed: 'priority'
-  account?: 'ChatGPT'
+  executionKind?: 'codex' | 'local' | 'readonly'
+  configuredModel?: string
+  configuredSpeed?: string
+  account?: string
+  actualModel?: string
+  connectionId?: string
+  usage?: DelegationExecutionResult['usage']
   cliVersion?: string
   threadId?: string
   exitCode?: number | null
@@ -53,6 +61,10 @@ export interface DelegationJobLog { entries: readonly { cursor: number; time: nu
 type Stored = DelegationJobSnapshot & { version: 1; copyRoot: string; expectedArtifacts: readonly string[];
   logs: DelegationJobLog['entries']; nextLogCursor: number }
 type Active = { runId: string; controller: AbortController; work: Promise<void> }
+type TaskIdentity = { runId: string; jobId: string; taskId: string }
+type LocalPlan = TaskIdentity & { intentDigest: string; command: PreparedLocalCommand; sources: readonly PreparedTaskSource[];
+  intent: LocalToolRunIntent; preview: LocalToolRunPreview; authorized: boolean }
+type TaskExecution = (active: Active, onEvent: (event: DelegationEvent) => void) => Promise<DelegationExecutionResult>
 
 const digest = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex')
 const terminal = (status: Stored['status']) => !['preparing', 'running'].includes(status)
@@ -79,13 +91,20 @@ export class DelegationJobService {
   private readonly now: () => Date
   private readonly active = new Map<string, Active>()
   private readonly tails = new Map<string, Promise<unknown>>()
+  private readonly localPlans = new Map<string, LocalPlan>()
+  private readonly stoppedRuns = new Set<string>()
+  private readonly localRunner: LocalToolRunner
+  private readonly readonlyRunner?: ReadonlyTaskRunner
 
-  constructor(options: { directory: string; copyRootBase: string; runner?: Pick<CodexDelegationRunner, 'run'>; now?: () => Date }) {
+  constructor(options: { directory: string; copyRootBase: string; runner?: Pick<CodexDelegationRunner, 'run'>;
+    localRunner?: LocalToolRunner; readonlyRunner?: ReadonlyTaskRunner; now?: () => Date }) {
     if (!path.isAbsolute(options.directory) || !path.isAbsolute(options.copyRootBase)) throw new Error('委派作业目录和副本授权根必须为绝对路径')
     this.directory = path.resolve(options.directory)
     this.copyRootBase = path.resolve(options.copyRootBase)
     this.runner = options.runner ?? new CodexDelegationRunner({ boundary: new WindowsCodexSandboxBoundary() })
     this.now = options.now ?? (() => new Date())
+    this.localRunner = options.localRunner ?? new LocalToolRunner()
+    this.readonlyRunner = options.readonlyRunner
   }
 
   private folder(jobId: string): string {
@@ -146,6 +165,83 @@ export class DelegationJobService {
     return copy
   }
 
+  private assertRunning(runId: string): void {
+    if (this.stoppedRuns.has(runId)) throw new DelegationJobError('run-stopped', '父任务已停止')
+  }
+  private async plannedCopy(input: TaskIdentity, cwd?: string): Promise<string> {
+    await fs.mkdir(this.copyRootBase, { recursive: true, mode: 0o700 })
+    const base = await fs.realpath(this.copyRootBase)
+    const root = path.join(base, digest(JSON.stringify([input.runId, input.jobId])))
+    return !cwd || cwd === '.' ? root : path.join(root, ...artifactName(cwd.replaceAll('\\', '/')).split('/'))
+  }
+  private frozenSources(sources: readonly PreparedTaskSource[]): readonly PreparedTaskSource[] {
+    const result = sources.map(source => ({ ...source, name: artifactName(source.name), bytes: new Uint8Array(source.bytes) }))
+    if (new Set(result.map(source => source.name)).size !== result.length) throw new DelegationJobError('invalid-materials', '任务输入文件重名')
+    return result
+  }
+  private async createTaskCopy(copyRoot: string, sources: readonly PreparedTaskSource[], materialize: boolean, taskRoot = copyRoot): Promise<void> {
+    // Refuse orphaned copies instead of replaying a command whose earlier outcome is unknown.
+    try { await fs.mkdir(taskRoot, { recursive: false, mode: 0o700 }) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new DelegationJobError('copy-unknown', '任务副本已存在但无匹配回执；未重新执行'); throw error }
+    await this.scopedCopy(taskRoot)
+    if (copyRoot !== taskRoot) await fs.mkdir(copyRoot, { recursive: true, mode: 0o700 })
+    await this.scopedCopy(copyRoot)
+    if (materialize) for (const source of sources) {
+      const destination = path.join(copyRoot, ...source.name.split('/'))
+      await fs.mkdir(path.dirname(destination), { recursive: true, mode: 0o700 })
+      await fs.writeFile(destination, source.bytes, { flag: 'wx', mode: 0o600 })
+    }
+  }
+  /** Preview contains the actual resolved command and frozen inputs; it grants no execution. */
+  async prepareLocal(input: TaskIdentity & { intent: LocalToolRunIntent; sources: readonly PreparedTaskSource[] }): Promise<LocalToolRunPreview> {
+    this.assertRunning(input.runId)
+    const intentDigest = documentDigest(input.intent), prior = this.localPlans.get(input.jobId)
+    if (prior) {
+      if (prior.runId !== input.runId || prior.intentDigest !== intentDigest) throw new DelegationJobError('job-conflict', '本地命令身份已绑定另一请求')
+      return structuredClone(prior.preview)
+    }
+    const sources = this.frozenSources(input.sources), cwd = await this.plannedCopy(input, input.intent.cwd)
+    const command = await this.localRunner.prepare(cwd, input.intent)
+    const outputs = (input.intent.outputs ?? []).map(artifactName)
+    if (new Set(outputs).size !== outputs.length) throw new DelegationJobError('invalid-input', '声明成果重名')
+    const preview: LocalToolRunPreview = { executable: command.executable, args: command.args, cwd,
+      stdinByteLength: Buffer.byteLength(command.stdin ?? ''), sources: sources.map(({ source, name, version, bytes }) =>
+        ({ source, name, version, byteLength: bytes.byteLength })), outputs }
+    this.assertRunning(input.runId)
+    this.localPlans.set(input.jobId, { ...input, intent: structuredClone(input.intent), intentDigest, command, sources, preview, authorized: false })
+    return structuredClone(preview)
+  }
+  authorizeLocal(input: TaskIdentity & { intent: LocalToolRunIntent }): void {
+    this.assertRunning(input.runId)
+    const plan = this.localPlans.get(input.jobId)
+    if (!plan || plan.runId !== input.runId || plan.intentDigest !== documentDigest(input.intent))
+      throw new DelegationJobError('command-not-prepared', '只有已预览的同一实际命令可以获准执行')
+    plan.authorized = true
+  }
+  async startLocal(input: TaskIdentity & { intent: LocalToolRunIntent }): Promise<DelegationJobSnapshot> {
+    this.assertRunning(input.runId)
+    const plan = this.localPlans.get(input.jobId)
+    if (!plan || plan.runId !== input.runId || plan.intentDigest !== documentDigest(input.intent) || !plan.authorized)
+      throw new DelegationJobError('command-not-approved', '本地命令需要此次实际命令的明确批准；工作空间权限不授予命令执行权')
+    const task: DelegationJobInput = { ...input, goal: `运行 ${plan.command.executable}`, copyRoot: plan.command.cwd,
+      permission: 'workspace', expectedArtifacts: plan.preview.outputs }
+    const requestDigest = digest(JSON.stringify({ intent: plan.intent, command: plan.command, sources: plan.sources.map(source =>
+      ({ ...source, bytes: digest(source.bytes) })) }))
+    return this.startExecution(task, requestDigest, 'local', async () => {
+      await this.createTaskCopy(plan.command.cwd, plan.sources, true, await this.plannedCopy(input))
+    }, (active, onEvent) => this.localRunner.run(input.taskId, plan.command, { signal: active.controller.signal, onEvent }))
+  }
+  async startReadonly(input: TaskIdentity & { intent: ReadonlyDelegationIntent; sources: readonly PreparedTaskSource[] }): Promise<DelegationJobSnapshot> {
+    this.assertRunning(input.runId)
+    if (!this.readonlyRunner) throw new DelegationJobError('unconfigured', '只读子任务尚未连接父任务模型')
+    const sources = this.frozenSources(input.sources), copyRoot = await this.plannedCopy(input)
+    const task: DelegationJobInput = { ...input, goal: input.intent.goal, copyRoot, permission: 'read-only', expectedArtifacts: ['report.md'] }
+    const requestDigest = digest(JSON.stringify({ runId: input.runId, intent: input.intent,
+      sources: sources.map(source => ({ ...source, bytes: digest(source.bytes) })) }))
+    return this.startExecution(task, requestDigest, 'readonly', () => this.createTaskCopy(copyRoot, sources, false),
+      (active, onEvent) => this.readonlyRunner!.run({ ...input, copyRoot, sources }, { signal: active.controller.signal, onEvent }))
+  }
+
   /** Creates an isolated copy without letting the model choose a host write root. */
   async startManaged(input: ManagedDelegationInput): Promise<DelegationJobSnapshot> {
     const materials = (input.materials ?? []).map(artifactName)
@@ -196,7 +292,19 @@ export class DelegationJobService {
     const copyRoot = await this.scopedCopy(input.copyRoot)
     const requestDigest = digest(JSON.stringify({ runId: input.runId, taskId: input.taskId, goal: input.goal,
       copyRoot, permission: input.permission, materials: input.materials ?? [], expectedArtifacts }))
+    return this.startExecution(input, requestDigest, 'codex', async () => undefined, (active, onEvent) =>
+      this.runner.run({ taskId: input.taskId, goal: input.goal, copyRoot, permission: input.permission,
+        materials: input.materials, expectedArtifacts: input.expectedArtifacts }, {
+        signal: active.controller.signal, onEvent,
+        verify: async ({ artifacts }) => ({ accepted: artifacts.length === input.expectedArtifacts.length
+          && artifacts.every(artifact => artifact.bytes > 0), detail: '声明成果已在批准副本内回读；等待父任务审阅和正式交付。' }),
+      }))
+  }
+
+  private async startExecution(input: DelegationJobInput, requestDigest: string, executionKind: NonNullable<DelegationJobSnapshot['executionKind']>,
+    prepare: () => Promise<void>, execute: TaskExecution): Promise<DelegationJobSnapshot> {
     return this.serial(input.jobId, async () => {
+      this.assertRunning(input.runId)
       const prior = await this.load(input.jobId)
       if (prior) {
         if (prior.runId !== input.runId || prior.requestDigest !== requestDigest)
@@ -214,12 +322,12 @@ export class DelegationJobService {
       const time = this.now().toISOString()
       const job: Stored = { version: 1, runId: input.runId, jobId: input.jobId, requestDigest,
         status: 'preparing', terminal: false, stopped: false, createdAt: time, updatedAt: time,
-        configuredModel: 'gpt-6-luna', configuredSpeed: 'priority', billedAmount: null,
-        copyRoot, expectedArtifacts, artifacts: [], logs: [], nextLogCursor: 0 }
+        executionKind, ...(executionKind === 'codex' ? { configuredModel: 'gpt-6-luna', configuredSpeed: 'priority' } : {}), billedAmount: null,
+        copyRoot: input.copyRoot, expectedArtifacts: input.expectedArtifacts, artifacts: [], logs: [], nextLogCursor: 0 }
       await this.save(job)
       const active: Active = { runId: input.runId, controller: new AbortController(), work: Promise.resolve() }
       this.active.set(input.jobId, active)
-      active.work = this.execute(input.jobId, input, copyRoot, active).finally(() => {
+      active.work = this.execute(input.jobId, input, active, prepare, execute).finally(() => {
         if (this.active.get(input.jobId) === active) this.active.delete(input.jobId)
       })
       void active.work.catch(() => undefined)
@@ -240,29 +348,28 @@ export class DelegationJobService {
     return { name, digest: digest(bytes), byteLength: bytes.byteLength }
   }
 
-  private async execute(jobId: string, input: DelegationJobInput, copyRoot: string, active: Active): Promise<void> {
-    let result: CodexDelegationResult | undefined
+  private async execute(jobId: string, input: DelegationJobInput, active: Active, prepare: () => Promise<void>, execute: TaskExecution): Promise<void> {
+    let result: DelegationExecutionResult | undefined
     try {
+      await prepare()
+      active.controller.signal.throwIfAborted()
       await this.update(jobId, job => { if (!job.stopped) job.status = 'running' })
-      result = await this.runner.run({ taskId: input.taskId, goal: input.goal, copyRoot,
-        permission: input.permission, materials: input.materials, expectedArtifacts: input.expectedArtifacts }, {
-        signal: active.controller.signal,
-        onEvent: event => { void this.update(jobId, job => {
+      result = await execute(active, event => { void this.update(jobId, job => {
           job.logs = [...job.logs, { cursor: ++job.nextLogCursor, time: Date.now(), kind: event.kind,
             message: event.detail }]
-        }).catch(() => undefined) },
-        verify: async ({ artifacts }) => ({ accepted: artifacts.length === input.expectedArtifacts.length
-          && artifacts.every(artifact => artifact.bytes > 0),
-        detail: '声明成果已在批准副本内回读；等待父任务审阅和正式交付。' }),
+        }).catch(() => undefined)
       })
       const artifacts: DelegationJobArtifact[] = []
       if (result.status === 'verified' && !active.controller.signal.aborted) {
         for (const name of input.expectedArtifacts) {
-          artifacts.push(await this.snapshotArtifact(jobId, copyRoot, name))
+          artifacts.push(await this.snapshotArtifact(jobId, input.copyRoot, name))
         }
       }
       await this.update(jobId, job => {
         job.account = result!.account; job.cliVersion = result!.cliVersion; job.threadId = result!.threadId
+        if (result!.configuredModel) job.configuredModel = result!.configuredModel
+        if (result!.configuredSpeed) job.configuredSpeed = result!.configuredSpeed
+        job.actualModel = result!.actualModel; job.connectionId = result!.connectionId; job.usage = result!.usage
         job.exitCode = result!.exitCode; job.summary = result!.summary?.slice(0, 8000)
         job.reason = result!.reason.slice(0, 1000); job.artifacts = artifacts
         if (result!.reason.length > 1000) job.logs = [...job.logs, { cursor: ++job.nextLogCursor,
@@ -323,6 +430,8 @@ export class DelegationJobService {
   }
   /** Called after the parent Gateway has revoked its canonical write authority. */
   async cancelRun(runId: string): Promise<void> {
+    this.stoppedRuns.add(runId)
+    for (const [jobId, plan] of this.localPlans) if (plan.runId === runId) this.localPlans.delete(jobId)
     await Promise.allSettled([...this.active.entries()].filter(([, value]) => value.runId === runId)
       .map(([jobId]) => this.cancel(runId, jobId)))
   }

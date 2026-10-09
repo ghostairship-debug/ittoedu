@@ -13,14 +13,6 @@
         "minLength": 1,
         "type": "string"
       },
-      "kind": {
-        "enum": [
-          "image",
-          "compute",
-          "delegation"
-        ],
-        "type": "string"
-      },
       "limit": {
         "maximum": 9007199254740991,
         "minimum": 1,
@@ -28,7 +20,6 @@
       }
     },
     "required": [
-      "kind",
       "job"
     ],
     "type": "object"

@@ -1,3 +1,4 @@
+import { isNativeProjectFilename } from '../../../shared/nativeProjectFile'
 import { useEffect, useRef, useState } from 'react'
 import { type LessonProject, type LessonWorkspace } from '../../../shared/lessonWorkspace'
 import type { LessonDesktopRequest, LessonDesktopResult, LessonDirectoryEntry } from '../../../shared/lessonDesktopContract'
@@ -142,7 +143,7 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
   }
   async function openFile(entry: LessonDirectoryEntry) {
     await run(async () => {
-      if (/\.h5lesson$/i.test(entry.name)) {
+      if (isNativeProjectFilename(entry.name)) {
         const known = current.current.lessons.find(item =>
           normalized(item.identity.normalizedDirectory) === normalized(entry.path)
           || (lessonProjectPath(item) ? normalized(lessonProjectPath(item)!) === normalized(entry.path) : false))
@@ -182,7 +183,7 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
     if (await props.onNewProject()) { detachLesson() }
   }
   async function newCourseFromPptx(file: File) {
-    if (!props.onNewProjectFromPptx) throw new Error('当前界面不能从 PPT 新建 H5 演示')
+    if (!props.onNewProjectFromPptx) throw new Error('当前界面不能从 PPT 新建 果铃工程')
     const bytes = new Uint8Array(await file.arrayBuffer())
     await stopAndFlush()
     if (await props.onNewProjectFromPptx({ name: file.name, bytes })) { detachLesson() }

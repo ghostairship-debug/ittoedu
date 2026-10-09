@@ -1,11 +1,11 @@
 import type { ModelChatMessage } from '../../../shared/workbench/modelProvider'
 import type { ToolResult } from '../../../shared/workbench/tools'
-import { contentApplyFact, operationFact, saveFact } from '../../../core/tools/modelToolResult'
+import { contentApplyFact, exportFact, operationFact, saveFact } from '../../../core/tools/modelToolResult'
 import { modelToolWireName } from '../providers/OpenAIChatProvider'
 
 // Only these named envelopes need business receipt interpretation. Reuse the
 // provider spelling function rather than guessing that every underscore is a dot.
-const receiptWireNames = new Map(['project.apply', 'project.save', 'file.save'].map(name => [modelToolWireName(name), name]))
+const receiptWireNames = new Map(['project.apply', 'project.save', 'file.save', 'document.export', 'task.delivery'].map(name => [modelToolWireName(name), name]))
 
 const imagePart = (part: unknown): part is { type: 'image_url'; image_url: { url: string } } => !!part && typeof part === 'object'
   && (part as { type?: unknown }).type === 'image_url' && typeof (part as { image_url?: { url?: unknown } }).image_url?.url === 'string'
@@ -88,15 +88,18 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
         const apply = contentApplyFact(name, original as ToolResult)
         const operation = operationFact(name, original as ToolResult)
         const saved = saveFact(name, original as ToolResult)
+        const exported = exportFact(name, original as ToolResult)
         receipt = { kind: original?.kind, ...(operation ? { operation: {
           operationId: operation.operationId, documentId: operation.documentId, status: operation.status,
           ...('revision' in operation ? { revision: operation.revision } : {}),
         } } : {}), ...(apply ? { commit: apply.commit, usability: apply.usability, diagnostics: apply.diagnostics } : {}),
-          ...(saved ? { save: saved } : {}) }
+          ...(saved ? { save: saved } : {}), ...(exported ? { export: exported } : {}) }
       } catch { /* The complete source remains readable even when a diagnostic wasn't JSON. */ }
-      const excerptLimit = Math.max(200, Math.floor(archiveThreshold * 0.55))
+      const excerptLimit = Math.max(200, Math.floor(archiveThreshold * 0.55)), tailLimit = Math.max(100, Math.floor(archiveThreshold * .25))
       const content = JSON.stringify({ archivedContext: sourceId, receipt, characters: message.content.length,
-        excerpt: message.content.slice(0, excerptLimit), notice: '工作上下文片段，非完整结果；context.read 可按原位置重读。' })
+        excerpt: message.content.slice(0, excerptLimit), tail: { offset: Math.max(excerptLimit, message.content.length - tailLimit),
+          text: message.content.slice(Math.max(excerptLimit, message.content.length - tailLimit)) },
+        notice: '工作上下文片段，非完整结果；context.read 可按原位置重读。' })
       toolBytesRemoved += Buffer.byteLength(message.content, 'utf8') - Buffer.byteLength(content, 'utf8')
       return { ...message, content }
     }

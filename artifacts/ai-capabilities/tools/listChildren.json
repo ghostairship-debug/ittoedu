@@ -1,6 +1,19 @@
 {
   "description": "分页列出文档、表面或组件的直接子项，并取得短句柄；写权限仍按冻结目标逐项判定。",
   "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
@@ -12,6 +25,10 @@
         "maximum": 9007199254740991,
         "minimum": 1,
         "type": "integer"
+      },
+      "state": {
+        "$ref": "#/$defs/__schema0",
+        "description": "页面或对象的展示状态名称或身份；null读取母版。返回句柄固定此状态，不改变编辑器选择。"
       },
       "target": {
         "maxLength": 100,

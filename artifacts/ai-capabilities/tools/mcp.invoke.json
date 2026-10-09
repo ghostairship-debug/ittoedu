@@ -1,6 +1,12 @@
 {
   "description": "调用当前任务发现且获授权的外部 MCP 工具；外部写操作需宿主逐项核准，未知结果不自动重发。",
   "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
@@ -12,12 +18,10 @@
         "type": "object"
       },
       "name": {
-        "minLength": 1,
-        "type": "string"
+        "$ref": "#/$defs/__schema0"
       },
       "snapshotId": {
-        "minLength": 1,
-        "type": "string"
+        "$ref": "#/$defs/__schema0"
       }
     },
     "required": [

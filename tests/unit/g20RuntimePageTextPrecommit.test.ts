@@ -1,51 +1,54 @@
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { WEB_DEFINITION } from '../../src/components/web/data'
+import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
+import { registerRuntimeLightEditDocument, runtimeLightEditCommands } from '../../src/renderer/composition/runtime/runtimeLightEditCommands'
+import type { CapturedCourseTarget, CourseV10DocumentBridge } from '../../src/renderer/documents/CourseV10DocumentBridge'
+import type { ComponentPlatformRuntime } from '../../src/player/components/ComponentPlatformRuntime'
 
-const target = { itemId: 'runtime-1', override: { original: '原文' } }
-const updateLegacy = vi.fn()
+const project = createBlankCourseProjectV10('页面文字')
+project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
+project.instances.web = { id: 'web', definitionId: WEB_DEFINITION.id, data: { html: '<p>原文</p><script>const states=["其他状态"];</script>' } }
+project.surfaces[0].childIds = ['web']
+const target: CapturedCourseTarget = { documentId: 'document-1', epoch: 'epoch', project, editingProject: project,
+  resources: { assets: {}, components: {} }, activeStateId: null, surfaceId: project.surfaces[0].id, instanceId: 'web', instanceIds: ['web'] }
 const submit = vi.fn()
-const state = {
-  courseDocument: { documentId: 'document-1' },
-  captureRuntimeContentTextTarget: vi.fn(() => target),
-  submitDynamicFallbackIntent: submit,
-  updateRuntimeContentTextAtTarget: updateLegacy,
-}
-vi.mock('@/renderer/store/editorStore', () => ({
-  useEditorStore: { getState: () => state },
-  selectActiveCourseProjectDocument: () => ({ id: 'project-1' }),
-  selectActiveSceneId: () => 'scene-1',
-  selectEditingScope: () => 'scene',
-  selectEffectiveLayerProjection: () => ({ locationId: 'location-1', surfaceType: 'slide' }),
-}))
+const bridge = { captureTarget: () => structuredClone(target),
+  capture: (edits: Parameters<typeof captureComponentOperation>[1], value: CapturedCourseTarget) =>
+    ({ ...captureComponentOperation(value.project, edits), documentId: value.documentId, epoch: value.epoch }),
+  editCaptured: submit } as unknown as CourseV10DocumentBridge
+let stop = () => {}
+beforeEach(() => {
+  submit.mockReset()
+  stop = registerRuntimeLightEditDocument('document-1', { authorSpots: () => [], subscribeAuthorSpots: () => () => {} } as unknown as ComponentPlatformRuntime, bridge)
+})
+afterEach(() => stop())
+const capture = () => runtimeLightEditCommands.capturePageCopy('document-1', 'web', '原文')
 
-const { runtimeLightEditCommands } = await import('@/renderer/composition/runtime/runtimeLightEditCommands')
-
-beforeEach(() => { submit.mockReset(); updateLegacy.mockReset(); state.captureRuntimeContentTextTarget.mockClear() })
-
-it('waits for the combined Main ACK before reporting a page text change', async () => {
-  let settle!: (result: { status: 'applied'; receipt: object }) => void
-  submit.mockReturnValue({ taskId: 'task-1', settled: new Promise(resolve => { settle = resolve }) })
-  const result = runtimeLightEditCommands.setPageText('runtime-1', '原文', '新文')
-  expect(submit).toHaveBeenCalledExactlyOnceWith({
-    kind: 'runtime.text', documentId: 'document-1', locationId: 'location-1', itemId: 'runtime-1',
-    projectId: 'project-1', target, value: '新文',
-  })
-  expect(updateLegacy).not.toHaveBeenCalled()
+it('waits for the canonical Main ACK before reporting a page-copy change', async () => {
+  let settle!: () => void
+  submit.mockImplementationOnce(() => new Promise<void>(resolve => { settle = resolve }))
+  const result = runtimeLightEditCommands.setPageCopy(capture(), '新文')
+  expect(submit).toHaveBeenCalledOnce()
+  expect(submit.mock.calls[0][0]).toMatchObject({ documentId: 'document-1', epoch: 'epoch',
+    edits: [{ type: 'data.set', instanceId: 'web', path: ['textOverrides'], value: [{ original: '原文', text: '新文' }] }] })
   let pending = true
   void result.then(() => { pending = false })
   await Promise.resolve()
   expect(pending).toBe(true)
-  settle({ status: 'applied', receipt: {} })
+  settle()
   await expect(result).resolves.toEqual({ ok: true, changed: true })
+  expect(project.instances.web.data).toEqual({ html: '<p>原文</p><script>const states=["其他状态"];</script>' })
 })
 
-it('reports capture failure without a legacy content commit', async () => {
-  submit.mockReturnValue({ taskId: 'task-2', settled: Promise.resolve({ status: 'failed', taskId: 'task-2', reason: '后备图捕获失败' }) })
-  await expect(runtimeLightEditCommands.setPageText('runtime-1', '原文', '新文')).resolves.toEqual({ ok: false, reason: '后备图捕获失败' })
-  expect(updateLegacy).not.toHaveBeenCalled()
+it('reports rejected completion without rewriting source or acknowledging a change', async () => {
+  submit.mockRejectedValueOnce(new Error('正式提交失败'))
+  await expect(runtimeLightEditCommands.setPageCopy(capture(), '新文')).resolves.toEqual({ ok: false, reason: '正式提交失败' })
+  expect(project.instances.web.data).toEqual({ html: '<p>原文</p><script>const states=["其他状态"];</script>' })
 })
 
-
-it.each(['blocked', 'unknown', 'failed', 'conflict'] as const)('retains page text for %s instead of acknowledging it', async status => {
-  submit.mockReturnValue({ taskId: 'pending', settled: Promise.resolve({ status, reason: '原操作仍待处理' }) })
-  await expect(runtimeLightEditCommands.setPageText('runtime-1', '原文', '人工新稿')).resolves.toEqual({ ok: false, reason: '原操作仍待处理' })
+it.each(['blocked', 'unknown', 'failed', 'conflict'] as const)('retains page copy for a %s Bridge rejection instead of acknowledging it', async status => {
+  submit.mockRejectedValueOnce(new Error(status + ': 原操作仍待处理'))
+  await expect(runtimeLightEditCommands.setPageCopy(capture(), '人工新稿')).resolves.toEqual({ ok: false, reason: status + ': 原操作仍待处理' })
+  expect(project.instances.web.data).toEqual({ html: '<p>原文</p><script>const states=["其他状态"];</script>' })
 })

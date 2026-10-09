@@ -1,10 +1,12 @@
 {
-  "description": "修改已授权演示页的命名状态：add、rename、duplicate、delete、set-initial、set-thumbnail、clear-overrides。target为页面句柄；state使用当前读取到的状态名称或身份，初始/缩略图可用null恢复母版。软件生成新状态身份；复制保留覆盖、顺序和背景，清除只作用于指定状态，一次事务可撤销。",
+  "description": "修改已授权演示页的命名状态：add、rename、duplicate、delete、set-initial、set-thumbnail、clear-overrides、clear-object-overrides、background。target为整页面句柄；state使用读取到的状态名称或身份，初始/缩略图可用null恢复母版。background可局部改颜色/图片，inherit恢复指定背景字段；objects只清指定对象覆盖。软件维护身份，一次事务可撤销。",
   "inputSchema": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "additionalProperties": false,
-    "properties": {
-      "action": {
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema1": {
         "enum": [
           "add",
           "rename",
@@ -12,11 +14,13 @@
           "delete",
           "set-initial",
           "set-thumbnail",
-          "clear-overrides"
+          "clear-overrides",
+          "clear-object-overrides",
+          "background"
         ],
         "type": "string"
       },
-      "state": {
+      "__schema2": {
         "anyOf": [
           {
             "minLength": 1,
@@ -27,13 +31,97 @@
           }
         ]
       },
-      "target": {
+      "__schema3": {
         "minLength": 1,
         "type": "string"
       },
-      "title": {
+      "__schema4": {
+        "items": {
+          "$ref": "#/$defs/__schema5"
+        },
+        "minItems": 1,
+        "type": "array"
+      },
+      "__schema5": {
         "minLength": 1,
         "type": "string"
+      },
+      "__schema6": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "assetId": {
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "color": {
+                "type": "string"
+              },
+              "fit": {
+                "enum": [
+                  "cover",
+                  "contain",
+                  "fill"
+                ],
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "inherit",
+                  "own"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "__schema7": {
+        "items": {
+          "enum": [
+            "color",
+            "assetId"
+          ],
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "$ref": "#/$defs/__schema1"
+      },
+      "background": {
+        "$ref": "#/$defs/__schema6"
+      },
+      "inherit": {
+        "$ref": "#/$defs/__schema7"
+      },
+      "objects": {
+        "$ref": "#/$defs/__schema4"
+      },
+      "state": {
+        "$ref": "#/$defs/__schema2"
+      },
+      "target": {
+        "$ref": "#/$defs/__schema0"
+      },
+      "title": {
+        "$ref": "#/$defs/__schema3"
       }
     },
     "required": [

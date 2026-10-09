@@ -1,0 +1,417 @@
+{
+  "description": "调整全局对象平面/显隐范围，或讲义正文/浮层载体。正文保留阅读顺序、宽度、环绕和题注；浮层保留space/plane/段落锚与frame。parent使用已观察容器句柄；null回到当前页。只更改提供字段。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema1": {
+        "$ref": "#/$defs/__schema2"
+      },
+      "__schema2": {
+        "type": "string"
+      },
+      "__schema3": {
+        "maximum": 400,
+        "minimum": 8,
+        "type": "number"
+      },
+      "__schema4": {
+        "additionalProperties": false,
+        "properties": {
+          "href": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "href"
+        ],
+        "type": "object"
+      },
+      "__schema5": {
+        "type": "number"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "placement": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "atSurface": {
+                "additionalProperties": false,
+                "properties": {
+                  "surfaceId": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "visible": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "surfaceId",
+                  "visible"
+                ],
+                "type": "object"
+              },
+              "kind": {
+                "const": "global",
+                "type": "string"
+              },
+              "plane": {
+                "enum": [
+                  "underlay",
+                  "overlay"
+                ],
+                "type": "string"
+              },
+              "visibility": {
+                "additionalProperties": false,
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "all",
+                      "include",
+                      "exclude"
+                    ],
+                    "type": "string"
+                  },
+                  "surfaceIds": {
+                    "items": {
+                      "$ref": "#/$defs/__schema0"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "surfaceIds"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "index": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "kind": {
+                "const": "flow-body",
+                "type": "string"
+              },
+              "layout": {
+                "additionalProperties": false,
+                "properties": {
+                  "caption": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "inlines": {
+                        "items": {
+                          "oneOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "code": {
+                                  "type": "boolean"
+                                },
+                                "link": {
+                                  "$ref": "#/$defs/__schema4"
+                                },
+                                "style": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "baseline": {
+                                      "maximum": 1,
+                                      "minimum": -1,
+                                      "type": "number"
+                                    },
+                                    "bold": {
+                                      "type": "boolean"
+                                    },
+                                    "color": {
+                                      "$ref": "#/$defs/__schema1"
+                                    },
+                                    "emphasis": {
+                                      "type": "boolean"
+                                    },
+                                    "fontFamily": {
+                                      "maxLength": 300,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "fontSize": {
+                                      "$ref": "#/$defs/__schema3"
+                                    },
+                                    "highlightColor": {
+                                      "anyOf": [
+                                        {
+                                          "$ref": "#/$defs/__schema2"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "italic": {
+                                      "type": "boolean"
+                                    },
+                                    "strike": {
+                                      "type": "boolean"
+                                    },
+                                    "underline": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "type": "object"
+                                },
+                                "text": {
+                                  "type": "string"
+                                },
+                                "type": {
+                                  "const": "text",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "text"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "accessibleText": {
+                                  "maxLength": 4000,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "formulaId": {
+                                  "maxLength": 240,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "latex": {
+                                  "maxLength": 16384,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "link": {
+                                  "$ref": "#/$defs/__schema4"
+                                },
+                                "style": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "color": {
+                                      "$ref": "#/$defs/__schema1"
+                                    },
+                                    "fontSize": {
+                                      "$ref": "#/$defs/__schema3"
+                                    }
+                                  },
+                                  "type": "object"
+                                },
+                                "type": {
+                                  "const": "math",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "formulaId",
+                                "latex",
+                                "accessibleText"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "inlines"
+                    ],
+                    "type": "object"
+                  },
+                  "width": {
+                    "enum": [
+                      "content-width",
+                      "wide",
+                      "full-width"
+                    ],
+                    "type": "string"
+                  },
+                  "wrap": {
+                    "enum": [
+                      "none",
+                      "left",
+                      "right"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "parent": {
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "frame": {
+                "additionalProperties": false,
+                "properties": {
+                  "height": {
+                    "$ref": "#/$defs/__schema5",
+                    "exclusiveMinimum": 0
+                  },
+                  "transform": {
+                    "prefixItems": [
+                      {
+                        "$ref": "#/$defs/__schema5"
+                      },
+                      {
+                        "$ref": "#/$defs/__schema5"
+                      },
+                      {
+                        "$ref": "#/$defs/__schema5"
+                      },
+                      {
+                        "$ref": "#/$defs/__schema5"
+                      },
+                      {
+                        "$ref": "#/$defs/__schema5"
+                      },
+                      {
+                        "$ref": "#/$defs/__schema5"
+                      }
+                    ],
+                    "type": "array"
+                  },
+                  "width": {
+                    "$ref": "#/$defs/__schema5",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "width",
+                  "height",
+                  "transform"
+                ],
+                "type": "object"
+              },
+              "index": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "kind": {
+                "const": "flow-overlay",
+                "type": "string"
+              },
+              "placement": {
+                "additionalProperties": false,
+                "properties": {
+                  "paragraphAnchor": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "blockId": {
+                        "$ref": "#/$defs/__schema0"
+                      },
+                      "offsetY": {
+                        "$ref": "#/$defs/__schema5"
+                      },
+                      "xRatio": {
+                        "$ref": "#/$defs/__schema5"
+                      }
+                    },
+                    "required": [
+                      "blockId",
+                      "offsetY",
+                      "xRatio"
+                    ],
+                    "type": "object"
+                  },
+                  "plane": {
+                    "enum": [
+                      "overlay",
+                      "underlay"
+                    ],
+                    "type": "string"
+                  },
+                  "space": {
+                    "enum": [
+                      "paper",
+                      "viewport"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "space",
+                  "plane"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind",
+              "placement"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "target": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "target",
+      "placement"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "对象归属与讲义排版",
+    "targetKinds": [
+      "course-instance"
+    ]
+  },
+  "name": "object.place",
+  "version": 1
+}

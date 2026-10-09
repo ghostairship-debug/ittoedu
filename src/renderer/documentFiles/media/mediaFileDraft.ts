@@ -1,4 +1,4 @@
-import type { MediaFileEditorPort, MediaFileOperation, MediaFileSnapshot } from '../../../shared/workbench/mediaFiles'
+import type { FileArtifactBinding, MediaFileDraftInput, MediaFileEditorPort, MediaFileOperation, MediaFileSnapshot } from '../../../shared/workbench/mediaFiles'
 
 export interface MediaFileDraftState {
   base: MediaFileSnapshot
@@ -21,6 +21,16 @@ export class MediaFileDraft {
   }
   read = () => this.state
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
+  rebind(binding: FileArtifactBinding) {
+    if (binding.fileVersion !== this.state.base.binding.fileVersion) return
+    if (binding.path === this.state.base.binding.path && binding.bindingVersion === this.state.base.binding.bindingVersion) return
+    this.update({ base: { ...this.state.base, binding }, preview: { ...this.state.preview, binding } })
+  }
+  /** Operations are recorded synchronously; a pending preview is not a pending input. */
+  captureCopyDraft(): MediaFileDraftInput {
+    if (this.disposed || this.state.busy === 'save' || this.state.busy === 'reload') throw new Error('媒体文件正在保存或重新读取，请完成后再复制当前稿')
+    return { binding: { ...this.state.base.binding }, operations: structuredClone(this.state.operations) }
+  }
   private update(patch: Partial<MediaFileDraftState>) { if (this.disposed) return; this.state = { ...this.state, ...patch }; this.listeners.forEach(listener => listener()) }
   private async render(operations: readonly MediaFileOperation[], redo: readonly MediaFileOperation[]) {
     const generation = ++this.generation

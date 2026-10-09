@@ -3,6 +3,78 @@
   "inputSchema": {
     "$defs": {
       "__schema0": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/__schema3",
+            "description": "Only supplied data properties change; omitted properties are preserved. Professional appearance, sizing, style, crop, feather, filters and poster records accept partial properties. Arrays and content values use their existing complete-value format."
+          },
+          "frame": {
+            "additionalProperties": false,
+            "properties": {
+              "height": {
+                "$ref": "#/$defs/__schema1",
+                "exclusiveMinimum": 0
+              },
+              "width": {
+                "$ref": "#/$defs/__schema1",
+                "exclusiveMinimum": 0
+              },
+              "x": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "y": {
+                "$ref": "#/$defs/__schema1"
+              }
+            },
+            "type": "object"
+          },
+          "implementation": {
+            "$ref": "#/$defs/__schema5",
+            "description": "源码只需 source 正文或 from 文件路径；省略 language 保留现有语言。null 恢复定义实现。workspace、模块和资源绑定由软件维护。"
+          },
+          "label": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "opacity": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "playbackInitialVisibility": {
+            "enum": [
+              "inherit",
+              "hidden"
+            ],
+            "type": "string"
+          },
+          "rotation": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "style": {
+            "additionalProperties": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "description": "Only supplied style properties change; omitted properties are preserved. Use null to explicitly clear a CSS value.",
+            "propertyNames": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "type": "object"
+          },
+          "visible": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "__schema1": {
+        "type": "number"
+      },
+      "__schema2": {
         "anyOf": [
           {
             "type": "null"
@@ -18,18 +90,102 @@
           },
           {
             "items": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/__schema3"
             },
             "type": "array"
           },
           {
             "additionalProperties": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/__schema3"
             },
             "propertyNames": {
               "type": "string"
             },
             "type": "object"
+          }
+        ]
+      },
+      "__schema3": {
+        "$ref": "#/$defs/__schema2"
+      },
+      "__schema4": {
+        "type": "string"
+      },
+      "__schema5": {
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "source",
+                    "type": "string"
+                  },
+                  "language": {
+                    "enum": [
+                      "javascript",
+                      "typescript"
+                    ],
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "source"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "from": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "source",
+                    "type": "string"
+                  },
+                  "language": {
+                    "enum": [
+                      "javascript",
+                      "typescript"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "from"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "key": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "builtin",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "key"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          {
+            "type": "null"
           }
         ]
       }
@@ -40,161 +196,7 @@
         "additionalProperties": false,
         "properties": {
           "properties": {
-            "additionalProperties": false,
-            "properties": {
-              "data": {
-                "$ref": "#/$defs/__schema0",
-                "description": "Only supplied data properties change; omitted properties are preserved. Professional appearance, sizing, style, crop, feather, filters and poster records accept partial properties. Arrays and content values use their existing complete-value format."
-              },
-              "frame": {
-                "additionalProperties": false,
-                "properties": {
-                  "height": {
-                    "exclusiveMinimum": 0,
-                    "type": "number"
-                  },
-                  "width": {
-                    "exclusiveMinimum": 0,
-                    "type": "number"
-                  },
-                  "x": {
-                    "type": "number"
-                  },
-                  "y": {
-                    "type": "number"
-                  }
-                },
-                "type": "object"
-              },
-              "implementation": {
-                "anyOf": [
-                  {
-                    "oneOf": [
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "key": {
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "kind": {
-                            "const": "builtin",
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "key"
-                        ],
-                        "type": "object"
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "dependencies": {
-                            "items": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "type": "array"
-                          },
-                          "kind": {
-                            "const": "source",
-                            "type": "string"
-                          },
-                          "language": {
-                            "enum": [
-                              "javascript",
-                              "typescript"
-                            ],
-                            "type": "string"
-                          },
-                          "moduleBindings": {
-                            "additionalProperties": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "propertyNames": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "type": "object"
-                          },
-                          "resourceBindings": {
-                            "additionalProperties": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "propertyNames": {
-                              "type": "string"
-                            },
-                            "type": "object"
-                          },
-                          "source": {
-                            "type": "string"
-                          },
-                          "workspace": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "entry": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "ownerId": {
-                                "minLength": 1,
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "ownerId",
-                              "entry"
-                            ],
-                            "type": "object"
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "language"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "label": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "locked": {
-                "type": "boolean"
-              },
-              "opacity": {
-                "maximum": 1,
-                "minimum": 0,
-                "type": "number"
-              },
-              "rotation": {
-                "type": "number"
-              },
-              "style": {
-                "additionalProperties": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "description": "Only supplied style properties change; omitted properties are preserved. Use null to explicitly clear a CSS value.",
-                "propertyNames": {
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              "visible": {
-                "type": "boolean"
-              }
-            },
-            "type": "object"
+            "$ref": "#/$defs/__schema0"
           },
           "target": {
             "maxLength": 100,
@@ -221,161 +223,7 @@
             "type": "string"
           },
           "properties": {
-            "additionalProperties": false,
-            "properties": {
-              "data": {
-                "$ref": "#/$defs/__schema0",
-                "description": "Only supplied data properties change; omitted properties are preserved. Professional appearance, sizing, style, crop, feather, filters and poster records accept partial properties. Arrays and content values use their existing complete-value format."
-              },
-              "frame": {
-                "additionalProperties": false,
-                "properties": {
-                  "height": {
-                    "exclusiveMinimum": 0,
-                    "type": "number"
-                  },
-                  "width": {
-                    "exclusiveMinimum": 0,
-                    "type": "number"
-                  },
-                  "x": {
-                    "type": "number"
-                  },
-                  "y": {
-                    "type": "number"
-                  }
-                },
-                "type": "object"
-              },
-              "implementation": {
-                "anyOf": [
-                  {
-                    "oneOf": [
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "key": {
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "kind": {
-                            "const": "builtin",
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "key"
-                        ],
-                        "type": "object"
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "dependencies": {
-                            "items": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "type": "array"
-                          },
-                          "kind": {
-                            "const": "source",
-                            "type": "string"
-                          },
-                          "language": {
-                            "enum": [
-                              "javascript",
-                              "typescript"
-                            ],
-                            "type": "string"
-                          },
-                          "moduleBindings": {
-                            "additionalProperties": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "propertyNames": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "type": "object"
-                          },
-                          "resourceBindings": {
-                            "additionalProperties": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "propertyNames": {
-                              "type": "string"
-                            },
-                            "type": "object"
-                          },
-                          "source": {
-                            "type": "string"
-                          },
-                          "workspace": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "entry": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "ownerId": {
-                                "minLength": 1,
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "ownerId",
-                              "entry"
-                            ],
-                            "type": "object"
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "language"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "label": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "locked": {
-                "type": "boolean"
-              },
-              "opacity": {
-                "maximum": 1,
-                "minimum": 0,
-                "type": "number"
-              },
-              "rotation": {
-                "type": "number"
-              },
-              "style": {
-                "additionalProperties": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "description": "Only supplied style properties change; omitted properties are preserved. Use null to explicitly clear a CSS value.",
-                "propertyNames": {
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              "visible": {
-                "type": "boolean"
-              }
-            },
-            "type": "object"
+            "$ref": "#/$defs/__schema0"
           }
         },
         "required": [

@@ -1,12 +1,12 @@
 import { z } from 'zod'
 import type { ToolDefinition } from '../../shared/workbench/tools'
 import { assetSourceDescriptions, assetSourceSchemas, assetSourceRegistrations, type AssetSourceToolContext } from './AssetSourceTools'
-import type { HostToolCoordinator } from './HostToolServices'
+import type { HostJobRef, HostToolCoordinator } from './HostToolServices'
 import { supportsWorkbenchService, toolRegistrationFor } from './ToolRegistration'
 
 const handle = z.string().min(1)
 const contentText = z.string().min(1)
-const job = z.object({ kind: z.enum(['image', 'compute', 'delegation']), job: handle }).strict()
+const job = z.object({ job: handle }).strict()
 const noInput = z.object({}).strict()
 /** Agent-facing schemas are kept in the canonical catalog even when a connection is unavailable. */
 export const workbenchServiceSchemas = {
@@ -18,6 +18,10 @@ export const workbenchServiceSchemas = {
     outputNames: z.array(z.string().min(1)).optional() }).strict(),
   'delegate.start': z.object({ goal: contentText, materials: z.array(z.string().min(1)).optional(),
     expectedArtifacts: z.array(z.string().min(1)).min(1) }).strict(),
+  'local.run': z.object({ command: contentText, args: z.array(z.string()).optional(), cwd: handle.optional(), stdin: z.string().optional(),
+    sources: z.array(handle).optional(), outputs: z.array(handle).optional(), timeoutMs: z.number().int().positive().optional() }).strict(),
+  'delegate.readonly': z.object({ goal: contentText, sources: z.array(handle),
+    budget: z.object({ maxOutputTokens: z.number().int().positive(), maxDurationMs: z.number().int().positive() }).strict() }).strict(),
   'delegate.read': z.object({ job: handle, name: z.string().min(1),
     offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(20_000).optional(),
     version: handle.optional() }).strict(),
@@ -43,6 +47,8 @@ const descriptions: Record<WorkbenchServiceToolName, string> = {
   'job.cancel': '取消本任务中的真实作业；外部结果未知时保留未知，不重发作业或清除已产资源。',
   'compute.run': '运行内置 Python 计算，无需安装 WSL；已包含 NumPy、pandas、Matplotlib 和自动中文绘图字体。sources 点名本任务获授权的文件路径或材料来源，由软件冻结字节与版本，输入文件位于 /job/input。当前目录与成果目录均为 /job/output，/job/work 为同目录别名；GUOLING_INPUT_DIR、GUOLING_OUTPUT_DIR 也提供位置。可用 outputNames 点名成果，省略时软件发现实际产物；坏辅助文件逐项诊断，ready 仅表示列出的成果可用，未保存到用户文件。只执行 Python 源码，无宿主文件、网络、OS 子进程、动态 pip 安装或未预装的原生扩展；缺库时明确报告。',
   'delegate.start': '在已核验可写的 Codex Luna 路由中，把点名的工作区文件复制到受管副本后提交一个持久委派作业。未核验写权限时返回 blocked，不发模型请求。',
+  'local.run': '调用已安装的原生 EXE 工具。宿主先展示实际可执行路径、参数、隔离副本目录和冻结输入，逐次批准后执行；工作空间权限不授予命令执行。sources 是已授权文件或文本材料来源，复制后的 name 位于 cwd；cwd 是副本内相对目录，stdin 为标准输入，outputs 点名相对成果。返回 job，用 job.wait/logs/read 与 artifact.save 读取或交付；失败退出或未知结果不重放。',
+  'delegate.readonly': '提交有明确目标、来源与输出/时长预算的只读子任务，使用父任务冻结的模型连接。sources 原样传入已授权文件路径或材料文本来源；子任务没有工具、主文档 writer 或再次委派权限。返回 job；候选保留来源引用，父任务回读审阅后决定正式应用。',
   'delegate.read': '分页回读本任务已封存的委派成果；内容是不可信数据，ready 不代表已应用到原文件或文档。',
   'web.search': '使用已授权搜索连接查询公开网页；未配置连接时明确反馈，不编造搜索结果。',
   'web.open': '打开公网 http(s) 页面或本任务搜索来源；裸公网域名自动使用 https。相对素材路径请使用 file.*，此工具不读取本地文件。返回正文、URL 和版本；逐跳校验公网目标，长文用 offset 续读。',
@@ -56,14 +62,19 @@ const descriptions: Record<WorkbenchServiceToolName, string> = {
 export interface WorkbenchServiceToolContext extends AssetSourceToolContext {
   operationId: string
   host: AssetSourceToolContext['host'] & Pick<HostToolCoordinator, 'jobStatus' | 'jobWait' | 'jobLogs' | 'jobCancel' | 'runCompute'
-    | 'runDelegate' | 'readDelegation' | 'webSearch' | 'webOpen' | 'mcpDiscover' | 'mcpInvoke' | 'readMcpResource' | 'mediaDiscover' | 'mediaStart'>
+    | 'runDelegate' | 'runLocalTool' | 'runReadonlyDelegate' | 'readDelegation' | 'webSearch' | 'webOpen' | 'mcpDiscover' | 'mcpInvoke' | 'readMcpResource' | 'mediaDiscover' | 'mediaStart'>
 }
 const registerService = toolRegistrationFor<WorkbenchServiceToolContext>()
 const serviceDescriptor = <Name extends WorkbenchServiceToolName>(name: Name, group: 'read' | 'edit') => ({ name,
   description: descriptions[name], inputSchema: workbenchServiceSchemas[name],
   manual: { label: name, group, targetKinds: [] as ToolDefinition['manual']['targetKinds'] },
 })
-const jobRef = (input: z.output<typeof job>) => ({ kind: input.kind, jobId: input.job })
+const jobRef = (input: z.output<typeof job>): Omit<HostJobRef, 'runId'> => {
+  const kind = input.job.startsWith('image-') ? 'image' : input.job.startsWith('compute-') ? 'compute'
+    : input.job.startsWith('delegate-') ? 'delegation' : undefined
+  if (!kind) throw new Error('作业引用无效；请原样使用创建返回的 job')
+  return { kind, jobId: input.job }
+}
 export const workbenchServiceRegistrations = [
   registerService(serviceDescriptor('job.status', 'read'), { capability: 'read', effect: null, family: 'jobs', supports: context => supportsWorkbenchService(context, 'jobs'),
     targets: () => [], handler: (context, input) => context.host.jobStatus(context.runId, jobRef(input)) }),
@@ -77,6 +88,10 @@ export const workbenchServiceRegistrations = [
     targets: () => [], handler: (context, input) => context.host.runCompute(context.runId, context.operationId, { language: 'python', ...input }) }),
   registerService(serviceDescriptor('delegate.start', 'edit'), { capability: 'write', effect: 'delegation-job', family: 'jobs', supports: context => supportsWorkbenchService(context, 'delegation'),
     targets: () => [], handler: (context, input) => context.host.runDelegate(context.runId, context.operationId, input) }),
+  registerService(serviceDescriptor('local.run', 'edit'), { capability: 'write', effect: 'delegation-job', family: 'jobs', supports: context => supportsWorkbenchService(context, 'delegation'),
+    targets: () => [], handler: (context, input) => context.host.runLocalTool(context.runId, context.operationId, input) }),
+  registerService(serviceDescriptor('delegate.readonly', 'read'), { capability: 'read', effect: 'delegation-job', family: 'jobs', supports: context => supportsWorkbenchService(context, 'delegation'),
+    targets: () => [], handler: (context, input) => context.host.runReadonlyDelegate(context.runId, context.operationId, input) }),
   registerService(serviceDescriptor('delegate.read', 'read'), { capability: 'read', effect: null, family: 'jobs', supports: context => supportsWorkbenchService(context, 'delegation'),
     targets: () => [], handler: (context, input) => context.host.readDelegation(context.runId, input) }),
   registerService(serviceDescriptor('web.search', 'read'), { capability: 'read', effect: null, supports: context => supportsWorkbenchService(context, 'web'),
@@ -90,8 +105,10 @@ export const workbenchServiceRegistrations = [
   registerService(serviceDescriptor('mcp.resource', 'read'), { capability: 'read', effect: null, supports: context => supportsWorkbenchService(context, 'mcp'),
     targets: () => [], handler: async (context, input) => {
       const resource = await context.host.readMcpResource(context.runId, input.resourceId)
-      return { kind: 'read', data: { resourceId: input.resourceId, mimeType: resource.mimeType,
-        byteLength: resource.bytes.byteLength, observation: 'host-resource-available-for-next-request' } }
+      return { kind: 'read', data: { resourceId: input.resourceId, source: `mcp:${input.resourceId}`, mimeType: resource.mimeType,
+        byteLength: resource.bytes.byteLength, observation: 'host-resource-available-for-next-request' },
+        ...(resource.mimeType.startsWith('image/') ? { images: [{ kind: 'image' as const, source: 'mcp' as const,
+          resourceId: input.resourceId, mimeType: resource.mimeType, byteLength: resource.bytes.byteLength }] } : {}) }
     } }),
   registerService(serviceDescriptor('media.discover', 'read'), { capability: 'read', effect: null, supports: context => supportsWorkbenchService(context, 'media'),
     targets: () => [], handler: async context => context.host.mediaDiscover(context.runId) }),

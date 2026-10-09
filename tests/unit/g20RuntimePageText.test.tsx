@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 const view = {
+  documentId: 'document-1', entries: [], pageCopy: ['听力练习', '第一题 请听录音', 'Well done!'],
   source: `CoursewareRuntime.define({ runtimeApiVersion: 2, create(ctx) {
     const title = '听力练习'
     const states = ['第一题 请听录音', 'Well done!']
@@ -13,9 +14,11 @@ const view = {
   locked: false,
 }
 const setPageText = vi.fn(async (): Promise<{ ok: true; changed: boolean } | { ok: false; reason: string }> => ({ ok: true, changed: true }))
+const capturePageCopy = vi.fn((documentId: string, instanceId: string, original: string) => ({ documentId, instanceId, original }))
 vi.mock('../../src/renderer/composition/runtime/runtimeLightEditCommands', () => ({
   useRuntimeLightEditView: () => view,
-  runtimeLightEditCommands: { setPageText: (...args: unknown[]) => setPageText(...(args as [])) },
+  runtimeLightEditCommands: { capturePageCopy: (...args: Parameters<typeof capturePageCopy>) => capturePageCopy(...args),
+    setPageCopy: (...args: unknown[]) => setPageText(...(args as [])) },
 }))
 const { RuntimePageTextList } = await import('../../src/renderer/workbench/RuntimePageText')
 
@@ -37,7 +40,7 @@ it('M15 writes one everywhere rule on Enter and nothing when the text is unchang
   const field = screen.getByRole('textbox', { name: '页面文字：第一题 请听录音' })
   fireEvent.change(field, { target: { value: '第一题：请听录音' } })
   fireEvent.keyDown(field, { key: 'Enter' })
-  expect(setPageText).toHaveBeenCalledExactlyOnceWith('runtime-1', '第一题 请听录音', '第一题：请听录音')
+  expect(setPageText).toHaveBeenCalledExactlyOnceWith({ documentId: 'document-1', instanceId: 'runtime-1', original: '第一题 请听录音' }, '第一题：请听录音')
   await act(async () => { await Promise.resolve() })
 
   fireEvent.change(field, { target: { value: '不会提交' } })

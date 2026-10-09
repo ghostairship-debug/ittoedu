@@ -18,7 +18,10 @@ it('prepares a text card and sends content-only AI for the same held source rang
   const release = workbenchSelection.register(snapshot.documentId, async () => snapshot), releaseRequest = workbenchSelection.onRequest(sent)
   try {
     expect(await prepareDocumentTextEdit(snapshot.documentId, target, captureMarkdownSelection)).toEqual({
-      target: { kind: 'markdown-range', from: 1, to: 5 }, label: '所选源文', content: '选中文字' })
+      target: { kind: 'markdown-range', from: 1, to: 5 }, label: '所选源文', content: '选中文字',
+      capture: { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, label: '所选源文', source: target.source,
+        targets: [{ kind: 'markdown-range', from: 1, to: 5 }] },
+      contentOutput: { kind: 'replace-text', documentId: snapshot.documentId, target: { kind: 'markdown-range', from: 1, to: 5 } } })
     await requestDocumentSelection(snapshot.documentId, target, '改得更简洁', captureMarkdownSelection)
     expect(sent).toHaveBeenCalledOnce()
     expect(sent.mock.calls[0][0]).toMatchObject({ selection: { documentId: snapshot.documentId, epoch: 'epoch', revision: 3,
@@ -34,5 +37,19 @@ it('does not send or retarget a held selection after its source changes during i
     await expect(requestDocumentSelection(snapshot.documentId, target, '修改原文字', captureMarkdownSelection)).rejects.toThrow('选区已改变')
     expect(sent).not.toHaveBeenCalled()
     expect(target.ranges).toEqual([{ from: 1, to: 5, before: '选中文字' }])
+  } finally { release(); releaseRequest() }
+})
+
+it('captures layout prose as one semantic selection for both the card and the ordinary AI request', async () => {
+  const { snapshot, target } = fixture(), sent = vi.fn()
+  target.mode = 'layout'
+  const release = workbenchSelection.register(snapshot.documentId, async () => snapshot), releaseRequest = workbenchSelection.onRequest(sent)
+  const semantic = { kind: 'text-selection', fragments: [{ target: { kind: 'markdown-range', from: 1, to: 5 } }] }
+  try {
+    expect(await prepareDocumentTextEdit(snapshot.documentId, target, captureMarkdownSelection)).toMatchObject({
+      target: semantic, content: '["选中文字"]', capture: { epoch: 'epoch', revision: 3, targets: [semantic] },
+      contentOutput: { kind: 'replace-text', target: semantic } })
+    await requestDocumentSelection(snapshot.documentId, target, '删掉选中文字', captureMarkdownSelection)
+    expect(sent.mock.calls[0][0]).toMatchObject({ selection: { epoch: 'epoch', revision: 3, targets: [semantic] }, contentOutput: { target: semantic } })
   } finally { release(); releaseRequest() }
 })

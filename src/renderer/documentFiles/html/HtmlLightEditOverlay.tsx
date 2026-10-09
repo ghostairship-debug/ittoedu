@@ -4,7 +4,7 @@ import type { HtmlPreviewEditOutcome } from '../../../shared/workbench/htmlPrevi
 import { captureSelection, workbenchSelection } from '../../workbench/SelectionContextController'
 import { TextAiButton, textCardLabel } from '../../workbench/elementCards/ElementTextCards'
 import type { HtmlSelectedTarget } from './htmlPreviewController'
-import { readEditableTargetContent } from '../../../core/tools/ToolTargets'
+import { readEditableTargetContent, prepareExecutionContentOutput } from '../../../core/tools/ToolTargets'
 import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
 import { readHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
 import type { ExecutionSelectionTarget } from '../../../shared/workbench/executionDesktop'
@@ -124,8 +124,8 @@ export function HtmlLightEditOverlay({ target, committed, position, value, onVal
             ...(field === 'src' ? { quote: quote === '"' || quote === "'" ? quote : '' as const } : {}) } } : {}) }
         const content = readEditableTargetContent(snapshot.model, address).text
         const label = target.report.kind === 'text' ? textCardLabel(content) : '所选图片地址'
-        captureSelection(snapshot, [address], label)
-        return { target: address, label, content }
+        const capture = captureSelection(snapshot, [address], label)
+        return { target: address, capture, contentOutput: prepareExecutionContentOutput(snapshot, address), label, content }
       }} disabledReason={!authoring ? '这个位置暂时无法定位，请重新选择。' : null} />}
       <button type="button" disabled={busy} onClick={onClose}>关闭</button>
     </div>

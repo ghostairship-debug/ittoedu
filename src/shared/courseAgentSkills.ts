@@ -8,3 +8,9 @@ export const courseAgentMethodSkills = [
   { name: 'research-and-report' },
   { name: 'data-and-report' },
 ] as const
+
+/** Shared product usage is independently readable; it is not a content method prerequisite. */
+export const courseAgentBundledSkills = [
+  ...courseAgentMethodSkills,
+  { name: 'workbench-usage' },
+] as const

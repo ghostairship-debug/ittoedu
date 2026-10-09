@@ -35,17 +35,23 @@ it('keeps an unconfirmed stop unknown, then records a known late result as unapp
 it('recovers a durable container identity and attempts to stop it before reporting unknown', async () => {
   const root = await fixture()
   const inspect = vi.fn(async (_name: string) => 'running' as const), stop = vi.fn(async (_name: string) => true)
-  const backend = { availability: async () => ({ available: true }), start: async () => ({ done: new Promise<ComputeProcessResult>(() => undefined), cancel: async () => true }),
-    inspectContainer: inspect, stopContainer: stop } as unknown as PodmanComputeBackend
+  const start = vi.fn(async (_request: { executionId: string }) => ({ done: new Promise<ComputeProcessResult>(() => undefined), cancel: async () => true }))
+  const backend = { kind: 'podman', availability: async () => ({ available: true }), start,
+    inspectExecution: inspect, stopExecution: stop } as unknown as PodmanComputeBackend
   const first = new ComputeJobService({ directory: root, backend })
   await first.start(request)
+  await expect.poll(async () => (await first.status('run', request.jobId)).status).toBe('running')
   const restored = new ComputeJobService({ directory: root, backend })
   expect(await restored.status('run', request.jobId)).toMatchObject({ status: 'unknown', reason: expect.stringContaining('已停止') })
   expect(inspect).toHaveBeenCalledOnce()
   expect(stop).toHaveBeenCalledOnce()
   expect(stop.mock.calls[0]![0]).toMatch(/^guoling-compute-[a-f0-9]{32}$/)
+  expect(stop.mock.calls[0]![0]).toBe(start.mock.calls[0]![0].executionId)
   expect(await restored.status('run', request.jobId)).toMatchObject({ status: 'unknown' })
   expect(inspect).toHaveBeenCalledOnce() // The unknown job is not retried or polled repeatedly.
+  expect(await restored.start(request)).toMatchObject({ status: 'unknown' })
+  expect(start).toHaveBeenCalledOnce() // Reopening the original job never replays its execution.
+  expect(inspect).toHaveBeenCalledOnce(); expect(stop).toHaveBeenCalledOnce()
 })
 
 it('coalesces concurrent stop requests without losing confirmed stop or granting another run access', async () => {

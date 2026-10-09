@@ -51,6 +51,7 @@ it('opens a durable V10 recovery in the course bridge and preserves its saved fi
       return <WorkspaceRecoveryPanel api={restarted.documents} onRestored={tabs.focusDocument} />
     }
     render(<RecoveryWorkspace />)
+    fireEvent.click(await screen.findByRole('button', { name: '恢复稿（1）' }))
     const row = (await screen.findByText('恢复课件.h5lesson')).closest('li')!
     expect(within(row).getByText('H5 演示 · 尚未恢复')).toBeTruthy()
     fireEvent.click(within(row).getByRole('button', { name: '恢复并打开' }))

@@ -1,3 +1,4 @@
+import { isNativeProjectFilename } from '../../../shared/nativeProjectFile'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { HostToolServices } from '../../../core/tools/HostToolServices'
@@ -20,7 +21,7 @@ async function permittedPath(requested: string, fileAccess: ToolRunGrant['fileAc
 export function createProjectFileServices(host: Pick<DocumentHostService, 'open'>): NonNullable<HostToolServices['projectFiles']> {
   return {
     async openProject({ path: requested, fileAccess }) {
-      if (!/\.h5lesson$/i.test(requested)) throw new Error('只能按路径打开 .h5lesson 课件')
+      if (!isNativeProjectFilename(requested)) throw new Error('只能按路径打开 .glx 课件')
       const { filename, inside } = await permittedPath(requested, fileAccess)
       const snapshot = await host.open(filename)
       if (snapshot.model.kind !== 'course-v10') throw new Error('该文件不是 Project V10 课件工程')

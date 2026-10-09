@@ -1,3 +1,4 @@
+import { isNativeProjectFilename } from '../../../shared/nativeProjectFile'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type DragEvent } from 'react'
 import { ChevronDown, ChevronRight, File, FileCode2, FileText, Folder, FolderOpen, Plus, Presentation, RotateCw } from 'lucide-react'
 import type { LessonDesktopRequest, LessonDesktopResult, LessonDirectoryEntry } from '../../../shared/lessonDesktopContract'
@@ -18,14 +19,13 @@ type Entry = Extract<WorkspaceListItem, { status: 'accessible' }>
 type Dialog = 'create-markdown' | 'create-course' | 'create-text' | 'create-html' | 'mkdir' | 'rename' | 'copy' | 'move' | 'trash'
 type Row = { entry: Entry; parentId: string }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
-function icon(name: string) { return /\.(md|markdown)$/i.test(name) ? <FileText size={16} /> : /\.h5lesson$/i.test(name) ? <Presentation size={16} /> : /\.html?$/i.test(name) ? <FileCode2 size={16} /> : <File size={16} /> }
-export function WorkspaceFilesTree({ directory, files, operation, refreshVersion = 0, onFile, onDirectory, onScope, onSaveDirectoryChange, onImportHtml, prepareCurrentCopy }: {
+function icon(name: string) { return /\.(md|markdown)$/i.test(name) ? <FileText size={16} /> : isNativeProjectFilename(name) ? <Presentation size={16} /> : /\.html?$/i.test(name) ? <FileCode2 size={16} /> : <File size={16} /> }
+export function WorkspaceFilesTree({ directory, files, operation, refreshVersion = 0, onFile, onDirectory, onScope, onSaveDirectoryChange, onImportHtml }: {
   directory: string; files: WorkspaceFilesAPI; operation?(request: LessonDesktopRequest): Promise<LessonDesktopResult>; refreshVersion?: number
   onFile(entry: LessonDirectoryEntry): void; onDirectory(path: string): void
   onScope?(path: string, kind: 'folder' | 'file', workspaceId?: string): void
   onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void
   onImportHtml?(directory: SaveDirectoryContext, sourceEntryId?: string): void
-  prepareCurrentCopy?(): Promise<boolean>
 }) {
   const [root, setRoot] = useState<RegisteredWorkspaceRoot>()
   const [pages, setPages] = useState<Record<string, WorkspaceListItem[]>>({})
@@ -47,7 +47,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
   const pagesRef = useRef(pages); pagesRef.current = pages
   const buttons = useRef(new Map<string, HTMLButtonElement>())
   const createMenu = useRef<HTMLDetailsElement>(null)
-  // "从 PPT 新建 H5 演示" picks a file here and writes the new presentation into the folder chosen when it was asked for.
+  // "从 PPT 新建 果铃工程" picks a file here and writes the new presentation into the folder chosen when it was asked for.
   const pptxInput = useRef<HTMLInputElement>(null), pptxTarget = useRef<string | undefined>(undefined)
   // The pane clips its content, so the create options open at a fixed window position.
   const [createAt, setCreateAt] = useState<{ left: number; top: number }>()
@@ -257,10 +257,6 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
     const generation = epoch.current
     lock.current = true; setBusy(true); setError(''); setMenu(undefined); setRetry(undefined)
     try {
-      if (request.type === 'copy' && request.sourceVersion === 'current') {
-        if (!prepareCurrentCopy || !await prepareCurrentCopy()) throw new Error('当前输入尚未同步，请完成输入或处理冲突后再复制当前稿。')
-        if (generation !== epoch.current) return
-      }
       const result = await files(request) as WorkspaceOperationResult
       if (generation !== epoch.current) return
       setResults(result)
@@ -311,12 +307,12 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
       const course = await createCourseFromPptx(file.bytes, stem)
       if (!await confirmPptxLosses(file.name, course.issues) || generation !== epoch.current) return
       const entries = pagesRef.current[directoryId] ?? await load(directoryId, current)
-      made = { name: uniqueFilename(stem, '.h5lesson', entries), archive: pptxCourseArchive(course), issues: course.issues.length }
+      made = { name: uniqueFilename(stem, '.glx', entries), archive: pptxCourseArchive(course), issues: course.issues.length }
     } catch (reason) { if (generation === epoch.current) setError(message(reason)) }
     finally { lock.current = false; if (generation === epoch.current) setBusy(false) }
     if (!made || generation !== epoch.current) return
     const result = await run({ type: 'create-course', ...common(), targetDirectoryId: directoryId, name: made.name, archive: made.archive })
-    if (result?.status === 'success' && made.issues) setNotice(`已从 PPT 新建 H5 演示；${made.issues} 项内容未保留或已简化`)
+    if (result?.status === 'success' && made.issues) setNotice(`已从 PPT 新建 果铃工程；${made.issues} 项内容未保留或已简化`)
   }
   const readChosenPptx = (file: File) => async () => {
     return { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) }
@@ -410,7 +406,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
       </details>
       <button type="button" title="刷新文件列表" disabled={busy || !root} onClick={() => { void refresh().catch(reason => setError(message(reason))) }}><RotateCw size={14} aria-hidden="true" /><span>刷新</span></button>
     </div>
-    <input ref={pptxInput} type="file" accept=".pptx" hidden aria-label="选择要在此文件夹新建为 H5 演示的 PPT" onChange={event => {
+    <input ref={pptxInput} type="file" accept=".pptx" hidden aria-label="选择要在此文件夹新建为 果铃工程的 PPT" onChange={event => {
       const file = event.target.files?.[0], target = pptxTarget.current
       event.target.value = ''
       if (file && target) void fromPptx(readChosenPptx(file), target)

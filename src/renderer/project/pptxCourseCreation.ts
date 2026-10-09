@@ -27,7 +27,7 @@ export interface PptxCourse {
   issues: PptxImportIssue[]
 }
 
-/** A new H5 presentation holding the PPT's pages, and nothing else (M21 "从 PPT 新建 H5 演示"). */
+/** A new H5 presentation holding the PPT's pages, and nothing else (M21 "从 PPT 新建 果铃工程"). */
 export async function createCourseFromPptx(bytes: Uint8Array, title: string): Promise<PptxCourse> {
   const canvas = pptxCourseCanvas(bytes)
   const draft = await parsePptxImport(bytes, canvas)
@@ -45,7 +45,7 @@ export async function createCourseFromPptx(bytes: Uint8Array, title: string): Pr
   return { project: model.project, resources: model.resources, issues: draft.issues }
 }
 
-/** The .h5lesson bytes of a course made from a PPT. */
+/** The .glx bytes of a course made from a PPT. */
 export function pptxCourseArchive(course: PptxCourse): Uint8Array<ArrayBuffer> {
   const bytes = new CourseV10Driver().serialize({ kind: 'course-v10', project: course.project, resources: course.resources })
   // File requests carry ArrayBuffer-backed bytes; the zip output already is one.
@@ -54,5 +54,5 @@ export function pptxCourseArchive(course: PptxCourse): Uint8Array<ArrayBuffer> {
 
 /** The file stem an H5 presentation made from `name` gets ("第一课.pptx" → "第一课"). */
 export function pptxCourseStem(name: string): string {
-  return name.replace(/^.*[\\/]/, '').replace(/\.pptx$/i, '').trim() || '从 PPT 新建的 H5 演示'
+  return name.replace(/^.*[\\/]/, '').replace(/\.pptx$/i, '').trim() || '从 PPT 新建的 果铃工程'
 }

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { clampCrop } from '../../renderer/editing/crop/imageCrop'
+import { clampCrop } from '../../shared/imageCrop'
 
 const fraction = z.number().finite().min(0).max(1)
 const nonnegative = z.number().finite().nonnegative()

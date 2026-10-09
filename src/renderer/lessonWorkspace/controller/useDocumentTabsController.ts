@@ -6,7 +6,7 @@ import type { LessonDocumentEditorHandle } from '../../documentFiles/LessonDocum
 import type { RecoverableDocumentFilePort } from '../../documentFiles/documentFileSession'
 import type { LessonWorkspace } from '../../../shared/lessonWorkspace'
 import type { MediaFileEditorHandle } from '../../documentFiles/media/MediaFileEditor'
-import type { MediaFileSnapshot, MediaFilesRequest } from '../../../shared/workbench/mediaFiles'
+import type { MediaFileDraftInput, MediaFileSnapshot, MediaFilesRequest } from '../../../shared/workbench/mediaFiles'
 
 export type LessonFileTab = {
   id: string
@@ -50,6 +50,7 @@ export interface DocumentTabsController {
   flushAll(): Promise<boolean>
   saveActiveDocument(): Promise<'course' | 'document' | 'none'>
   drainAll(): Promise<boolean>
+  captureMediaDrafts(source: string, kind: 'file' | 'directory'): MediaFileDraftInput[]
   preserveAll(mode?: 'save' | 'preserve', documentIds?: readonly string[]): Promise<boolean>
   hasDirtyInputs(documentIds?: readonly string[]): boolean
   suspendForClose(documentIds?: readonly string[]): void
@@ -204,8 +205,13 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     const snapshot = tab.kind === 'document' ? await documentPort.documents?.open(tab.path) : undefined
     const mediaSnapshot = tab.kind === 'media' ? await requestMediaFiles({ type: 'media-file.open-path', path: tab.path }) : undefined
     if (tab.kind === 'document' && !snapshot) throw new Error('文档服务尚未连接')
-    const id = snapshot?.documentId ?? (mediaSnapshot ? `media:${normalized(mediaSnapshot.binding.path)}` : crypto.randomUUID())
-    setTabs(current => current.some(item => item.id === id) ? current : [...current, { ...tab, path: mediaSnapshot?.binding.path ?? tab.path, id, documentId: snapshot?.documentId, mediaSnapshot, dirty: snapshot?.dirty ?? false }])
+    const filename = mediaSnapshot?.binding.path ?? tab.path
+    const alreadyOpened = mediaSnapshot && tabsRef.current.find(item => normalized(item.path) === normalized(filename))
+    if (alreadyOpened) { if (ticket === navigation.current) setActiveTab(alreadyOpened.id); return }
+    const id = snapshot?.documentId ?? crypto.randomUUID()
+    const opened = { ...tab, path: filename, id, documentId: snapshot?.documentId, mediaSnapshot, dirty: snapshot?.dirty ?? false }
+    if (mediaSnapshot) tabsRef.current = [...tabsRef.current, opened]
+    setTabs(current => current.some(item => item.id === id) ? current : [...current, opened])
     if (ticket === navigation.current) setActive(id)
   }
   async function createMarkdown(name = '未命名文档') {
@@ -223,7 +229,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     const snapshot = await api.read(documentId)
     if (snapshot.model.kind === 'course-v10') {
       const ticket = ++navigation.current
-      if (!courseRef.current) throw new Error('H5 演示视图尚未连接')
+      if (!courseRef.current) throw new Error('果铃工程视图尚未连接')
       pendingCourse.current = { id: documentId, ticket }
       await courseRef.current.activate(documentId)
       if (ticket === navigation.current) setActive(documentId)
@@ -275,6 +281,17 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     if (!tab || tab.path === filename) return
     setTabs(current => current.map(item => item.id === tab.id ? { ...item, documentId: snapshot.documentId, path: filename, name: filename.split(/[\\/]/).pop() ?? filename } : item))
   }), [documentPort.documents])
+  useEffect(() => window.desktopAPI?.onMediaArtifactBindingChanged?.(({ before, binding }) => {
+    const matches = (current: MediaFileSnapshot['binding']) => normalized(current.path) === normalized(before.path)
+      && current.fileVersion === before.fileVersion && current.bindingVersion === before.bindingVersion
+    const rebound = new Set<string>()
+    for (const [id, editor] of mediaEditors.current) if (matches(editor.binding())) { editor.rebind(binding); rebound.add(id) }
+    const relocate = (current: LessonFileTab[]) => current.map(tab => tab.kind === 'media' && tab.mediaSnapshot && (rebound.has(tab.id) || matches(tab.mediaSnapshot.binding))
+      ? { ...tab, path: binding.path, name: binding.path.split(/[\\/]/).pop() ?? tab.name,
+        mediaSnapshot: { ...tab.mediaSnapshot, binding } } : tab)
+    tabsRef.current = relocate(tabsRef.current)
+    setTabs(relocate)
+  }), [])
   useEffect(() => () => { for (const stop of subscriptions.current.values()) stop() }, [])
   /**
    * 每个 path 一个身份稳定的 ref 回调。内联 `ref={editor => registerEditor(tab.path, editor)}` 每次
@@ -343,7 +360,19 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     }
     return true
   }
-  return { tabs, activeTab, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, mediaEditorRef, mediaFiles: requestMediaFiles, updateMediaSnapshot, updateDirty, flushAll, saveActiveDocument, drainAll, preserveAll, hasDirtyInputs, suspendForClose, resumeAfterCloseCancelled, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
+  function captureMediaDrafts(source: string, kind: 'file' | 'directory'): MediaFileDraftInput[] {
+    const parent = normalized(source).replace(/\/$/, '')
+    const drafts: MediaFileDraftInput[] = []
+    for (const tab of tabsRef.current) if (tab.kind === 'media') {
+      const editor = mediaEditors.current.get(tab.id)
+      const filename = normalized(editor?.binding().path ?? tab.path)
+      if (kind === 'file' ? filename !== parent : filename !== parent && !filename.startsWith(`${parent}/`)) continue
+      if (!editor) throw new Error('媒体编辑器尚未连接，当前稿已保留')
+      drafts.push(editor.captureCopyDraft())
+    }
+    return drafts
+  }
+  return { tabs, activeTab, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, mediaEditorRef, mediaFiles: requestMediaFiles, updateMediaSnapshot, updateDirty, flushAll, saveActiveDocument, drainAll, captureMediaDrafts, preserveAll, hasDirtyInputs, suspendForClose, resumeAfterCloseCancelled, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
 }
 
 function normalized(value: string) { return value.replace(/\\/g, '/').toLowerCase() }

@@ -16,9 +16,9 @@ export async function askMediaCapture(request: MediaCaptureRequest): Promise<boo
   const device = mediaCaptureLabel(request.mediaTypes)
   const { response } = await dialog.showMessageBox(owner, {
     type: 'question',
-    title: 'H5 演示请求使用设备',
-    message: `当前 H5 演示请求使用${device}。`,
-    detail: '只对本次请求生效；选择“拒绝”后，H5 演示会收到“未获授权”。',
+    title: '果铃工程请求使用设备',
+    message: `当前 果铃工程请求使用${device}。`,
+    detail: '只对本次请求生效；选择“拒绝”后，果铃工程会收到“未获授权”。',
     buttons: ['拒绝', `允许本次使用${device}`],
     defaultId: 0,
     cancelId: 0,

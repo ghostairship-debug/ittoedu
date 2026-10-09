@@ -154,7 +154,8 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
   if (!win || !doc.body) return () => {}
   const tracking = inheritedTracking ?? trackScriptMutations(doc)
   const authorWindow = win as Window & { __cwHtmlAuthoringRecords?: Record<string, ComponentAuthorRecord>;
-    __cwHtmlAuthoringConsumer?: ReturnType<typeof createDomAuthoring> }
+    __cwHtmlAuthoringConsumer?: ReturnType<typeof createDomAuthoring>;
+    __cwPageTextOverrides?: { originalText(node: Text): string; setLocalText(node: Text, text: string | null): void } }
   if (!authorWindow.__cwHtmlAuthoringRecords) {
     try {
       const value = JSON.parse(doc.getElementById('cw-html-authoring-records')?.textContent ?? '{}')
@@ -163,7 +164,11 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
     } catch { authorWindow.__cwHtmlAuthoringRecords = {} }
   }
   const inheritedConsumer = authorWindow.__cwHtmlAuthoringConsumer
-  const authoring = inheritedConsumer ?? createDomAuthoring(doc.documentElement, { records: () => authorWindow.__cwHtmlAuthoringRecords ?? {} })
+  const authoring = inheritedConsumer ?? createDomAuthoring(doc.documentElement, {
+    records: () => authorWindow.__cwHtmlAuthoringRecords ?? {},
+    originalText: node => authorWindow.__cwPageTextOverrides?.originalText(node),
+    claimText: (node, text) => authorWindow.__cwPageTextOverrides?.setLocalText(node, text),
+  })
   authorWindow.__cwHtmlAuthoringConsumer = authoring
   const handles = new WeakMap<Node, string>()
   const nodes = new Map<string, Node>()

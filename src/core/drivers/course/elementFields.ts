@@ -235,6 +235,10 @@ export function elementUnitLabel(unit: readonly string[]): string {
 
 /** The source or component text held by the original target, without searching elsewhere. */
 export function textTargetContent(model: DocumentModel, target: ExecutionSelectionTarget): string | null {
+  if (target.kind === 'text-selection') {
+    const values = target.fragments.map(fragment => textTargetContent(model, fragment.target))
+    return values.some(value => value === null) ? null : JSON.stringify(values)
+  }
   if (target.kind === 'html-author-field') { try { return readHtmlAuthorField(model, target).value } catch { return null } }
   if (target.kind === 'course-instance' && model.kind === 'course-v10') {
     try {

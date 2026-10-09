@@ -5,12 +5,16 @@ import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { AgentFileService } from '../../src/main/workbench/execution/AgentFileService'
-import { AgentFileOutcomeUnknown, type AgentFileContext, type AgentFileService as AgentFilePort } from '../../src/core/tools/AgentFileTools'
+import { AgentFileMissingParent, AgentFileOutcomeUnknown, type AgentFileContext, type AgentFileService as AgentFilePort } from '../../src/core/tools/AgentFileTools'
 import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
 import type { ModelEvent, ModelProvider, ModelRequest } from '../../src/shared/workbench/modelProvider'
 import { fileCreated, serviceToolOutcome } from '../../src/main/workbench/execution/executionOutcome'
+import { createMarkdownTestHost } from '../helpers/markdownDocumentHost'
+import { createLessonDocumentFiles } from '../../src/main/lessonDocumentFiles'
+import { DocumentFileSession } from '../../src/renderer/documentFiles/documentFileSession'
+import { SelectionContextController } from '../../src/renderer/workbench/SelectionContextController'
 
 const cleanup: string[] = []
 afterEach(async () => { for (const root of cleanup.splice(0)) await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }) })
@@ -29,6 +33,54 @@ async function fixture() {
 }
 
 describe('general agent file tools', () => {
+  it('keeps missing-parent create refused and completes only after mkdir and the same real write', async () => {
+    const h = await fixture(), input = { path: 'new-lesson/plan.md', mode: 'create', content: '教学策划' }
+    const filename = path.join(h.workspace, input.path)
+    await expect(h.files.preflightMutation(h.context, 'file.write', input)).rejects.toMatchObject({ pendingCreationPath: filename })
+    await expect(h.files.preflightMutation({ ...h.context, permission: 'read-only' }, 'file.write', input)).rejects.not.toBeInstanceOf(AgentFileMissingParent)
+    await expect(h.files.execute(h.context, 'file.write', input, 'direct-missing')).rejects.toBeInstanceOf(AgentFileMissingParent)
+    let turn = 0, dispatches = 0
+    const actualExecute = h.files.execute.bind(h.files)
+    h.files.execute = async (...args) => { dispatches++; return actualExecute(...args) }
+    const steps = [ { name: 'file.write', input }, { name: 'file.mkdir', input: { name: 'new-lesson', path: '.' } },
+      { name: 'file.write', input }, { name: 'task.finish', input: {} } ]
+    const provider: ModelProvider = { async *stream(request) {
+      const step = steps[turn++]
+      const calls = step ? [{ id: `step-${turn}`, type: 'function' as const, function: { name: step.name, arguments: JSON.stringify(step.input) } }] : []
+      yield { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: `r${turn}`, actualModel: 'fixture', nativeResponse: {}, finishReason: calls.length ? 'tool_calls' : 'stop',
+        toolCalls: calls.map(call => ({ id: call.id, name: call.function.name, argumentsText: call.function.arguments })), assistant: { role: 'assistant', content: '', ...(calls.length ? { tool_calls: calls } : {}) } }
+    } }
+    const engine = new ExecutionEngine({ registry: h.host.registry, gateway: h.host.tools, provider, files: h.files,
+      runs: new ExecutionRunStore(path.join(h.root, 'create-runs')), events: new ExecutionEventStore({ directory: path.join(h.root, 'create-events') }) })
+    const started = await engine.start({ conversationId: 'c', taskId: 'create', instruction: '新建教学策划', documents: [], workspaceRoot: h.workspace,
+      selection: { model: 'fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat', baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture',
+        auth: { kind: 'api-key', credentialRef: 'fixture' }, billing: { kind: 'unknown' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } } })
+    const result = await engine.wait(started.runId)
+    expect(result.tools[0]).toMatchObject({ rejectedCreationPath: filename, result: { kind: 'error', code: 'file-tool-failed' } })
+    expect(result.tools[0]!.effectPaths).toBeUndefined()
+    expect(dispatches).toBe(2)
+    expect(result.status).toBe('completed')
+    expect(await readFile(filename, 'utf8')).toBe(input.content)
+    await expect(h.files.execute(h.context, 'file.write', { ...input, path: path.join(h.outside, 'out.md') }, 'outside')).rejects.toThrow()
+  })
+  it('creates explicit formats without suffixes at the same preflight path and reports the actual initial course', async () => {
+    const h = await fixture()
+    for (const [kind, extension] of [['course-v10', '.h5lesson'], ['markdown', '.md'], ['html', '.html']] as const) {
+      const input = { name: `无后缀-${kind}`, kind }
+      const scope = await h.files.preflightMutation(h.context, 'file.create', input)
+      const expected = path.join(h.workspace, 'lesson', input.name + extension)
+      expect(scope).toEqual({ paths: [expected], outside: false })
+      const result = await h.files.execute(h.context, 'file.create', input, `create-suffix-${kind}`)
+      expect(result.opened?.name).toBe(expected)
+      expect(h.host.registry.get(result.opened!.documentId).read()).toMatchObject({ model: { kind: kind === 'html' ? 'text' : kind }, binding: { kind: 'file', path: expected } })
+      if (kind === 'course-v10') expect(result.data).toMatchObject({ course: { surfaceCount: 1, surfaces: [{ title: '第 1 页', kind: 'slide', childCount: 0 }] } })
+      else expect(await readFile(expected, 'utf8')).toBe('')
+    }
+    await expect(h.files.preflightMutation(h.context, 'file.create', { name: 'conflicting.md', kind: 'course-v10' })).rejects.toThrow('格式不符')
+    await expect(h.files.execute(h.context, 'file.create', { name: '无后缀-course-v10', kind: 'course-v10' }, 'same-name')).resolves.toMatchObject({ data: { operation: { status: 'failed' } } })
+    const text = await h.files.execute(h.context, 'file.create', { name: '无后缀文本', kind: 'text' }, 'text-no-suffix')
+    expect(text.opened?.name).toBe(path.join(h.workspace, 'lesson', '无后缀文本'))
+  })
   it('lists from file home, creates beside it through FileService, and opens formal DocumentSession', async () => {
     const h = await fixture()
     const listed = await h.files.execute(h.context, 'file.list', {}, 'list')
@@ -426,6 +478,75 @@ it('reads one drained snapshot after queued commits with matching paged text and
     release(); await lease; await committed
     draining.mockRestore(); gateway.mockRestore(); attach.mockRestore()
   }
+})
+
+it.each(['html', 'js', 'json'])('captures and patches the settled current %s source while its disk stays unchanged', async extension => {
+  const h = await fixture(), filename = path.join(h.workspace, 'lesson', `current.${extension}`)
+  await writeFile(filename, 'disk source')
+  expect(await h.host.readOpenedSource(filename)).toBeUndefined()
+  expect((await h.files.execute(h.context, 'file.read', { path: filename }, 'closed-read')).data).toMatchObject({ text: 'disk source', dirty: false })
+  const snapshot = await h.host.open(filename), session = h.host.registry.get(snapshot.documentId)
+  await h.host.tools.beginRun({ runId: h.context.runId, actor: 'agent', documents: [{ documentId: snapshot.documentId,
+    writable: [{ kind: 'document' }] }] })
+  let entered!: () => void, release!: () => void
+  const acquired = new Promise<void>(resolve => { entered = resolve })
+  const held = new Promise<void>(resolve => { release = resolve })
+  const lease = session.withFileLease(async () => { entered(); await held })
+  await acquired
+  const queued = session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision,
+    operationId: 'queued-current-source', actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: 'current source' } } })
+  const captured = h.host.readOpenedSource(filename)
+  const patched = h.files.execute(h.context, 'file.patch', { path: filename, oldText: 'current', newText: 'edited' }, 'patch-current-source')
+  try {
+    release()
+    expect(await queued).toMatchObject({ status: 'applied' })
+    expect(await captured).toMatchObject({ documentId: snapshot.documentId, dirty: true, model: { source: 'current source' } })
+    expect((await patched).data).toMatchObject({ status: 'applied', dirty: true, saved: false })
+    expect(await h.host.readOpenedSource(filename)).toMatchObject({ undoDepth: 2, model: { source: 'edited source' } })
+    expect(await readFile(filename, 'utf8')).toBe('disk source')
+  } finally { release(); await lease; await queued }
+})
+
+it('prepares the original renderer source input before capture and never returns an old source after preparation fails', async () => {
+  const h = await fixture(), filename = path.join(h.workspace, 'lesson', 'unconfirmed.js')
+  await writeFile(filename, 'export const value = "disk";')
+  const { host, documents } = createMarkdownTestHost(path.join(h.root, 'source-input-host'))
+  const files = createLessonDocumentFiles({ recoveryDirectory: path.join(h.root, 'source-input-files'), validateTarget: async () => {}, documents })
+  const view = new DocumentFileSession({ kind: 'file', path: filename }, { ...files, documents })
+  await view.open()
+  const controller = new SelectionContextController(id => documents.read(id)), documentId = view.documentId!
+  const stop = controller.register(documentId, async () => {
+    if (!await view.drain() || !view.committedDocument) throw new Error('输入尚未确认')
+    return view.committedDocument
+  })
+  let preparing!: () => void
+  const entered = new Promise<void>(resolve => { preparing = resolve })
+  host.setDocumentInputPreparer(async id => { expect(id).toBe(documentId); preparing(); await controller.prepare(id) })
+  try {
+    view.setComposing(true); view.edit('export const value = "current";')
+    expect(host.registry.get(documentId).read().model).toMatchObject({ source: 'export const value = "disk";' })
+    const capture = host.readOpenedSource(filename)
+    expect(await Promise.race([entered.then(() => 'preparing'), capture.then(() => 'captured')])).toBe('preparing')
+    view.setComposing(false)
+    expect(await capture).toMatchObject({ documentId, dirty: true, model: { source: 'export const value = "current";' } })
+    const destination = path.join(h.workspace, 'current-copy'); await mkdir(destination)
+    let copyPreparing!: () => void
+    const copyEntered = new Promise<void>(resolve => { copyPreparing = resolve })
+    host.setDocumentInputPreparer(async id => { expect(id).toBe(documentId); copyPreparing(); await controller.prepare(id) })
+    view.setComposing(true); view.edit('export const value = "copied current";')
+    const copy = host.agentFiles.execute(h.context, 'file.copy', { sources: [filename], destination, sourceVersion: 'current' }, 'copy-current-input')
+    expect(await Promise.race([copyEntered.then(() => 'preparing'), copy.then(() => 'copied')])).toBe('preparing')
+    view.setComposing(false)
+    expect((await copy).data).toMatchObject({ operation: { status: 'success' } })
+    expect(await readFile(path.join(destination, path.basename(filename)), 'utf8')).toBe('export const value = "copied current";')
+    view.setComposing(true); view.edit('export const value = "retained input";')
+    host.setDocumentInputPreparer(async () => { throw new Error('当前输入未完成') })
+    await expect(host.readOpenedSource(filename)).rejects.toThrow('当前输入未完成')
+    await expect(host.agentFiles.execute(h.context, 'file.read', { path: filename }, 'unconfirmed-read')).rejects.toThrow('当前输入未完成')
+    expect(view.getSnapshot()).toMatchObject({ source: 'export const value = "retained input";', composing: true, dirty: true })
+    expect(host.registry.get(documentId).read().model).toMatchObject({ source: 'export const value = "copied current";' })
+    expect(await readFile(filename, 'utf8')).toBe('export const value = "disk";')
+  } finally { stop(); view.dispose() }
 })
 
 it('rejects an opened file.read stopped after draining and before returning the snapshot', async () => {

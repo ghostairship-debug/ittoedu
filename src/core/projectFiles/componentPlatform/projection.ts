@@ -8,8 +8,18 @@ import { htmlDocumentKind } from '../../../shared/html/documentKind'
 import { createCourseSurface } from '../../course/courseSurfaceStructure'
 import { projectFlowDocument } from '../../components/document/flowDocumentProjection'
 import { serializeDocumentMarkdown, type MarkdownDocument } from '../../../shared/document/markdown'
-import { serializeFlowHtml } from '../../../shared/document/html'
+import { inlineHtml, serializeFlowHtml } from '../../../shared/document/html'
 import { componentSourceOwnerIsShared } from '../../components/source/sourceAuthoringEdits'
+import { componentAssetIds, sourceAssetIds, sourceModuleBindings } from '../../components/library/references'
+import { isComponentVisibleAtSurface } from '../../../shared/contracts/component-platform/project'
+import { observeSpatialSource, type SpatialObservedRefs } from '../../course/courseSpatialEdits'
+import { formulaComponentDataSchema, textComponentDataSchema } from '../../../components/text/data'
+import { formulaComponentHtml, textComponentHtml } from '../../../components/text/render'
+import { imageDataSchema } from '../../../components/image/data'
+import { clampCrop, cropGeometry } from '../../../shared/imageCrop'
+
+export type ComponentProjectFileState = { surfaceId: string; stateId: string }
+export type ComponentProjectFileScope = ({ kind: 'document' } | { kind: 'surface'; surfaceId: string } | { kind: 'instance'; instanceId: string }) & { state?: ComponentProjectFileState }
 
 type Element = DefaultTreeAdapterTypes.Element
 type Node = DefaultTreeAdapterTypes.ChildNode
@@ -33,6 +43,9 @@ export interface ComponentProjectFile {
   bytes?: Uint8Array
   mimeType?: string
   note?: string
+  /** Observation-only context; source implementations remain base author content. */
+  observedState?: ComponentProjectFileState
+  editingContext?: ComponentProjectFileState
   /** Software-only bindings; tool results expose paths and content, never require these fields. */
   target?: ContentApplyTarget
   projection?: HtmlContentProjection
@@ -41,11 +54,12 @@ export interface ComponentProjectFile {
   sourceFile?: { path: string; files: Record<string, Uint8Array>; privateOwner: boolean }
   /** Canonical fields that are not object content. Identities stay inside this software projection. */
   binding?:
+    | { kind: 'project-settings' }
     | { kind: 'theme' }
     | { kind: 'definition'; definitionId: string }
     | { kind: 'definition-source'; definitionId: string }
     | { kind: 'instance-source'; instanceId: string }
-    | { kind: 'spatial'; surfaceId: string; objectPaths: Record<string, string> }
+    | { kind: 'spatial'; surfaceId: string; objectPaths: Record<string, string>; refs: SpatialObservedRefs }
     | { kind: 'asset'; assetId: string }
     | { kind: 'flow'; surfaceId: string; format: 'html' | 'markdown'; document: MarkdownDocument; objectPaths: Record<string, string> }
   /** Initial program region comes from the observed container; never an AI-authored identity or persistent viewport. */
@@ -62,6 +76,26 @@ function webHtml(project: CourseProjectV10, instance: ComponentInstance): string
   const data = instance.data
   return data && typeof data === 'object' && !Array.isArray(data) && typeof data.html === 'string' ? data.html : undefined
 }
+const attribute = (value: string) => value.replace(/[&<>"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[character]!)
+function instanceHtml(project: CourseProjectV10, instance: ComponentInstance): string | undefined {
+  const implementation = instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation
+  if (implementation?.kind !== 'builtin') return undefined
+  if (implementation.key === 'guoling.text') {
+    const data = textComponentDataSchema.parse(instance.data), body = bodyOf(textComponentHtml(data))
+    const outer = body.childNodes.find(element)!, content = outer.childNodes.find(element)!
+    content.childNodes = bodyOf(inlineHtml(data.content)).childNodes
+    content.childNodes.forEach(node => { node.parentNode = content })
+    return serializeOuter(outer)
+  }
+  if (implementation.key === 'guoling.formula') return formulaComponentHtml(formulaComponentDataSchema.parse(instance.data))
+  if (implementation.key !== 'guoling.image') return webHtml(project, instance)
+  const data = imageDataSchema.parse(instance.data), asset = project.assets[data.assetId], frame = instance.frame
+  // Feathering needs the actual pixel projection; keep that image's data/source entry available.
+  if (!asset?.width || !asset.height || !frame || data.feather.amount) return undefined
+  const whole = cropGeometry({ ...data, frame, source: { width: asset.width, height: asset.height } }).whole
+  const crop = clampCrop(data.crop), filters = data.filters
+  return `<div style="position:relative;overflow:hidden;width:100%;height:100%;border-radius:${data.cornerRadius}px;filter:brightness(${filters.brightness}) contrast(${filters.contrast}) saturate(${filters.saturation}) grayscale(${filters.grayscale}) blur(${filters.blur}px)"><img src="${attribute(`../${asset.path}`)}" alt="${attribute(data.alt)}" style="position:absolute;max-width:none;max-height:none;transform-origin:0 0;left:${whole.x}px;top:${whole.y}px;width:${whole.width}px;height:${whole.height}px;clip-path:inset(${crop.top * 100}% ${crop.right * 100}% ${crop.bottom * 100}% ${crop.left * 100}%);transform:translate(${data.flipX ? '100%' : '0'},${data.flipY ? '100%' : '0'}) scale(${data.flipX ? -1 : 1},${data.flipY ? -1 : 1})"></div>`
+}
 
 /** Reconstructed from current canonical objects; no HTML source or mapping is persisted beside them. */
 export function projectHtmlProjection(project: CourseProjectV10, rootIds: readonly string[]): HtmlContentProjection | undefined {
@@ -76,9 +110,9 @@ export function projectHtmlProjection(project: CourseProjectV10, rootIds: readon
   const body = bodyOf(''), mappings = new Map<Element, string>(), css = new Set<string>()
   const build = (id: string): Element | undefined => {
     const instance = project.instances[id]!
-    const html = webHtml(project, instance)
+    const html = instanceHtml(project, instance)
     const implementation = instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation
-    if (html === undefined || implementation?.kind !== 'builtin' || implementation.key !== 'guoling.web') return undefined
+    if (html === undefined || implementation?.kind !== 'builtin' || implementation.key === 'guoling.html-program') return undefined
     const parsed = bodyOf(html), roots = parsed.childNodes.filter(element)
     // Multiple-root fragments remain directly editable through their own content.html file.
     if (roots.length !== 1 || parsed.childNodes.some(node => node.nodeName === '#text' && (node as DefaultTreeAdapterTypes.TextNode).value.trim())) return undefined
@@ -123,6 +157,8 @@ export function componentProjectFiles(project: CourseProjectV10, resources: Docu
   const files: ComponentProjectFile[] = [{ path: 'pages', kind: 'framework',
     content: json({ pages: project.surfaces.map((surface, index) => ({ path: `${surfacePath(surface.title, index)}.json`, title: surface.title, kind: surface.kind })) }),
     note: '页面框架目录。surface.add 新增页面；现存页面路径可用 surface.move、surface.remove、surface.title，before 选择本次列出的页面路径，省略即末尾。身份与编号由软件维护。' }]
+  files.push({ path: 'project.json', kind: 'framework', content: json(project), binding: { kind: 'project-settings' },
+    note: '完整正式作者内容观察。可直接应用 title/background/designTokens/playback 设置补丁；身份、版本和编号由软件维护。对象、页面、资源和源码修改使用各内容路径或语义工具，保留未提供的设置。' })
   files.push({ path: 'theme.css', kind: 'style', content: project.theme?.css ?? '', binding: { kind: 'theme' },
     note: '整课主题源码；修改主题保留对象和人工 frame，资源仍来自本工程。' })
   Object.values(project.definitions).forEach((definition, index) => {
@@ -220,14 +256,9 @@ export function componentProjectFiles(project: CourseProjectV10, resources: Docu
     if (surface.kind === 'spatial') {
       const spatial = surface.spatial ?? { home: { x: 0, y: 0, zoom: 1 }, frames: [] }
       const objectPaths = Object.fromEntries(files.flatMap(file => file.target?.kind === 'instance' && (file.kind === 'data' || file.kind === 'html') ? [[file.target.instanceId, file.path]] : []))
-      const source = { home: spatial.home,
-        stops: spatial.frames.map(frame => ({ title: frame.title, pose: frame.pose, ...(frame.targetInstanceId ? { target: objectPaths[frame.targetInstanceId] } : {}) })),
-        ...(spatial.paths ? { paths: spatial.paths.map(path => ({ title: path.title, stops: path.frameIds.map(id => spatial.frames.findIndex(frame => frame.id === id) + 1),
-          objects: path.instanceIds?.map(id => objectPaths[id]), style: path.style })) } : {}),
-        ...(spatial.relations ? { relations: spatial.relations.map(relation => ({ from: objectPaths[relation.sourceInstanceId], to: objectPaths[relation.targetInstanceId], label: relation.label, kind: relation.kind })) } : {}),
-        ...(spatial.semanticZoom ? { semanticZoom: spatial.semanticZoom.map(rule => ({ objects: rule.instanceIds.map(id => objectPaths[id]), minZoom: rule.minZoom, maxZoom: rule.maxZoom, visible: rule.visible })) } : {}) }
-      files.push({ path: `${base}.spatial.json`, kind: 'data', content: json(source), binding: { kind: 'spatial', surfaceId: surface.id, objectPaths },
-        note: '空间镜头源文；stops 按镜头顺序，target/objects 使用本次观察的对象路径，paths.stops 使用本文件镜头序号。软件维护身份，修改镜头不重排对象。' })
+      const { source, refs } = observeSpatialSource(project, surface.id, objectPaths)
+      files.push({ path: `${base}.spatial.json`, kind: 'data', content: json(source), binding: { kind: 'spatial', surfaceId: surface.id, objectPaths, refs },
+        note: '空间镜头源文；保留已观察 ref 可重排镜头、路径和关系。新项省略 ref；target/objects 使用本次对象路径，paths.stops 使用已读镜头 ref，新镜头也可用本文件镜头序号。pose 可为 currentViewport，由当前空间视口提供。' })
     }
     if (surface.kind === 'flow') {
       const document = projectFlowDocument(project, surface.id)
@@ -250,4 +281,62 @@ export function componentProjectFiles(project: CourseProjectV10, resources: Docu
       ...(content !== null ? { content } : {}) })
   }
   return files
+}
+
+/** Resolve logical scope against the same canonical capture that produced natural file paths. */
+export function componentProjectScopeFiles(project: CourseProjectV10, files: ComponentProjectFile[], scope: ComponentProjectFileScope): ComponentProjectFile[] {
+  if (scope.kind === 'document') return files
+  const instances = new Set<string>(), definitions = new Set<string>(), assets = new Set<string>()
+  const visitDefinition = (id: string) => {
+    if (definitions.has(id)) return
+    definitions.add(id)
+    const implementation = project.definitions[id]?.implementation
+    if (implementation?.kind === 'source') {
+      sourceAssetIds(implementation).forEach(id => assets.add(id))
+      Object.values(sourceModuleBindings(implementation)).forEach(visitDefinition)
+    }
+  }
+  const visit = (id: string) => {
+    if (instances.has(id)) return
+    const instance = project.instances[id]
+    if (!instance) return
+    instances.add(id); visitDefinition(instance.definitionId)
+    const definition = project.definitions[instance.definitionId]
+    if (definition) componentAssetIds(instance, definition).forEach(id => assets.add(id))
+    if (instance.implementationOverride?.kind === 'source') Object.values(sourceModuleBindings(instance.implementationOverride)).forEach(visitDefinition)
+    instance.childIds?.forEach(visit)
+  }
+  if (scope.kind === 'instance') visit(scope.instanceId)
+  else {
+    project.surfaces.find(surface => surface.id === scope.surfaceId)?.childIds.forEach(visit)
+    for (const id of [...project.global.underlay, ...project.global.overlay]) {
+      const instance = project.instances[id]
+      if (instance && isComponentVisibleAtSurface(instance, scope.surfaceId)) visit(id)
+    }
+  }
+  for (const reference of Object.values(project.theme?.assets ?? {})) assets.add(reference.assetId)
+  if (project.background?.assetId) assets.add(project.background.assetId)
+  for (const surface of project.surfaces) {
+    if (scope.kind === 'surface' && surface.id !== scope.surfaceId) continue
+    if (scope.kind === 'surface' && surface.background?.assetId) assets.add(surface.background.assetId)
+    for (const state of surface.presentation?.states ?? []) {
+      if (scope.kind === 'surface' && state.background?.assetId) assets.add(state.background.assetId)
+      for (const [id, override] of Object.entries(state.overrides)) if (instances.has(id) && override.data !== undefined) {
+        const instance = project.instances[id], definition = project.definitions[instance.definitionId]
+        if (definition) componentAssetIds({ ...instance, data: override.data }, definition).forEach(id => assets.add(id))
+      }
+    }
+  }
+  return files.filter(file => {
+    if (file.target?.kind === 'instance') return instances.has(file.target.instanceId)
+    if (file.target?.kind === 'container') return scope.kind === 'surface' && file.target.container.kind === 'surface' && file.target.container.surfaceId === scope.surfaceId
+    const binding = file.binding
+    if (!binding) return false
+    if (binding.kind === 'project-settings') return false
+    if (binding.kind === 'theme') return true
+    if (binding.kind === 'definition' || binding.kind === 'definition-source') return definitions.has(binding.definitionId)
+    if (binding.kind === 'instance-source') return instances.has(binding.instanceId)
+    if (binding.kind === 'asset') return assets.has(binding.assetId)
+    return scope.kind === 'surface' && binding.surfaceId === scope.surfaceId
+  })
 }

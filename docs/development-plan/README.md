@@ -2,13 +2,13 @@
 
 链接按职责取用，不顺序通读全部文档。已注入的 AGENTS 无需重读。
 
-启动：读当前用户指定的执行入口；Root 读当前状态及本轮问题概览，再选择本批。实施者/T/reviewer 只读本包问题段落、直接源码和相关规则。任务板在实际协调前查，合同/历史证据在需要时查。
+启动：主执行者读当前指定入口、当前状态和必要问题段落，直接实施和自检；调用其他执行者时只提供相关范围、源码与约束。任务板在实际协调前查，合同和历史证据按需读取。
 
 | 用途 | 入口 |
 |---|---|
 | 当前基线、阶段与剩余 | [CURRENT_STATUS](CURRENT_STATUS.md) |
-| 当前实施唯一入口 | [核心体验统一实施包](20261008-core-experience-unified/README.md)，Owner 10月8日已明确启动；含执行计划/23工作包/启动提示词，实际派发与候选见任务板/当前状态 |
-| 原人员、费用与三路创作约束 | [核心体验原执行指令](20261007-content-revision/CORE_EXPERIENCE_EXECUTION_PROMPT.md)，新包完整继承 |
+| 当前唯一产品计划入口 | [核心体验统一实施包](20261008-core-experience-unified/README.md)：保留 §9＋§10 目标和原证据；本轮品牌／本地打包／清理按当前状态，不自动派发旧范围 |
+| 作者模型、费用与三路创作约束 | [核心体验原执行指令](20261007-content-revision/CORE_EXPERIENCE_EXECUTION_PROMPT.md)，这些约束保留；开发组织按工作协议 |
 | 问题选择与直接定位 | [问题概览](20261007-content-revision/CORE_EXPERIENCE_ISSUES.md#startup-overview)，只展开本批 |
 | 核心体验统一解决方案 | [统一方案](20261007-content-revision/CORE_EXPERIENCE_UNIFIED_SOLUTION.md)，含 Owner 决定、七批职责与原 HTML/Runtime 编辑闭环；决策依据，不是第二执行入口 |
 | 实际任务与写域 | [TASK_BOARD](TASK_BOARD.md)，按需读对应卡 |

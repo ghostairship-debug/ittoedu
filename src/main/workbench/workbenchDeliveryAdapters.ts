@@ -73,7 +73,7 @@ export async function resolveExportDestination(
     return null
   }
   const base = snapshot.binding.kind === 'file' ? path.dirname(snapshot.binding.path) : await preferredDirectory(scope)
-  const desired = requested ? path.resolve(base, requested) : path.join(base, suggestedName)
+  const desired = requested ? path.resolve(scope.workspaceRoot ?? base, requested) : path.join(base, suggestedName)
   if (!requested && snapshot.binding.kind === 'file' && scope.permission === 'workspace') {
     const bound = await fs.realpath(base)
     if (scope.workspaceRoot && !isInsideRoot(await fs.realpath(scope.workspaceRoot), bound)) {

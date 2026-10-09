@@ -22,7 +22,7 @@ import {
   Workflow,
 } from 'lucide-react'
 import { nanoid } from 'nanoid'
-import { useRef, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type {
   ArrowHead,
   FeatherMode,
@@ -44,7 +44,7 @@ import type {
 import { SharedShapeProperties } from './SharedShapeProperties'
 import { NativeColorPreviewContext } from './NativeColorPreview'
 import { SlideInputProperties, type SlideInputPropertiesCommands, type SlideInputPropertiesView } from './SlideInputProperties'
-import { formulaAstToAccessibleText } from '../../../shared/formulaLinear'
+import { FORMULA_SLOT, formulaAstToAccessibleText } from '../../../shared/formulaLinear'
 import { describeDocumentMath, parseDocumentMath } from '../../../shared/document/math'
 import { isVerticalWritingMode } from '../../../shared/textLayout'
 import type { TextRunEdit } from '../../../shared/textRuns'
@@ -68,7 +68,7 @@ import {
   type InteractionEditorProps,
 } from '../InteractionEditor'
 import { SimpleEntranceAnimationEditor } from '../SimpleEntranceAnimationEditor'
-import type { SlideSimpleEntranceAnimationConfig } from '../../course/simpleEntranceAnimation'
+import type { SlideSimpleEntranceAnimationConfig } from '../../course/v9SlideContentCommands'
 import { FlowSpatialInteractionUnavailableSection } from './FlowSpatialInteractionUnavailableSection'
 import {
   BufferedInput,
@@ -78,6 +78,8 @@ import {
   SelectField,
   TextContentTextarea,
   ToggleRow,
+  usePropertyDraftBindingKey,
+  usePropertyDraftFlush,
 } from './PropertyControls'
 import {
   ChartProperties,
@@ -454,10 +456,90 @@ export function TextProperties({
   )
 }
 
+/** The property control owns the existing editor draft; the captured Session callback owns the write. */
+function FormalFormulaPropertyEditor({ node, update, accessibilityAutomatic }: {
+  node: PropertiesFormulaView & { latex: string }
+  update(patch: PropertiesPatch): void | Promise<void>
+  accessibilityAutomatic: boolean
+}) {
+  const bindingKey = usePropertyDraftBindingKey()
+  const [draft, setDraft] = useState(node.latex), [error, setError] = useState('')
+  const [, setInputEpoch] = useState(0)
+  const resumeRequired = useRef(false)
+  const fresh = () => ({ key: bindingKey, baseline: node.latex, raw: node.latex, dirty: false, composing: false,
+    serial: 0, update, pending: undefined as Promise<boolean> | undefined })
+  const session = useRef(fresh())
+  useLayoutEffect(() => {
+    const owner = session.current
+    if (owner.dirty || owner.composing || owner.pending) {
+      if (owner.key === bindingKey) owner.update = update
+      return
+    }
+    session.current = fresh()
+    setDraft(node.latex)
+  }, [bindingKey, node.latex, update])
+  const reset = () => { resumeRequired.current = false; session.current = fresh(); setDraft(node.latex); setError('') }
+  const commit = (source = session.current.raw): boolean | Promise<boolean> => {
+    const owner = session.current
+    if (owner.pending) return owner.pending
+    if (resumeRequired.current || owner.composing) return false
+    if (!owner.dirty && source === owner.baseline) return true
+    if (owner.key !== bindingKey || node.latex !== owner.baseline && node.latex !== source) {
+      setError('公式草稿对应的目标或源文已改变；输入保留，请按 Esc 放弃后重试。')
+      return false
+    }
+    let accessibleText: string
+    try {
+      const parsed = parseDocumentMath(source)
+      if (source.includes(FORMULA_SLOT)) return false
+      accessibleText = accessibilityAutomatic ? describeDocumentMath(parsed) : node.accessibleText
+    } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); return false }
+    const serial = owner.serial
+    const finish = () => {
+      if (session.current !== owner) return true
+      owner.baseline = source
+      owner.dirty = owner.serial !== serial || owner.composing
+      setError(''); setInputEpoch(epoch => epoch + 1)
+      return !owner.dirty
+    }
+    const fail = (failure: unknown) => { setError(failure instanceof Error ? failure.message : String(failure)); return false }
+    try {
+      const result = owner.update({ latex: source, accessibleText })
+      if (!result) return finish()
+      const pending = Promise.resolve(result).then(() => { owner.pending = undefined; return finish() }, failure => {
+        owner.pending = undefined; return fail(failure)
+      })
+      owner.pending = pending
+      return pending
+    } catch (failure) { return fail(failure) }
+  }
+  usePropertyDraftFlush(() => commit(), {
+    hasDirty: () => resumeRequired.current || session.current.dirty || session.current.composing || Boolean(session.current.pending),
+    readDraft: () => ({ bindingKey: session.current.key, label: '公式 LaTeX', kind: 'text', raw: session.current.raw,
+      baseline: session.current.baseline, composing: resumeRequired.current || session.current.composing }),
+    restoreDraft: record => {
+      session.current.key = record.bindingKey; session.current.baseline = record.baseline ?? node.latex
+      session.current.raw = record.raw; session.current.dirty = true; resumeRequired.current = record.composing
+      setDraft(record.raw)
+      if (record.composing) setError('恢复的输入法草稿尚未完成，请继续编辑后再应用。')
+    },
+  })
+  return <><FormulaAuthoringEditor node={node} latexSource={node.latex} draftSource={draft}
+    onCommit={() => { throw new Error('公式属性保留正式 LaTeX 源文') }}
+    onCommitLatex={source => { void commit(source) }} onCancel={reset}
+    onBeginEdit={() => { if (!session.current.dirty && !session.current.composing && !session.current.pending) session.current = fresh() }}
+    onDraftChange={next => {
+      resumeRequired.current = false; session.current.raw = next.source; session.current.dirty = next.source !== session.current.baseline
+      session.current.serial++; setDraft(next.source); setError('')
+    }}
+    onCompositionChange={composing => { resumeRequired.current = false; session.current.composing = composing; setInputEpoch(epoch => epoch + 1) }} />
+    {error && <p role="alert" className="property-hint">{error}</p>}</>
+}
+
 function FormulaProperties({ node, update, formulaAuthoring }: {
   formulaAuthoring?: FormulaAuthoringBinding
   node: PropertiesFormulaView
-  update(patch: PropertiesPatch): void
+  update(patch: PropertiesPatch): void | Promise<void>
 }) {
   const generatedAccessibleText = node.latex === undefined
     ? node.ast ? formulaAstToAccessibleText(node.ast) : node.accessibleText
@@ -469,7 +551,7 @@ function FormulaProperties({ node, update, formulaAuthoring }: {
   return (
     <section className="property-section" data-testid="formula-properties">
       <h3 className="property-title"><Sigma size={14} />公式</h3>
-      <FormulaAuthoringEditor
+      {node.latex !== undefined && !formulaAuthoring ? <FormalFormulaPropertyEditor node={{ ...node, latex: node.latex }} update={update} accessibilityAutomatic={accessibilityAutomatic} /> : <FormulaAuthoringEditor
         node={node}
         latexSource={node.latex}
         onCommitLatex={(latex, accessibleText) => update({ latex, accessibleText })}
@@ -478,7 +560,7 @@ function FormulaProperties({ node, update, formulaAuthoring }: {
           accessibleText,
         } as PropertiesPatch)}
         {...formulaAuthoring}
-      />
+      />}
       <BufferedInput
         label="无障碍描述"
         value={node.accessibleText}

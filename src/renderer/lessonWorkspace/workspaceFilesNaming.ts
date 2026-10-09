@@ -1,3 +1,4 @@
+import { nativeProjectFilename } from '../../shared/nativeProjectFile'
 import type { WorkspaceListItem } from '../../shared/workbench/workspaceFiles'
 
 export type CreateFileType = 'create-markdown' | 'create-course' | 'create-text' | 'mkdir'
@@ -11,8 +12,8 @@ export function computeDefaultName(type: CreateFileType, existingItems: Workspac
       ext = '.md'
       break
     case 'create-course':
-      base = '新建 H5 演示'
-      ext = '.h5lesson'
+      base = '新建 果铃工程'
+      ext = '.glx'
       break
     case 'create-text':
       base = '新建文本文档'
@@ -43,7 +44,7 @@ export function uniqueFilename(base: string, ext: string, existingItems: Workspa
   }
 }
 
-const TYPED_EXTENSION: Partial<Record<CreateFileType, string>> = { 'create-markdown': '.md', 'create-course': '.h5lesson', 'create-text': '.txt' }
+const TYPED_EXTENSION: Partial<Record<CreateFileType, string>> = { 'create-markdown': '.md', 'create-course': '.glx', 'create-text': '.txt' }
 
 export function normalizeNewFilename(type: CreateFileType, raw: string): string {
   let filename = raw.trim()
@@ -53,9 +54,7 @@ export function normalizeNewFilename(type: CreateFileType, raw: string): string 
   if (type === 'create-markdown' && !/\.md$/i.test(filename)) {
     filename += '.md'
   }
-  if (type === 'create-course' && !/\.h5lesson$/i.test(filename)) {
-    filename += '.h5lesson'
-  }
+  if (type === 'create-course') filename = nativeProjectFilename(filename)
   if (type === 'create-text') {
     const dot = filename.lastIndexOf('.')
     if (dot === -1 || dot === filename.length - 1) {

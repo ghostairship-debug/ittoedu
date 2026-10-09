@@ -39,6 +39,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { TaskBrowserViewport } from './browserEmbedded/TaskBrowserViewport'
 import type { LessonMaterialTarget } from '../../shared/materialExtraction'
 import type { LessonAuthoringMaterialSelection } from '../../shared/lessonAuthoring'
+import { currentSave, saveFact } from '../../core/tools/modelToolResult'
 
 export interface ExecutionAssistantHandle { preserveDraft(): Promise<void> }
 type BrowserControlState = Awaited<ReturnType<NonNullable<ExecutionDesktopAPI['browserControl']>>>
@@ -851,7 +852,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     const clicked = !retry ? captureRendererTiming() : undefined
     const selected = activeRef.current
     if (!api || !selected || submittingRef.current || attachmentBusy || !retry && !continueRun && !draftRef.current.trim() && attachmentsRef.current.length === 0) return
-    if (!configured) { setError('尚未配置可用的对话模型。请先在模型设置中选择连接、模型和账号。'); return }
+    if (!configured && mode !== 'adjust') { setError('尚未配置可用的对话模型。请先在模型设置中选择连接、模型和账号。'); return }
     submittingRef.current = true; setBusy(true); setError('')
     let request: ExecutionSendInput | undefined, sendInvoked = false
     try {
@@ -880,6 +881,18 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           ...(source.permission ? { permission: source.permission } : {}), ...(source.contentOutput ? { contentOutput: source.contentOutput } : {}),
           ...(source.materials ? { materials: structuredClone(source.materials) } : {}) }
       }
+      else if (mode === 'adjust') {
+        const original = runRef.current
+        if (!original || !['queued', 'running'].includes(original.status)) throw new Error('当前任务已结束，补充输入已保留，请作为新任务发送')
+        if (attachmentsRef.current.length || permission !== (original.input.permission ?? DEFAULT_PERMISSION_MODE))
+          throw new Error('新增材料或权限请加入队列作为新任务。')
+        await persist()
+        const current = activeRef.current
+        if (!current || current.conversationId !== selected.conversationId) throw new Error('会话已切换，消息没有发送。')
+        // Main owns the original run's documents, provider and authority. A text adjustment captures none anew.
+        request = { workspaceId: current.workspaceId, conversationId: current.conversationId, submissionId: crypto.randomUUID(),
+          expectedRevision: current.revision, text: draftRef.current, documents: [], attachments: [], mode: 'adjust', permission }
+      }
       else {
         const materials = await captureMaterials?.()
         const pinned = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
@@ -898,10 +911,12 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           ...(materials ? { materials: structuredClone(materials) } : {}) }
       }
       // Owner 2026-09-24: no service notice. The route shown in the model menu is frozen with the task.
-      const shownSettings: ExecutionSettingsView | null = settingsAPI ? await settingsAPI.read() : settings
-      if (!shownSettings) return
-      request.disclosedSettings = disclosedExecutionSettings(shownSettings)
-      setSettings(shownSettings)
+      if (mode !== 'adjust') {
+        const shownSettings: ExecutionSettingsView | null = settingsAPI ? await settingsAPI.read() : settings
+        if (!shownSettings) return
+        request.disclosedSettings = disclosedExecutionSettings(shownSettings)
+        setSettings(shownSettings)
+      }
       if (activeRef.current?.conversationId !== selected.conversationId || activeRef.current.workspaceId !== selected.workspaceId) {
         setError('会话已切换，消息没有发送；原草稿仍保留。'); return
       }
@@ -1128,7 +1143,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       const receipt = tool?.state === 'returned' && tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
         ? tool.result.data as { path?: unknown; saved?: unknown; status?: unknown; dirty?: unknown } : null
       const saved = tool?.call.name === 'file.write' && receipt?.saved === true
-        || tool?.call.name === 'file.save' && receipt?.status === 'saved' && receipt.dirty === false
+        || !!tool && currentSave(saveFact(tool.call.name, tool.result))
       if (!saved || typeof receipt?.path !== 'string') throw new Error('这份文件的保存位置暂不可读取。')
       dispatchRevealInExplorer({ path: receipt.path, kind: 'file', open: true })
     }).catch(() => {
@@ -1462,6 +1477,9 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
                 {taskBrowser.state === 'human' ? '完成操作，继续任务' : taskBrowser.state === 'transition' ? '正在切换浏览器…' : '接管当前网页'}</button></>}
             {run && ['queued', 'running', 'stopping'].includes(run.status) && <button type="button" onClick={() => void stop()} disabled={busy || run.status === 'stopping'}>{run.status === 'stopping' ? '正在停止…' : '停止当前'}</button>}
             {run?.status === 'running' && submissions.some(item => item.state === 'queued') && <button type="button" disabled={busy} onClick={() => void stop(true)}>停止并暂停后续</button>}
+            {run && ['queued', 'running'].includes(run.status) && <button type="button" onClick={() => { composerRef.current?.focus(); void submit('adjust') }}
+              disabled={!active || busy || attachmentBusy || !draft.trim() || attachments.length > 0 || permission !== (run.input.permission ?? DEFAULT_PERMISSION_MODE)}
+              title="在原任务的范围内继续；新增材料或权限请加入队列。">调整当前任务</button>}
             <button type="button" className="primary-button" onClick={() => { composerRef.current?.focus(); void submit('queue') }} disabled={!active || busy || attachmentBusy || (!draft.trim() && attachments.length === 0)}>{run && ['queued', 'running', 'stopping'].includes(run.status) ? '加入队列' : '发送'}</button>
           </div>
         </div>

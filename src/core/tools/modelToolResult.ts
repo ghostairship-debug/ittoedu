@@ -1,6 +1,6 @@
 import type { DocumentOperationResult } from '../../shared/workbench/document'
 import type { ToolResult } from '../../shared/workbench/tools'
-import type { SaveReceipt } from '../../shared/workbench/toolPorts'
+import type { ExportReceipt, SaveReceipt } from '../../shared/workbench/toolPorts'
 import { agentFileMutationNames } from './AgentFileTools'
 import type { ContentApplyRequest, ContentApplyResult, ContentApplySource, ContentObjectDraft } from '../contentApply/planning/types'
 import type { ComponentDefinition, ComponentEdit, ComponentImplementation } from '../../shared/contracts/component-platform'
@@ -106,6 +106,11 @@ function projectInput(input: ContentApplyRequest): unknown {
 
 /** Model replies describe committed paths; normalized document values stay in the host receipt. */
 export function modelToolResult(toolName: string, result: ToolResult): ToolResult {
+  // Pixel references are host-only transport input, not authored text or model capabilities.
+  if (result.kind === 'read' && result.images) {
+    const { images: _images, ...textResult } = result
+    result = textResult
+  }
   if (result.kind === 'document-operation') return { ...result, result: projectReceipt(result.result) }
   // Only this write tool wraps its host receipt in read.data. Explicit reads are authored content.
   if (toolName === 'project.apply' && result.kind === 'read' && contentApplyResult(result.data)) {
@@ -154,14 +159,24 @@ export function applicationEventFacts(name: string, result?: ToolResult) {
 }
 
 export function saveFact(name: string, result?: ToolResult): SaveReceipt | null {
-  if ((name !== 'file.save' && name !== 'project.save') || result?.kind !== 'read' || !record(result.data)) return null
+  if (!['file.save', 'project.save', 'task.delivery'].includes(name) || result?.kind !== 'read' || !record(result.data)) return null
   const data = result.data
   return data.status === 'saved' && typeof data.documentId === 'string' && revision(data.savedRevision)
     && revision(data.currentRevision) && typeof data.dirty === 'boolean'
-    && (name !== 'project.save' || typeof data.path === 'string' && typeof data.epoch === 'string')
+    && (name === 'file.save' || typeof data.path === 'string' && typeof data.epoch === 'string')
     ? data as unknown as SaveReceipt : null
 }
 export const currentSave = (fact: SaveReceipt | null): boolean => !!fact && !fact.dirty && fact.savedRevision === fact.currentRevision
+
+export function exportFact(name: string, result?: ToolResult): ExportReceipt | null {
+  if (!['document.export', 'task.delivery'].includes(name) || result?.kind !== 'read' || !record(result.data)) return null
+  const data = result.data
+  return (data.status === 'written' || data.status === 'generated') && typeof data.documentId === 'string'
+    && typeof data.epoch === 'string' && typeof data.format === 'string' && revision(data.exportedRevision)
+    && revision(data.currentRevision) && (data.files === undefined || Array.isArray(data.files)) ? data as unknown as ExportReceipt : null
+}
+export const currentExport = (fact: ExportReceipt | null): boolean => !!fact && fact.status === 'written'
+  && fact.exportedRevision === fact.currentRevision
 
 /** Lookup proves the transaction, never runtime usability. Preserve the original apply diagnostics/source. */
 export function reconciledToolResult(name: string, previous: ToolResult | undefined, receipt: ToolResult): ToolResult {
@@ -207,10 +222,20 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
     if (document.status !== 'applied' && document.status !== 'unchanged')
       return { status: 'failed', message: typeof document.message === 'string' ? document.message : '文件文档事务未提交' }
   }
+  if(fileMutations.has(name)&&data.operation&&typeof data.operation==='object'
+    &&(data.operation as {status?:unknown}).status==='success')return {status:'written',message:'文件操作已完成'}
+  if(fileMutations.has(name)&&data.saved===true&&data.dirty!==true&&typeof data.path==='string')
+    return {status:'written',message:'文件当前内容已保存'}
   const saved = saveFact(name, result)
   if (saved) return { status: 'saved', message: currentSave(saved) ? '文件已保存' : '文件已保存到原版本，期间的新修改仍未保存' }
   if (name === 'file.save' && data.status === 'saved') return { status: 'saved', message: data.dirty === true ? '文件已保存到原版本，期间的新修改仍未保存' : '文件已保存' }
-  if (name === 'project.save') return { status: 'failed', message: typeof data.reason === 'string' ? data.reason : '当前课件保存尚未确认' }
+  if (name === 'file.save' || name === 'project.save') return { status: 'failed', message: typeof data.reason === 'string' ? data.reason : '当前文档保存尚未确认' }
+  if (name === 'task.delivery') {
+    const exported = exportFact(name, result)
+    if (currentExport(exported)) return { status: 'written', message: '导出文件已写入' }
+    if (exported?.status === 'generated') return { status: 'failed', message: '导出内容已生成，但尚未写入交付文件' }
+    return { status: 'failed', message: typeof data.reason === 'string' ? data.reason : '当前文档交付尚未完成' }
+  }
   if (name === 'artifact.save') {
     if (data.status === 'written') return { status: 'written', message: '作业成果已保存为新文件' }
     if (data.status === 'unknown') return { status: 'unknown', message: '成果交付回执未知，请核对目标文件，不要重试同一操作' }
@@ -223,7 +248,7 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
     return { status: 'failed', message: data.status === 'failed' ? '构建检查未通过，请读取构建日志' : '构建检查已取消' }
   }
   if (name === 'web.search' || name === 'web.open' || name === 'mcp.discover' || name === 'mcp.invoke'
-    || name === 'media.start' || name === 'compute.run' || name === 'delegate.start'
+    || name === 'media.start' || name === 'compute.run' || name === 'delegate.start' || name === 'local.run' || name === 'delegate.readonly'
     || name === 'image.search' || name === 'image.preview' || name === 'image.fetch' || name === 'asset.search'
     || name === 'asset.use' || name === 'asset.save') {
     const message = typeof data.reason === 'string' ? data.reason.slice(0, 240) : '外部能力未返回可用成果'
@@ -232,9 +257,11 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
       return { status: 'pending', message: '受限计算作业仍在运行，请等待并读取成果' }
     if (name === 'delegate.start' && (data.status === 'preparing' || data.status === 'running' || data.status === 'ready'))
       return { status: 'pending', message: '外部委派须等待并回读封存成果' }
+    if ((name === 'local.run' || name === 'delegate.readonly') && (data.status === 'preparing' || data.status === 'running' || data.status === 'ready'))
+      return { status: 'pending', message: name === 'local.run' ? '本地作业需等待终态并读取退出结果和所需成果' : '只读子任务需等待终态并回读结果' }
     if (data.status === 'not-configured' || data.status === 'rejected' || data.status === 'failed'
       || data.status === 'stopped' || data.status === 'unconfigured' || data.status === 'access-required' || data.status === 'needs-material-reader'
-      || (name === 'compute.run' || name === 'delegate.start') && (data.status === 'cancelled' || data.status === 'unapplied'))
+      || (name === 'compute.run' || name === 'delegate.start' || name === 'local.run' || name === 'delegate.readonly') && (data.status === 'cancelled' || data.status === 'unapplied'))
       return { status: 'failed', message }
   }
   if (name === 'image.generate' || name === 'image.edit') {
@@ -253,5 +280,5 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
 
 export const toolFailed = (name: string, result?: ToolResult) => result?.kind === 'error' ||
   result?.kind === 'document-operation' && result.result.status !== 'applied' && result.result.status !== 'unchanged' ||
-  name === 'project.save' && !!saveFact(name, result) && !currentSave(saveFact(name, result)) ||
+  !!saveFact(name, result) && !currentSave(saveFact(name, result)) ||
   ['failed', 'unknown', 'pending', 'stopped'].includes(serviceToolOutcome(name, result)?.status ?? '')

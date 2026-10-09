@@ -59,6 +59,27 @@ describe('M29 public research boundary', () => {
     expect(await service.open({ runId: 'run', url: 'https://example.com/article' })).toMatchObject({ status: 'rejected' })
     expect(fetch).toHaveBeenCalledTimes(2)
   })
+
+  it('preserves the observed client challenge as an unavailable response without claiming target body completion', async () => {
+    const message = 'A required part of this site couldn’t load. This may be due to a browser extension, network issues, or browser settings.'
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ url: 'https://pypi.org/project/agent-web-search-mcp/0.7.3/', status: 200, contentType: 'text/html',
+        bytes: html(`<html><head><title>Client Challenge</title></head><body><p>${message}</p></body></html>`) })
+      .mockResolvedValueOnce({ url: 'https://example.com/article', status: 200, contentType: 'text/html',
+        bytes: html(`<html><head><title>Challenge documentation</title></head><body><p>${message}</p><p>Actual explanation.</p></body></html>`) })
+    const service = new WebResearchService({ fetch })
+    service.beginRun('challenge')
+    try {
+      const result = await service.open({ runId: 'challenge', url: 'https://pypi.org/project/agent-web-search-mcp/0.7.3/' })
+      expect(result).toMatchObject({ status: 'access-required', reason: expect.stringContaining('未取得请求的正文'),
+        response: { title: 'Client Challenge', text: message, contentType: 'text/html', httpStatus: 200 } })
+      expect(result).not.toHaveProperty('source')
+      expect(result).not.toHaveProperty('bodyComplete')
+      expect(await service.open({ runId: 'challenge', url: 'https://example.com/article' }))
+        .toMatchObject({ status: 'opened', source: { bodyComplete: true }, text: expect.stringContaining('Actual explanation.') })
+      expect(fetch).toHaveBeenCalledTimes(2)
+    } finally { await service.stopRun('challenge') }
+  })
 })
 
 it('opens more than forty sources and accepts the page limits advertised by the tools', async () => {

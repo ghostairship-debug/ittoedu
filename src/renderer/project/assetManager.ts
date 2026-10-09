@@ -1,10 +1,7 @@
-import { createImageAssetMetadata, assertSupportedImage, safeOriginalFilename } from '../../core/tools/imageAssetMetadata'
+import { createImageAssetMetadata, assertSupportedImage } from '../../core/tools/imageAssetMetadata'
 export { assertSupportedImage } from '../../core/tools/imageAssetMetadata'
-import { nanoid } from 'nanoid'
-import {
-  SUPPORTED_AUDIO_MIME_TYPES,
-  SUPPORTED_VIDEO_MIME_TYPES,
-} from '@/shared/constants'
+import { createMediaAssetMetadata, type MediaMetadata } from '../../core/tools/mediaResource'
+export type { MediaMetadata } from '../../core/tools/mediaResource'
 import { UserFacingError } from '@/shared/errors'
 import type { SelectedImageResult, SelectedMediaResult } from '@/shared/ipcTypes'
 import type {
@@ -13,15 +10,6 @@ import type {
   RuntimeAssetMap,
 } from '@/shared/contracts/media-v1/types'
 import type { BlobUrlRegistry } from './blobUrlRegistry'
-
-const MEDIA_EXTENSION: Record<string, string> = {
-  'audio/mpeg': 'mp3',
-  'audio/ogg': 'ogg',
-  'audio/wav': 'wav',
-  'audio/mp4': 'm4a',
-  'video/mp4': 'mp4',
-  'video/webm': 'webm',
-}
 
 export interface ImageDimensions {
   width: number
@@ -35,12 +23,6 @@ export interface ImportedImageAsset {
 }
 
 export type ImportedMediaAsset = ImportedImageAsset
-
-export interface MediaMetadata {
-  duration: number
-  width?: number
-  height?: number
-}
 
 export async function assetBytesSha256(bytes: Uint8Array): Promise<string> {
   if (!globalThis.crypto?.subtle) {
@@ -95,43 +77,9 @@ export function createMediaAssetImport(
   metadata: MediaMetadata,
   options: Pick<ImportImageOptions, 'id' | 'idFactory' | 'blobUrlRegistry'> = {},
 ): ImportedMediaAsset {
-  const supported = kind === 'audio'
-    ? (SUPPORTED_AUDIO_MIME_TYPES as readonly string[])
-    : (SUPPORTED_VIDEO_MIME_TYPES as readonly string[])
-  if (!supported.includes(input.mimeType) || input.bytes.byteLength === 0) {
-    throw new UserFacingError(
-      `${kind === 'audio' ? '声音' : '视频'}导入失败`,
-      '所选媒体类型不受支持或文件为空。',
-      kind === 'audio' ? '请选择 MP3、OGG、WAV 或 M4A。' : '请选择 MP4 或 WebM。',
-    )
-  }
-  if (!Number.isFinite(metadata.duration) || metadata.duration < 0) {
-    throw new UserFacingError(
-      '媒体读取失败',
-      '无法读取有效的媒体时长。',
-      '请重新编码文件后再试。',
-    )
-  }
-  const id = options.id ?? `asset_${(options.idFactory ?? nanoid)()}`
-  const extension = MEDIA_EXTENSION[input.mimeType]
-  if (!extension || !/^[A-Za-z0-9._-]+$/.test(id)) {
-    throw new UserFacingError('媒体导入失败', '素材 ID 或媒体扩展名无效。', '请重新选择文件。')
-  }
-  const bytes = Uint8Array.from(input.bytes)
-  const meta: AssetMeta = {
-    id,
-    kind,
-    filename: safeOriginalFilename(input.name),
-    mimeType: input.mimeType,
-    path: `assets/${id}.${extension}`,
-    byteLength: bytes.byteLength,
-    duration: metadata.duration,
-    ...(kind === 'video' && metadata.width && metadata.height
-      ? { width: metadata.width, height: metadata.height }
-      : {}),
-  }
-  const url = options.blobUrlRegistry?.create(`asset:${id}`, bytes, input.mimeType)
-  return { meta, bytes, ...(url === undefined ? {} : { url }) }
+  const prepared = createMediaAssetMetadata(input, kind, metadata, options)
+  const url = options.blobUrlRegistry?.create(`asset:${prepared.meta.id}`, prepared.bytes, input.mimeType)
+  return { ...prepared, ...(url === undefined ? {} : { url }) }
 }
 
 export async function readMediaMetadata(

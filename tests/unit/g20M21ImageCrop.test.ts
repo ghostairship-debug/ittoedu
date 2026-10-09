@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { commitCrop, cropGeometry, dragCropBox, type CropImage, type CropRect } from '../../src/renderer/editing/crop/imageCrop'
+import { commitCrop, cropGeometry, dragCropBox, type CropImage, type CropRect } from '../../src/shared/imageCrop'
 
 const image = (overrides: Partial<CropImage & { frame: CropRect }> = {}): CropImage & { frame: CropRect } => ({
   frame: { x: 100, y: 50, width: 320, height: 180 }, crop: { left: 0, top: 0, right: 0, bottom: 0 }, fit: 'contain', cropX: 0.5, cropY: 0.5,

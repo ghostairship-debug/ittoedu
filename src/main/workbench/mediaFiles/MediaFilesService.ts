@@ -9,6 +9,13 @@ export interface MediaFileOwner {
 }
 function isPdf(bytes: Uint8Array): boolean { return Buffer.from(bytes.subarray(0, 1024)).includes(Buffer.from('%PDF-')) }
 async function inspect(bytes: Uint8Array): Promise<MediaFileContent> { return isPdf(bytes) ? inspectPdfFile(bytes) : inspectImageFile(bytes) }
+export async function prepareMediaFileContent(bytes: Uint8Array, operations: readonly MediaFileOperation[], signal?: AbortSignal): Promise<MediaFileContent> {
+  const parsed = operations.map(operation => mediaFileOperationSchema.parse(operation))
+  signal?.throwIfAborted()
+  const content = parsed.length ? isPdf(bytes) ? await editPdfFile(bytes, parsed, signal) : await editImageFile(bytes, parsed, signal) : await inspect(bytes)
+  signal?.throwIfAborted()
+  return content
+}
 
 /** Format mechanics have no filesystem writer and do not own another document history. */
 export class MediaFilesService {
@@ -20,10 +27,9 @@ export class MediaFilesService {
     return { binding, content }
   }
   async preview(binding: FileArtifactBinding, operations: readonly MediaFileOperation[], signal?: AbortSignal): Promise<MediaFileSnapshot> {
-    const parsed = operations.map(operation => mediaFileOperationSchema.parse(operation))
     signal?.throwIfAborted()
     const bytes = await this.owner.read(binding, signal)
-    const content = isPdf(bytes) ? await editPdfFile(bytes, parsed, signal) : await editImageFile(bytes, parsed, signal)
+    const content = await prepareMediaFileContent(bytes, operations, signal)
     signal?.throwIfAborted()
     return { binding, content }
   }
@@ -31,7 +37,7 @@ export class MediaFilesService {
     const prepared = await this.preview(binding, operations, signal)
     if (!operations.length) return prepared
     signal?.throwIfAborted()
-    const saved = await this.owner.replace(binding, prepared.content.bytes, signal)
+    const saved = await this.owner.replace(prepared.binding, prepared.content.bytes, signal)
     // Reopen the actual published file. Preview bytes alone never count as a save.
     return this.open(saved, signal)
   }

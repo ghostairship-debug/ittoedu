@@ -2,7 +2,7 @@ import type { DocumentOperationResult } from './document'
 import type { ToolTarget } from './tools'
 
 /** Host-resolved addresses only. Provider arguments carry opaque target handles. */
-export type EditTarget = Extract<ToolTarget, { kind: 'markdown-range' | 'html-author-field' | 'course-instance' | 'course-object' | 'flow-block' | 'flow-range' }>
+export type EditTarget = Extract<ToolTarget, { kind: 'markdown-range' | 'html-author-field' | 'course-instance' | 'text-selection' | 'course-object' | 'flow-block' | 'flow-range' }>
 export interface BeginEditSession {
   runId: string
   editId: string

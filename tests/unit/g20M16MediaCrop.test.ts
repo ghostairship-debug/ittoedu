@@ -2,10 +2,11 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { createElement } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { flowMediaCropGeometry, flowMediaCropPatch } from '@/shared/flowMediaCrop'
-import { clampCrop } from '@/renderer/editing/crop/imageCrop'
+import { clampCrop } from '@/shared/imageCrop'
 import { FlowMediaCropEditor } from '@/renderer/ui/flow/FlowMediaCropEditor'
 import { FlowPaperMedia } from '@/renderer/ui/flow/FlowPaperMedia'
 import type { FlowMediaBlock } from '@/shared/contracts/course-project-v9/types'
+import { createImageData } from '@/components/image/data'
 
 afterEach(cleanup)
 
@@ -62,15 +63,19 @@ it('matches Native edge bounds near 98 percent and preserves crop on body to Nat
 
 it('keeps the original asset and commits crop exactly once only on confirm', () => {
   const onConfirm = vi.fn(), onCancel = vi.fn()
-  const view = render(createElement(FlowMediaCropEditor, { block, url: 'asset://original', onConfirm, onCancel }))
+  const imageData = { ...createImageData('original'), crop: clampCrop(block.crop!) }
+  const instance = { id: 'photo', definitionId: 'guoling.image', data: imageData }
+  const view = render(createElement(FlowMediaCropEditor, { instance, imageData, url: 'asset://original', onConfirm, onCancel }))
   fireEvent.change(screen.getByLabelText('左裁剪'), { target: { value: '0.2' } })
   fireEvent.click(screen.getByRole('button', { name: '取消' }))
   expect(onCancel).toHaveBeenCalledOnce()
   expect(onConfirm).not.toHaveBeenCalled()
-  view.rerender(createElement(FlowMediaCropEditor, { block, url: 'asset://original', onConfirm, onCancel }))
+  view.rerender(createElement(FlowMediaCropEditor, { instance, imageData, url: 'asset://original', onConfirm, onCancel }))
   fireEvent.change(screen.getByLabelText('左裁剪'), { target: { value: '0.2' } })
   fireEvent.click(screen.getByRole('button', { name: '确认裁剪' }))
   expect(onConfirm).toHaveBeenCalledOnce()
   expect(onConfirm.mock.calls[0]?.[0]).toMatchObject({ crop: { left: 0.2, top: 0.2, right: 0.3, bottom: 0.1 } })
   expect(block.assetId).toBe('original')
+  expect(imageData.assetId).toBe('original')
+  expect(imageData.crop).toEqual(block.crop)
 })

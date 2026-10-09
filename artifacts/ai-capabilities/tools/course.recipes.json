@@ -1,0 +1,19 @@
+{
+  "description": "读取现有教学配方及各正文槽位的名称、说明和默认示例；与人工界面共用同一目录。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "教学配方目录",
+    "targetKinds": [
+      "document"
+    ]
+  },
+  "name": "course.recipes",
+  "version": 1
+}

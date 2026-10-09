@@ -2,10 +2,10 @@ import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { z } from 'zod'
 import type { DocumentRegistry } from '../../../core/documents/DocumentRegistry'
-import type { DocumentToolGateway } from '../../../core/tools/DocumentToolGateway'
+import { documentSnapshotFacts, type DocumentToolGateway } from '../../../core/tools/DocumentToolGateway'
 import { applicationEventFacts, committedFact, contentApplyFact, currentSave, modelToolResult,
   operationFact, saveFact, serviceToolOutcome, toolFailed } from '../../../core/tools/modelToolResult'
-import { agentFileMutationNames, agentFileTools, isAgentFileTool, type AgentFileContext, type AgentFileMutationName,
+import { AgentFileMissingParent, agentFileMutationNames, agentFileTools, isAgentFileTool, type AgentFileContext, type AgentFileMutationName,
   type AgentFileOutcome, type AgentFileToolName } from '../../../core/tools/AgentFileTools'
 import { createCourseFromHtmlInputSchema, createCourseFromHtmlTool } from '../../../core/tools/HtmlImportTools'
 import { toolFamilies } from '../../../core/tools/ToolCatalog'
@@ -94,7 +94,7 @@ const record = (value: unknown): value is Record<string, unknown> => !!value && 
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
   : record(value) ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value
 const callDigest = (name: string, input: unknown) => createHash('sha256').update(JSON.stringify([name, canonical(input)])).digest('hex')
-const failure = (code: string, message: string): ToolResult => ({ kind: 'error', code, message })
+const failure = (code: string, message: string, data?: unknown): ToolResult => ({ kind: 'error', code, message, ...(data !== undefined ? { data } : {}) })
 function summarize(name: string, result: ToolResult): OperationSummary {
   const receipt = operationFact(name, result), apply = contentApplyFact(name, result), saved = saveFact(name, result)
   const outcome = serviceToolOutcome(name, result)
@@ -391,11 +391,11 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[] = [{ type: 'text', text: JSON.stringify(publicResult) }]
     if (replayed) content.push({ type: 'text', text: '这是此前同一调用的正式回执：上次回复没有送达，本次未重复执行。' })
     let imageMissing = false
-    if (result.kind === 'read' && record(result.data) && record(result.data.image) && typeof result.data.image.resourceId === 'string'
-      && ['image/png', 'image/jpeg', 'image/webp'].includes(String(result.data.image.mimeType))) {
+    if (result.kind === 'read' && result.images?.length) {
       try {
-        const resource = await this.options.gateway.readObservationResource(runId, result.data.image.resourceId)
-        content.push({ type: 'image', data: Buffer.from(resource.bytes).toString('base64'), mimeType: resource.mimeType })
+        const images = await this.options.gateway.prepareResultImages(runId, result)
+        this.assertActive(session, runId)
+        for (const image of images) content.push({ type: 'image', data: Buffer.from(image.bytes).toString('base64'), mimeType: image.mimeType })
       } catch {
         imageMissing = true
         content.push({ type: 'text', text: '图片资源未能读取或授权已失效；本次结果只有身份元数据，不能据此声称已看见画面。' })
@@ -420,7 +420,15 @@ export class ExternalMcpService implements ResidentMcpHandler {
         session.listChanged = true
         return { kind: 'read', data: { loaded: families.filter(family => available.some(item => item.family === family)), available } }
       }
-      if (!tool.read && session.permission === 'ask' && tool.kind !== 'file' && tool.kind !== 'course'
+      const artifact = tool.name === 'artifact.save' ? await this.options.gateway.preflightArtifactSave(runId, input) : undefined
+      if (artifact?.approvalRequired) {
+        const reason = artifact.outsideWorkspace ? 'outside-workspace' : 'ask'
+        if (!await this.options.confirm({ clientName: session.clientName, label: tool.label, reason, paths: [artifact.path] }))
+          return failure('approval-denied', '用户未批准此次修改，未执行。')
+        this.assertActive(session, runId)
+        this.options.gateway.authorizeOperationPaths(runId, ticket, [artifact.path])
+      }
+      if (!artifact && !tool.read && session.permission === 'ask' && tool.kind !== 'file' && tool.kind !== 'course'
         && !await this.options.confirm({ clientName: session.clientName, label: tool.label, reason: 'ask' })) return failure('approval-denied', '用户未批准此次修改，未执行。')
       this.assertActive(session, runId)
       if (tool.kind === 'gateway') return await this.options.gateway.execute(runId, ticket, { name: tool.name, input })
@@ -438,7 +446,8 @@ export class ExternalMcpService implements ResidentMcpHandler {
         },
         documentTarget: documentId => this.options.gateway.issueTarget(runId, documentId, { kind: 'document' }),
       })
-    } catch (cause) { return failure('tool-failed', cause instanceof Error ? cause.message : String(cause)) }
+    } catch (cause) { return failure('tool-failed', cause instanceof Error ? cause.message : String(cause),
+      cause instanceof AgentFileMissingParent ? { pendingCreationPath: cause.pendingCreationPath } : undefined) }
   }
   private async file(session: Session, runId: string, ticket: string, tool: HostTool, input: unknown, approve: boolean): Promise<ToolResult> {
     const name = tool.name as AgentFileToolName
@@ -452,10 +461,10 @@ export class ExternalMcpService implements ResidentMcpHandler {
     }
     const outcome = await this.options.files.execute(context, name, input, this.options.gateway.operationIdentity(runId, ticket))
     if (!outcome.opened) return { kind: 'read', data: outcome.data }
-    const writable = await this.options.gateway.attachRunDocument(runId, outcome.opened.documentId, outcome.opened.writable, 'select')
-    const target = await this.options.gateway.issueTarget(runId, outcome.opened.documentId, { kind: 'document' })
+    const opened = await this.options.gateway.completeOpenedDocument(runId, outcome.opened, { selection: 'select' })
     session.listChanged = true
-    return { kind: 'read', data: { ...outcome.data as object, target, writable } }
+    return { kind: 'read', data: { ...outcome.data as object, target: opened.target, writable: opened.writable,
+      ...(opened.kind === 'markdown' ? { markdown: opened.source } : opened.kind === 'text' ? { text: opened.source } : {}) } }
   }
   private async service(session: Session, runId: string, name: string, raw: unknown): Promise<unknown> {
     if (name === 'workspace.list') {
@@ -483,17 +492,17 @@ export class ExternalMcpService implements ResidentMcpHandler {
     this.assertActive(session, runId)
     const writableFor = (filePath?: string) => session.permission !== 'read-only'
       && (session.permission === 'full' || !filePath || isInsideRoot(session.workspaceRoot, filePath))
-    const documents = this.options.registry.list().map(snapshot => ({ documentId: snapshot.documentId, kind: snapshot.model.kind,
+    const documents = this.options.registry.list().map(snapshot => ({ ...documentSnapshotFacts(snapshot),
       name: snapshot.binding.kind === 'file' ? path.basename(snapshot.binding.path) : snapshot.binding.suggestedName,
-      ...(snapshot.binding.kind === 'file' ? { path: snapshot.binding.path } : {}), dirty: snapshot.dirty,
       active: snapshot.documentId === ui?.activeDocumentId }))
     const handles = async (documentId: string) => {
       const snapshot = this.options.registry.list().find(item => item.documentId === documentId)
       if (!snapshot) return null
-      const writable = await this.options.gateway.attachRunDocument(runId, documentId,
-        writableFor(snapshot.binding.kind === 'file' ? snapshot.binding.path : undefined), documentId === ui?.activeDocumentId ? 'initialize' : undefined)
+      const opened = await this.options.gateway.completeOpenedDocument(runId, { documentId,
+        writable: writableFor(snapshot.binding.kind === 'file' ? snapshot.binding.path : undefined) },
+        { selection: documentId === ui?.activeDocumentId ? 'initialize' : 'preserve' })
       session.listChanged = true
-      return { writable, target: await this.options.gateway.issueTarget(runId, documentId, { kind: 'document' }) }
+      return { writable: opened.writable, target: opened.target }
     }
     const active = ui?.activeDocumentId ? await handles(ui.activeDocumentId) : null
     let selection: unknown = null

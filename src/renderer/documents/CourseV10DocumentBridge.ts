@@ -166,7 +166,7 @@ export class CourseV10DocumentBridge {
   async create(model: Extract<DocumentModel, { kind: 'course-v10' }> = {
     kind: 'course-v10', project: createBlankCourseProjectV10(), resources: { assets: {}, components: {} },
   }): Promise<void> {
-    const snapshot = await this.host().create(model, `${model.project.title}.h5lesson`)
+    const snapshot = await this.host().create(model, `${model.project.title}.glx`)
     await this.activate(snapshot.documentId)
   }
   async open(path: string): Promise<void> { const snapshot = await this.host().open(path); await this.activate(snapshot.documentId) }

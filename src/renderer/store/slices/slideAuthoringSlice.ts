@@ -1,11 +1,10 @@
-import { type ComponentAuthorSpot, type ComponentContainer, type ComponentDefinition, type ComponentEdit, type ComponentFrame, type ComponentImplementation, type ComponentPresentation, type CourseProjectV10, type JsonValue } from '../../../shared/contracts/component-platform'
+import { type ComponentAuthorSpot, type ComponentContainer, type ComponentEdit, type ComponentFrame, type ComponentImplementation, type CourseProjectV10, type JsonValue } from '../../../shared/contracts/component-platform'
+import { coursePresentationEdits, type CoursePresentationInput } from '../../../core/tools/coursePresentationEdits'
+import { componentDataEdits } from '../../../core/course/componentDataEdits'
 import type { TextRun } from '../../../shared/contracts/native-v1'
 import type { NativeLineGeometry } from '../../../shared/contracts/native-v1/types'
-import { createTextData, createFormulaData, TEXT_DEFINITION, FORMULA_DEFINITION, textComponentDataSchema } from '../../../components/text'
-import { defaultShapeData, SHAPE_DEFINITION, shapeDataSchema } from '../../../components/shape'
-import { createTableData, TABLE_DEFINITION } from '../../../components/table'
-import { createChartData, CHART_DEFINITION, chartDataSchema } from '../../../components/chart'
-import { createTeacherControllerData, createTeacherControllerFrame, TEACHER_CONTROLLER_DEFINITION } from '../../../components/teacher-controller'
+import { textComponentDataSchema } from '../../../components/text'
+import { insertCourseElement, ensureCourseTeacherController, type CourseElementKind, type CourseInsertionOptions } from '../../media/commitCourseMediaAuthoring'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import type { EditorStoreKernel } from '../editorStoreKernel'
 import { createSlideOwnedCommands } from './slideOwnedCommands'
@@ -70,17 +69,9 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
   const insertionContainer = (target: CapturedCourseTarget): ComponentContainer => ports.readEditingScope?.() === 'global'
     ? { kind: 'global', plane: 'overlay' }
     : { kind: 'surface', surfaceId: target.surfaceId! }
-  const insert = async (definition: ComponentDefinition, data: unknown, width: number, height: number, x = 80, y = 80, target = kernel.captureTarget()) => {
-    const surface = target.project.surfaces.find(value => value.id === target.surfaceId)
-    if (!surface) throw new Error('请先选择一个内容页面')
-    const id = crypto.randomUUID(), container = insertionContainer(target)
-    const edits: ComponentEdit[] = []
-    if (!target.project.definitions[definition.id]) edits.push({ type: 'definition.set', definition })
-    edits.push({ type: 'instance.insert', container, index: container.kind === 'global' ? target.project.global[container.plane].length : surface.childIds.length,
-      rootIds: [id], instances: [{ id, definitionId: definition.id, data: json(data), frame: { width, height, transform: [1, 0, 0, 1, x, y] } }] })
-    await kernel.editCaptured(kernel.capture(edits, target))
-    kernel.selectInstances([id], surface.id, target.documentId)
-    return id
+  const insertElement = async (kind: CourseElementKind, options: CourseInsertionOptions = {}, target = kernel.captureTarget()) => {
+    const result = await insertCourseElement(kernel, target, kind, { ...options, origin: 'slide-authoring', container: insertionContainer(target) })
+    return result.instanceIds[0]
   }
   const beginSlideDataEdit = (instanceId: string, source: 'canvas' | 'properties' = 'canvas') => {
     const previous = ports.read().slideContentEdit
@@ -176,7 +167,8 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
       if (hasSlideContentDraftChanges(edit)) {
         const edits: ComponentEdit[] = edit.authorSpot && edit.spotText !== undefined
           ? authorSpotEdits(edit.target.editingProject, edit.authorSpot, edit.spotText, edit.target.resources) : []
-        if (!edit.authorSpot && JSON.stringify(edit.originalData) !== JSON.stringify(edit.data)) edits.push({ type: 'data.set', instanceId: edit.instanceId, path: [], value: edit.data })
+        if (!edit.authorSpot && JSON.stringify(edit.originalData) !== JSON.stringify(edit.data)) edits.push(...componentDataEdits(edit.target.project,
+          { instanceId: edit.instanceId, surfaceId: edit.target.surfaceId, stateId: edit.target.activeStateId }, { kind: 'replace', data: edit.data }))
         if (edit.frame !== undefined) edits.push({ type: 'frame.set', instanceId: edit.instanceId, frame: edit.frame })
         if (!edit.authorSpot && edit.implementation) edits.push({ type: 'implementation.set', instanceId: edit.instanceId, implementation: edit.implementation })
         const command = kernel.capture(edits, edit.target)
@@ -251,18 +243,12 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
     release(documentId) { if (ports.read().slideContentEdit?.target.documentId === documentId) ports.patch({ slideContentEdit: null }) },
   })
   const addShapeNode = (type: string, x?: number, y?: number) =>
-    insert(SHAPE_DEFINITION, shapeDataSchema.parse(defaultShapeData(type as Parameters<typeof defaultShapeData>[0])), 200, 140, x, y)
-  const mutatePresentation = async (recipe: (presentation: ComponentPresentation) => void, captured = kernel.captureTarget()) => {
-    const surface = captured.project.surfaces.find(value => value.id === captured.surfaceId)
-    if (!surface || surface.kind !== 'slide') throw new Error('请先选择一个演示页面')
-    const presentation = structuredClone(surface.presentation ?? { states: [] })
-    recipe(presentation)
-    return kernel.editCaptured(kernel.capture([{ type: 'surface.presentation.set', surfaceId: surface.id, presentation }], captured))
-  }
-  const requireState = (presentation: ComponentPresentation, id: string) => {
-    const state = presentation.states.find(value => value.id === id)
-    if (!state) throw new Error('演示状态已不存在')
-    return state
+    insertElement('shape', { shapeType: type as CourseInsertionOptions['shapeType'], x, y })
+  const mutatePresentation = (input: Omit<CoursePresentationInput, 'target'>, captured = kernel.captureTarget(), id?: string) => {
+    if (!captured.surfaceId) throw new Error('请先选择一个演示页面')
+    const edits = coursePresentationEdits(captured.project, { kind: 'course-surface', surfaceId: captured.surfaceId }, input,
+      id ? () => id : undefined)
+    return kernel.editCaptured(kernel.capture(edits, captured))
   }
   return {
     ...createSlideOwnedCommands(kernel, { ...ports, submit }),
@@ -273,42 +259,31 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
     },
     async addPresentationState(name = '新状态', captured = kernel.captureTarget()) {
       const id = crypto.randomUUID()
-      await mutatePresentation(presentation => { presentation.states.push({ id, title: name, overrides: {} }) }, captured)
+      await mutatePresentation({ action: 'add', title: name }, captured, id)
       kernel.bridge.selectPresentationState(captured.documentId, id, captured.surfaceId ?? undefined)
       return id
     },
     async duplicatePresentationState(stateId: string, captured = kernel.captureTarget()) {
       const id = crypto.randomUUID()
-      await mutatePresentation(presentation => {
-        const source = requireState(presentation, stateId), index = presentation.states.indexOf(source)
-        presentation.states.splice(index + 1, 0, { ...structuredClone(source), id, title: source.title + ' 副本' })
-      }, captured)
+      await mutatePresentation({ action: 'duplicate', state: stateId }, captured, id)
       kernel.bridge.selectPresentationState(captured.documentId, id, captured.surfaceId ?? undefined)
       return id
     },
     renamePresentationState(stateId: string, title: string, captured?: CapturedCourseTarget) {
-      return mutatePresentation(presentation => { requireState(presentation, stateId).title = title }, captured)
+      return mutatePresentation({ action: 'rename', state: stateId, title }, captured)
     },
     async deletePresentationState(stateId: string, captured = kernel.captureTarget()) {
-      await mutatePresentation(presentation => {
-        requireState(presentation, stateId)
-        presentation.states = presentation.states.filter(state => state.id !== stateId)
-        if (presentation.initialStateId === stateId) presentation.initialStateId = null
-        if (presentation.thumbnailStateId === stateId) presentation.thumbnailStateId = null
-      }, captured)
+      await mutatePresentation({ action: 'delete', state: stateId }, captured)
       return true
     },
     setInitialPresentationState(stateId: string | null, captured?: CapturedCourseTarget) {
-      return mutatePresentation(presentation => { if (stateId) requireState(presentation, stateId); presentation.initialStateId = stateId }, captured)
+      return mutatePresentation({ action: 'set-initial', state: stateId }, captured)
     },
     setThumbnailPresentationState(stateId: string | null, captured?: CapturedCourseTarget) {
-      return mutatePresentation(presentation => { if (stateId) requireState(presentation, stateId); presentation.thumbnailStateId = stateId }, captured)
+      return mutatePresentation({ action: 'set-thumbnail', state: stateId }, captured)
     },
     clearPresentationStateOverrides(stateId: string, captured?: CapturedCourseTarget) {
-      return mutatePresentation(presentation => {
-        const state = requireState(presentation, stateId)
-        state.overrides = {}; delete state.order; delete state.background
-      }, captured)
+      return mutatePresentation({ action: 'clear-overrides', state: stateId }, captured)
     },
     updateTextEditDraft(instanceId: string, text: string, runs: TextRun[], _height?: number, _width?: number) {
       const edit = ports.read().slideContentEdit
@@ -335,23 +310,17 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
       if (documentId && ports.read().slideContentEdit?.target.documentId !== documentId) return { ok: true }
       try { await commitTextEdit(); return { ok: true } } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : String(error) } }
     },
-    addTextNode: (x?: number, y?: number) => insert(TEXT_DEFINITION, createTextData('双击编辑文字'), 320, 80, x, y),
-    addFormulaNode: (x?: number, y?: number) => insert(FORMULA_DEFINITION, createFormulaData(crypto.randomUUID(), 'x^2'), 240, 100, x, y),
+    addTextNode: (x?: number, y?: number) => insertElement('text', { x, y }),
+    addFormulaNode: (x?: number, y?: number) => insertElement('formula', { x, y }),
     addRectangleNode: (x?: number, y?: number) => addShapeNode('rectangle', x, y),
     addShapeNode,
     drawSlideShapeNode(input: { shapeType: 'line' | 'elbow-arrow'; frame: { x: number; y: number; width: number; height: number }; lineGeometry: NativeLineGeometry }, target?: CapturedCourseTarget) {
-      return insert(SHAPE_DEFINITION, shapeDataSchema.parse({ ...defaultShapeData(input.shapeType), lineGeometry: input.lineGeometry }),
-        Math.max(1, input.frame.width), Math.max(1, input.frame.height), input.frame.x, input.frame.y, target)
+      return insertElement('shape', { shapeType: input.shapeType, lineGeometry: input.lineGeometry,
+        width: Math.max(1, input.frame.width), height: Math.max(1, input.frame.height), x: input.frame.x, y: input.frame.y }, target)
     },
-    addTableNode: (x?: number, y?: number) => insert(TABLE_DEFINITION, createTableData(), 600, 120, x, y),
+    addTableNode: (x?: number, y?: number) => insertElement('table', { x, y }),
     addChartNode(type: 'bar' | 'line' | 'area' | 'pie' | 'donut' = 'bar', x?: number, y?: number) {
-      const initial = createChartData()
-      const style = type === 'pie' || type === 'donut'
-        ? { backgroundColor: initial.style.backgroundColor, backgroundOpacity: initial.style.backgroundOpacity,
-            fontFamily: initial.style.fontFamily, fontSize: initial.style.fontSize, textColor: initial.style.textColor,
-            showLegend: initial.style.showLegend, legendPosition: initial.style.legendPosition, showDataLabels: initial.style.showDataLabels,
-            ...(type === 'donut' ? { holeSize: 50 } : {}) } : initial.style
-      return insert(CHART_DEFINITION, chartDataSchema.parse({ ...initial, chartType: type, style }), 560, 360, x, y)
+      return insertElement('chart', { chartType: type, x, y })
     },
     async addExternalComponentNode(packageId: string, x?: number, y?: number, presetId?: string) {
       const target = kernel.captureTarget(), container = insertionContainer(target)
@@ -360,16 +329,7 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
       return result
     },
     async ensureTeacherController() {
-      const target = kernel.captureTarget()
-      const existing = Object.values(target.project.instances).find(instance => instance.definitionId === TEACHER_CONTROLLER_DEFINITION.id)
-      if (existing) { kernel.selectInstances([existing.id], target.surfaceId, target.documentId); return }
-      const canvas = target.editingProject.surfaces.find(surface => surface.id === target.surfaceId)?.designSize ?? { width: 1280, height: 720 }
-      const id = crypto.randomUUID(), edits: ComponentEdit[] = []
-      if (!target.project.definitions[TEACHER_CONTROLLER_DEFINITION.id]) edits.push({ type: 'definition.set', definition: TEACHER_CONTROLLER_DEFINITION })
-      edits.push({ type: 'instance.insert', container: { kind: 'global', plane: 'overlay' }, index: target.project.global.overlay.length, rootIds: [id],
-        instances: [{ id, definitionId: TEACHER_CONTROLLER_DEFINITION.id, data: json(createTeacherControllerData(canvas)), frame: createTeacherControllerFrame(canvas) }] })
-      await kernel.editCaptured(kernel.capture(edits, target))
-      kernel.selectInstances([id], target.surfaceId, target.documentId)
+      await ensureCourseTeacherController(kernel, kernel.captureTarget(), 'slide-authoring')
     },
   }
 }

@@ -23,7 +23,7 @@
   ],
   "query": "query.mjs",
   "scope": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
-  "semanticVersion": "285a394fbb7f87eadcde2db4a5492682e439a1bc9952c795a16dd709e0aec62a",
+  "semanticVersion": "fcd051d09ad3113b17c72f47d9d883c5b729ff9d67377d057541f067ff385fd2",
   "tools": [
     {
       "id": "artifact.save",
@@ -62,12 +62,36 @@
       "path": "tools/compute.run.json"
     },
     {
+      "id": "course.configure",
+      "path": "tools/course.configure.json"
+    },
+    {
       "id": "course.importPptx",
       "path": "tools/course.importPptx.json"
     },
     {
+      "id": "course.logic",
+      "path": "tools/course.logic.json"
+    },
+    {
+      "id": "course.media",
+      "path": "tools/course.media.json"
+    },
+    {
+      "id": "course.productivity",
+      "path": "tools/course.productivity.json"
+    },
+    {
+      "id": "course.recipes",
+      "path": "tools/course.recipes.json"
+    },
+    {
       "id": "delegate.read",
       "path": "tools/delegate.read.json"
+    },
+    {
+      "id": "delegate.readonly",
+      "path": "tools/delegate.readonly.json"
     },
     {
       "id": "delegate.start",
@@ -190,6 +214,10 @@
       "path": "tools/inspect.json"
     },
     {
+      "id": "interaction.update",
+      "path": "tools/interaction.update.json"
+    },
+    {
       "id": "job.cancel",
       "path": "tools/job.cancel.json"
     },
@@ -208,6 +236,10 @@
     {
       "id": "listChildren",
       "path": "tools/listChildren.json"
+    },
+    {
+      "id": "local.run",
+      "path": "tools/local.run.json"
     },
     {
       "id": "material.extract",
@@ -254,8 +286,28 @@
       "path": "tools/media.start.json"
     },
     {
+      "id": "object.author",
+      "path": "tools/object.author.json"
+    },
+    {
       "id": "object.convert",
       "path": "tools/object.convert.json"
+    },
+    {
+      "id": "object.insert",
+      "path": "tools/object.insert.json"
+    },
+    {
+      "id": "object.layout",
+      "path": "tools/object.layout.json"
+    },
+    {
+      "id": "object.place",
+      "path": "tools/object.place.json"
+    },
+    {
+      "id": "object.structure",
+      "path": "tools/object.structure.json"
     },
     {
       "id": "object.update",
@@ -304,6 +356,30 @@
     {
       "id": "skills.read",
       "path": "tools/skills.read.json"
+    },
+    {
+      "id": "surface.configure",
+      "path": "tools/surface.configure.json"
+    },
+    {
+      "id": "surface.duplicate",
+      "path": "tools/surface.duplicate.json"
+    },
+    {
+      "id": "surface.recipe",
+      "path": "tools/surface.recipe.json"
+    },
+    {
+      "id": "surface.remix",
+      "path": "tools/surface.remix.json"
+    },
+    {
+      "id": "surface.remix.inspect",
+      "path": "tools/surface.remix.inspect.json"
+    },
+    {
+      "id": "teacher.ensure",
+      "path": "tools/teacher.ensure.json"
     },
     {
       "id": "text.replace",

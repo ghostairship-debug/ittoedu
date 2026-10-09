@@ -1,6 +1,7 @@
 import { app, BrowserWindow, session } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { configureRestrictedSession, hardenWebContents } from '../../../security'
+import { HTML_PREVIEW_SCHEME } from '../../../protocols'
 import { assembleMeasuredHtml, sourceProgramAssembly, type HtmlAssembly, type HtmlAssemblyDiagnostic, type HtmlDesignCapture } from '../../../../core/contentApply/assembly/htmlAssembly'
 import { captureHtmlDesignViewport } from './browserCapture'
 import { prepareMeasurementDocument, retainedMeasurementScopeHtml } from './prepareMeasurementDocument'
@@ -58,7 +59,11 @@ export async function measureHtmlAtDesignViewport(request: HtmlDesignMeasurement
     webPreferences: { session: isolated, sandbox: true, contextIsolation: true, nodeIntegration: false,
       nodeIntegrationInWorker: false, webviewTag: false, webSecurity: true, backgroundThrottling: false } })
   worker.webContents.setZoomFactor(1)
-  const url = 'data:text/html;charset=utf-8,' + encodeURIComponent(prepared.html)
+  // Keep document bytes out of Chromium's navigation URL. The private session serves only this passive entry.
+  const url = `${HTML_PREVIEW_SCHEME}://measurement-${randomUUID()}/index.html`
+  isolated.protocol.handle(HTML_PREVIEW_SCHEME, request => request.url === url
+    ? new Response(prepared.html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+    : new Response('Not found', { status: 404 }))
   hardenWebContents(worker.webContents, value => value === url)
   let timer!: ReturnType<typeof setTimeout>
   let cancel!: () => void
@@ -113,5 +118,6 @@ export async function measureHtmlAtDesignViewport(request: HtmlDesignMeasurement
     worker.webContents.removeListener('render-process-gone', gone)
     isolated.webRequest.onErrorOccurred(null)
     if (!worker.isDestroyed()) worker.destroy()
+    isolated.protocol.unhandle(HTML_PREVIEW_SCHEME)
   }
 }

@@ -75,7 +75,7 @@ export function ImageResultCard({ api, owner, documents = window.desktopAPI?.doc
   const act = async (work: () => Promise<void>) => { if (busy) return; setBusy(true); setError(''); try { await work() } catch (cause) { setError((cause as Error).message) } finally { setBusy(false) } }
   const refresh = async () => setView(await api.read(owner))
   const capture = async (mode: 'insert' | 'replace'): Promise<ImageApplyCapture> => {
-    if (!documents || !selected) throw new Error('请明确选择要应用图片的 H5 演示')
+    if (!documents || !selected) throw new Error('请明确选择要应用图片的 果铃工程')
     const exact = mode === 'replace' ? structuredClone(workbenchSelection.getManual(documentId)) : null
     const targetSurface = locationId, targetDocument = documentId, targetEpoch = selected.epoch
     const current = await workbenchSelection.prepare(documentId)
@@ -118,7 +118,7 @@ export function ImageResultCard({ api, owner, documents = window.desktopAPI?.doc
       {view.job.resources.length > 1 && <label>图片<select value={resourceId} onChange={event => setResourceId(event.target.value)}>{view.job.resources.map((resource, index) => <option key={resource.resourceId} value={resource.resourceId}>图片 {index + 1}（{resource.width}×{resource.height}）</option>)}</select></label>}
       <button type="button" disabled={busy} onClick={() => void act(async () => { const ticket = previewGeneration.current, result = await api.preview({ ...owner, resourceId }); if (ticket === previewGeneration.current) setPreview(URL.createObjectURL(new Blob([Uint8Array.from(result.bytes).buffer], { type: result.mimeType }))) })}>预览图片</button>
       {preview && <img className="image-result-card__preview" src={preview} alt="生成的图片预览" />}
-      <label>应用到 H5 演示<select value={documentId} onChange={event => { setDocumentId(event.target.value); setLocationId('') }}><option value="">请选择 H5 演示</option>{available.map(document => <option key={document.documentId} value={document.documentId}>{document.binding.kind === 'untitled' ? document.binding.suggestedName : document.binding.path.split(/[\\/]/).pop()}</option>)}</select></label>
+      <label>应用到 果铃工程<select value={documentId} onChange={event => { setDocumentId(event.target.value); setLocationId('') }}><option value="">请选择 果铃工程</option>{available.map(document => <option key={document.documentId} value={document.documentId}>{document.binding.kind === 'untitled' ? document.binding.suggestedName : document.binding.path.split(/[\\/]/).pop()}</option>)}</select></label>
       <label>插入位置<select value={locationId} onChange={event => setLocationId(event.target.value)}><option value="">请选择位置</option>{project?.surfaces.map(surface => <option key={surface.id} value={surface.id}>{surface.title || surface.id}</option>)}</select></label>
       {surface && resource && <details className="image-result-card__placement">
         <summary>画布位置与尺寸：{frame ? `X ${frame.x} · Y ${frame.y} · ${frame.width}×${frame.height}` : '请填写有效数值'}</summary>
@@ -129,7 +129,7 @@ export function ImageResultCard({ api, owner, documents = window.desktopAPI?.doc
       </details>}
       <div><button type="button" disabled={busy || !documentId || !locationId || !frame || Boolean(retryKind)} onClick={() => void act(() => apply('insert'))}>插入图片</button>
         <button type="button" disabled={busy || !replacement || Boolean(retryKind)} onClick={() => void act(() => apply('replace'))}>替换选中图片</button></div>
-      <small>{replacement ? `替换目标：${replacement.label}` : '替换时请在所选 H5 演示中选中一个图片对象。'}</small>
+      <small>{replacement ? `替换目标：${replacement.label}` : '替换时请在所选 果铃工程中选中一个图片对象。'}</small>
       <label>继续编辑图片<textarea value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="描述这张图片需要怎样修改" /></label>
       <small>使用当前图片编辑设置发起新请求；保留原图，不自动应用。</small>
       <button type="button" disabled={busy || !prompt.trim() || Boolean(retryKind)} onClick={() => void act(async () => {

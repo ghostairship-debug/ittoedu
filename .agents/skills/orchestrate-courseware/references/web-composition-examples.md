@@ -77,7 +77,7 @@
 
 软件保留原生 form owner、label 与 control 的关联、同组 radio 和依赖状态的 CSS 为可继续编辑的语义组。依赖祖先选择器、外部上下文或状态变化会影响后文布局时，保留共同源文范围；独立文本、图像或 SVG 继续沿用现有内容装配。这些关联与共同源文范围由软件识别，不需要额外编号或登记。
 
-继续修改该组时，从 `project.list/read` 取得实际对象 `.content.html`，读取完整当前源文后用 `project.apply {path, intent:"content", content:"修改后的完整源文"}` 提交。组内 HTML/CSS 通过源文编辑，保留该组的正式 frame 和邻项；这不代表组内每个 DOM 元素都成为可分别拖拽的正式对象。需要移动整个自由对象时用[工程路径与 frame](project-files.md)入口。含脚本或事件处理器的耦合内容沿现有整体程序路径保留，不拆解任意 JavaScript 的依赖。
+继续修改该组时，从 `project.list/read` 取得实际对象 `.content.html`，读取完整当前源文后用 `project.apply {path, intent:"content", content:"修改后的完整源文"}` 提交。组内 HTML/CSS 通过源文编辑，保留该组的正式 frame 和邻项；这不代表组内每个 DOM 元素都成为可分别拖拽的正式对象。需要移动整个自由对象时用共享指南的[工程路径与 frame](../../workbench-usage/references/project-files.md)（内置读取 `skills.read` 的 `workbench-usage` 根内路径）入口。含脚本或事件处理器的耦合内容沿现有整体程序路径保留，不拆解任意 JavaScript 的依赖。
 
 局部互动具有自己的内容与状态时，可以使用标准 iframe 引用同目录或子目录下的独立 HTML。两份文件可直接在普通浏览器中运行；外层静态布局、正文和专业组件仍可编辑，软件负责互动文档的资源闭包、Runtime 封装与准入，不需要编号、登记或编写宿主协议。
 

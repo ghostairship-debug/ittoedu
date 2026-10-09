@@ -8,7 +8,8 @@ const identity = z.string().trim().min(1).max(512)
 const json: z.ZodType<ModelJson> = z.lazy(() => z.union([z.null(), z.boolean(), z.number().finite(), z.string(), z.array(json), z.record(z.string(), json)]))
 const parameters = z.record(z.string(), json).refine(value => JSON.stringify(value).length <= 65536)
 const role = z.object({ connectionId: identity, model: identity, parameters: parameters.optional(), capabilityModel: identity.optional() }).strict().nullable()
-export const executionSettingsRolesSchema = z.object({ conversation: role, vision: role, imageGenerate: role, imageEdit: role }).strict()
+export const executionSettingsRolesSchema = z.object({ conversation: role, vision: role, imageGenerate: role, imageEdit: role,
+  compression: role.optional() }).strict()
 /** Capability facts are main-owned. A settings form cannot claim a successful probe. */
 export type SaveExecutionConnectionDesktop = Omit<SaveExecutionConnection, 'connection'> & { connection: Omit<ExecutionConnectionConfiguration, 'capabilities'> }
 export const executionSettingsConnectionSchema = z.object({

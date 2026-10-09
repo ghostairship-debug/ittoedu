@@ -21,6 +21,7 @@ afterEach(() => { cleanup() })
 
 const target = (itemId: string): ExecutionSelectionTarget => ({ kind: 'course-object', locationId: 'location', itemId })
 const capture = (itemId: string): SelectionCapture => ({ documentId: 'doc', epoch: 'epoch', revision: 3, targets: [target(itemId)], label: '所选 1 个对象' })
+const textCapture = (target: ExecutionSelectionTarget, revision: number): SelectionCapture => ({ documentId: 'doc', epoch: 'epoch', revision, targets: [target], label: '文字' })
 
 function executionFixture() {
   const conversations = new Map<string, ConversationRecord>()
@@ -280,7 +281,7 @@ it('M15 a text card sends to where its text is now, waits for the previous reque
   const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings(), documents: () => d.documents, snapshot })
   cards.setWorkspace('workspace')
   const first = { kind: 'markdown-range' as const, from: 8, to: 10 }
-  const key = cards.openText({ documentId: 'doc', target: first, label: '“加粗”', anchor: { left: 10, top: 20 }, content: '加粗' })
+  const key = cards.openText({ documentId: 'doc', target: first, capture: textCapture(first, 1), label: '“加粗”', anchor: { left: 10, top: 20 }, content: '加粗' })
   expect(cards.texts()).toMatchObject([{ key, kind: 'text', anchor: { left: 10, top: 20 }, textLost: null }])
   expect(cards.active()).toEqual([])
 
@@ -293,16 +294,18 @@ it('M15 a text card sends to where its text is now, waits for the previous reque
   // The request ends; Main says where the text is now, and the next request goes there.
   source = '# 标题\n\n**更粗的**文字\n'; revision = 2
   const moved = { kind: 'markdown-range' as const, from: 8, to: 11 }
-  f.finish('c1', 'run-1', { state: 'applied', fields: ['文字'], target: moved, content: '更粗的' })
+  f.finish('c1', 'run-1', { state: 'applied', fields: ['文字'], target: moved, content: '更粗的', epoch: 'epoch', revision: 2 })
   await waitFor(() => expect(cards.view(key)).toMatchObject({ busy: false, target: moved }))
   await cards.send(key, '再短一点', undefined)
   expect(f.api.send.mock.calls[1]![0].documents).toEqual([{ documentId: 'doc', epoch: 'epoch', revision: 2, selection: [moved], writable: [moved] }])
-  f.finish('c1', 'run-2', { state: 'applied', fields: ['文字'], target: moved, content: '更粗的' })
+  const second = f.finish('c1', 'run-2', { state: 'applied', fields: ['文字'], target: moved, content: '更粗的', epoch: 'epoch', revision: 2 })
   await waitFor(() => expect(cards.view(key)!.busy).toBe(false))
 
   // Someone rewrote that text: the card does not guess.
   source = '# 标题\n\n**别的**文字\n'; revision = 3
-  await expect(cards.send(key, '还原', undefined)).rejects.toThrow('这段文字已被改动')
+  // The Session-backed tracker reports the related replacement as untraceable; a renderer never relocates it.
+  f.changes.set(second, { submissionId: second, state: 'applied', fields: ['文字'], unavailable: '这段文字已被改动' })
+  await expect(cards.send(key, '还原', undefined)).rejects.toThrow('这段文字已找不到')
   // Closing ends the card and its conversation; the document keeps the changes.
   await cards.closeText(key)
   expect(cards.texts()).toEqual([])
@@ -316,22 +319,42 @@ it('refreshes a completed text target before follow-up and keeps a later explici
     snapshot: async () => ({ documentId: 'doc', epoch: 'epoch', revision, model: { kind: 'markdown', source } }) as DocumentSnapshot })
   cards.setWorkspace('workspace')
   const key = cards.openText({ documentId: 'doc', target: { kind: 'markdown-range', from: 2, to: 5 },
+    capture: textCapture({ kind: 'markdown-range', from: 2, to: 5 }, 1),
     content: 'AAA', label: '文字', anchor: { left: 0, top: 0 } })
   await cards.send(key, '改写')
   source = 'P BBBB ZZ'; revision++
   const submissionId = f.finish('c1', 'run-1', { state: 'applied', fields: ['文字'],
-    target: { kind: 'markdown-range', from: 2, to: 6 }, content: 'BBBB' })
+    target: { kind: 'markdown-range', from: 2, to: 6 }, content: 'BBBB', epoch: 'epoch', revision: 2 })
   await waitFor(() => expect(cards.view(key)!.busy).toBe(false))
   source = 'XP BBBB ZZ'; revision++
   f.changes.set(submissionId, { submissionId, state: 'applied', fields: ['文字'],
-    target: { kind: 'markdown-range', from: 3, to: 7 }, content: 'BBBB' })
+    target: { kind: 'markdown-range', from: 3, to: 7 }, content: 'BBBB', epoch: 'epoch', revision: 3 })
   await cards.send(key, '继续改')
   expect(f.api.send.mock.calls[1]![0].documents[0]!.selection).toEqual([{ kind: 'markdown-range', from: 3, to: 7 }])
-  f.finish('c1', 'run-2', { state: 'applied', fields: ['文字'], target: { kind: 'markdown-range', from: 3, to: 7 }, content: 'BBBB' })
+  f.finish('c1', 'run-2', { state: 'applied', fields: ['文字'], target: { kind: 'markdown-range', from: 3, to: 7 }, content: 'BBBB', epoch: 'epoch', revision: 3 })
   await waitFor(() => expect(cards.view(key)!.busy).toBe(false))
-  cards.rebindText(key, { documentId: 'doc', target: { kind: 'markdown-range', from: 8, to: 10 }, content: 'ZZ', label: '新文字', anchor: { left: 0, top: 0 } })
+  cards.rebindText(key, { documentId: 'doc', target: { kind: 'markdown-range', from: 8, to: 10 }, capture: textCapture({ kind: 'markdown-range', from: 8, to: 10 }, 3), content: 'ZZ', label: '新文字', anchor: { left: 0, top: 0 } })
   await cards.send(key, '改新选区')
   expect(f.api.send.mock.calls[2]![0].documents[0]!.selection).toEqual([{ kind: 'markdown-range', from: 8, to: 10 }])
+})
+
+it('keeps the confirmed change baseline when another edit arrives before follow-up preparation', async () => {
+  const f = executionFixture()
+  let source = 'P AAA ZZ', revision = 1
+  const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings(),
+    snapshot: async () => ({ documentId: 'doc', epoch: 'epoch', revision, model: { kind: 'markdown', source } }) as DocumentSnapshot })
+  cards.setWorkspace('workspace')
+  const original = { kind: 'markdown-range' as const, from: 2, to: 5 }
+  const key = cards.openText({ documentId: 'doc', target: original, capture: textCapture(original, 1), content: 'AAA', label: '文字', anchor: { left: 0, top: 0 } })
+  await cards.send(key, '改写')
+  source = 'P BBBB ZZ'; revision = 2
+  f.finish('c1', 'run-1', { state: 'applied', fields: ['文字'], target: { kind: 'markdown-range', from: 2, to: 6 },
+    content: 'BBBB', epoch: 'epoch', revision: 2 })
+  await waitFor(() => expect(cards.view(key)!.busy).toBe(false))
+  source = 'PREFIX P BBBB ZZ'; revision = 3
+  await cards.send(key, '继续修改原处')
+  expect(f.api.send.mock.calls[1]![0].documents[0]).toMatchObject({ epoch: 'epoch', revision: 2,
+    selection: [{ kind: 'markdown-range', from: 2, to: 6 }] })
 })
 
 it('preserves unsent card input once through conversation drafts, surfaces failures, and still ends on explicit close', async () => {
@@ -339,7 +362,7 @@ it('preserves unsent card input once through conversation drafts, surfaces failu
   const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings(),
     snapshot: async () => ({ documentId: 'doc', epoch: 'epoch', revision: 3, model: { kind: 'markdown', source: 'text' } }) as DocumentSnapshot })
   cards.setWorkspace('workspace')
-  const key = cards.openText({ documentId: 'doc', target: selected, content: 'text', label: '文字', anchor: { left: 0, top: 0 } })
+  const key = cards.openText({ documentId: 'doc', target: selected, capture: textCapture(selected, 3), content: 'text', label: '文字', anchor: { left: 0, top: 0 } })
   cards.setDraft(key, '  尚未发送的修改要求  ')
   const first = cards.flushDrafts()
   expect(cards.flushDrafts()).toBe(first)
@@ -431,7 +454,7 @@ it.each(['capture', 'settings', 'conversation'] as const)('does not send an invi
   const cards = new ElementCardController({ execution: () => f.execution, settings: () => conf, documents: () => d.documents,
     snapshot: async () => { if (stage === 'capture') await gate; return snapshot } })
   cards.setWorkspace('workspace')
-  const key = cards.openText({ documentId: 'doc', target: { kind: 'markdown-range', from: 0, to: 4 }, label: '文字', content: 'text', anchor: { left: 20, top: 20 } })
+  const key = cards.openText({ documentId: 'doc', target: { kind: 'markdown-range', from: 0, to: 4 }, capture: textCapture({ kind: 'markdown-range', from: 0, to: 4 }, 3), label: '文字', content: 'text', anchor: { left: 20, top: 20 } })
   const sent = cards.send(key, '改写').catch(error => error)
   await waitFor(() => expect(cards.view(key)?.busy).toBe(true))
   if (stage === 'conversation') await waitFor(() => expect(f.api.createConversation).toHaveBeenCalledTimes(1))
@@ -494,7 +517,7 @@ it('retains control while a submitted text-card request awaits ACK and closes it
   const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings(), documents: () => d.documents,
     snapshot: async () => ({ documentId: 'doc', epoch: 'epoch', revision: 3, model: { kind: 'markdown', source: 'text' } }) as DocumentSnapshot })
   cards.setWorkspace('workspace')
-  const key = cards.openText({ documentId: 'doc', target: { kind: 'markdown-range', from: 0, to: 4 }, label: '文字', content: 'text', anchor: { left: 20, top: 20 } })
+  const key = cards.openText({ documentId: 'doc', target: { kind: 'markdown-range', from: 0, to: 4 }, capture: textCapture({ kind: 'markdown-range', from: 0, to: 4 }, 3), label: '文字', content: 'text', anchor: { left: 20, top: 20 } })
   const sent = cards.send(key, '改写')
   await waitFor(() => expect(f.api.send).toHaveBeenCalledTimes(1))
   const closed = cards.closeText(key)
