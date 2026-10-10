@@ -3,7 +3,7 @@ import { componentBackgroundSchema, componentFlowAuthoringSchema, componentFlowB
 import { courseProjectDesignTokensSchema } from '../../shared/contracts/design-v1/schema'
 import { projectPresenterSettingsSchema } from '../../shared/contracts/playback-v1/schema'
 import { tableNativeContentObjectSchema } from '../../shared/contracts/native-v1/schema'
-import { documentTextContentSchema } from '../../shared/document/content'
+import { documentTextContentSchema, documentTextStyleSchema } from '../../shared/document/content'
 import { chartDataSchema, chartTableDataSchema } from '../../components/chart/data'
 import { interactionActionSchema, interactionActionStepSchema, interactionRuleContentSchema } from '../../shared/interactionSchema'
 import { courseStateDeclarationSchema } from '../../shared/contracts/course-state/schema'
@@ -13,6 +13,7 @@ import { RECIPE_CATALOG } from '../course/courseRecipeEdits'
 import { shapeDataSchema } from '../../components/shape/data'
 
 const semanticId = z.string().min(1)
+export const textFormatInputSchema = z.object({ target: semanticId, style: documentTextStyleSchema }).strict()
 export const objectLayoutInputSchema = z.object({ targets: z.array(semanticId).min(1), intent: z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('align'), alignment: z.enum(['left', 'center', 'right', 'top', 'middle', 'bottom']) }).strict(),
   z.object({ kind: z.literal('distribute'), axis: z.enum(['horizontal', 'vertical']) }).strict(),
@@ -146,6 +147,13 @@ export const objectUpdatePropertiesInputSchema = z.object({
   rotation: coordinate.optional(), opacity: z.number().min(0).max(1).optional(),
   visible: z.boolean().optional(), locked: z.boolean().optional(), label: z.string().min(1).optional(),
   playbackInitialVisibility: z.enum(['inherit', 'hidden']).optional(),
+  appearance: z.record(z.string(), jsonValueSchema).optional().describe('目标真实专业外观的局部参数；文字可用 fontFamily、fontSize、color、shadows、lineHeight 等。shadows 是对象数组，每项使用 x、y、blur、color。表格、图表与图形使用其公开专业样式。只应用提供字段，不改变正文、位置或省略参数；实际适用键与类型由目标领域数据验证。复制已观察对象的外观优先 appearanceFrom；显式 appearance 字段覆盖来源同名字段。不支持项明确反馈，文字范围格式使用 text.format。'),
+  appearanceFrom: z.object({
+    target: semanticId.describe('已观察来源整对象的只读句柄；软件按该来源当前捕获内容读取外观。'),
+    fields: z.array(z.string().min(1)).min(1).max(64)
+      .refine(fields => new Set(fields).size === fields.length, '复制的外观字段不能重复')
+      .meta({ uniqueItems: true }).describe('明确复制的外观字段，例如 color、shadows；不复制正文、位置、尺寸或未列出字段。'),
+  }).strict().optional().describe('从已观察且可读的整对象确定性复制指定外观字段；不需要模型转抄 CSS，也不补默认值。可与 appearance 合并，显式字段覆盖来源字段。'),
   data: jsonValueSchema.describe('Only supplied data properties change; omitted properties are preserved. Professional appearance, sizing, style, crop, feather, filters and poster records accept partial properties. Arrays and content values use their existing complete-value format.').optional(),
   style: z.record(z.string(), jsonValueSchema).describe('Only supplied style properties change; omitted properties are preserved. Use null to explicitly clear a CSS value.').optional(),
   implementation: sourceAuthoringInputSchema.nullable().optional().describe('源码只需 source 正文或 from 文件路径；省略 language 保留现有语言。null 恢复定义实现。workspace、模块和资源绑定由软件维护。'),

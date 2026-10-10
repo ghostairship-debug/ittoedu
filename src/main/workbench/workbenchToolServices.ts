@@ -235,7 +235,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     if (!access?.workspaceRoot) throw new Error('任务缺少已冻结的文件读取范围')
     return { runId, workspaceRoot: access.workspaceRoot, permission: access.permission,
       conversationHome: access.conversationHome, conversationHomeRoot: access.conversationHomeRoot,
-      readOnlyRoots: Object.values(access.boundPaths ?? {}), approvedOutsidePaths: approvedPaths,
+      boundPaths: Object.values(access.boundPaths ?? {}), approvedOutsidePaths: approvedPaths,
       assertActive: () => { deliverySignals.get(runId)?.signal.throwIfAborted(); if (!runGrants.has(runId)) throw new Error('任务已停止'); assertActive?.() } }
   }
   const frozenSkillRoots = new Map<string, readonly SkillRoot[]>()
@@ -363,17 +363,13 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
         fileContext(runId).assertActive?.()
         if (materialIds.get(runId)?.has(source)) {
           const attachments = (await attachmentsDesktopService()).attachments
+          const ids = materialIds.get(runId)!
+          const read = await dispatchMaterialTool(attachments, ids, 'material.read', {
+            attachmentId: source, representation: 'text', maxChars: 64000 }, deliverySignals.get(runId)?.signal)
+          if ('admittedSourceIds' in read) for (const id of read.admittedSourceIds ?? []) ids.add(id)
           const snapshot = await attachments.readSnapshot(source)
-          const representations = snapshot.representations.filter(value => value.kind === 'text')
-          if (!representations.length) throw new Error('该材料尚无可读正文，请先使用 material.extract 提取原件')
-          const sections = []
-          for (const representation of representations) {
-            const read = await attachments.readRepresentation(source, representation.id)
-            sections.push({ representation: representation.id, version: representation.blobRef.digest,
-              provenance: representation.provenance, text: new TextDecoder('utf-8', { fatal: true }).decode(read.bytes) })
-          }
-          const bytes = new TextEncoder().encode(JSON.stringify({ name: snapshot.name, source: snapshot.id,
-            originalVersion: snapshot.digest, coverage: snapshot.coverage, gaps: snapshot.gaps, sections }))
+          // The readonly worker receives actual prepared ranges and their omissions, never a fabricated full source.
+          const bytes = new TextEncoder().encode(JSON.stringify(read.data))
           inputs.push({ source, name: path.basename(snapshot.name) + '.txt', mimeType: 'text/plain', bytes,
             version: createHash('sha256').update(bytes).digest('hex') })
         } else {
@@ -521,6 +517,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     images: { selection: (runId, _documentId, operation) => roles.selection(runId, operation),
       run: (request, options) => images.start(request, options), read: id => images.read(id),
       stop: id => images.stop(id), readResource: id => images.readResource(id),
+      registerWorkspaceResource: (scope, image, source) => images.registerWorkspaceResource(scope, image, source),
+      readWorkspaceResource: (scope, resource) => images.readWorkspaceResource(scope, resource),
       readReadyResourceFromJob: input => images.readReadyResourceFromJob(input) },
   }
   host.tools.configureHostServices(services)

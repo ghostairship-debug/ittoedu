@@ -1,6 +1,5 @@
 /** Explicitly invoked real CLI probe against the resident MCP endpoint. No SDK client, credential file reads, model fallback or automatic paid retry. */
 import { spawn } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
 import { mkdir, realpath, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { DocumentHostService } from '../src/main/workbench/DocumentHostService'
@@ -89,11 +88,9 @@ console.log(JSON.stringify({ directory, versions, execute }))
 const host = new DocumentHostService(path.join(directory, 'documents'))
 const conversations = new ConversationStore({ directory: path.join(directory, 'conversations') })
 const events = new ExecutionEventStore({ directory: path.join(directory, 'events') })
-let settings: ExternalMcpSettings = { ...DEFAULT_EXTERNAL_MCP_SETTINGS, port: 0 }
-const token = randomBytes(32).toString('base64url')
-redactions.add(token)
+let settings: ExternalMcpSettings = { ...DEFAULT_EXTERNAL_MCP_SETTINGS, enabled: true, port: 0 }
 const service = new ExternalMcpService({ conversations, registry: host.registry, gateway: host.tools, files: new AgentFileService(host),
-  settings: { read: async () => settings, update: async patch => (settings = { ...settings, ...patch }), token: async () => token, regenerateToken: async () => token },
+  settings: { read: async () => settings, update: async patch => (settings = { ...settings, ...patch }) },
   workspaceRoot: root => realpath(root), uiState: async () => ({ workspaceId: 'cli-probe' }), appendEvent: input => events.append(input),
   confirm: async () => false })
 const source = 'KEEP_ORIGINAL\nCODEX_SLOT\nOPENCODE_SLOT\n'
@@ -102,7 +99,7 @@ try {
   await conversations.registerWorkspace({ workspaceId: 'cli-probe', rootPath: await realpath(workspace), managed: false, authorization: 'user-selected' })
   const status = await service.start()
   if (status.state !== 'running') throw new Error(status.message ?? 'resident MCP service did not start')
-  const endpoint = status.endpoint, env = { GUOLING_MCP_TOKEN: token }
+  const endpoint = status.endpoint, env = {}
   for (const client of clients) {
     const marker = client === 'codex' ? 'CODEX_SLOT' : 'OPENCODE_SLOT', replacement = `${client.toUpperCase()}_LUNA_OK`
     const prompt = `这是一次已授权的果铃 MCP 协议验收。只使用已连接的 guoling MCP 工具，禁止执行 shell、直接读写本地文件、网络搜索、子代理或换模型。\n` +
@@ -111,7 +108,7 @@ try {
       `必须真实调用工具，不能只输出计划。任一步错误只报告原错误并停止，不重试、不绕过权限。最后仅报告实际结果。`
     let args: string[], childEnv: NodeJS.ProcessEnv = env
     if (client === 'codex') {
-      const mcpConfig = ['-c', `mcp_servers.guoling.url=${JSON.stringify(endpoint)}`, '-c', 'mcp_servers.guoling.bearer_token_env_var="GUOLING_MCP_TOKEN"',
+      const mcpConfig = ['-c', `mcp_servers.guoling.url=${JSON.stringify(endpoint)}`,
         '-c', `mcp_servers.guoling.enabled_tools=${JSON.stringify(TOOLS)}`, '-c', 'mcp_servers.guoling.default_tools_approval_mode="approve"']
       await verifyCodexConfig(mcpConfig, env)
       args = ['exec', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check', '--ephemeral', '--json', '--color', 'never',
@@ -120,13 +117,12 @@ try {
         ...mcpConfig, prompt]
     } else {
       const configPath = path.join(directory, 'opencode.json')
-      // OpenCode does not reliably expand {env:...} inside remote headers; the probe writes the token like the settings page does.
       await writeFile(configPath, JSON.stringify({ $schema: 'https://opencode.ai/config.json', model: 'openai/gpt-5.6-luna-fast', small_model: 'openai/gpt-5.6-luna-fast',
         default_agent: 'g20-probe', share: 'disabled', agent: { 'g20-probe': { mode: 'primary', model: 'openai/gpt-5.6-luna-fast',
           prompt: 'Only use the connected guoling MCP tools for the explicitly authorized protocol probe. Do not delegate or use filesystem/shell tools.',
           tools: { bash: false, shell: false, write: false, edit: false, apply_patch: false, task: false, webfetch: false, websearch: false, skill: false, read: false, glob: false, grep: false } },
           general: { disable: true }, explore: { disable: true } },
-        mcp: { guoling: { type: 'remote', url: endpoint, enabled: true, headers: { Authorization: `Bearer ${token}` } } } }, null, 2))
+        mcp: { guoling: { type: 'remote', url: endpoint, enabled: true } } }, null, 2))
       childEnv = { ...env, OPENCODE_CONFIG: configPath }
       const discovery = await launch(client, ['mcp', 'list', '--pure'], childEnv)
       await writeFile(path.join(directory, `${client}-discovery.json`), JSON.stringify(discovery, null, 2))

@@ -12,6 +12,7 @@ import { LocalAuthorTransformGesture } from '../../componentPlatform/surfaces/sl
 import { frameToSpaceMatrix, transformPoint } from '../../../core/components/geometry'
 import type { ComponentFrame } from '../../../shared/contracts/component-platform/frame'
 import type { ComponentAuthorGeometry } from '../../../shared/contracts/component-platform/runtime'
+import { workbenchSelection } from '../../workbench/SelectionContextController'
 
 type Patch = { handle: string; kind: 'text' | 'image'; value: string }
 type ChangeRecord = { revision: number; beforeSource: string; afterSource?: string; beforeValue: string; patch: Patch }
@@ -80,6 +81,16 @@ export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, 
   const [frameReady, setFrameReady] = useState(false)
   const [modePending, setModePending] = useState(false)
   const [editMode, setEditMode] = useState(false)
+  useEffect(() => {
+    if (!active) return
+    const clear = workbenchSelection.registerSelectionClearer(committed.documentId, () => controller.current?.clearSelection())
+    const unregister = workbenchSelection.registerTargetView(committed.documentId, {
+      root: () => frame.current,
+      rect: target => target.kind === 'html-author-field' ? controller.current?.cardRect(target.authorKey) ?? null : null,
+      select: target => target.kind === 'html-author-field' ? controller.current?.selectAuthor(target.authorKey) ?? false : false,
+    })
+    return () => { clear(); unregister() }
+  }, [committed.documentId, active])
   const [structureOpen, setStructureOpen] = useState(false)
   const [gestureFrame, setGestureFrame] = useState<ComponentFrame | null>(null)
   const transform = useRef<{ pointerId: number; authorKey: string; broker: HtmlPreviewController; gesture: LocalAuthorTransformGesture; geometry: ComponentAuthorGeometry | null } | null>(null)

@@ -62,7 +62,7 @@ export const assetSourceRegistrations = [
     supports: context => supportsWorkbenchService(context, 'openImages') || context.workbenchServices !== false && context.images !== false,
     targets: () => [], handler: (context, input) => context.host.imagePreview(context.runId, input) }),
   registerSource(sourceDescriptor('image.fetch', 'edit'), { capability: 'resource', effect: input => input.path ? 'document-edit' : 'image-fetch-resource',
-    supports: context => supportsWorkbenchService(context, 'openImages') && hasRunWrite(context, ['course-instance', 'course-surface'], 'course-v10'),
+    supports: context => supportsWorkbenchService(context, 'openImages'),
     targets: (input, resolver) => input.path ? projectToolTarget(input, resolver) : [],
     handler: (context, input) => context.fetchImage(input) }),
   registerSource(sourceDescriptor('asset.search', 'read'), { capability: 'read', effect: null, supports: context => supportsWorkbenchService(context, 'assetLibrary'),

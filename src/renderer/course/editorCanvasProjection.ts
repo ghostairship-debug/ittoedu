@@ -357,7 +357,7 @@ export function projectActiveScene(state: EditorCanvasProjectionState): EditorCa
       state.flowSession.history.present,
       state.flowSession.selection.locationId,
       flowNodes,
-      '流式讲义',
+      '流式布局',
     )
   }
   throw new Error(SESSIONLESS_COURSE_REASON)

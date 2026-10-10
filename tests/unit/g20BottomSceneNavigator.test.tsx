@@ -53,7 +53,7 @@ it('keeps rail creation and page menu copy/rename/delete on the same Session and
   const rail = screen.getByRole('navigation', { name: '场景与页面导航' })
   fireEvent.click(within(rail).getByRole('button', { name: '新建场景或页面' }))
   const add = screen.getByRole('menu', { name: '新建场景或页面' })
-  expect(within(add).getAllByRole('menuitem').map(item => item.getAttribute('aria-label'))).toEqual(['新建场景', '新建演示页', '新建流式讲义', '新建无限画布'])
+  expect(within(add).getAllByRole('menuitem').map(item => item.getAttribute('aria-label'))).toEqual(['新建场景', '新建演示页', '新建流式布局', '新建无限画布'])
   await act(async () => { fireEvent.click(within(add).getByRole('menuitem', { name: '新建场景' })); await store().courseBridge.drain() })
   expect(h.session.read().undoDepth).toBe(before.undoDepth + 1)
   const card = screen.getByTestId(`bottom-scene-${h.secondSlide}`)

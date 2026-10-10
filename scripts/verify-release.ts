@@ -2,6 +2,7 @@ import { isControllerFixture } from '../tests/fixtures/teacherController'
 import { extractFile, listPackage, statFile } from '@electron/asar'
 import { _electron as electron, chromium } from '@playwright/test'
 import { prepareElectronLaunchEnvironment } from './electronLaunchEnvironment'
+import { verifyPortableSharp } from './portableSharpVerification'
 import { unzipSync } from 'fflate'
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -1561,6 +1562,14 @@ async function main(): Promise<void> {
   console.log(`验证报告：${reportPath}`)
 }
 
+if (process.argv.includes('--portable-sharp')) {
+  // This branch owns only a fresh explicitly selected report directory.
+  // Its failures must never enter the historical release/M13 report catch below.
+  void verifyPortableSharp(process.argv.slice(2)).catch((error: unknown) => {
+    console.error('Portable sharp 专项验证失败：', error)
+    process.exitCode = 1
+  })
+} else {
 ;(focusedM13 ? verifyM13Package() : focusedM13Exports
   ? verifyMixedSurfacePackagedExports().then(async (evidence) => {
     await fs.writeFile(focusedM13ExportsReportPath, `${JSON.stringify({ status: 'passed', evidence }, null, 2)}\n`)
@@ -1588,3 +1597,4 @@ async function main(): Promise<void> {
   console.error('发布验证失败：', error)
   process.exitCode = 1
 })
+}

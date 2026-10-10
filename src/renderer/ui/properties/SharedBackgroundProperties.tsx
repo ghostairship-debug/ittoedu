@@ -14,7 +14,7 @@ export const EFFECTIVE_BACKGROUND_SOURCE_LABEL: Record<EffectiveBackgroundOwner,
   'slide-surface': '演示页容器',
   'slide-scene': '场景',
   'slide-state': '当前状态',
-  'flow-surface': '流式讲义页',
+  'flow-surface': '流式布局页',
   'spatial-surface': '无限画布',
 }
 
@@ -41,7 +41,7 @@ export interface SharedBackgroundInheritControl {
 }
 
 export interface SharedBackgroundProps {
-  /** Human label for the owner currently being edited, e.g. "场景" or "流式讲义页". */
+  /** Human label for the owner currently being edited, e.g. "场景" or "流式布局页". */
   readonly ownerLabel: string
   /** This owner's own color. `undefined` only arises for Named state (no override yet). */
   readonly color: string | undefined

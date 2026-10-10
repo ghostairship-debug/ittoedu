@@ -20,7 +20,7 @@ function stageCanvas(stage: HTMLElement): SlideCanvasSize {
 /**
  * Letterbox each authored stage into its host. A stage declares its logical
  * size with `data-canvas-width` / `data-canvas-height`. Spatial keeps the
- * legacy design viewport when it does not declare one. Flow is responsive.
+ * legacy design viewport when it does not declare one. Flow keeps a fixed reading width and scrolls.
  */
 export function fitPublishedCourseStage(container: HTMLElement): void {
   const hostWidth = container.clientWidth

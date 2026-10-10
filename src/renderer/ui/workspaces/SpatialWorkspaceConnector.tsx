@@ -57,7 +57,7 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWork
   const background = resolveComponentBackground(projection, projectedSurface)
   const safe = (result: unknown) => { void Promise.resolve(result).catch(error => state().setError(error instanceof Error ? error.message : String(error))) }
   return <SpatialLocationWorkspace documentId={runtime.documentId} project={projection} surface={projectedSurface} view={view}
-    teacherController={runtime.navigation}
+    teacherController={runtime.navigation.editorPort()}
     activeStateId={source.courseView.activeStateId}
     selectionIds={runtime.selectedInstanceIds} canvasMode={source.canvasMode} renderInstance={(id, displayProjection) => runtime.renderInstance(id, displayProjection ?? projection)}
     backgroundAssetUrl={background.assetId ? runtime.world.assetUrl(background.assetId) : null}
@@ -69,6 +69,11 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWork
     onActivateFrame={id => state().activateSpatialCameraFrame(surface.id, id)}
     onGraphSelect={selection => state().setSpatialGraphSelection(selection, surface.id)}
     onCanvasModeChange={mode => { safe(state().commitTextEdit().then(() => state().setCanvasMode(mode))) }}
+    onResetPlayback={async playing => {
+      await state().commitTextEdit()
+      await runtime.resetPlayback(playing)
+      if (state().courseView.activeDocumentId !== runtime.documentId) runtime.setPlaying(false)
+    }}
     onEditContent={id => {
       runtime.selectInstances([id], surface.id)
       chrome.setMode('deep')

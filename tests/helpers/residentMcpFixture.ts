@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -10,7 +9,7 @@ import { ExternalMcpService, type ExternalApproval, type ExternalFilePort } from
 import { DEFAULT_EXTERNAL_MCP_SETTINGS, type ExternalMcpSettings, type ExternalUiState } from '../../src/shared/workbench/external'
 import type { ExecutionEventInput } from '../../src/shared/workbench/executionEvents'
 
-/** A started resident MCP service over a real DocumentHost, a registered workspace and an in-memory settings/token store. */
+/** A started resident MCP service over a real DocumentHost, a registered workspace and an in-memory explicitly enabled settings store. */
 export async function residentMcpFixture(input: {
   host: DocumentHostService
   directory: string
@@ -24,14 +23,12 @@ export async function residentMcpFixture(input: {
   const conversations = input.conversations ?? new ConversationStore({ directory: path.join(input.directory, 'conversations') })
   const root = await realpath(input.workspaceRoot)
   if (!await conversations.readWorkspace('space')) await conversations.registerWorkspace({ workspaceId: 'space', rootPath: root, managed: false, authorization: 'user-selected' })
-  let settings: ExternalMcpSettings = { ...DEFAULT_EXTERNAL_MCP_SETTINGS, port: 0, ...input.settings }
-  let token = randomBytes(32).toString('base64url')
+  let settings: ExternalMcpSettings = { ...DEFAULT_EXTERNAL_MCP_SETTINGS, enabled: true, port: 0, ...input.settings }
   const ui: { state: ExternalUiState | null } = { state: { workspaceId: 'space' } }
   const approvals: ExternalApproval[] = []
   const files = new AgentFileService(input.host)
   const service = new ExternalMcpService({
-    settings: { read: async () => ({ ...settings }), update: async patch => (settings = { ...settings, ...patch }),
-      token: async () => token, regenerateToken: async () => (token = randomBytes(32).toString('base64url')) },
+    settings: { read: async () => ({ ...settings }), update: async patch => (settings = { ...settings, ...patch }) },
     conversations, registry: input.host.registry, gateway: input.host.tools, files: input.files?.(files) ?? files,
     workspaceRoot: rootPath => realpath(rootPath), uiState: async () => ui.state,
     appendEvent: event => input.appendEvent?.(event) ?? Promise.resolve(),
@@ -39,19 +36,18 @@ export async function residentMcpFixture(input: {
   })
   const clients: Client[] = []
   const started = await service.start()
-  const connect = async (name = 'resident-test-client', bearer = token) => {
+  const connect = async (name = 'resident-test-client') => {
     const client = new Client({ name, version: '1' })
-    await client.connect(new StreamableHTTPClientTransport(new URL(service.server.listeningPort ? `http://127.0.0.1:${service.server.listeningPort}/mcp` : started.endpoint),
-      { requestInit: { headers: { Authorization: `Bearer ${bearer}` } } }))
+    await client.connect(new StreamableHTTPClientTransport(new URL(service.server.listeningPort ? `http://127.0.0.1:${service.server.listeningPort}/mcp` : started.endpoint)))
     clients.push(client)
     return client
   }
   const close = async () => { await Promise.allSettled(clients.map(client => client.close())); await service.close() }
-  return { service, conversations, root, ui, approvals, connect, close, token: () => token, settings: () => settings }
+  return { service, conversations, root, ui, approvals, connect, close, settings: () => settings }
 }
 
 /** Tool reply envelope as returned by the resident server. */
-export interface ResidentToolReply { content: { type: string; text?: string }[]; structuredContent: { result: any; ticket?: string; replayed?: boolean }; isError: boolean }
+export interface ResidentToolReply { content: { type: string; text?: string }[]; structuredContent: { result: any; ticket?: string; operationScope?: { runId: string; workspaceId: string; workspaceRoot: string }; replayed?: boolean }; isError: boolean }
 export async function callTool(client: Client, name: string, args: Record<string, unknown> = {}, ticket?: string): Promise<ResidentToolReply> {
   return await client.callTool({ name, arguments: args, ...(ticket ? { _meta: { 'guoling/ticket': ticket } } : {}) }) as unknown as ResidentToolReply
 }

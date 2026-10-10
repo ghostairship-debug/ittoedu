@@ -1,5 +1,4 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { timingSafeEqual } from 'node:crypto'
 
 export type ResidentMcpListenResult =
   | { state: 'running'; port: number }
@@ -14,7 +13,7 @@ export interface ResidentMcpCall {
   /** Queue a server notification sent on this request's reply stream before its result (e.g. tools/list_changed). */
   notify(method: string, params?: Record<string, unknown>): void
 }
-/** Domain sessions, tools and authority live behind this port; the transport only authenticates and frames JSON-RPC. */
+/** Domain sessions, tools and authority live behind this port; the transport checks the local boundary and frames JSON-RPC. */
 export interface ResidentMcpHandler {
   initialize(client: ResidentMcpClientInfo): Promise<{ sessionId: string; instructions: string }>
   terminate(sessionId: string): void
@@ -30,20 +29,17 @@ const VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26']
 const LOOPBACK = ['127.0.0.1', '::ffff:127.0.0.1']
 const rpcError = (id: unknown, code: number, message: string) => ({ jsonrpc: '2.0', id: id ?? null, error: { code, message } })
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
-const safeEqual = (a: string, b: string) => Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b))
 
-/** Fixed-port Streamable HTTP MCP transport for the explicitly started app: 127.0.0.1 only, Host-checked, no browser Origin, Bearer. */
+/** Fixed-port Streamable HTTP MCP transport for the explicitly started app: 127.0.0.1 only, Host-checked, no browser Origin. Explicit host enablement owns access. */
 export class ResidentMcpServer {
   private server?: Server
   private port?: number
-  private token = ''
   private readonly sessions = new Map<string, TransportSession>()
   constructor(private readonly handler: ResidentMcpHandler) {}
   get listeningPort(): number | undefined { return this.port }
 
-  async start(port: number, token: string): Promise<ResidentMcpListenResult> {
+  async start(port: number): Promise<ResidentMcpListenResult> {
     await this.stop()
-    this.token = token
     const server = createServer((request, response) => { void this.receive(request, response).catch(() => {
       if (!response.headersSent) this.respond(response, 500, rpcError(null, -32603, 'MCP 请求未完成'))
       else response.end()
@@ -63,12 +59,6 @@ export class ResidentMcpServer {
     this.server = server
     this.port = (server.address() as { port: number }).port
     return { state: 'running', port: this.port }
-  }
-  /** The previous bearer stops working immediately and every attached transport session is dropped. */
-  replaceToken(token: string): void {
-    this.token = token
-    this.dropSessions()
-    this.server?.closeAllConnections()
   }
   /** Forget one transport session; its next request receives 404 and a standard client re-initializes. */
   dropSession(sessionId: string): void {
@@ -91,16 +81,11 @@ export class ResidentMcpServer {
     response.writeHead(status, { 'Cache-Control': 'no-store', ...(value === undefined ? {} : { 'Content-Type': 'application/json; charset=utf-8' }), ...headers })
     response.end(value === undefined ? undefined : JSON.stringify(value))
   }
-  private authorized(request: IncomingMessage): boolean {
-    const token = request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1]
-    return !!token && !!this.token && safeEqual(token, this.token)
-  }
   private async receive(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const port = this.port
     if (!port || request.url !== '/mcp' || ![`127.0.0.1:${port}`, `localhost:${port}`].includes(request.headers.host ?? '')) return this.respond(response, 404)
     // Native clients send no browser Origin; web pages and preview frames get no access.
     if (request.headers.origin !== undefined || !LOOPBACK.includes(request.socket.remoteAddress ?? '')) return this.respond(response, 403)
-    if (!this.authorized(request)) return this.respond(response, 401)
     if (request.method === 'GET') return this.respond(response, 405, undefined, { Allow: 'POST, DELETE' })
     const sessionId = typeof request.headers['mcp-session-id'] === 'string' ? request.headers['mcp-session-id'] : undefined
     if (request.method === 'DELETE') {

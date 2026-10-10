@@ -1,4 +1,4 @@
-import sharp from 'sharp'
+import { getImageDecoder } from './imageDecoder'
 import { assertSupportedImage, createImageAssetMetadata, type ImageAssetResource } from '../../core/tools/imageAssetMetadata'
 import type { HostImageInput } from '../../core/tools/imageResource'
 
@@ -6,6 +6,7 @@ export async function prepareImageResource(input: HostImageInput, createId: () =
   input = { bytes: Uint8Array.from(input.bytes), mimeType: input.mimeType, filename: input.filename }
   const bytes = input.bytes
   assertSupportedImage(input.mimeType, bytes)
+  const sharp = getImageDecoder()
   const decoder = sharp(bytes, { animated: true, failOn: 'warning', limitInputPixels: false })
   const metadata = await decoder.metadata()
   const expected: Record<string, string> = { png: 'image/png', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml' }

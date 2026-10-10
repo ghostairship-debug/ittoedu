@@ -1,5 +1,5 @@
 {
-  "description": "按 material.list 返回的 attachmentId/representationId 回读已提取文本或原图，返回原件版本、表示版本与真实页/段落出处。文本分页不冒充全文；图片进入下一轮输入，准备好图片不表示模型已理解。原件尚未提取时明确提示 material.extract，不执行文件内容。",
+  "description": "读取授权材料，软件按需准备并缓存所需页段，无需先 material.extract。attachmentId 用原材料；可指定 pages 和 representation=text/image，省略时优先正文。representationId 只用于回读明确命中的表示。返回真实出处、缺口及未读页段；截断后将 nextCursor 传给 cursor，仍使用同一原材料。图片进入下一轮输入，准备好图片不表示模型已理解。不会自动全件 OCR 或执行文件内容。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -7,6 +7,10 @@
       "attachmentId": {
         "format": "uuid",
         "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+        "type": "string"
+      },
+      "cursor": {
+        "minLength": 1,
         "type": "string"
       },
       "maxChars": {
@@ -21,14 +25,42 @@
         "minimum": 0,
         "type": "integer"
       },
+      "pages": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "to": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "representation": {
+        "default": "auto",
+        "enum": [
+          "auto",
+          "text",
+          "image"
+        ],
+        "type": "string"
+      },
       "representationId": {
         "minLength": 1,
         "type": "string"
       }
     },
     "required": [
-      "attachmentId",
-      "representationId"
+      "attachmentId"
     ],
     "type": "object"
   },

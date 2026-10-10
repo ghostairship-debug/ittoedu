@@ -17,14 +17,15 @@ export const FLOW_COMPONENT_BLOCK_HEIGHT = 320
 export interface FlowWidthLayout {
   readonly widthMode?: 'fluid' | 'reading'
   readonly readingWidth: number
+  readonly wideContentWidth?: number
 }
 export function flowPaperMaxWidth(layout: FlowWidthLayout): string {
-  return layout.widthMode === 'fluid' ? 'none' : `${layout.readingWidth}px`
+  return `${layout.widthMode === 'fluid' ? layout.wideContentWidth ?? layout.readingWidth : layout.readingWidth}px`
 }
-/** Border-box paper and content sizes before observation transforms. */
-export function resolveFlowBodyWidth(layout: FlowWidthLayout, viewportWidth: number): number {
-  const paper = Math.max(0, viewportWidth - 32)
-  return Math.max(0, (layout.widthMode === 'fluid' ? paper : Math.min(paper, layout.readingWidth)) - 72)
+/** Fixed logical reading width; host width affects scrolling/fit, never line wrapping. */
+export function resolveFlowBodyWidth(layout: FlowWidthLayout, _viewportWidth: number): number {
+  const paper = layout.widthMode === 'fluid' ? layout.wideContentWidth ?? layout.readingWidth : layout.readingWidth
+  return Math.max(0, paper - 72)
 }
 export interface FlowParagraphPresentation {
   readonly textAlign: 'left' | 'center' | 'right'

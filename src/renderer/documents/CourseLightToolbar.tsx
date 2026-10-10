@@ -161,7 +161,7 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
           {flowMediaUnavailable && <p role="status">{flowMediaUnavailable}</p>}
           </>}
           {props.onImportHtml && (props.insertSurface === 'slide' || props.insertSurface === 'flow') && <button type="button" aria-label="导入 HTML 页面" disabled={Boolean(unavailable || flowMediaUnavailable)} title={unavailable ?? flowMediaUnavailable ?? undefined}
-            onClick={() => insert(props.onImportHtml!)}><span>HTML 页面…</span><small>导入到指定演示页或流式讲义</small></button>}
+            onClick={() => insert(props.onImportHtml!)}><span>HTML 页面…</span><small>导入到指定演示页或流式布局</small></button>}
           {flowInsertMenu?.disabledReason && <p role="status">{flowInsertMenu.disabledReason}</p>}
         </div>}
       </div>

@@ -80,7 +80,7 @@ async function reportMcpReady(request: HeadlessMcpLaunch, ownership: 'owned' | '
   const service = await externalMcpService(), info = await service.connectionInfo()
   const samePath = (left: string, right: string) => process.platform === 'win32'
     ? left.toLowerCase() === right.toLowerCase() : left === right
-  const reply = { status: 'ready', ...info, token: await service.revealToken(), pid: process.pid,
+  const reply = { status: 'ready', ...info, pid: process.pid,
     profile: app.getPath('userData'), mode: guiEnabled ? 'gui' : 'headless', ownership,
     requestedWorkspace: request.workspace, workspaceMismatch: !samePath(info.workspace, request.workspace) }
   if (request.readyFile) await writeMcpLaunchReply(request.readyFile, reply)

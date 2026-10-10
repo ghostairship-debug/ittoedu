@@ -20,6 +20,8 @@ export function FlowWorkspaceConnector({ onDropWorkspaceMedia, onSelectImageAsse
   const surface = project?.surfaces.find(value => value.id === courseView.surfaceId)
   if (!project || !courseView.activeDocumentId || surface?.kind !== 'flow') return <main className="workspace workspace--flow" role="alert"><p className="property-hint">没有活动的 Flow 编辑会话</p></main>
   return <FlowLocationWorkspace documentId={courseView.activeDocumentId} project={project} surfaceId={surface.id}
-    canvasMode={canvasMode} editingScope={editingScope === 'global' ? 'global' : 'scene'} onCanvasModeChange={setCanvasMode}
+    canvasMode={canvasMode} editingScope={editingScope === 'global' ? 'global' : 'scene'}
+    beforeNavigate={() => useEditorStore.getState().commitTextEdit()}
+    onCanvasModeChange={mode => { void useEditorStore.getState().commitTextEdit().then(() => setCanvasMode(mode)).catch(error => setStatus(error instanceof Error ? error.message : String(error))) }}
     onDropWorkspaceMedia={onDropWorkspaceMedia} onSelectImageAsset={onSelectImageAsset} onSelectMediaAsset={onSelectMediaAsset} onStatus={setStatus} />
 }

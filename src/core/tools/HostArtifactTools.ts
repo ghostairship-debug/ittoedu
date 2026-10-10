@@ -28,6 +28,8 @@ export function resolveArtifactSource(input: HostArtifactSaveInput): HostArtifac
   if (compute) return { kind: 'compute', job: compute[1]!, name: decodeURIComponent(compute[2]!), destination: input.destination }
   const delegated = /^(delegate-[^@\s]+)@(.+)$/.exec(input.source)
   if (delegated) return { kind: 'delegation', job: delegated[1]!, name: decodeURIComponent(delegated[2]!), destination: input.destination }
+  if (/^workspace-image:[a-f0-9]{64}:image_[a-f0-9]{64}$/.test(input.source))
+    return { kind: 'image-resource', resource: input.source, destination: input.destination }
   // Gateway-issued image resources are checked against the current run/document/epoch by their reader.
   if (/^r[^@\s]+$/.test(input.source)) return { kind: 'image-resource', resource: input.source, destination: input.destination }
   throw new Error('成果来源无效；请使用创建、状态或等待返回的 source')

@@ -57,6 +57,10 @@ describe('G20 workbench save/export delivery wiring', () => {
     await expect(resolveExportDestination('run', moved, undefined, 'note.html', 'html-offline', frozenAccess))
       .rejects.toThrow('文档文件绑定已移到工作空间外')
     await expect(resolveSaveDestination('run', original, undefined, frozenAccess)).resolves.toBe(originalPath)
+    const nested = { ...original, binding: { ...original.binding, path: path.join(workspace, 'lesson', 'note.md') } }
+    await fs.mkdir(path.join(workspace, 'lesson'))
+    await expect(resolveSaveDestination('run', nested, 'copy.md', frozenAccess)).resolves.toBe(path.join(workspace, 'copy.md'))
+    await expect(resolveSaveDestination('run', nested, undefined, frozenAccess)).resolves.toBe(nested.binding.path)
   })
 
   it('allows default save and export to an outside original binding frozen in an approved workspace task', async () => {

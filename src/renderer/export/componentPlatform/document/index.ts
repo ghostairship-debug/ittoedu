@@ -89,7 +89,9 @@ export async function buildComponentDocx(document: ComponentExportDocument, opti
         const data = block.data
         const inlines = textOutputAdapter.inlines(data).map(inline => ({ ...inline,
           style: { fontFamily: data.appearance.fontFamily, fontSize: data.appearance.fontSize, color: data.appearance.color, ...inline.style } }))
-        nodes.push({ type: 'paragraph', blockId: id, content: { inlines }, paragraph: { textAlign: data.appearance.align, lineHeight: data.appearance.lineHeight } }); break
+        if (data.appearance.lineHeight === 'normal') note(block, 'word-normal-line-height', 'Word 使用现有原生文字的标准行距近似 browser normal；字体度量可能不同，HTML 保留原行高。')
+        nodes.push({ type: 'paragraph', blockId: id, content: { inlines }, paragraph: { textAlign: data.appearance.align,
+          lineHeight: data.appearance.lineHeight === 'normal' ? 1.22 : data.appearance.lineHeight } }); break
       }
       case 'formula': nodes.push({ type: 'formula', blockId: id, latex: block.data.formula.latex, accessibleText: block.data.formula.accessibleText, style: { ...block.data.appearance, ...block.data.formula.style } }); break
       case 'table': {

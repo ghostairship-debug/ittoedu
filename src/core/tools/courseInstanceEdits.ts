@@ -1,4 +1,3 @@
-import type { z } from 'zod'
 import type { DocumentModel } from '../../shared/workbench/document'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { componentDefinitionBuiltinKey, type JsonValue } from '../../shared/contracts/component-platform/project'
@@ -12,12 +11,64 @@ import { changeChartType, replaceChartTableData } from '../../components/chart/c
 import { chartDataEdit } from '../../components/chart/edit'
 import { plainDocumentText } from '../../shared/document/content'
 import { componentDataEdits } from '../course/componentDataEdits'
+import { z } from 'zod'
+import { documentTextStyleSchema } from '../../shared/document/content'
 export { componentDataPropertyFields } from '../course/componentDataEdits'
+
+/** Copy only observed professional appearance fields. Shadow CSS stays software-owned. */
+export function readCourseInstanceAppearance(model: DocumentModel, target: CourseInstanceTarget, fields: readonly string[]): {
+  appearance: Record<string, JsonValue>; style: Record<string, JsonValue>
+} {
+  if (target.dataPath || target.from !== undefined || target.to !== undefined) throw new Error('外观来源需要已观察的整对象，文字范围不授权读取整对象外观')
+  const { project, instance } = courseInstanceContext(model, target)
+  const builtin = componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
+  const data = instance.data as Record<string, JsonValue>
+  const properties = builtin === 'guoling.text' || builtin === 'guoling.formula' ? data.appearance
+    : ['guoling.table', 'guoling.chart', 'guoling.shape'].includes(builtin ?? '') ? data.style : undefined
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) throw new Error('来源对象没有可复制的专业外观')
+  const appearance: Record<string, JsonValue> = {}, style: Record<string, JsonValue> = {}
+  for (const field of fields) {
+    if (field === 'shadows' && (builtin === 'guoling.text' || builtin === 'guoling.formula')) {
+      const shadow = instance.style?.textShadow ?? instance.style?.['text-shadow'] ?? 'none'
+      if (typeof shadow !== 'string') throw new Error('来源文字阴影不是可复制的 CSS 值')
+      style.textShadow = shadow
+    } else {
+      if (!Object.hasOwn(properties, field)) throw new Error(`来源对象没有外观属性：${field}`)
+      appearance[field] = structuredClone(properties[field]!)
+    }
+  }
+  return { appearance, style }
+}
+
+/** Public appearance maps to the same professional data and wrapper style that renderers consume. */
+export function courseInstanceAppearanceEdits(model: DocumentModel, target: CourseInstanceTarget,
+  appearance: Record<string, JsonValue>): ComponentEdit[] {
+  const { project, instance } = courseInstanceContext(model, target)
+  const builtin = componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
+  const fields = { ...appearance }, edits: ComponentEdit[] = []
+  if (builtin === 'guoling.text' || builtin === 'guoling.formula') {
+    if (Object.hasOwn(fields, 'shadows')) {
+      const shadows = z.array(z.object({ x: z.number().finite(), y: z.number().finite(),
+        blur: z.number().finite().nonnegative(), color: documentTextStyleSchema.shape.color.unwrap() }).strict()).parse(fields.shadows)
+      const value = shadows.length ? shadows.map(shadow => `${shadow.x}px ${shadow.y}px ${shadow.blur}px ${shadow.color}`).join(', ') : 'none'
+      if (!equalComponentValue(instance.style?.textShadow, value)) edits.push({ type: 'style.set', instanceId: instance.id, path: ['textShadow'], value })
+      delete fields.shadows
+    }
+    if (Object.keys(fields).length) edits.push(...componentDataEdits(project, target, { kind: 'patch', data: { appearance: fields } }))
+  } else if (['guoling.table', 'guoling.chart', 'guoling.shape'].includes(builtin ?? '')) {
+    edits.push(...componentDataEdits(project, target, { kind: 'patch', data: { style: fields } }))
+  } else if (builtin === 'guoling.image') {
+    const forbidden = ['assetId', 'originalAssetId', 'alt'].filter(key => Object.hasOwn(fields, key))
+    if (forbidden.length) throw new Error(`外观不能替换资源或正文：${forbidden.join('、')}`)
+    edits.push(...componentDataEdits(project, target, { kind: 'patch', data: fields }))
+  } else throw new Error('当前对象不支持专业外观参数，请使用已观察的公开 data/style 属性')
+  return edits
+}
 
 /** Selected instance properties use the same public operations as the inspector. */
 export function courseInstancePropertyEdits(model: DocumentModel, target: CourseInstanceTarget,
   properties: Omit<z.infer<typeof objectUpdatePropertiesInputSchema>, 'implementation'>): ComponentEdit[] {
-  if (target.dataPath || target.from !== undefined || target.to !== undefined) throw new Error('属性修改需要整对象授权，所选文字仅可替换正文')
+  if (target.dataPath || target.from !== undefined || target.to !== undefined) throw new Error('属性修改需要整对象授权，文字范围请使用 text.replace 或 text.format')
   const { project, instance } = courseInstanceContext(model, target)
   if (instance.locked && Object.keys(properties).some(key => key !== 'locked')) throw new Error('所选对象已锁定，请先解锁')
   const edits: ComponentEdit[] = []
@@ -36,6 +87,7 @@ export function courseInstancePropertyEdits(model: DocumentModel, target: Course
     edits.push({ type: 'frame.set', instanceId: instance.id, frame })
   }
   if (properties.data !== undefined) edits.push(...componentDataEdits(project, target, { kind: 'patch', data: properties.data }))
+  if (properties.appearance !== undefined) edits.push(...courseInstanceAppearanceEdits(model, target, properties.appearance))
   // CSS null remains an explicit cleared value under the existing style contract.
   const style = { ...properties.style, ...(properties.opacity !== undefined ? { opacity: properties.opacity } : {}) }
   for (const [name, value] of Object.entries(style)) if (!equalComponentValue(instance.style?.[name], value))

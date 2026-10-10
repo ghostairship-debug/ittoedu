@@ -80,8 +80,8 @@ it('sends a narrow Markdown catalog on every real HTTP turn and commits one cano
   expect(bodies).toHaveLength(3)
   const wireNames = bodies[0].data.tools.map((tool: any) => tool.function.name)
   // Services and engine controls are independent of the scoped document editing catalog.
-  const serviceAndControlNames = new Set([...workbenchServiceToolCatalog.map(tool => modelToolWireName(tool.name)), 'context_read', 'task_note', 'task_finish', 'ask_user', 'tools_load'])
-  expect(wireNames.filter((name: string) => !serviceAndControlNames.has(name)).sort()).toEqual(['read', 'inspect', 'listChildren', 'text_replace', 'batch'].sort())
+  const serviceAndControlNames = new Set([...workbenchServiceToolCatalog.map(tool => modelToolWireName(tool.name)), 'context_read', 'task_note', 'ask_user', 'tools_load'])
+  expect(wireNames.filter((name: string) => !serviceAndControlNames.has(name)).sort()).toEqual(['read', 'inspect', 'listChildren', 'text_replace', 'text_format', 'batch'].sort())
   expect(bodies.map(body => body.data.tools.map((tool: any) => tool.function.name))).toEqual(Array(3).fill(wireNames))
   const batch = bodies[0].data.tools.find((tool: any) => tool.function.name === 'batch')
   expect(JSON.stringify(batch.function.parameters)).toContain('text.replace')
@@ -108,9 +108,13 @@ it('projects current V10 grants without widening a frozen range or a deleted con
   await host.tools.beginRun({ runId: 'range', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [range] }] })
   const first = await host.tools.describeRun('range')
   expect(first.map(tool => tool.name)).toContain('text.replace')
+  expect(first.map(tool => tool.name)).toContain('text.format')
   expect(first.map(tool => tool.name)).not.toContain('course.configure')
   await host.tools.loadToolFamilies('range', toolFamilies)
-  expect(await host.tools.describeRun('range')).toEqual(first)
+  const expanded = await host.tools.describeRun('range')
+  expect(expanded.map(tool => tool.name)).toContain('course.recipes')
+  expect(expanded.map(tool => tool.name)).not.toContain('course.configure')
+  expect(expanded.length).toBeGreaterThan(first.length)
   const text = await host.tools.issueTarget('range', initial.documentId, range)
   const outside = await host.tools.issueTarget('range', initial.documentId, { kind: 'course-surface', surfaceId: 'flow' })
   expect(await host.tools.execute('range', 'inspect', { name: 'inspect', input: { target: text } })).toMatchObject({ kind: 'read', data: { writable: true } })
@@ -143,19 +147,21 @@ it('projects current V10 grants without widening a frozen range or a deleted con
   expect(await host.tools.describeRun('parent')).toEqual(frozenCatalog)
 })
 
-it('sends current authoring tools by default and keeps repeated family loading idempotent while preserving frozen grants and exact provider payload bytes', async () => {
+it('discovers a deferred tool, sends its real schema on the next turn and executes it in the same run without widening the grant', async () => {
   const { directory, host } = await workspace()
   const session = await host.internalAPI.create({ kind: 'course-v10', project: currentProject(), resources: { assets: {}, components: {} } }, 'current.h5lesson')
   const observed: { names: string[]; bytes: number; payloadBytes: number }[] = []
   const complete = (request: ModelRequest, index: number, call?: { name: string; input: unknown }): Extract<ModelEvent, { type: 'response.completed' }> => {
     const calls = call ? [{ id: `load-${index}`, type: 'function' as const, function: { name: call.name, arguments: JSON.stringify(call.input) } }] : []
     return { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: `r-${index}`, actualModel: 'fixture', nativeResponse: {}, finishReason: calls.length ? 'tool_calls' : 'stop',
-      toolCalls: calls.map(item => ({ id: item.id, name: item.function.name, argumentsText: item.function.arguments })), assistant: { role: 'assistant', content: '', ...(calls.length ? { tool_calls: calls } : {}) } }
+      toolCalls: calls.map(item => ({ id: item.id, name: item.function.name, argumentsText: item.function.arguments })), assistant: { role: 'assistant', content: calls.length ? '' : '名称已更新', ...(calls.length ? { tool_calls: calls } : {}) } }
   }
   const provider: ModelProvider = { async *stream(request) {
     const index = observed.length
     observed.push({ names: request.tools?.map(tool => tool.name) ?? [], bytes: Buffer.byteLength(JSON.stringify(request.tools)), payloadBytes: Buffer.byteLength(serializeModelRequest(request)) })
-    yield complete(request, index, index < 2 ? { name: 'tools.load', input: { families: ['content'] } } : undefined)
+    const reference = JSON.parse(String(request.messages[1].content).split('：')[1])[0]
+    yield complete(request, index, index < 2 ? { name: 'tools.load', input: { families: ['layout'] } }
+      : index === 2 ? { name: 'course.configure', input: { target: reference.target, settings: { title: '已发现并调用' } } } : undefined)
   } }
   const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider,
     runs: new ExecutionRunStore(path.join(directory, 'family-runs')), events: new ExecutionEventStore({ directory: path.join(directory, 'family-events') }) })
@@ -167,10 +173,28 @@ it('sends current authoring tools by default and keeps repeated family loading i
   expect(result.status).toBe('completed')
   expect(result.input.permission).toBe('workspace')
   expect(result.input.documents).toEqual([grant])
-  expect(observed).toHaveLength(3)
-  expect(observed[0].names).toEqual(expect.arrayContaining(['tools.load', 'object.insert', 'object.update']))
-  expect(observed.map(value => value.names)).toEqual(Array(3).fill(observed[0].names))
-  expect(observed.map(value => value.bytes)).toEqual(Array(3).fill(observed[0].bytes))
-  expect(result.requests.map((request, index) => request.payload?.serializedBytes === observed[index]?.payloadBytes)).toEqual([true, true, true])
-  expect(await host.internalAPI.read(session.documentId)).toEqual(session)
+  expect(observed).toHaveLength(4)
+  expect(observed[0].names).toEqual(expect.arrayContaining(['tools.load', 'object.insert', 'object.update', 'object.layout']))
+  expect(observed[0].names).not.toContain('task.finish')
+  expect(observed[0].names).not.toContain('course.configure')
+  expect(observed[1].names).toEqual(expect.arrayContaining(['course.configure', 'object.author']))
+  expect(observed.slice(1).map(value => value.names)).toEqual(Array(3).fill(observed[1].names))
+  expect(observed[1].bytes).toBeGreaterThan(observed[0].bytes)
+  expect(observed.slice(1).map(value => value.bytes)).toEqual(Array(3).fill(observed[1].bytes))
+  expect(result.requests.map((request, index) => request.payload?.serializedBytes === observed[index]?.payloadBytes)).toEqual([true, true, true, true])
+  expect(await host.internalAPI.read(session.documentId)).toMatchObject({ revision: 1, undoDepth: 1, model: { project: { title: '已发现并调用' } } })
+})
+
+it('keeps creation available for an empty formal project while hiding unrelated long-tail schemas until discovery', async () => {
+  const { host } = await workspace()
+  const initial = await host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('空作品'), resources: { assets: {}, components: {} } }, 'empty.glx')
+  await host.tools.beginRun({ runId: 'empty', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }] })
+  const first = await host.tools.describeRun('empty')
+  expect(first.map(tool => tool.name)).toEqual(expect.arrayContaining(['object.insert', 'object.update']))
+  expect(first.map(tool => tool.name)).not.toContain('object.author')
+  expect(JSON.stringify(first.find(tool => tool.name === 'batch')!.schema)).not.toContain('object.author')
+  const resolved = await host.tools.resolveRunTool('empty', 'object.author')
+  expect(resolved?.schema).toHaveProperty('properties')
+  expect((await host.tools.describeRun('empty')).map(tool => tool.name)).toContain('object.author')
+  expect(JSON.stringify((await host.tools.describeRun('empty')).find(tool => tool.name === 'batch')!.schema)).toContain('object.author')
 })

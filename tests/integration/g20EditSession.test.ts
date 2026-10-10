@@ -49,6 +49,72 @@ function receipt(result: ToolResult): DocumentOperationResult {
 const textCall = (target: string, content: string) => ({ name: 'text.replace', input: { target, content } })
 
 describe('S06 real EditSession/Gateway/Registry integration', () => {
+  it('streams disjoint A/B in one document while C is edited, and ACK/late snapshots remove only their own group', async () => {
+    const h = harness(), session = await h.registry.create(md('AAA | BBB | CCC'), 'parallel.md')
+    const a = await h.grant('run-a', session.documentId, { kind: 'markdown-range', from: 0, to: 3 })
+    const b = await h.grant('run-b', session.documentId, { kind: 'markdown-range', from: 6, to: 9 })
+    await Promise.all([h.edits.begin({ runId: 'run-a', editId: 'a', targetHandle: a }), h.edits.begin({ runId: 'run-b', editId: 'b', targetHandle: b })])
+    expect(h.edits.list(session.documentId).map(value => value.editId)).toEqual(['a', 'b'])
+    await h.edits.snapshot('a', 0, 'result A'); await h.edits.snapshot('b', 0, 'result B')
+    await h.human(session.documentId, { type: 'markdown.splice', from: 12, to: 15, text: 'human C' })
+    expect(h.edits.list(session.documentId)).toHaveLength(2)
+    const appliedA = receipt(await h.gateway.execute('run-a', 'a', textCall(a, 'result A')))
+    expect(appliedA.status).toBe('applied')
+    h.edits.finish('a', appliedA)
+    expect(await h.edits.snapshot('a', 99, 'late A')).toBeNull()
+    expect(await h.edits.snapshot('b', 1, 'result B')).toMatchObject({ status: 'active' })
+    expect(h.edits.list(session.documentId).map(value => value.editId)).toEqual(['b'])
+    const appliedB = receipt(await h.gateway.execute('run-b', 'b', textCall(b, 'result B')))
+    expect(appliedB.status).toBe('applied')
+    expect(session.read()).toMatchObject({ model: { source: 'result A | result B | human C' }, undoDepth: 3 })
+    expect(h.edits.list(session.documentId)).toEqual([])
+    expect(h.events.filter(event => event.type === 'edit.finished').map(event => event.snapshot.editId)).toEqual(['a', 'b'])
+  })
+
+  it('keeps separate ranges of one component text field parallel and rejects an intersecting range or whole field', async () => {
+    const h = harness(), model = fixture()
+    model.project.instances['flow-paragraph'].data = JSON.parse(JSON.stringify(createTextComponentData('ABCDEFGH'))) as JsonValue
+    const session = await h.registry.create(model, 'component-ranges.glx')
+    const field: ToolTarget = { kind: 'course-instance', surfaceId: 'flow', instanceId: 'flow-paragraph', stateId: null, dataPath: ['content'] }
+    const a = await h.grant('a', session.documentId, { ...field, from: 0, to: 2 })
+    const b = await h.grant('b', session.documentId, { ...field, from: 4, to: 6 })
+    const overlap = await h.grant('overlap', session.documentId, { ...field, from: 1, to: 5 })
+    const whole = await h.grant('whole', session.documentId, field)
+    await h.edits.begin({ runId: 'a', editId: 'a', targetHandle: a })
+    await h.edits.begin({ runId: 'b', editId: 'b', targetHandle: b })
+    await expect(h.edits.begin({ runId: 'overlap', editId: 'overlap', targetHandle: overlap })).rejects.toMatchObject({ code: 'target-busy' })
+    await expect(h.edits.begin({ runId: 'whole', editId: 'whole', targetHandle: whole })).rejects.toMatchObject({ code: 'target-busy' })
+    await h.edits.snapshot('a', 0, 'long A'); await h.edits.snapshot('b', 0, 'new B')
+    const appliedA = receipt(await h.gateway.execute('a', 'a', textCall(a, 'long A')))
+    expect(appliedA.status).toBe('applied')
+    expect(await h.edits.snapshot('b', 1, 'new B')).toMatchObject({ status: 'active', target: { from: 8, to: 10 } })
+    expect(receipt(await h.gateway.execute('b', 'b', textCall(b, 'new B'))).status).toBe('applied')
+    const current = session.read().model
+    if (current.kind !== 'course-v10') throw new Error('Expected component project')
+    expect(readCourseInstanceText(current, field)).toMatchObject({ inlines: [{ type: 'text', text: 'long ACDnew BGH' }] })
+    expect(h.edits.list(session.documentId)).toEqual([])
+  })
+
+  it('rejects partial source intersections and aggregate fragment overlap, and aborts only the selected edit', async () => {
+    const h = harness(), session = await h.registry.create(md('first second third'), 'ranges.md')
+    const a = await h.grant('a', session.documentId, { kind: 'markdown-range', from: 0, to: 5 })
+    const b = await h.grant('b', session.documentId, { kind: 'markdown-range', from: 6, to: 12 })
+    const overlap = await h.grant('overlap', session.documentId, { kind: 'markdown-range', from: 3, to: 8 })
+    const aggregate = await h.grant('aggregate', session.documentId, { kind: 'text-selection', fragments: [
+      { target: { kind: 'markdown-range', from: 1, to: 3 } }, { target: { kind: 'markdown-range', from: 13, to: 18 }, separatorBefore: ' ' },
+    ] })
+    await h.edits.begin({ runId: 'a', editId: 'a', targetHandle: a })
+    await h.edits.begin({ runId: 'b', editId: 'b', targetHandle: b })
+    await expect(h.edits.begin({ runId: 'overlap', editId: 'overlap', targetHandle: overlap })).rejects.toMatchObject({ code: 'target-busy' })
+    await expect(h.edits.begin({ runId: 'aggregate', editId: 'aggregate', targetHandle: aggregate })).rejects.toMatchObject({ code: 'target-busy' })
+    h.edits.abort('a', 'stop A only')
+    expect(h.edits.list(session.documentId).map(value => value.editId)).toEqual(['b'])
+    expect(await h.edits.snapshot('a', 1, 'late A')).toBeNull()
+    expect(await h.edits.snapshot('b', 0, 'still B')).toMatchObject({ status: 'active' })
+    await h.gateway.stop('a')
+    expect(await h.edits.snapshot('b', 1, 'next B')).toMatchObject({ status: 'active' })
+  })
+
   it('maps a disjoint human edit, saves only canonical source and removes its own ACK preview with one generation undo', async () => {
     const h = harness(), session = await h.registry.create(md('head\nTARGET\ntail'), 'lesson.md')
     const handle = await h.grant('run', session.documentId, { kind: 'markdown-range', from: 5, to: 11 })
@@ -92,14 +158,14 @@ describe('S06 real EditSession/Gateway/Registry integration', () => {
     await expect(h.edits.begin({ runId: 'r', editId: 'call', targetHandle: handle })).rejects.toMatchObject({ code: 'edit-id-used' })
   })
 
-  it('enforces one group per document, keeps other documents independent and deduplicates cumulative snapshots', async () => {
+  it('rejects overlapping groups, keeps other documents independent and deduplicates cumulative snapshots', async () => {
     const h = harness(), a = await h.registry.create(md('a'), 'a.md'), b = await h.registry.create(md('b'), 'b.md')
     const ha = await h.grant('ra', a.documentId, { kind: 'markdown-range', from: 0, to: 1 })
     const hb = await h.grant('rb', b.documentId, { kind: 'markdown-range', from: 0, to: 1 })
     const request = { runId: 'ra', editId: 'a', targetHandle: ha }
     const [first, duplicate] = await Promise.all([h.edits.begin(request), h.edits.begin(request)])
     expect(duplicate).toEqual(first)
-    await expect(h.edits.begin({ ...request, editId: 'busy' })).rejects.toMatchObject({ code: 'document-busy' })
+    await expect(h.edits.begin({ ...request, editId: 'busy' })).rejects.toMatchObject({ code: 'target-busy' })
     await h.edits.begin({ runId: 'rb', editId: 'b', targetHandle: hb })
     await h.edits.snapshot('a', 0, 'first'); await h.edits.snapshot('a', 3, 'replacement')
     expect(await h.edits.snapshot('a', 0, 'first')).toMatchObject({ value: 'replacement', sequence: 3 })

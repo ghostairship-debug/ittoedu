@@ -359,7 +359,7 @@ export function createComponentModelProjection(context: {
         if (view.flow) {
           const layout = surface.flow?.layout ?? { readingWidth: 860, wideContentWidth: 1100, paperBackgroundColor: '#ffffff' }
           const background = resolveFlowPaperBackground(project, surface), url = background.assetId ? runtime.assetUrl(background.assetId) : undefined
-          Object.assign(view.flow.paper.style, { maxWidth: flowPaperMaxWidth(layout), backgroundColor: background.color,
+          Object.assign(view.flow.paper.style, { width: flowPaperMaxWidth(layout), maxWidth: flowPaperMaxWidth(layout), containerType: 'inline-size', backgroundColor: background.color,
             backgroundImage: url ? `url(${JSON.stringify(url)})` : 'none', backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit,
             backgroundPosition: 'center', backgroundRepeat: 'no-repeat' })
         }

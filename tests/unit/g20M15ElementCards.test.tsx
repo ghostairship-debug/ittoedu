@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { SelectionQuickBar } from '../../src/renderer/editing/quickbar/SelectionQuickBar'
+import { ElementTextCardLayer } from '../../src/renderer/workbench/elementCards/ElementTextCards'
 import { ElementAiButton } from '../../src/renderer/workbench/elementCards/ElementAiCard'
 import { ElementCardIndicator } from '../../src/renderer/workbench/elementCards/ElementCardIndicator'
 import { ElementCardController, elementCardKey, elementCards, type ElementCardView } from '../../src/renderer/workbench/elementCards/elementCardController'
@@ -17,7 +18,8 @@ import { executionInputMessages } from '../../src/shared/workbench/executionInpu
 import { USER_QUESTION_TOOL } from '../../src/shared/workbench/userQuestion'
 
 // M15: every object has its own AI card. A card's AI may change only its object; requests to one object queue.
-afterEach(() => { cleanup() })
+beforeEach(() => { vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () { return new DOMRect(100, 200, 120, 40) }) })
+afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 const target = (itemId: string): ExecutionSelectionTarget => ({ kind: 'course-object', locationId: 'location', itemId })
 const capture = (itemId: string): SelectionCapture => ({ documentId: 'doc', epoch: 'epoch', revision: 3, targets: [target(itemId)], label: '所选 1 个对象' })
@@ -185,6 +187,7 @@ it('M15 the quick bar opens the card, the top bar shows cards at work and jumps 
   const existing = new Set(['a'])
   const jump = vi.fn((card: ElementCardView) => elementCards.requestOpen(card.key))
   const view = () => <>
+    <ElementTextCardLayer />{existing.has('a') && <div data-layer-item-id="a" />}
     <ElementCardIndicator documentId="doc" navigation={{ exists: card => card.target.kind === 'course-object' && existing.has(card.target.itemId), jump }} />
     <SelectionQuickBar label="选中对象快捷工具" anchor={{ left: 100, top: 200, width: 120, height: 40 }} bounds={{ left: 0, top: 0, right: 1000, bottom: 800 }} selectionKey="doc:a">
       <ElementAiButton documentId="doc" target={target('a')} label="标题" capture={async () => capture('a')} />
@@ -211,9 +214,9 @@ it('M15 the quick bar opens the card, the top bar shows cards at work and jumps 
     fireEvent.click(within(question).getByRole('button', { name: '暗红' }))
     await waitFor(() => expect(f.api.answer).toHaveBeenCalledWith({ runId: 'run-1', callId: 'request:0', answer: { choices: [1] } }))
 
-    // Closed, the card comes back from the top bar with its record.
+    // Waiting work survives deselection; the top bar keeps its entry.
     fireEvent.click(within(card).getByRole('button', { name: '收起 AI 卡' }))
-    expect(screen.queryByRole('dialog', { name: 'AI 修改：标题' })).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'AI 修改：标题' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'AI 需回答 1' }))
     fireEvent.click(within(screen.getByRole('menu', { name: '元素 AI 卡' })).getByRole('menuitem', { name: '标题：需回答' }))
     expect(jump).toHaveBeenCalledWith(expect.objectContaining({ key: elementCardKey('doc', target('a')) }))
@@ -235,9 +238,9 @@ it('M15 the card undoes and redoes its latest request, and asks before overwriti
   window.desktopAPI = { execution: f.execution, executionSettings: settings(), documents: d.documents } as unknown as typeof window.desktopAPI
   elementCards.setWorkspace('workspace')
   try {
-    render(<SelectionQuickBar label="选中对象快捷工具" anchor={{ left: 100, top: 200, width: 120, height: 40 }} bounds={{ left: 0, top: 0, right: 1000, bottom: 800 }} selectionKey="doc:a">
+    render(<><ElementTextCardLayer /><div data-layer-item-id="a" /><div data-layer-item-id="partial" /><SelectionQuickBar label="选中对象快捷工具" anchor={{ left: 100, top: 200, width: 120, height: 40 }} bounds={{ left: 0, top: 0, right: 1000, bottom: 800 }} selectionKey="doc:a">
       <ElementAiButton documentId="doc" target={target('a')} label="标题" capture={async () => capture('a')} />
-    </SelectionQuickBar>)
+    </SelectionQuickBar></>)
     fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }))
     const card = screen.getByRole('dialog', { name: 'AI 修改：标题' })
     const undo = within(card).getByRole('button', { name: '撤销这张卡的 AI 修改' }), redo = within(card).getByRole('button', { name: '重做这张卡的 AI 修改' })
@@ -413,7 +416,8 @@ it('M15 a card shows a request\'s reply as its run showed it, before the convers
   const key = cards.ensure({ documentId: 'doc', target: target('a'), label: '标题' })
   await cards.send(key, '看看', capture('a'))
   f.say('c1', 'run-1', '看过了：是红色。')
-  await waitFor(() => expect(cards.view(key)!.entries[0]!.reply).toBe('看过了：是红色。'))
+  await waitFor(() => expect(cards.view(key)!.projection.items.some(item => item.type === 'text')).toBe(true))
+  expect(cards.view(key)!.entries[0]!.reply).toBeUndefined()
 })
 
 
@@ -422,9 +426,9 @@ it('M26 partial remains visible and terminal while an applied change stays undoa
   window.desktopAPI = { execution: f.execution, executionSettings: settings(), documents: d.documents } as unknown as typeof window.desktopAPI
   elementCards.setWorkspace('partial-workspace')
   try {
-    render(<SelectionQuickBar label="选中对象快捷工具" anchor={{ left: 100, top: 200, width: 120, height: 40 }} bounds={{ left: 0, top: 0, right: 1000, bottom: 800 }} selectionKey="doc:partial">
+    render(<><ElementTextCardLayer /><div data-layer-item-id="a" /><div data-layer-item-id="partial" /><SelectionQuickBar label="选中对象快捷工具" anchor={{ left: 100, top: 200, width: 120, height: 40 }} bounds={{ left: 0, top: 0, right: 1000, bottom: 800 }} selectionKey="doc:partial">
       <ElementAiButton documentId="doc" target={target('partial')} label="部分交付" capture={async () => capture('partial')} />
-    </SelectionQuickBar>)
+    </SelectionQuickBar></>)
     fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }))
     const card = screen.getByRole('dialog', { name: 'AI 修改：部分交付' })
     fireEvent.change(within(card).getByRole('textbox', { name: 'AI 修改要求' }), { target: { value: '改字并补图' } })

@@ -13,7 +13,16 @@ async function permittedPath(requested: string, fileAccess: ToolRunGrant['fileAc
   const realRoot = await fs.realpath(root)
   const filename = await fs.realpath(path.resolve(root, requested))
   const inside = isInsideRoot(realRoot, filename)
-  if (fileAccess.permission !== 'full' && !inside) throw new Error('只能使用工作空间内的文件')
+  if (fileAccess.permission !== 'full' && !inside) {
+    let bound = false
+    for (const source of Object.values(fileAccess.boundPaths ?? {})) {
+      const actual = await fs.realpath(source).catch(() => null)
+      if (actual && (process.platform === 'win32' ? actual.toLowerCase() === filename.toLowerCase() : actual === filename)) {
+        bound = true; break
+      }
+    }
+    if (!bound) throw new Error('只能使用工作空间内或当前任务明确绑定的文件')
+  }
   return { filename, inside }
 }
 

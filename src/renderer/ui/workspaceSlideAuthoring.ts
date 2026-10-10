@@ -67,7 +67,10 @@ export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAut
     const at = transformPoint(invertMatrix(surfaceToPointer), point(pointer))
     let ids = [...state.selectedInstanceIds]
     if (!handle) {
-      const hit = hitFreeObject(targets, at, Boolean(pointer.altKey))
+      const outerHit = hitFreeObject(targets, at, Boolean(pointer.altKey))
+      const selectedHit = hitFreeObject(selectedFreeTargets(targets, ids), at, true)
+      // An explicitly selected child stays draggable inside its containing group.
+      const hit = !pointer.altKey && outerHit && selectedHit?.ancestors.includes(outerHit.instanceId) ? selectedHit : outerHit
       if (!hit) {
         marquee = { start: at, extend: pointer.additive ? ids : [] }
         if (!pointer.additive) ports.select([])

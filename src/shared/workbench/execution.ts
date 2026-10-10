@@ -9,7 +9,7 @@ import type { SavedCourseIdentity } from './documentSave'
 
 /** Explicit host-bound authoring output. This is task metadata, never model-authored tool arguments. */
 export interface ExecutionContentOutput {
-  kind: 'replace-text'
+  kind: 'content'
   documentId: string
   target: EditTarget
 }
@@ -40,6 +40,8 @@ export interface ExecutionStart {
   permission?: ExecutionPermissionMode
   /** Canonical root of this space, including an app-managed space. */
   workspaceRoot?: string | null
+  /** Exact files registered by Main from explicit current references/material selections; never a directory grant. */
+  boundReadPaths?: readonly string[]
   /** Advisory location frozen from the conversation when Main accepted this task. */
   conversationHome?: ConversationHome
   /** Canonical root containing conversationHome, which may differ after an in-app cross-space move. */
@@ -80,6 +82,8 @@ export interface ExecutionModelRecord {
   responseId?: string
   /** Actual provider terminal label; tool arguments are validated independently. */
   finishReason?: string
+  /** Exact message appended from this completed conversation request; auxiliary requests have none. */
+  assistantMessageIndex?: number
   failure?: ModelFailure
   payload?: { phase: 'initial' | 'dynamic'; digest: string; serializedBytes: number }
   /** Local unfinished content only; never calls, model messages, effects or replay inputs. */

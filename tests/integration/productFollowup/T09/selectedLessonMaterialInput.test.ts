@@ -53,6 +53,11 @@ it('freezes only teacher-selected content from the real lesson material owner wi
     await expect(snapshotSelectedLessonMaterials({ target, selections: [{ ...selection, extractionVersion: 'stale-version' }] }, { workspaceRoot })).rejects.toThrow('版本已变化')
     const outsider = path.join(directory, 'other-workspace'); await fs.mkdir(outsider)
     await expect(snapshotSelectedLessonMaterials({ target, selections: [selection] }, { workspaceRoot: outsider })).rejects.toThrow('已授权读取')
+    const bound: string[] = []
+    const outsideSelection = await snapshotSelectedLessonMaterials({ target, selections: [selection] }, {
+      workspaceRoot: outsider, onBoundPath: filename => { bound.push(filename) } })
+    expect(outsideSelection).toEqual(messages)
+    expect(bound).toEqual([await fs.realpath(path.join(target.rootPath, selected.sourcePath))])
   } finally {
     if (!path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unsafe fixture cleanup')
     await fs.rm(directory, { recursive: true, force: true })

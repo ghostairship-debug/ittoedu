@@ -1,0 +1,84 @@
+{
+  "description": "对已观察且获授权的 Markdown 或课件原生正文范围设置加粗、斜体、字号、字体、颜色等真实文字格式，保留原文、范围外格式和对象位置。style 只应用提供字段。纯文本文件没有格式；普通 HTML 源文件的范围格式当前不支持，不扩大为父元素样式。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "style": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline": {
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "bold": {
+            "type": "boolean"
+          },
+          "color": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "emphasis": {
+            "type": "boolean"
+          },
+          "fontFamily": {
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          },
+          "fontSize": {
+            "maximum": 400,
+            "minimum": 8,
+            "type": "number"
+          },
+          "highlightColor": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/__schema0"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "italic": {
+            "type": "boolean"
+          },
+          "strike": {
+            "type": "boolean"
+          },
+          "underline": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "target": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "target",
+      "style"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "设置文字格式",
+    "targetKinds": [
+      "markdown-range",
+      "course-instance",
+      "text-selection"
+    ]
+  },
+  "name": "text.format",
+  "version": 1
+}

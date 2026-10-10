@@ -15,12 +15,12 @@ const sameTokens = (a: string[], b: string[]) => a.length === b.length && a.ever
 
 /** Refreshes only the original stable targets, following committed changes without searching for equal text. */
 export async function continueDocumentTargets<T extends { documentId: string; epoch: string; revision: number;
-  writable: readonly ToolTarget[]; selection?: readonly ToolTarget[] }>(session: DocumentSession, reference: T, ownRuns: ReadonlySet<string>): Promise<T> {
+  writable: readonly ToolTarget[]; selection?: readonly ToolTarget[] }>(session: DocumentSession, reference: T, ownRuns: ReadonlySet<string>, options: { followCurrent?: boolean } = {}): Promise<T> {
   const snapshot = await session.drain()
   if (snapshot.documentId !== reference.documentId) throw new Error('恢复的文档身份不一致')
-  if (snapshot.epoch !== reference.epoch) throw new Error('原文档会话已改变，请重新选择')
   const ranges = [...reference.writable, ...(reference.selection ?? [])].some(target => target.kind === 'text-selection' || target.kind === 'markdown-range' || isCourseInstanceRange(target)
     || target.kind === 'html-author-field' && target.source)
+  if (snapshot.epoch !== reference.epoch && (!options.followCurrent || ranges)) throw new Error('原文档会话已改变，请重新选择')
   const changes = ranges ? session.committedChangesSince(reference.revision) : []
   const advance = (target: ToolTarget, change: typeof changes[number], own: boolean): ToolTarget => {
       if (target.kind === 'text-selection') {
@@ -80,7 +80,7 @@ export async function continueDocumentTargets<T extends { documentId: string; ep
   const map = (original: ToolTarget): ToolTarget => {
     let target: ToolTarget = structuredClone(original)
     for (const change of changes) target = advance(target, change,
-      change.actor === 'agent' && !!change.runId && ownRuns.has(change.runId))
+      options.followCurrent === true || change.actor === 'agent' && !!change.runId && ownRuns.has(change.runId))
     readTarget(snapshot.model, target)
     if ((target.kind === 'markdown-range' || isCourseInstanceRange(target)) && target.to <= target.from) throw new Error('原选区已删除，请重新选择')
     return target

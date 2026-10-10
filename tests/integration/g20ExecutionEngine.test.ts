@@ -964,7 +964,7 @@ it('M26 context.read uses an actual stored source, rejects another run, and puts
       expect(native.at(-1)?.content).toEqual(expect.arrayContaining([{ type: 'image_url', image_url: { url: image } }]))
       yield complete(request, [{ id: 'foreign-context', name: 'context.read', argumentsText: JSON.stringify({ sourceId: 'run:unrelated-run:0' }) }]); return
     }
-    expect(request.messages.findLast(message => message.role === 'tool')?.content).toContain('context-read-failed')
+    expect(request.messages.filter(message => message.role === 'tool').at(-1)?.content).toContain('context-read-failed')
     yield complete(request)
   } }
   const h = await fixture(provider)

@@ -1,11 +1,10 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { randomBytes, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { DEFAULT_EXTERNAL_MCP_SETTINGS, externalMcpSettingsSchema, type ExternalMcpSettings } from '../../../shared/workbench/external'
-import type { CredentialEncryptionPort } from '../providers/providerCredentials'
 
 const SETTINGS_FILE = 'settings.json'
-const TOKEN_FILE = 'token.bin'
+const TOKENLESS_CHOICE = 'tokenlessEnabled'
 
 async function writeAtomic(filename: string, bytes: string | Uint8Array): Promise<void> {
   await fs.mkdir(path.dirname(filename), { recursive: true, mode: 0o700 })
@@ -17,10 +16,10 @@ async function writeAtomic(filename: string, bytes: string | Uint8Array): Promis
   } finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }
 }
 
-/** Resident connection settings plus the long-lived local bearer, kept only in the OS credential store's ciphertext. */
+/** One owner for local endpoint preferences and the explicit tokenless-enable choice. */
 export class ResidentMcpSettingsStore {
   private queue: Promise<unknown> = Promise.resolve()
-  constructor(private readonly options: { directory: string; encryption: CredentialEncryptionPort }) {}
+  constructor(private readonly options: { directory: string }) {}
   private serial<T>(work: () => Promise<T>): Promise<T> {
     const next = this.queue.catch(() => undefined).then(work)
     this.queue = next
@@ -28,8 +27,11 @@ export class ResidentMcpSettingsStore {
   }
   private async load(): Promise<ExternalMcpSettings> {
     try {
+      const stored = JSON.parse(await fs.readFile(path.join(this.options.directory, SETTINGS_FILE), 'utf8')) as Record<string, unknown>
+      const { [TOKENLESS_CHOICE]: tokenlessEnabled, ...preferences } = stored
+      // An old enabled:true authorized bearer transport, not the new tokenless endpoint.
       const parsed = externalMcpSettingsSchema.safeParse({ ...DEFAULT_EXTERNAL_MCP_SETTINGS,
-        ...JSON.parse(await fs.readFile(path.join(this.options.directory, SETTINGS_FILE), 'utf8')) })
+        ...preferences, enabled: tokenlessEnabled === true && preferences.enabled === true })
       // Settings hold no secret; an unreadable file falls back to the defaults and is rewritten on the next change.
       return parsed.success ? parsed.data : { ...DEFAULT_EXTERNAL_MCP_SETTINGS }
     } catch { return { ...DEFAULT_EXTERNAL_MCP_SETTINGS } }
@@ -38,27 +40,8 @@ export class ResidentMcpSettingsStore {
   update(patch: Partial<ExternalMcpSettings>): Promise<ExternalMcpSettings> {
     return this.serial(async () => {
       const next = externalMcpSettingsSchema.parse({ ...await this.load(), ...patch })
-      await writeAtomic(path.join(this.options.directory, SETTINGS_FILE), JSON.stringify(next))
+      await writeAtomic(path.join(this.options.directory, SETTINGS_FILE), JSON.stringify({ ...next, [TOKENLESS_CHOICE]: next.enabled }))
       return next
     })
   }
-  private async create(): Promise<string> {
-    const token = randomBytes(32).toString('base64url')
-    await writeAtomic(path.join(this.options.directory, TOKEN_FILE), await this.options.encryption.encryptString(token))
-    return token
-  }
-  /** Created on first use and valid until regenerated. */
-  token(): Promise<string> {
-    return this.serial(async () => {
-      let ciphertext: Uint8Array
-      try { ciphertext = await fs.readFile(path.join(this.options.directory, TOKEN_FILE)) }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return this.create(); throw error }
-      if (!(await this.options.encryption.isEncryptionAvailable())) throw new Error('系统安全凭据存储不可用，无法读取外部连接令牌')
-      let token: string
-      // A token the OS store can no longer decrypt cannot authenticate anyone; replace it instead of blocking the service.
-      try { token = await this.options.encryption.decryptString(ciphertext) } catch { return this.create() }
-      return /^[A-Za-z0-9_-]{43}$/.test(token) ? token : this.create()
-    })
-  }
-  regenerateToken(): Promise<string> { return this.serial(() => this.create()) }
 }

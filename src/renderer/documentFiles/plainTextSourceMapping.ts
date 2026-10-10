@@ -2,7 +2,7 @@ import type { ChangeSet } from '@codemirror/state'
 
 export const editorText = (source: string): string => source.replace(/\r\n?|\n/g, '\n')
 
-function sourceOffset(source: string, editorOffset: number): number {
+export function sourceOffset(source: string, editorOffset: number): number {
   let raw = 0, visible = 0
   while (raw < source.length && visible < editorOffset) {
     if (source[raw] === '\r' && source[raw + 1] === '\n') raw += 2
@@ -45,3 +45,5 @@ export function reconcileEditorText(source: string, current: string): string {
   while (before > from && after > from && previous[before - 1] === current[after - 1]) { before--; after-- }
   return applyEditorChange(source, from, before, current.slice(from, after))
 }
+
+export const editorOffset = (source: string, rawOffset: number): number => editorText(source.slice(0, rawOffset)).length

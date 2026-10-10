@@ -1,5 +1,5 @@
 ﻿# Distributed with the Windows product. No Node, repository or client-global config.
-# stdout is a one-use connection receipt, including its bearer; consume it directly,
+# stdout is a one-use local connection receipt; consume it directly,
 # never copy it into logs, a course project, or a published artifact.
 [CmdletBinding()]
 param(

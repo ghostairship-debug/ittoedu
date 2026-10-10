@@ -37,7 +37,7 @@ export const HtmlDocumentEditor = forwardRef<PlainTextDocumentEditorHandle, Html
     if (composing.current) return { ready: false, source }
     const current = sourceEditor.current?.flush() ?? { ready: true, source }
     return current.ready ? textDrafts.prepare(current.source) : current
-  } }), [source, textDrafts])
+  }, clearSelection: () => { sourceEditor.current?.clearSelection(); window.getSelection()?.removeAllRanges() } }), [source, textDrafts])
 
   const binding = committed.binding
   const documentId = committed.documentId
@@ -103,7 +103,7 @@ export const HtmlDocumentEditor = forwardRef<PlainTextDocumentEditorHandle, Html
         : <p role={previewError ? 'alert' : 'status'}>{previewError ?? '正在准备 HTML 预览…'}{previewError && <button type="button" onClick={() => setRetry(value => value + 1)}>重试预览</button>}</p>}
     </div>
     <div className="html-document-editor__source" hidden={mode !== 'source'}>
-      <PlainTextDocumentEditor ref={sourceEditor} source={source} revision={revision} onDraft={onDraft} onUndo={onUndo} onRedo={onRedo} />
+      <PlainTextDocumentEditor documentEpoch={committed.epoch} documentId={committed.documentId} active={active && mode === 'source'} ref={sourceEditor} source={source} revision={revision} onDraft={onDraft} onUndo={onUndo} onRedo={onRedo} />
     </div>
   </div>
 })

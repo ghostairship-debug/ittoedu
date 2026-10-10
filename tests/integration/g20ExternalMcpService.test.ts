@@ -37,7 +37,7 @@ it('returns the shared missing-parent diagnostic over MCP without invoking or gr
 afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
 
 async function fixture(options: { confirm?: (request: ExternalApproval) => boolean | Promise<boolean>; files?: (files: AgentFileService) => ExternalFilePort;
-  permission?: 'full' | 'workspace' | 'ask' | 'read-only'; port?: number } = {}) {
+  permission?: 'full' | 'workspace' | 'ask' | 'read-only'; port?: number; enabled?: boolean } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'g20-resident-mcp-'))
   cleanups.push(() => rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }))
   const workspace = path.join(directory, 'space'), second = path.join(directory, 'second')
@@ -47,7 +47,7 @@ async function fixture(options: { confirm?: (request: ExternalApproval) => boole
   const host = new DocumentHostService(path.join(directory, 'documents'))
   const events = new ExecutionEventStore({ directory: path.join(directory, 'events') })
   const mcp = await residentMcpFixture({ host, directory, workspaceRoot: workspace, appendEvent: event => events.append(event), confirm: options.confirm, files: options.files,
-    settings: { ...(options.permission ? { permission: options.permission } : {}), ...(options.port !== undefined ? { port: options.port } : {}) } })
+    settings: { ...(options.enabled !== undefined ? { enabled: options.enabled } : {}), ...(options.permission ? { permission: options.permission } : {}), ...(options.port !== undefined ? { port: options.port } : {}) } })
   cleanups.push(() => mcp.close())
   await mcp.conversations.registerWorkspace({ workspaceId: 'second', rootPath: await realpath(second), managed: false, authorization: 'user-selected' })
   return { directory, workspace, second, host, events, ...mcp }
@@ -196,7 +196,7 @@ it('serves a resident session in the current workspace with the built-in tool se
   expect(timeline.items.every(item => item.source === 'external-mcp')).toBe(true)
   expect(timeline.items.some(item => item.type === 'document.commit')).toBe(true)
   expect(timeline.items.some(item => ['run.end', 'reasoning', 'usage'].includes(item.type))).toBe(false)
-  expect(JSON.stringify([conversation, timeline, await f.service.status()])).not.toContain(f.token())
+  expect(JSON.stringify([conversation, timeline, await f.service.status()])).not.toContain("Authorization")
   // The current lifecycle treats only pending calls as work; an idle resident
   // connection stays available without holding an active-operation barrier.
   expect(f.service.activity()).toEqual([])
@@ -257,7 +257,7 @@ it('S12-T03 answers an undelivered write with its original receipt, executes aga
   expect((await callTool(reconnected, 'file.read', { path: 'notes.md' })).isError).toBe(false)
 })
 
-it('reports an occupied port without starting, recovers on a new port, and disconnects every session when the token is regenerated', async () => {
+it('reports an occupied port without starting, recovers on a new port, and disconnects every session when disabled', async () => {
   const blocker: Server = createServer()
   await new Promise<void>(resolve => blocker.listen(0, '127.0.0.1', resolve))
   cleanups.push(() => new Promise(resolve => blocker.close(resolve)))
@@ -272,17 +272,9 @@ it('reports an occupied port without starting, recovers on a new port, and disco
   const left = await f.connect('Gemini CLI'), right = await f.connect('OpenCode')
   await callTool(left, 'workspace.list'); await callTool(right, 'workspace.list')
   expect((await f.service.status()).sessions).toHaveLength(2)
-  const before = f.token()
-  const regenerated = await f.service.regenerateToken()
-  expect(regenerated.token).not.toBe(before)
-  expect(regenerated.status.sessions).toEqual([])
-  await expect(left.listTools()).rejects.toThrow()
-  await expect(f.connect('stale', before)).rejects.toThrow()
-  const renewed = await f.connect('OpenCode')
-  expect((await renewed.listTools()).tools.length).toBeGreaterThan(0)
   const disabled = await f.service.configure({ enabled: false })
   expect(disabled).toMatchObject({ state: 'disabled', sessions: [] })
-  await expect(renewed.listTools()).rejects.toThrow()
+  await expect(left.listTools()).rejects.toThrow()
 })
 
 it('S12-T06 binds sessions to the app workspace, switches spaces, isolates handles and asks before writing outside', async () => {
@@ -368,4 +360,142 @@ it('S12-T02 keeps concurrent clients on one Session and History, and a closing d
   expect(stale.structuredContent.result).toMatchObject({ kind: 'error' })
   expect((await f.service.status()).sessions.every(session => !session.stopped)).toBe(true)
   expect((await callTool(codex, 'file.read', { path: 'notes.md' })).isError).toBe(false)
+})
+
+
+it('stays disabled until explicitly enabled and uses tokenless SDK initialization', async () => {
+  const f = await fixture({ enabled: false })
+  expect(await f.service.status()).toMatchObject({ state: 'disabled', settings: { enabled: false, permission: 'workspace' } })
+  expect(f.service.server.listeningPort).toBeUndefined()
+  await f.service.configure({ enabled: true })
+  const client = await f.connect('no-bearer-client')
+  expect((await callTool(client, 'file.read', { path: 'notes.md' })).isError).toBe(false)
+})
+
+it('changes the same live connection across all four permissions, including real full outside reads and writes', async () => {
+  const f = await fixture({ permission: 'read-only' }), client = await f.connect('same-live-connection')
+  const id = (await f.service.status()).sessions[0]!.sessionId
+  expect((await client.listTools()).tools.map(tool => tool.name)).not.toContain('file.write')
+  await f.service.configureSession(id, 'ask')
+  expect((await callTool(client, 'file.write', { mode: 'create', path: 'ask.md', content: 'ask' })).isError).toBe(false)
+  expect(f.approvals.at(-1)?.reason).toBe('ask')
+  await f.service.configureSession(id, 'workspace')
+  f.approvals.length = 0
+  expect((await callTool(client, 'file.write', { mode: 'create', path: 'workspace.md', content: 'workspace' })).isError).toBe(false)
+  expect(f.approvals).toHaveLength(0)
+  const outside = path.join(f.second, 'other.md')
+  expect((await callTool(client, 'file.read', { path: outside })).isError).toBe(true)
+  await f.service.configureSession(id, 'full')
+  expect((await callTool(client, 'file.read', { path: outside })).isError).toBe(false)
+  const opened = data(await callTool(client, 'file.open', { path: outside }))
+  expect(opened.writable).toBe(true)
+  expect((await callTool(client, 'file.write', { mode: 'create', path: path.join(f.second, 'full.txt'), content: 'full' })).isError).toBe(false)
+  expect(await readFile(path.join(f.second, 'full.txt'), 'utf8')).toBe('full')
+  expect(f.approvals).toHaveLength(0)
+  f.ui.state = { workspaceId: 'second', activeDocumentId: opened.documentId }
+  expect(data(await callTool(client, 'workspace.list')).current).toBe('space')
+  expect(data(await callTool(client, 'workbench.state')).activeDocument).toMatchObject({ documentId: opened.documentId, writable: true })
+  await f.service.configureSession(id, 'read-only')
+  expect((await client.listTools()).tools.map(tool => tool.name)).not.toContain('file.write')
+  expect((await callTool(client, 'text.replace', { target: opened.target, content: 'stale handle' })).isError).toBe(true)
+  expect((await f.service.status()).sessions).toMatchObject([{ sessionId: id, permission: 'read-only', stopped: false }])
+})
+
+it('shares exact host-bound outside reads with file and foreground state without granting a sibling', async () => {
+  const f = await fixture()
+  const outside = path.join(f.second, 'other.md'), sibling = path.join(f.second, 'sibling.md')
+  await writeFile(sibling, 'private sibling')
+  const doc = await f.host.internalAPI.open(outside)
+  f.ui.state = { workspaceId: 'space', activeDocumentId: doc.documentId }
+  const client = await f.connect('host-bound-file')
+  expect((await callTool(client, 'file.read', { path: outside })).isError).toBe(false)
+  expect((await callTool(client, 'file.read', { path: sibling })).isError).toBe(true)
+  const state = data(await callTool(client, 'workbench.state'))
+  expect(state.activeDocument).toMatchObject({ documentId: doc.documentId, writable: false })
+  expect((await callTool(client, 'read', { target: state.activeDocument.target })).isError).toBe(false)
+  const unbound = await f.host.internalAPI.open(sibling)
+  f.ui.state = { workspaceId: 'second', activeDocumentId: unbound.documentId }
+  expect(data(await callTool(client, 'workbench.state')).activeDocument).toBeNull()
+  expect((await callTool(client, 'file.read', { path: sibling })).isError).toBe(true)
+})
+
+it.each(['full', 'read-only'] as const)('keeps an accepted file call frozen and revoked while changing the connection to %s', async nextPermission => {
+  let release!: () => void, entered!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const arrived = new Promise<void>(resolve => { entered = resolve })
+  let first = true
+  const seen: string[] = []
+  const f = await fixture({ permission: nextPermission === 'full' ? 'workspace' : 'full', files: files => ({
+    execute: files.execute.bind(files), releaseRun: files.releaseRun.bind(files),
+    preflightMutation: async (context, name, input) => {
+      seen.push(context.permission)
+      const result = await files.preflightMutation(context, name, input)
+      if (first) { first = false; entered(); await gate }
+      return result
+    },
+  }) })
+  const client = await f.connect('frozen-inflight'), id = (await f.service.status()).sessions[0]!.sessionId
+  const filename = path.join(f.second, `frozen-${nextPermission}.txt`)
+  const old = callTool(client, 'file.write', { mode: 'create', path: filename, content: 'must not commit' })
+  await arrived
+  await f.service.configureSession(id, nextPermission)
+  release()
+  expect((await old).isError).toBe(true)
+  expect(seen[0]).toBe(nextPermission === 'full' ? 'workspace' : 'full')
+  await expect(readFile(filename)).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(f.approvals).toHaveLength(0)
+  if (nextPermission === 'full') {
+    expect((await callTool(client, 'file.write', { mode: 'create', path: filename, content: 'new full operation' })).isError).toBe(false)
+    expect(await readFile(filename, 'utf8')).toBe('new full operation')
+  } else expect((await client.listTools()).tools.map(tool => tool.name)).not.toContain('file.write')
+})
+
+it('executes a new identical operation in B and retries only the explicitly identified receipt from A', async () => {
+  const f = await fixture(), client = await f.connect('scoped-retry')
+  const input = { mode: 'create', path: 'scope.txt', content: 'same args' }
+  const a = await callTool(client, 'file.write', input, 'same-ticket')
+  expect(a.isError).toBe(false)
+  expect(a.structuredContent.operationScope).toMatchObject({ workspaceId: 'space', workspaceRoot: f.workspace })
+  await callTool(client, 'workspace.switch', { workspaceId: 'second' })
+  const b = await callTool(client, 'file.write', input, 'same-ticket')
+  expect(b.isError).toBe(false)
+  expect(b.structuredContent.operationScope).toMatchObject({ workspaceId: 'second', workspaceRoot: f.second })
+  expect(b.structuredContent.operationScope!.runId).not.toBe(a.structuredContent.operationScope!.runId)
+  const retry = await client.callTool({ name: 'file.write', arguments: input,
+    _meta: { 'guoling/ticket': a.structuredContent.ticket!, 'guoling/operation': { ...a.structuredContent.operationScope! } } }) as unknown as ResidentToolReply
+  expect(retry.isError).toBe(false)
+  expect(retry.structuredContent).toMatchObject({ replayed: true, operationScope: a.structuredContent.operationScope })
+  expect(retry.structuredContent.result).toEqual(a.structuredContent.result)
+  expect(await readFile(path.join(f.workspace, 'scope.txt'), 'utf8')).toBe('same args')
+  expect(await readFile(path.join(f.second, 'scope.txt'), 'utf8')).toBe('same args')
+  expect(data(await callTool(client, 'operation.recent')).operations.filter((item: { tool: string }) => item.tool === 'file.write')).toHaveLength(2)
+})
+
+
+it('uses registry effects for readonly delegation receipts instead of starting another job on retry', async () => {
+  const f = await fixture(), client = await f.connect('readonly-job-retry')
+  vi.spyOn(f.host.tools, 'resolveRunTool').mockImplementation(async (_run, name) => describeTools([name])[0] ?? null)
+  const execute = vi.spyOn(f.host.tools, 'execute').mockResolvedValue({ kind: 'read', data: { job: 'original-delegation-job', status: 'running' } })
+  const input = { goal: 'Read the supplied fixture', sources: ['notes.md'], budget: { maxOutputTokens: 1000, maxDurationMs: 30000 } }
+  const first = await callTool(client, 'delegate.readonly', input, 'readonly-job')
+  const again = await callTool(client, 'delegate.readonly', input, 'readonly-job')
+  expect(first.isError).toBe(false)
+  expect(again.structuredContent).toMatchObject({ replayed: true, result: first.structuredContent.result })
+  expect(execute).toHaveBeenCalledOnce()
+  expect(data(await callTool(client, 'operation.recent')).operations[0]).toMatchObject({ tool: 'delegate.readonly', ticket: 'readonly-job', status: 'pending' })
+})
+
+
+it('fetches resource-only images without an ask modification prompt while target application still asks', async () => {
+  const f = await fixture({ permission: 'ask' }), client = await f.connect('resource-only-ask')
+  vi.spyOn(f.host.tools, 'resolveRunTool').mockImplementation(async (_run, name) => describeTools([name])[0] ?? null)
+  const execute = vi.spyOn(f.host.tools, 'execute').mockResolvedValue({ kind: 'read', data: { status: 'ready', resource: 'downloaded-original' } })
+  const resource = await callTool(client, 'image.fetch', { image: 'approved-open-image' })
+  expect(resource.isError).toBe(false)
+  expect(f.approvals).toHaveLength(0)
+  expect(resource.structuredContent.operationScope).toBeDefined()
+  const applied = await callTool(client, 'image.fetch', { image: 'approved-open-image', path: '/current-page/image' })
+  expect(applied.isError).toBe(false)
+  expect(f.approvals).toMatchObject([{ reason: 'ask' }])
+  expect(execute).toHaveBeenCalledTimes(2)
 })

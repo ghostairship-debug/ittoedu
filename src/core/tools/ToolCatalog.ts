@@ -14,7 +14,7 @@ import bundledSkills from '../../shared/generated/bundledSkills.json'
 import { nativeContentInputSchemaByType } from '../../shared/contracts/native-v1/schema'
 import { z } from 'zod'
 import type { ModelToolCall, ToolDefinition, ToolResult } from '../../shared/workbench/tools'
-import { objectUpdateInputSchema, objectConvertInputSchema, courseConfigureInputSchema, surfaceConfigureInputSchema, objectStructureInputSchema, objectPlaceInputSchema, objectAuthorInputSchema, interactionUpdateInputSchema, courseLogicInputSchema, courseMediaInputSchema, surfaceRecipeInputSchema, courseProductivityInputSchema, surfaceRemixInputSchema, objectInsertInputSchema, objectLayoutInputSchema, teacherEnsureInputSchema } from './toolSchemas'
+import { textFormatInputSchema, objectUpdateInputSchema, objectConvertInputSchema, courseConfigureInputSchema, surfaceConfigureInputSchema, objectStructureInputSchema, objectPlaceInputSchema, objectAuthorInputSchema, interactionUpdateInputSchema, courseLogicInputSchema, courseMediaInputSchema, surfaceRecipeInputSchema, courseProductivityInputSchema, surfaceRemixInputSchema, objectInsertInputSchema, objectLayoutInputSchema, teacherEnsureInputSchema } from './toolSchemas'
 import { coursePresentationInputSchema } from './coursePresentationEdits'
 import { componentFrameSchema } from '../../shared/contracts/component-platform/schema'
 import { handleToolTarget, hasRunDocument, hasRunWrite, projectToolTarget, registeredEffectNames,
@@ -49,14 +49,19 @@ export const canonicalMutationTools = [
     inputSchema: z.object({ target: target.optional().describe('省略时使用本次文字卡由宿主固定的默认目标；其它任务必须提供。'), content: z.string(), format: z.enum(['text', 'html']).optional() }).strict(), manual: { label: '替换正文', group: 'edit', targetKinds: ['markdown-range', 'html-author-field', 'course-instance', 'text-selection'] } },
   { capability: 'write', effect: 'document-edit', supports: context => hasRunWrite(context, ['markdown-range', 'html-author-field', 'course-instance', 'text-selection']), targets: (input, resolver) => input.target ? handleToolTarget({ target: input.target }, resolver) : undefined,
     handler: (context, input) => context.mutate({ name: 'text.replace', input }) }),
-  registerCanonical({ name: 'object.update', description: '修改获授权整对象的公开属性。使用 target 句柄，或使用 project.list/read 返回的对象 path；project 可选。data/style 只修改提供字段，省略字段和人工位置保持；专业 appearance/style 等子记录可局部修改，数组和正文仍使用该字段完整值。implementation 是实例源码覆盖或 null 恢复默认，不能充当专业类型转换；frame 可局部调位置尺寸。文字范围授权不能扩大为整对象。',
+  registerCanonical({ name: 'text.format', description: '对已观察且获授权的 Markdown 或课件原生正文范围设置加粗、斜体、字号、字体、颜色等真实文字格式，保留原文、范围外格式和对象位置。style 只应用提供字段。纯文本文件没有格式；普通 HTML 源文件的范围格式当前不支持，不扩大为父元素样式。',
+    inputSchema: textFormatInputSchema, manual: { label: '设置文字格式', group: 'edit', targetKinds: ['markdown-range', 'course-instance', 'text-selection'] } },
+  { capability: 'write', effect: 'document-edit', supports: context => hasRunWrite(context, ['markdown-range', 'text-selection'], 'markdown')
+      || hasRunWrite(context, ['course-instance', 'text-selection'], 'course-v10'), targets: handleToolTarget,
+    handler: (context, input) => context.mutate({ name: 'text.format', input }) }),
+  registerCanonical({ name: 'object.update', description: '修改获授权整对象的公开属性。使用 target 句柄，或使用 project.list/read 返回的对象 path；project 可选。复制 A 的颜色或阴影到 B 时优先 properties.appearanceFrom:{target:已观察来源整对象只读句柄,fields:["color","shadows"]}，软件确定性读取指定字段，此例保留正文、字号和位置。properties.appearance 直接修改专业外观，显式字段覆盖来源同名字段；文字阴影 shadows 是对象数组，每项 x/y/blur/color。不需要猜 data.appearance，不补省略项默认值。data/style 保留高级局部路径，数组和正文仍使用该字段完整值。implementation 是实例源码覆盖或 null 恢复默认，不能充当专业类型转换；frame 可局部调位置尺寸。文字范围格式使用 text.format，不能扩大为整对象。',
     inputSchema: objectUpdateInputSchema, manual: { label: '修改属性', group: 'edit', targetKinds: ['course-instance'] } },
-  { capability: 'write', effect: 'document-edit', family: 'layout', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'),
+  { capability: 'write', effect: 'document-edit', exposure: 'direct', family: 'layout', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'),
     targets: (input, resolver) => 'target' in input ? handleToolTarget(input, resolver) : projectToolTarget(input, resolver),
     handler: (context, input) => context.mutate({ name: 'object.update', input }) }),
   registerCanonical({ name: 'media.apply', description: '使用来源返回的 source 或已授权文件路径，原位替换同类型图片、音频或视频；软件读取实际字节并登记资源。保留对象身份、frame、专业效果与未指定字段；asset 可引用当前文档已有图片句柄。',
     inputSchema: mediaApplyInputSchema, manual: { label: '替换媒体', group: 'edit', targetKinds: ['course-instance'] } },
-  { capability: 'write', effect: 'document-edit', family: 'media', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'), targets: handleToolTarget,
+  { capability: 'write', effect: 'document-edit', exposure: 'direct', family: 'media', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'media.apply', input }) }),
   registerCanonical({ name: 'media.insert', description: '把来源返回的 source 或已授权文件路径插入已授权页面，支持图片、音频和视频；target 为页面句柄，或用 project.list/read 返回的页面 path（project 可选）。软件读取字节、登记资源并分配组件身份。frame 可省略，由宿主按媒体尺寸放置；一次正式事务可撤销。',
     inputSchema: z.union([
@@ -66,7 +71,7 @@ export const canonicalMutationTools = [
       z.object({ path: z.string().min(1), project: z.string().min(1).optional(), resource: z.string().min(1), fit: imageFitSchema.optional(), frame: componentFrameSchema.optional() }).strict(),
     ]),
     manual: { label: '插入媒体', group: 'edit', targetKinds: ['course-surface'] } },
-  { capability: 'write', effect: 'document-edit', family: 'media', supports: context => hasRunWrite(context, ['course-surface'], 'course-v10'),
+  { capability: 'write', effect: 'document-edit', exposure: 'direct', family: 'media', supports: context => hasRunWrite(context, ['course-surface'], 'course-v10'),
     targets: (input, resolver) => 'target' in input ? handleToolTarget(input, resolver) ?? projectToolTarget({ path: input.target }, resolver) : projectToolTarget(input, resolver),
     handler: (context, input) => context.mutate({ name: 'media.insert', input }) }),
   registerCanonical({ name: 'object.convert', description: '将当前表格转换为可编辑专业图表，保留对象身份、位置、样式和其它对象。用已观察的 target 或 path，to=chart；chartType 可选 bar/line/area/pie/donut。categoryColumn/valueColumns 按列从1计数，默认首列类别、其余列数值。软件读取当前表格及声明表头、产生图表身份并一次提交；不要求复制原表格数据或内部编号。',
@@ -88,7 +93,7 @@ export const canonicalMutationTools = [
     handler: (context, input) => context.mutate({ name: 'surface.configure', input }) }),
   registerCanonical({ name: 'object.structure', description: '删除、复制、移动或调层序。target为整对象句柄；复制保持全部展示状态、局部规则、判题反馈和资源引用；移动调整当前页或全局平面内的父子归属，用已观察容器destination句柄并保持世界几何。软件维护对象身份、父子关系和一次撤销，不接受手写childIds。',
     inputSchema: objectStructureInputSchema, manual: { label: '对象结构', group: 'edit', targetKinds: ['course-instance'] } },
-  { capability: 'write', effect: 'document-edit', family: 'layout', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'), targets: handleToolTarget,
+  { capability: 'write', effect: 'document-edit', exposure: 'direct', family: 'layout', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'object.structure', input }) }),
   registerCanonical({ name: 'object.place', description: '调整全局对象平面/显隐范围，或讲义正文/浮层载体。正文保留阅读顺序、宽度、环绕和题注；浮层保留space/plane/段落锚与frame。parent使用已观察容器句柄；null回到当前页。只更改提供字段。',
     inputSchema: objectPlaceInputSchema, manual: { label: '对象归属与讲义排版', group: 'edit', targetKinds: ['course-instance'] } },
@@ -128,11 +133,11 @@ export const canonicalMutationTools = [
     handler: (context, input) => context.mutate({ name: 'surface.remix', input }) }),
   registerCanonical({ name: 'object.insert', description: '在已观察页面或容器内插入文字、公式、图形、表格、图表或填空。只提供类型、正文及所需位置尺寸；软件复用人工插入默认、准备容器、专业数据和身份，正式事务可撤销。Flow destination=document 为正文，paper 为纸张浮层。',
     inputSchema: objectInsertInputSchema, manual: { label: '插入专业元素', group: 'edit', targetKinds: ['course-surface', 'course-instance'] } },
-  { capability: 'write', effect: 'document-edit', family: 'content', supports: context => hasRunWrite(context, ['course-surface', 'course-instance'], 'course-v10'), targets: handleToolTarget,
+  { capability: 'write', effect: 'document-edit', exposure: 'direct', family: 'content', supports: context => hasRunWrite(context, ['course-surface', 'course-instance'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'object.insert', input }) }),
   registerCanonical({ name: 'object.layout', description: '对同页同展示状态的已观察对象做对齐或等距分布。targets 使用对象句柄；软件复用人工世界坐标、父级逆变换与锁定规则，不需计算每个 frame，一次事务可撤销。',
     inputSchema: objectLayoutInputSchema, manual: { label: '对齐与分布', group: 'edit', targetKinds: ['course-instance'] } },
-  { capability: 'write', effect: 'document-edit', family: 'layout', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'),
+  { capability: 'write', effect: 'document-edit', exposure: 'direct', family: 'layout', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'),
     targets: (input, resolver) => { const resolved = input.targets.map(target => resolver.resolveHandle(target)); return resolved.every(value => value !== undefined) ? resolved : undefined },
     handler: (context, input) => context.mutate({ name: 'object.layout', input }) }),
   registerCanonical({ name: 'teacher.ensure', description: '为已观察演示页准备教师控制台；复用已有控制台，否则使用人工插入默认、共享层和软件身份创建。涉及全局层时需要整课授权，一次事务可撤销。',
@@ -143,7 +148,8 @@ export const canonicalMutationTools = [
 export const projectApplyTool = projectFileRegistrations.find(tool => tool.name === 'project.apply')!
 export const canonicalToolRegistrations = [...canonicalMutationTools]
 export function canonicalToolRegistration(name: string) { return canonicalToolRegistrations.find(tool => tool.name === name) }
-const mutationSchemas = [canonicalMutationTools[0].callSchema, canonicalMutationTools[1].callSchema, canonicalMutationTools[2].callSchema, canonicalMutationTools[3].callSchema, canonicalMutationTools[4].callSchema, canonicalMutationTools[5].callSchema, canonicalMutationTools[6].callSchema, canonicalMutationTools[7].callSchema, canonicalMutationTools[8].callSchema, canonicalMutationTools[9].callSchema, canonicalMutationTools[10].callSchema, canonicalMutationTools[11].callSchema, canonicalMutationTools[12].callSchema, canonicalMutationTools[13].callSchema, canonicalMutationTools[14].callSchema, canonicalMutationTools[15].callSchema, canonicalMutationTools[16].callSchema, canonicalMutationTools[17].callSchema, canonicalMutationTools[18].callSchema, canonicalMutationTools[19].callSchema, canonicalMutationTools[20].callSchema] as const
+type CallSchemas<T extends readonly { callSchema: z.ZodType }[]> = { [Index in keyof T]: T[Index]['callSchema'] }
+const mutationSchemas = canonicalMutationTools.map(tool => tool.callSchema) as unknown as CallSchemas<typeof canonicalMutationTools>
 export const mutationCallSchema = z.discriminatedUnion('name', mutationSchemas)
 export type MutationCall = z.infer<typeof mutationCallSchema>
 export const batchMutationCallSchema = mutationCallSchema
@@ -199,6 +205,7 @@ export const toolFamilyDescriptions: Record<ToolFamily, string> = {
   content: '组件专业内容与文档正文', layout: '组件属性与表面布局', navigation: '页面、表面、状态与位置结构',
   interaction: '交互规则、输入题和答案', media: '图片、视频、声音与图像生成', build: '文档导出',
   jobs: '受限计算、有限委派与作业状态、等待、日志和取消', office: 'Word、Excel、PowerPoint 原格式内容创建、读取和局部编辑；软件组装与保存',
+  external: '公开网页搜索与读取、已授权外部 MCP 工具和资源；配置及调用权限以真实回执为准',
 }
 /** Describe only capabilities actually allowed by this run's frozen grant. */
 export function describeToolFamily(family: ToolFamily, allowedNames: readonly string[]): string {
@@ -208,8 +215,12 @@ export function describeToolFamily(family: ToolFamily, allowedNames: readonly st
 }
 export function familyOfTool(name: string): ToolFamily | null { return toolRegistration(name)?.family ?? null }
 export function visibleRunToolNames(allowed: readonly string[], loadedFamilies: ReadonlySet<ToolFamily>): string[] {
-  const coreFamilies = new Set<ToolFamily>(['content', 'layout', 'navigation', 'interaction', 'media', 'build', 'jobs', 'office'])
-  const direct = allowed.filter(name => name !== 'batch' && (!familyOfTool(name) || coreFamilies.has(familyOfTool(name)!) || loadedFamilies.has(familyOfTool(name)!)))
+  const direct = allowed.filter(name => {
+    if (name === 'batch') return false
+    const registration = toolRegistration(name)
+    return !!registration && (!registration.family || 'exposure' in registration && registration.exposure === 'direct'
+      || loadedFamilies.has(registration.family))
+  })
   const canBatch = allowed.includes('batch') && mutationNamesIn(direct).length > 0
   return allowed.filter(name => direct.includes(name) || name === 'batch' && canBatch)
 }

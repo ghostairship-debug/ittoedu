@@ -6,7 +6,6 @@ import { externalRequestSchema, externalUiStateSchema, type ExternalUiState } fr
 import { DesktopOperationError } from '../../errors'
 import { executionDesktopService } from '../execution/ExecutionDesktopService'
 import { documentHost } from '../documentHost'
-import { createElectronCredentialEncryption } from '../providers/providerCredentials'
 import { authorizeWorkspaceFilesRoot, operateWorkspaceFiles } from '../workspaceFilesDesktopService'
 import { ExternalMcpService, type ExternalApproval } from './ExternalMcpService'
 import { ResidentMcpSettingsStore } from './ResidentMcpSettings'
@@ -34,8 +33,7 @@ export function externalMcpService(): Promise<ExternalMcpService> {
   return singleton ??= (async () => {
     await app.whenReady()
     const execution = await executionDesktopService(), documents = documentHost()
-    const settings = new ResidentMcpSettingsStore({ directory: path.join(app.getPath('userData'), 'workbench-v2', 'external-mcp'),
-      encryption: await createElectronCredentialEncryption() })
+    const settings = new ResidentMcpSettingsStore({ directory: path.join(app.getPath('userData'), 'workbench-v2', 'external-mcp') })
     const service = new ExternalMcpService({ settings, conversations: execution.conversations, registry: documents.registry, gateway: documents.tools,
       files: documents.agentFiles,
       workspaceRoot: async root => (await operateWorkspaceFiles({ type: 'root', directory: root })).resolvedPath,
@@ -86,8 +84,7 @@ export async function operateExternalMcp(raw: unknown): Promise<unknown> {
     switch (input.type) {
       case 'status': return await service.status()
       case 'configure': return await service.configure(input.patch)
-      case 'token': return await service.revealToken()
-      case 'regenerate-token': return await service.regenerateToken()
+      case 'configure-session': return await service.configureSession(input.sessionId, input.permission)
       case 'stop-session': return await service.stopSession(input.sessionId)
     }
   } catch (cause) {
@@ -95,7 +92,7 @@ export async function operateExternalMcp(raw: unknown): Promise<unknown> {
       cause instanceof Error ? cause.message : '操作未完成', '当前文档和已提交的修改已保留。')
   }
 }
-/** Default on: listen when the app starts; an occupied port is reported in settings without affecting the rest of the app. */
+/** Listen only after explicit enablement; an occupied port is reported in settings without affecting the rest of the app. */
 export async function startExternalMcpService(): Promise<void> { await (await externalMcpService()).start() }
 export async function closeExternalMcpService(): Promise<void> { if (singleton) await (await singleton).close() }
 

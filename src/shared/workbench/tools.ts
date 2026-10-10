@@ -44,7 +44,7 @@ export interface ToolRunGrant {
   webAuthorization?: { origins: readonly string[]; actions: readonly ('submit' | 'upload' | 'download')[] }
   materialIds?: readonly string[]
   /** Frozen by the visible content action; omitted model targets resolve only here. */
-  contentOutput?: { kind: 'replace-text'; documentId: string; target: ToolTarget }
+  contentOutput?: { kind: 'content'; documentId: string; target: ToolTarget }
 }
 
 /** Transport assigns callId outside the model arguments. */

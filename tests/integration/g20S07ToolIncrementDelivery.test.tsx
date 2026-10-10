@@ -126,7 +126,7 @@ it('S07-T01 receives real resident MCP stages and reopens one external source ti
   expect(increments.map(row => row.data.text)).toEqual(['已收到外部工具请求。', '正在调用正式工具。'])
   expect(new Set(increments.map(row => `${row.runId}:${row.itemId}`)).size).toBe(1)
   expect(JSON.stringify(increments)).not.toContain('PRIVATE_DOCUMENT_BODY')
-  expect(JSON.stringify(increments)).not.toContain(mcp.token())
+  expect(JSON.stringify(increments)).not.toContain("Authorization")
   assertRunningCard(await h.reopen().snapshot(conversationId), 'external-mcp', increments.map(row => row.data.text!))
   release.resolve()
   const response = await pending

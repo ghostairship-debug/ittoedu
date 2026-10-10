@@ -98,8 +98,7 @@ function Connect-Product {
   Assert-True ($null -ne $receiptLine) 'Distributed helper ended before a complete JSON receipt.'
   try { $connection = $receiptLine | ConvertFrom-Json }
   catch { throw ('Distributed helper receipt was not JSON. lineCharacters=' + $receiptLine.Length) }
-  Assert-True ($connection.status -eq 'ready' -and [bool]$connection.token) 'Distributed helper did not supply an actual ready receipt.'
-  $script:Credentials.Add([string]$connection.token)
+  Assert-True ($connection.status -eq 'ready' -and [bool]$connection.endpoint) 'Distributed helper did not supply an actual ready receipt.'
   return $connection
 }
 function Invoke-ProductRpc($Headers, [string]$Method, $Parameters, [bool]$Notification = $false) {
@@ -124,7 +123,7 @@ function Invoke-ProductRpc($Headers, [string]$Method, $Parameters, [bool]$Notifi
   return [pscustomobject]@{ Response = $response; Rpc = $rpc }
 }
 function Open-Session([string]$Name) {
-  $headers = @{ Authorization = 'Bearer ' + $script:Ready.token; Accept = 'application/json, text/event-stream' }
+  $headers = @{ Accept = 'application/json, text/event-stream' }
   $reply = Invoke-ProductRpc $headers 'initialize' @{ protocolVersion = '2025-11-25'; capabilities = @{};
     clientInfo = @{ name = $Name; version = '1' } }
   $session = [string]$reply.Response.Headers['Mcp-Session-Id']
@@ -269,8 +268,7 @@ try {
       while (-not (Test-Path -LiteralPath $readyFile -PathType Leaf) -and [DateTime]::UtcNow -lt $readyDeadline -and -not $prestarted.HasExited) { Start-Sleep -Milliseconds 100 }
       Assert-True (Test-Path -LiteralPath $readyFile -PathType Leaf) 'The isolated public headless launch did not supply ready; no process was killed or launch repeated.'
       try { $initialReady = [IO.File]::ReadAllText($readyFile, $utf8) | ConvertFrom-Json }
-      catch { throw 'The isolated public ready receipt was not JSON; raw bearer content is omitted.' }
-      if ($initialReady.token) { $script:Credentials.Add([string]$initialReady.token) }
+      catch { throw 'The isolated public ready receipt was not JSON; raw handoff content is omitted.' }
       Assert-True ($initialReady.status -eq 'ready' -and $initialReady.mode -eq 'headless' -and $initialReady.ownership -eq 'owned' `
         -and $initialReady.pid -eq $prestarted.Id -and -not $initialReady.workspaceMismatch `
         -and (Same-Path $initialReady.workspace $workspace) -and (Same-Path $initialReady.profile $profile)) 'Explicit headless launch returned a different owner or workspace.'
@@ -285,7 +283,7 @@ try {
   $script:Ready = Connect-Product
   $expectedOwnership = if ($ReuseWorkspace) { 'attached' } else { 'owned' }
   Assert-True ($script:Ready.mode -eq 'headless' -and $script:Ready.ownership -eq $expectedOwnership -and -not $script:Ready.workspaceMismatch) 'Expected the actual headless owner in the isolated profile.'
-  if ($ReuseWorkspace) { Assert-True ($script:Ready.pid -eq $initialReady.pid -and $script:Ready.endpoint -eq $initialReady.endpoint -and $script:Ready.token -eq $initialReady.token) 'Self-locating helper attached to a different isolated owner or endpoint.' }
+  if ($ReuseWorkspace) { Assert-True ($script:Ready.pid -eq $initialReady.pid -and $script:Ready.endpoint -eq $initialReady.endpoint) 'Self-locating helper attached to a different isolated owner or endpoint.' }
   Assert-True ((Same-Path $script:Ready.profile $profile) -and (Same-Path $script:Ready.workspace $workspace) `
     -and $script:Ready.permission -eq 'workspace') 'Connection returned a different profile, workspace, or permission.'
   $owner = [Diagnostics.Process]::GetProcessById([int]$script:Ready.pid)
@@ -461,10 +459,10 @@ public static class TeacherPackagedWindow {
   Checkpoint 'gui.connection.identity' @{ mode = $guiReady.mode; ownership = $guiReady.ownership;
     pidMatches = $guiReady.pid -eq $owner.Id; profileMatches = Same-Path $guiReady.profile $profile;
     workspaceMatches = Same-Path $guiReady.workspace $workspace; workspaceMismatch = $guiReady.workspaceMismatch;
-    tokenMatches = $guiReady.token -eq $script:Ready.token; endpointMatches = $guiReady.endpoint -eq $script:Ready.endpoint }
+    endpointMatches = $guiReady.endpoint -eq $script:Ready.endpoint }
   Assert-True ($guiReady.mode -eq 'gui' -and $guiReady.ownership -eq 'attached' -and $guiReady.pid -eq $owner.Id `
     -and -not $guiReady.workspaceMismatch -and (Same-Path $guiReady.profile $profile) -and (Same-Path $guiReady.workspace $workspace) `
-    -and $guiReady.token -eq $script:Ready.token -and $guiReady.endpoint -eq $script:Ready.endpoint) 'GUI promotion did not retain the same actual owner and connection.'
+    -and $guiReady.endpoint -eq $script:Ready.endpoint) 'GUI promotion did not retain the same actual owner and connection.'
   $clientB = Open-Session 'Packaged teacher acceptance B'
   $uiDeadline = [DateTime]::UtcNow.AddSeconds(20)
   do {

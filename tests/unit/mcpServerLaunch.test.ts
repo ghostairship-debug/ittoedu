@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { mcpServerElectronArguments, readMcpConnectionReady, waitForMcpConnection } from '../../scripts/mcpServerLaunch'
 
 const workspace = path.resolve('test-workspace')
-const ready = { status: 'ready', endpoint: 'http://127.0.0.1:45888/mcp', token: 'connection-only', workspace, workspaceId: 'space',
+const ready = { status: 'ready', endpoint: 'http://127.0.0.1:45888/mcp', workspace, workspaceId: 'space',
   permission: 'workspace', pid: 123, profile: path.resolve('test-profile'), mode: 'headless', ownership: 'owned', requestedWorkspace: workspace, workspaceMismatch: false }
 
 describe('resident MCP launcher', () => {
@@ -28,7 +28,7 @@ describe('resident MCP launcher', () => {
 
   it('reports service failure, failed process exit, and missing ready without inventing readiness', async () => {
     expect(() => readMcpConnectionReady({ status: 'failed', message: 'port already in use' })).toThrow('port already in use')
-    expect(() => readMcpConnectionReady({ ...ready, token: '' })).toThrow('token')
+    expect(readMcpConnectionReady(ready)).not.toHaveProperty('token')
     await expect(waitForMcpConnection({ read: async () => undefined, exit: () => ({ code: 1, signal: null }) })).rejects.toThrow('退出状态：1')
     let time = 0
     await expect(waitForMcpConnection({ read: async () => undefined, exit: () => ({ code: 0, signal: null }), timeoutMs: 50,

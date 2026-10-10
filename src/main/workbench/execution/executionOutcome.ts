@@ -31,6 +31,20 @@ export function trustedRunDocumentIds(record: ExecutionRunRecord): string[] {
   return [...ids]
 }
 
+/** The last conversation request must have naturally ended this run. Process text,
+ * previous-run context and interrupted/truncated attempts remain timeline facts. */
+export function executionFinalReply(record: ExecutionRunRecord): string | null {
+  if (!['completed', 'partial'].includes(record.status)) return null
+  const request = record.requests.filter(value => value.kind === undefined).at(-1)
+  if (!request || request.state !== 'completed' || request.finishReason !== 'stop'
+    || record.tools.some(tool => tool.origin !== 'host' && tool.requestId === request.requestId)) return null
+  const index = request.assistantMessageIndex
+  if (index === undefined || !Number.isSafeInteger(index) || index < record.initialMessageCount) return null
+  const message = record.messages[index]
+  return message?.role === 'assistant' && (!Array.isArray(message.tool_calls) || message.tool_calls.length === 0)
+    && typeof message.content === 'string' && message.content.trim() ? message.content : null
+}
+
 export { serviceToolOutcome, toolFailed, type ServiceToolOutcome } from '../../../core/tools/modelToolResult'
 const fileMutations = new Set<string>(agentFileMutationNames)
 
@@ -94,6 +108,23 @@ const terminalJobReceipt = (tool: ExecutionToolRecord, pending: PendingJob): boo
   if (tool.call.name !== 'job.wait' && tool.call.name !== 'job.status') return false
   return data.kind === pending.kind && data.terminal === true
     && data.status === 'ready'
+}
+
+/** Actual running owner jobs only. A ready candidate may still need reading, but
+ * it has no background operation to await and must not cause wait polling. */
+export function runningExecutionJobs(record: ExecutionRunRecord): Array<{ kind: PendingJob['kind']; job: string; callId: string }> {
+  return executionCompletionIssues(record).flatMap(issue => {
+    if (issue.status !== 'pending' || !issue.job || !issue.kind || !issue.callId) return []
+    const producer = record.tools.find(tool => tool.callId === issue.callId)
+    if (!producer) return []
+    const pending = pendingJob(producer)
+    if (!pending) return []
+    const latest = record.tools.slice(record.tools.indexOf(producer) + 1).reverse()
+      .map(tool => completionJobObservation(tool, pending)).find(data => data !== null)
+    const data = latest ?? (producer.result?.kind === 'read' ? producer.result.data as { status?: unknown; terminal?: unknown } : null)
+    return data && data.terminal !== true && ['preparing', 'running'].includes(String(data.status))
+      ? [{ kind: issue.kind, job: issue.job, callId: issue.callId }] : []
+  })
 }
 
 function jobOf(tool: ExecutionToolRecord): string | null {
@@ -378,7 +409,7 @@ function completionJobObservation(tool: ExecutionToolRecord, pending: NonNullabl
   const data = tool.result.data as { job?: unknown; jobId?: unknown; kind?: unknown; status?: unknown; terminal?: unknown;
     failure?: { outcome?: unknown }; snapshot?: { reason?: unknown; failure?: { outcome?: unknown; message?: unknown } } } | null
   if (!data || (data.job ?? data.jobId) !== pending.id) return null
-  return (tool.call.name === 'job.wait' || tool.call.name === 'job.status') && data.kind === pending.kind
+  return (tool.call.name === 'job.wait' || tool.call.name === 'job.status' || tool.call.name === 'job.cancel') && data.kind === pending.kind
     || tool.call.name === 'image.status' && pending.kind === 'image' ? data : null
 }
 const knownJobFailure = (tool: ExecutionToolRecord, data: NonNullable<ReturnType<typeof completionJobObservation>>) =>
@@ -404,6 +435,8 @@ export function executionCompletionIssues(record: ExecutionRunRecord): Execution
         receipt = later
         if (data.status === 'unknown' || data.failure?.outcome === 'unknown' || data.snapshot?.failure?.outcome === 'unknown') {
           status = 'unknown'; message = '原作业结果未知；请查询原作业，不要重新提交'
+        } else if (data.terminal === true && data.status === 'ready') {
+          status = 'unverified'; message = '原作业已完成，成果可读取；尚未回读所需结果'
         } else if (knownJobFailure(later, data)) {
           status = 'failed'
           // Reading the same ended failure again is not a new failure that

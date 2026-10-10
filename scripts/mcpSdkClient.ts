@@ -4,26 +4,24 @@ import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import { bootstrapInstalledMcp, type InstalledMcpBootstrapOptions } from '../src/main/workbench/external/installedMcpBootstrap'
 import { readMcpConnectionReady, type McpConnectionReady } from '../src/shared/workbench/mcpConnection'
 
-export interface ExplicitMcpConnection { endpoint: string; token: string; workspaceId?: string; host?: McpConnectionReady }
+export interface ExplicitMcpConnection { endpoint: string; workspaceId?: string; host?: McpConnectionReady }
 
-/** Accept the launcher's ready JSON or explicit HTTP credentials; never extract them from a UI. */
+/** Accept the launcher's ready JSON or explicit local endpoint; never extract them from a UI. */
 export function readExplicitMcpConnection(value: unknown): ExplicitMcpConnection {
   if (!value || typeof value !== 'object') throw new Error('需要显式 MCP 连接配置')
   const input = value as Record<string, unknown>
-  if (typeof input.endpoint !== 'string' || typeof input.token !== 'string' || !input.token) throw new Error('连接配置需要 endpoint 与 token')
+  if (typeof input.endpoint !== 'string') throw new Error('连接配置需要 endpoint')
   const endpoint = new URL(input.endpoint)
   if (!['http:', 'https:'].includes(endpoint.protocol)) throw new Error('MCP 使用 HTTP 传输')
   if (input.workspaceId !== undefined && (typeof input.workspaceId !== 'string' || !input.workspaceId)) throw new Error('workspaceId 无效')
-  return { endpoint: endpoint.href, token: input.token, ...(typeof input.workspaceId === 'string' ? { workspaceId: input.workspaceId } : {}),
+  return { endpoint: endpoint.href, ...(typeof input.workspaceId === 'string' ? { workspaceId: input.workspaceId } : {}),
     ...(input.status === 'ready' ? { host: readMcpConnectionReady(input) } : {}) }
 }
 
 /** Closing this SDK connection detaches the client; it does not stop a shared resident host. */
 export async function connectExplicitMcp(connection: ExplicitMcpConnection, name = 'guoling-direct-sdk-example') {
   const client = new Client({ name, version: '1' })
-  const transport = new StreamableHTTPClientTransport(new URL(connection.endpoint), {
-    requestInit: { headers: { Authorization: `Bearer ${connection.token}` } },
-  })
+  const transport = new StreamableHTTPClientTransport(new URL(connection.endpoint))
   try { await client.connect(transport) }
   catch (error) {
     await transport.terminateSession().catch(() => undefined)

@@ -3,12 +3,14 @@ import type { ModelChatMessage, ModelJson } from '../../../shared/workbench/mode
 import type { AttachmentService } from '../attachments/AttachmentService'
 import type { AttachmentSnapshot, AttachmentRepresentation } from '../../../shared/workbench/attachments'
 import { promises as fs } from 'node:fs'
+import path from 'node:path'
 import { LessonMaterials } from '../../lessonMaterials'
 import { LessonWorkspaceService } from '../../lessonWorkspace'
 import { createWorkspaceIdentity } from '../../workspaceIdentity'
 import { isInsideRoot, type ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
 import { lessonAuthoringMaterialSelectionSchema, type LessonAuthoringMaterialSelection } from '../../../shared/lessonAuthoring'
 import type { LessonMaterialTarget } from '../../../shared/materialExtraction'
+import { MATERIAL_EXTRACTION_LIMITS } from '../../../shared/materialExtraction'
 import { prepareImageResource } from '../admittedImageResource'
 
 import { materialListSchema, materialReadSchema, materialFindSchema, materialExtractSchema, type MaterialToolName } from '../../../core/tools/MaterialTools'
@@ -19,14 +21,14 @@ export type { MaterialToolName } from '../../../core/tools/MaterialTools'
  * The caller owns the task/file grant; this helper never produces writable targets.
  */
 export async function snapshotSelectedLessonMaterials(input: { target: LessonMaterialTarget; selections: readonly LessonAuthoringMaterialSelection[] },
-  context: { workspaceRoot: string; readOnlyRoots?: readonly string[]; permission?: ExecutionPermissionMode; signal?: AbortSignal }): Promise<ModelChatMessage[]> {
+  context: { workspaceRoot: string; readOnlyRoots?: readonly string[]; boundPaths?: readonly string[]; permission?: ExecutionPermissionMode; signal?: AbortSignal;
+    onBoundPath?(filename: string): void }): Promise<ModelChatMessage[]> {
   const frozen = structuredClone(input)
   context.signal?.throwIfAborted()
   if (!frozen.selections.length) return []
   const root = await fs.realpath(frozen.target.rootPath), workspaceRoot = await fs.realpath(context.workspaceRoot)
   const roots = await Promise.all((context.readOnlyRoots ?? []).map(value => fs.realpath(value)))
-  if (context.permission !== 'full' && ![workspaceRoot, ...roots].some(value => isInsideRoot(value, root)))
-    throw new Error('所选课例材料不在当前任务已授权读取的来源内')
+  const boundPaths = await Promise.all((context.boundPaths ?? []).map(value => fs.realpath(value)))
   const target = { ...frozen.target, rootPath: root }
   // read() only validates the actual manifest/identity; it does not register or move a lesson.
   const workspace = new LessonWorkspaceService(workspaceRoot)
@@ -41,7 +43,14 @@ export async function snapshotSelectedLessonMaterials(input: { target: LessonMat
     const selection = lessonAuthoringMaterialSelectionSchema.parse(raw)
     const record = records.find(value => value.id === selection.id)
     if (!record) throw new Error('所选材料不属于当前课例，请重新选择')
+    // The trusted UI selection grants this source, rather than its entire lesson directory.
+    const filename = await fs.realpath(path.join(root, record.sourcePath))
+    if (!isInsideRoot(root, filename)) throw new Error('所选材料原件超出实际课例目录')
+    if (context.permission !== 'full' && ![workspaceRoot, ...roots].some(value => isInsideRoot(value, filename))
+      && !boundPaths.some(value => process.platform === 'win32' ? value.toLowerCase() === filename.toLowerCase() : value === filename)
+      && !context.onBoundPath) throw new Error('所选课例材料不在当前任务已授权读取的来源内')
     const read = await owner.read(target, selection)
+    context.onBoundPath?.(filename)
     const content: ModelJson[] = []
     const fragments = read.fragments.map(fragment => ({ kind: fragment.kind,
       location: { part: fragment.locator.part,
@@ -84,6 +93,7 @@ export async function readMaterialImageSource(service: AttachmentService, ids: R
   const match = /^material:([^:]+):(.+)$/.exec(source)
   if (!match) throw new Error('材料图片来源无效')
   const input = materialReadSchema.parse({ attachmentId: match[1], representationId: decodeURIComponent(match[2]!) })
+  if (!input.representationId) throw new Error('材料图片来源缺少表示')
   allowed(ids, input.attachmentId)
   const { snapshot, representation, bytes } = await service.readRepresentation(input.attachmentId, input.representationId)
   signal?.throwIfAborted()
@@ -105,12 +115,12 @@ const location = (snapshot: AttachmentSnapshot, representation: AttachmentRepres
 export async function dispatchMaterialTool(service: AttachmentService, ids: ReadonlySet<string>, name: MaterialToolName, input: unknown, signal?: AbortSignal) {
   signal?.throwIfAborted()
   if (name === 'material.list') return { data: await listMaterials(service, ids, input) }
-  if (name === 'material.find') return { data: await findMaterial(service, ids, input) }
+  if (name === 'material.find') return findPreparedMaterial(service, ids, input, signal)
   if (name === 'material.extract') {
     const extracted = await extractMaterial(service, ids, input, signal)
     return { data: extracted.data, admittedSourceIds: [extracted.derivedId] }
   }
-  return readMaterial(service, ids, input)
+  return readPreparedMaterial(service, ids, input, signal)
 }
 const samePages = (actual: { from: number; to: number } | undefined, requested: { from: number; to: number } | undefined, total?: number) =>
   !requested ? !actual || actual.from === 1 && actual.to === total : actual?.from === requested.from && actual.to === requested.to
@@ -184,6 +194,7 @@ export async function listMaterials(service: AttachmentService, ids: ReadonlySet
 }
 export async function readMaterial(service: AttachmentService, ids: ReadonlySet<string>, raw: unknown) {
   const input = materialReadSchema.parse(raw)
+  if (!input.representationId) throw new Error('直接表示回读需要 representationId；普通读取由材料调度入口按需准备')
   allowed(ids, input.attachmentId)
   const { snapshot, representation, bytes } = await service.readRepresentation(input.attachmentId, input.representationId)
   const provenance = { attachmentId: snapshot.id, representationId: representation.id, name: snapshot.name,
@@ -262,4 +273,156 @@ export async function findMaterial(service: AttachmentService, ids: ReadonlySet<
     searchComplete: !truncated && !failures.length && snapshot.representations.every(item => item.kind === 'text')
       && !snapshot.gaps.length && (snapshot.coverage?.complete ?? true),
     observation: 'literal-search-over-extracted-text' }
+}
+
+const preparedCursorSchema = z.object({ sourceId: z.uuid(), originalDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  snapshotId: z.uuid(), action: z.enum(['read', 'find']), query: z.string().optional(),
+  pages: z.object({ from: z.number().int().positive(), to: z.number().int().positive() }).optional(),
+  representation: z.enum(['auto', 'text', 'image']).optional(), index: z.number().int().nonnegative().optional(),
+  offset: z.number().int().nonnegative().optional(), inner: z.string().optional(), nextPage: z.number().int().positive().optional(),
+  completeSoFar: z.boolean().optional() }).strict()
+type PreparedCursor = z.infer<typeof preparedCursorSchema>
+const encodePreparedCursor = (input: PreparedCursor) => `prepared:${Buffer.from(JSON.stringify(input)).toString('base64url')}`
+function decodePreparedCursor(input: string): PreparedCursor {
+  try {
+    if (!input.startsWith('prepared:')) throw new Error()
+    return preparedCursorSchema.parse(JSON.parse(Buffer.from(input.slice('prepared:'.length), 'base64url').toString('utf8')))
+  } catch { throw new Error('材料续读游标无效；请从当前原材料重新读取') }
+}
+const representationReference = (snapshotId: string, representationId: string) => `prepared:${snapshotId}:${encodeURIComponent(representationId)}`
+async function preparedSnapshot(service: AttachmentService, ids: ReadonlySet<string>, sourceId: string,
+  options: { pages?: { from: number; to: number }; fromPage?: number; images?: 'auto' | 'all'; snapshotId?: string }, signal?: AbortSignal) {
+  allowed(ids, sourceId)
+  signal?.throwIfAborted()
+  const source = await service.readSnapshot(sourceId)
+  const format = source.coverage?.format ?? source.name.split('.').at(-1)?.toLowerCase()
+  if (options.pages && options.pages.to < options.pages.from) throw new Error('页范围起止无效')
+  if (options.pages && format !== 'pdf' && format !== 'pptx')
+    throw new Error(format === 'docx' ? 'DOCX XML 没有可靠排版页码，只能按段落读取' : '该材料没有可按页读取的来源')
+  if (options.snapshotId) {
+    const snapshot = await service.readSnapshot(options.snapshotId)
+    if (snapshot.digest !== source.digest || snapshot.id !== source.id
+      && snapshot.derivedFrom !== (source.derivedFrom ?? source.id)) throw new Error('续读表示不属于当前授权材料的原件版本')
+    return { source, snapshot }
+  }
+  const covered = source.coverage?.selectedPages
+  const matchesPages = !options.pages || covered?.from === options.pages.from
+    && covered?.to === Math.min(options.pages.to, source.coverage?.totalPages ?? options.pages.to)
+  if (source.representations.some(item => item.kind !== 'file') && !options.fromPage && matchesPages) return { source, snapshot: source }
+  const snapshot = await service.extract(source.derivedFrom ?? source.id, {
+    pages: options.pages && { from: options.fromPage ?? options.pages.from, to: options.pages.to }, fromPage: options.fromPage,
+    maxPages: MATERIAL_EXTRACTION_LIMITS.pages, images: options.images ?? 'auto', signal })
+  signal?.throwIfAborted()
+  return { source, snapshot }
+}
+function unreadPages(snapshot: AttachmentSnapshot) {
+  const covered = snapshot.coverage?.selectedPages, total = snapshot.coverage?.totalPages
+  if (!covered || !total) return []
+  const ranges: { from: number; to: number }[] = []
+  if (covered.to < total) ranges.push({ from: covered.to + 1, to: total })
+  return ranges
+}
+function nextPreparedPage(snapshot: AttachmentSnapshot, pages?: { from: number; to: number }) {
+  const selected = snapshot.coverage?.selectedPages, total = snapshot.coverage?.totalPages
+  return selected && total && selected.to < Math.min(pages?.to ?? total, total) ? selected.to + 1 : undefined
+}
+function checkedPreparedCursor(input: { attachmentId: string; cursor?: string; pages?: { from: number; to: number } }, action: 'read' | 'find') {
+  if (!input.cursor?.startsWith('prepared:')) return undefined
+  const cursor = decodePreparedCursor(input.cursor)
+  if (cursor.sourceId !== input.attachmentId || cursor.action !== action
+    || JSON.stringify(cursor.pages) !== JSON.stringify(input.pages)) throw new Error('材料游标不属于当前来源或读取范围')
+  return cursor
+}
+
+/** Ordinary readers retain the source identity; extraction snapshots stay with the existing owner. */
+async function readPreparedMaterial(service: AttachmentService, ids: ReadonlySet<string>, raw: unknown, signal?: AbortSignal) {
+  const input = materialReadSchema.parse(raw)
+  if (input.representationId) {
+    if (input.cursor) throw new Error('表示回读与普通续读游标不能同时使用')
+    const match = /^prepared:([^:]+):(.+)$/.exec(input.representationId)
+    if (!match) {
+      allowed(ids, input.attachmentId)
+      const snapshot = await service.readSnapshot(input.attachmentId)
+      if (snapshot.representations.find(item => item.id === input.representationId)?.kind === 'file')
+        return readPreparedMaterial(service, ids, { ...input, representationId: undefined }, signal)
+      const read = await readMaterial(service, ids, input)
+      signal?.throwIfAborted()
+      return read
+    }
+    const prepared = await preparedSnapshot(service, ids, input.attachmentId, { snapshotId: match[1] }, signal)
+    const result = await readMaterial(service, new Set([...ids, prepared.snapshot.id]), {
+      ...input, attachmentId: prepared.snapshot.id, representationId: decodeURIComponent(match[2]!) })
+    signal?.throwIfAborted()
+    return { ...result, admittedSourceIds: [prepared.snapshot.id] }
+  }
+  const cursor = checkedPreparedCursor(input, 'read')
+  if (input.cursor && !cursor) throw new Error('普通材料续读请使用回执 nextCursor')
+  if (cursor && cursor.representation !== input.representation) throw new Error('材料续读表示偏好已改变，请重新读取')
+  const { source, snapshot } = await preparedSnapshot(service, ids, input.attachmentId,
+    { pages: input.pages, images: input.representation === 'image' ? 'all' : 'auto',
+      ...(cursor?.nextPage ? { fromPage: cursor.nextPage } : cursor ? { snapshotId: cursor.snapshotId } : {}) }, signal)
+  if (cursor && cursor.originalDigest !== source.digest) throw new Error('材料原件版本已改变，请重新读取')
+  const sections: Record<string, unknown>[] = []
+  let imagePrepared = false
+  let index = cursor?.nextPage ? 0 : cursor?.index ?? 0, offset = cursor?.nextPage ? 0 : cursor?.offset ?? input.offset
+  let remaining = input.maxChars
+  if (index > snapshot.representations.length) throw new Error('材料续读位置超出快照范围')
+  while (index < snapshot.representations.length && remaining > 0) {
+    signal?.throwIfAborted()
+    const representation = snapshot.representations[index]!
+    if (representation.kind === 'file' || input.representation === 'text' && representation.kind !== 'text'
+      || input.representation === 'image' && representation.kind !== 'image') { index++; offset = 0; continue }
+    if (representation.kind === 'image' && imagePrepared) break
+    const read = await readMaterial(service, new Set([...ids, snapshot.id]), {
+      attachmentId: snapshot.id, representationId: representation.id, offset, maxChars: remaining })
+    const data = read.data as Record<string, unknown>
+    sections.push({ representationId: representationReference(snapshot.id, representation.id),
+      kind: representation.kind, location: data.location, representationDigest: data.representationDigest,
+      ...(representation.kind === 'image' ? { image: data.image, width: data.width, height: data.height }
+        : { text: data.text, offset: data.offset, total: data.total, truncated: data.truncated,
+          ...(data.nextOffset !== undefined ? { nextOffset: data.nextOffset } : {}) }) })
+    if (representation.kind === 'image') {
+      imagePrepared = true
+    } else remaining -= String(data.text ?? '').length
+    if (data.truncated) { offset = Number(data.nextOffset); break }
+    index++; offset = 0
+  }
+  const withinSnapshot = index < snapshot.representations.length
+  const nextPage = withinSnapshot ? undefined : nextPreparedPage(snapshot, input.pages)
+  const truncated = withinSnapshot || nextPage !== undefined
+  const nextCursor = truncated ? encodePreparedCursor({ sourceId: source.id, originalDigest: source.digest, snapshotId: snapshot.id,
+    action: 'read', pages: input.pages, representation: input.representation,
+    ...(nextPage ? { nextPage } : { index, offset }) }) : undefined
+  signal?.throwIfAborted()
+  return { data: { attachmentId: source.id, name: source.name, originalDigest: source.digest, source: source.source,
+    sections, coverage: snapshot.coverage, gaps: snapshot.gaps, unreadPages: unreadPages(snapshot),
+    truncated, ...(nextCursor ? { nextCursor } : {}), wholeSourceRead: false,
+    observation: imagePrepared ? 'text-ranges-and-images-prepared-for-next-request' : 'returned-material-ranges' },
+    admittedSourceIds: [snapshot.id] }
+}
+
+async function findPreparedMaterial(service: AttachmentService, ids: ReadonlySet<string>, raw: unknown, signal?: AbortSignal) {
+  const input = materialFindSchema.parse(raw), cursor = checkedPreparedCursor(input, 'find')
+  if (cursor && cursor.query !== input.query) throw new Error('材料游标不属于当前来源、版本或查询')
+  // Explicit representation callers can still use the original immutable-search cursor.
+  if (input.cursor && !cursor) return { data: await findMaterial(service, ids, input) }
+  const { source, snapshot } = await preparedSnapshot(service, ids, input.attachmentId,
+    { pages: input.pages, ...(cursor?.nextPage ? { fromPage: cursor.nextPage } : cursor ? { snapshotId: cursor.snapshotId } : {}) }, signal)
+  if (cursor && cursor.originalDigest !== source.digest) throw new Error('材料原件版本已改变，请重新检索')
+  const data = await findMaterial(service, new Set([...ids, snapshot.id]), {
+    ...input, attachmentId: snapshot.id, cursor: cursor?.nextPage ? undefined : cursor?.inner })
+  const nextPage = data.truncated ? undefined : nextPreparedPage(snapshot, input.pages)
+  const truncated = data.truncated || nextPage !== undefined
+  const completeSoFar = (cursor?.completeSoFar ?? true) && !data.failures.length && !data.unreadable.length
+    && !snapshot.gaps.length && snapshot.representations.every(item => item.kind === 'text')
+  const nextCursor = truncated ? encodePreparedCursor({ sourceId: source.id, originalDigest: source.digest,
+    snapshotId: snapshot.id, action: 'find', query: input.query, pages: input.pages, completeSoFar,
+    ...(data.truncated ? { inner: data.nextCursor } : { nextPage }) }) : undefined
+  signal?.throwIfAborted()
+  return { data: { ...data, attachmentId: source.id,
+    hits: data.hits.map(hit => ({ ...hit, representationId: representationReference(snapshot.id, hit.representationId) })),
+    truncated, nextCursor, unreadPages: unreadPages(snapshot), searchComplete: completeSoFar && !truncated
+      && (!snapshot.coverage?.selectedPages || (input.pages?.from ?? 1) === 1
+        && snapshot.coverage.selectedPages.to === snapshot.coverage.totalPages) },
+    admittedSourceIds: [snapshot.id] }
 }

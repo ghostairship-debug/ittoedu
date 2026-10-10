@@ -1,11 +1,11 @@
 import { nanoid } from 'nanoid'
 import { SUPPORTED_AUDIO_MIME_TYPES, SUPPORTED_VIDEO_MIME_TYPES } from '../../shared/constants'
 import { UserFacingError } from '../../shared/errors'
-import type { AssetMeta } from '../../shared/contracts/media-v1/types'
+import type { AssetMeta, AssetSource } from '../../shared/contracts/media-v1/types'
 import { safeOriginalFilename } from './imageAssetMetadata'
 
 /** Bytes are supplied by the current authorized file/resource owner, never read from a model path here. */
-export interface HostMediaInput { bytes: Uint8Array; mimeType: string; filename: string }
+export interface HostMediaInput { bytes: Uint8Array; mimeType: string; filename: string; source?: AssetSource }
 export interface MediaMetadata { duration: number; width?: number; height?: number }
 export interface MediaAssetResource { meta: AssetMeta; bytes: Uint8Array }
 export type PrepareMediaResourcePort = (input: HostMediaInput, createId: () => string) => Promise<MediaAssetResource>

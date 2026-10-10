@@ -4,9 +4,10 @@ import { createPortal } from 'react-dom'
 import { QuickBarButton } from '../../editing/quickbar/SelectionQuickBar'
 import type { ExecutionSelectionTarget } from '../../../shared/workbench/executionDesktop'
 import type { ExecutionSendInput } from '../../../shared/workbench/executionDesktop'
-import type { SelectionCapture } from '../SelectionContextController'
+import { captureSelection, workbenchSelection, type SelectionCapture } from '../SelectionContextController'
+import { useEditorStore } from '../../store/editorStore'
 import { ElementAiCard } from './ElementAiCard'
-import { elementCards, useTextCards, type ElementCardView } from './elementCardController'
+import { elementCards, useVisibleCards, type ElementCardView } from './elementCardController'
 import './elementCards.css'
 
 /** What a text card starts from: the selected range, a name for it, and what the range holds now. */
@@ -35,31 +36,37 @@ function attachAnchor(key: string, node: HTMLElement | null, target?: ExecutionS
   else textAnchors.delete(key)
   window.dispatchEvent(new Event(anchorChanged))
 }
-function cardPosition(card: ElementCardView, node: HTMLElement | undefined, width: number, height: number) {
+function locateTarget(card: ElementCardView): { node: HTMLElement | null; rect: DOMRect | null } {
+  const target = card.target, registered = workbenchSelection.targetView(card.documentId)
+  const measured = registered?.rect(target)
+  if (measured) return { node: registered!.root(), rect: measured }
+  const id = target.kind === 'course-instance' ? target.instanceId : target.kind === 'course-object' ? target.itemId
+    : target.kind === 'flow-block' || target.kind === 'flow-range' ? target.blockId : null
+  const node = id ? [...document.querySelectorAll<HTMLElement>('[data-component-instance],[data-layer-item-id],[data-flow-block-id],[data-block-id]')]
+    .find(node => node.dataset.componentInstance === id || node.dataset.layerItemId === id || node.dataset.flowBlockId === id || node.dataset.blockId === id) ?? null : null
+  if (node) return { node, rect: node.getBoundingClientRect() }
+  const linked = textAnchors.get(card.key)
+  return { node: linked?.node ?? null, rect: linked?.node.isConnected ? linked.node.getBoundingClientRect() : null }
+}
+export function cardPosition(card: ElementCardView, node: HTMLElement | null, rect: DOMRect | null, width: number, height: number) {
   const viewportWidth = window.innerWidth, viewportHeight = window.innerHeight
-  const rect = node?.isConnected ? node.getBoundingClientRect() : null
-  const visible = Boolean(rect && getComputedStyle(node!).visibility !== 'hidden'
-    && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < viewportHeight
-    && rect.right > 0 && rect.left < viewportWidth)
-  const left = visible ? rect!.left : card.anchor?.left ?? 24
-  const below = visible ? rect!.bottom + 8 : card.anchor?.top ?? 24
-  const top = visible && below + height > viewportHeight - 8 && rect!.top - height - 8 >= 8
-    ? rect!.top - height - 8 : below
-  let placedLeft = Math.max(8, Math.min(left, viewportWidth - width - 8))
-  let placedTop = Math.max(8, Math.min(top, viewportHeight - height - 8))
-  if (!visible) {
-    // The old card remains available, but must not cover the new selection's AI button needed to rebind it.
-    for (const bar of document.querySelectorAll<HTMLElement>('[data-selection-quick-bar]')) {
-      if (getComputedStyle(bar).visibility === 'hidden') continue
-      const box = bar.getBoundingClientRect()
-      if (!(placedLeft < box.right && placedLeft + width > box.left && placedTop < box.bottom && placedTop + height > box.top)) continue
-      if (box.bottom + 8 + height <= viewportHeight - 8) placedTop = box.bottom + 8
-      else if (box.top - 8 - height >= 8) placedTop = box.top - 8 - height
-      else if (box.right + 8 + width <= viewportWidth - 8) placedLeft = box.right + 8
-      else if (box.left - 8 - width >= 8) placedLeft = box.left - 8 - width
+  let clip = { left: 0, top: 0, right: viewportWidth, bottom: viewportHeight }
+  let hidden = false
+  for (let ancestor: HTMLElement | null = node; ancestor; ancestor = ancestor.parentElement) {
+    const style = getComputedStyle(ancestor)
+    if (style.display === 'none' || style.visibility === 'hidden') hidden = true
+    if (/(auto|scroll|hidden|clip)/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) {
+      const box = ancestor.getBoundingClientRect()
+      clip = { left: Math.max(clip.left, box.left), top: Math.max(clip.top, box.top), right: Math.min(clip.right, box.right), bottom: Math.min(clip.bottom, box.bottom) }
     }
   }
-  return { left: placedLeft, top: placedTop, detached: !visible }
+  const visible = Boolean(rect && node?.isConnected && !hidden && rect.width > 0 && rect.height > 0
+    && rect.bottom > clip.top && rect.top < clip.bottom && rect.right > clip.left && rect.left < clip.right)
+  if (!visible || !rect) return null
+  const below = rect.bottom + 8
+  const top = below + height > viewportHeight - 8 && rect.top - height - 8 >= 8 ? rect.top - height - 8 : below
+  return { left: Math.max(8, Math.min(rect.left, viewportWidth - width - 8)), top: Math.max(8, Math.min(top, viewportHeight - height - 8)),
+    target: { left: Math.max(rect.left, clip.left), top: Math.max(rect.top, clip.top), width: Math.min(rect.right, clip.right) - Math.max(rect.left, clip.left), height: Math.min(rect.bottom, clip.bottom) - Math.max(rect.top, clip.top) } }
 }
 
 /**
@@ -121,71 +128,63 @@ export function TextAiButton({ documentId, selectionIdentity, start, disabledRea
 function TextCardPanel({ card }: { card: ElementCardView }) {
   const holder = useRef<HTMLDivElement>(null)
   const pendingRebind = useSyncExternalStore(subscribeRebind, requestedRebind, () => null) === card.key
-  const [position, setPosition] = useState(() => ({ left: card.anchor?.left ?? 24, top: card.anchor?.top ?? 24, detached: false }))
+  const [position, setPosition] = useState<ReturnType<typeof cardPosition>>(null)
+  const [selectionError, setSelectionError] = useState('')
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {
-      if (event.composedPath().includes(holder.current!)) return
-      elementCards.dismissText(card.key)
+      if (event.composedPath().includes(holder.current!) || (event.target as HTMLElement)?.closest?.('.element-text-card,.selection-quick-bar')) return
+      // Only cancelling a selection in the original editor ends idle interaction; navigation merely hides it.
+      const owner = locateTarget(card).node?.closest('.workspace,.document-editor,.ProseMirror,.cm-editor')
+      if (owner?.contains(event.target as Node)) elementCards.dismiss(card.key)
     }
     document.addEventListener('pointerdown', dismiss)
     return () => document.removeEventListener('pointerdown', dismiss)
-  }, [card.key])
+  }, [card.key, card.target])
   useEffect(() => {
-    let observed: HTMLElement | null = null
     const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+    let observed: HTMLElement | null = null
     function update() {
-      const linked = textAnchors.get(card.key)
-      // A stale quick bar cannot stand in for text that the host has moved. The user can explicitly reselect it.
-      const anchor = linked && (linked.stable || linked.target === JSON.stringify(card.target)) ? linked.node : null
-      if (anchor !== observed) {
-        if (observed) resize?.unobserve(observed)
-        observed = anchor
-        if (observed) resize?.observe(observed)
-      }
+      const target = locateTarget(card)
+      if (target.node !== observed) { if (observed) resize?.unobserve(observed); observed = target.node; if (observed) resize?.observe(observed) }
       const box = holder.current?.getBoundingClientRect()
-      const next = cardPosition(card, anchor ?? undefined, box?.width || 320, box?.height || 300)
-      setPosition(current => current.left === next.left && current.top === next.top && current.detached === next.detached ? current : next)
+      const next = cardPosition(card, target.node, target.rect, box?.width || 320, box?.height || 300)
+      setPosition(current => JSON.stringify(current) === JSON.stringify(next) ? current : next)
     }
-    document.addEventListener('scroll', update, true)
-    window.addEventListener('resize', update)
-    window.addEventListener(anchorChanged, update)
-    if (holder.current) resize?.observe(holder.current)
+    const observer = new MutationObserver(update); observer.observe(document.body, { childList: true, subtree: true })
+    document.addEventListener('scroll', update, true); window.addEventListener('resize', update); window.addEventListener(anchorChanged, update)
     update()
-    return () => {
-      document.removeEventListener('scroll', update, true)
-      window.removeEventListener('resize', update)
-      window.removeEventListener(anchorChanged, update)
-      resize?.disconnect()
-    }
-  }, [card.key, card.anchor?.left, card.anchor?.top, card.textLost, pendingRebind])
-  useEffect(() => () => { attachAnchor(card.key, null); if (rebindKey === card.key) setRebind(null) }, [card.key])
-  return <div ref={holder} className="element-text-card" style={{ left: position.left, top: position.top }} role="dialog" aria-label={`AI 修改：${card.label}`}>
-    {(position.detached || card.textLost || pendingRebind) && <div className="element-text-card__binding" role="status">
-      <span>{pendingRebind ? '请重新选中文字，再点选区旁的“AI 修改”；当前输入会保留。'
-        : card.textLost ? '原文字已改变，请重新选择要修改的文字。'
-          : '原选区暂不在视图中；滚回原位置可继续查看。'}</span>
-      <button type="button" onClick={() => setRebind(pendingRebind ? null : card.key)}>
-        {pendingRebind ? '取消重新选择' : '重新选择文字并保留输入'}
-      </button>
-    </div>}
-    <ElementAiCard cardKey={card.key} onRebind={() => setRebind(card.key)}
-      onClose={() => { void elementCards.closeText(card.key).catch(() => undefined) }} />
-  </div>
+    return () => { observer.disconnect(); resize?.disconnect(); document.removeEventListener('scroll', update, true); window.removeEventListener('resize', update); window.removeEventListener(anchorChanged, update) }
+  }, [card.key, JSON.stringify(card.target), card.textLost, pendingRebind])
+  const completed = card.entries.some(entry => ['completed', 'partial'].includes(entry.state))
+  const selectResult = () => {
+    try { if (workbenchSelection.targetView(card.documentId)?.select(card.target)) return } catch (error) { setSelectionError(error instanceof Error ? error.message : '结果暂不可定位，请重新选择。'); return }
+    setSelectionError('')
+    void workbenchSelection.prepare(card.documentId).then(snapshot => {
+      if (card.epoch && snapshot.epoch !== card.epoch) throw new Error('这份作品已经重新打开，请重新定位当前内容。')
+      const selected = captureSelection(snapshot, [card.target], card.label)
+      if (card.target.kind === 'course-instance') useEditorStore.getState().selectNodes([card.target.instanceId])
+      else if (card.target.kind === 'course-object') useEditorStore.getState().selectNodes([card.target.itemId])
+      workbenchSelection.setManual(card.documentId, selected)
+    }).catch(error => setSelectionError(error instanceof Error ? error.message : '结果暂不可定位，请重新选择。'))
+  }
+  if (card.dismissed) return position ? <button type="button" className="element-card-result-select" style={{ left: position.target.left, top: position.target.top }}
+    aria-label={`恢复 AI 草稿：${card.label}`} title={card.draft} onClick={() => elementCards.reveal(card.key)}>AI 草稿</button> : null
+  return <>
+    {completed && position && <>
+      <span className="element-card-result-highlight" aria-hidden="true" style={position.target} />
+      <button type="button" className="element-card-result-select" aria-label={`选中 AI 修改结果：${card.label}`} style={{ left: position.target.left, top: position.target.top }} onClick={selectResult}>AI</button>
+    </>}
+    <div ref={holder} className="element-text-card" style={{ display: position ? undefined : 'none', left: position?.left ?? 0, top: position?.top ?? 0 }} role="dialog" aria-label={`AI 修改：${card.label}`}>{selectionError && <p role="alert">{selectionError}</p>}
+      {card.textLost && <div className="element-text-card__binding" role="status">原文字已改变，请重新选择要修改的文字。</div>}
+      <ElementAiCard cardKey={card.key} capture={card.kind === 'element' ? () => elementCards.captureCurrent(card.key) : undefined}
+        onRebind={card.kind === 'text' ? () => setRebind(card.key) : undefined}
+        onClose={() => { if (card.kind === 'text') void elementCards.closeText(card.key).catch(() => undefined); else elementCards.dismiss(card.key) }} />
+    </div>
+  </>
 }
 
 /** Floats visible text cards; folded unsent cards remain in their original lifetime. */
 export function ElementTextCardLayer() {
-  const cards = useTextCards()
-  if (!cards.length) return null
-  const foldedDrafts = cards.filter(card => card.dismissed && card.draft.length > 0)
-  return createPortal(<>
-    {cards.filter(card => !card.dismissed).map(card => <TextCardPanel key={card.key} card={card} />)}
-    {foldedDrafts.length > 0 && <aside className="element-text-card-drafts" aria-label="未发送的 AI 草稿">
-      <strong>未发送的 AI 草稿</strong>
-      {foldedDrafts.map(card => <button key={card.key} type="button" aria-label={`恢复 AI 草稿：${card.label}`} title={card.draft}
-        onClick={() => elementCards.revealText(card.key, card.anchor ?? { left: 24, top: 24 })}>
-        <span>恢复草稿：{card.label}</span><small>{card.draft}</small>
-      </button>)}
-    </aside>}
-  </>, document.body)
+  const cards = useVisibleCards()
+  return createPortal(<>{cards.map(card => <TextCardPanel key={card.key} card={card} />)}</>, document.body)
 }

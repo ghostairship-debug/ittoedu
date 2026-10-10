@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 
-const errorCodes = new Set(['EPERM', 'EACCES', 'ENOENT', 'ENOSPC', 'EIO', 'EBUSY', 'EEXIST', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EPIPE', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'ERR_NETWORK', 'ERR_ABORTED'])
-const categories = new Set(['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'URIError', 'EvalError', 'AggregateError', 'AbortError', 'TimeoutError'])
+const errorCodes = new Set(['EPERM', 'EACCES', 'ENOENT', 'ENOSPC', 'EIO', 'EBUSY', 'EEXIST', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EPIPE', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'ERR_NETWORK', 'ERR_ABORTED', 'MODULE_NOT_FOUND', 'ERR_MODULE_NOT_FOUND', 'ERR_DLOPEN_FAILED', 'ERR_REQUIRE_ESM'])
+const categories = new Set(['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'URIError', 'EvalError', 'AggregateError', 'AbortError', 'TimeoutError', 'ImageDecoderUnavailableError'])
 const processReasons = new Set(['clean-exit', 'abnormal-exit', 'killed', 'crashed', 'oom', 'launch-failed', 'integrity-failure', 'memory-eviction'])
 const chatToolTypes = new Set(['missing', 'null', 'function', 'custom', 'function_call', 'other-string', 'number', 'other'])
 const chatToolCodes = new Set(['invalid-tool-index', 'unsupported-tool-type', 'tool-id-changed', 'invalid-tool-function',
@@ -20,6 +20,7 @@ export function privateDiagnostic(entry: DiagnosticInput) {
   const category = /^([A-Za-z]+Error)\b/.exec(stack || message)?.[1]
   const code = [details.code, ...message.split(/[\s:;,]+/)].find(value => typeof value === 'string' && errorCodes.has(value))
   const safeDetails: Record<string, unknown> = {}
+  if (details.nativeModule === 'sharp') safeDetails.nativeModule = 'sharp'
   for (const key of ['exitCode', 'httpStatus', 'statusCode', 'revision', 'generation', 'durationMs', 'attempt'] as const) {
     if (typeof details[key] === 'number' && Number.isFinite(details[key])) safeDetails[key] = details[key]
   }

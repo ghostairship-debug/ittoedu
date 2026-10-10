@@ -10,6 +10,7 @@ import type { ExecutionDesktopAPI } from '../../src/shared/workbench/executionDe
 import { emptyExecutionProjection, foldExecutionEvents, type ExecutionEvent } from '../../src/shared/workbench/executionEvents'
 import type { ExecutionSettingsView } from '../../src/shared/workbench/executionSettings'
 import type { ExecutionSettingsAPI } from '../../src/shared/workbench/executionSettingsDesktop'
+import { workbenchSelection } from '../../src/renderer/workbench/SelectionContextController'
 import { executionInputMessages } from '../../src/shared/workbench/executionInputMessages'
 
 afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals() })
@@ -325,7 +326,7 @@ it('labels a recovered stale document reference and only refreshes it after expl
   const captureDocuments = vi.fn(async () => [{ documentId: 'doc', epoch: 'new-epoch', revision: 2, writable: [{ kind: 'document' as const }] }])
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={captureDocuments} prepareSend={vi.fn(async () => true)} />)
   await screen.findByText(/原引用需要重新选择/)
-  expect(captureDocuments).not.toHaveBeenCalled()
+  expect(captureDocuments).toHaveBeenCalledWith(true)
   expect(api.draft).not.toHaveBeenCalled()
   expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue('继续改这段文字')
   fireEvent.click(screen.getByRole('button', { name: '重新引用当前文档' }))
@@ -367,12 +368,12 @@ it('keeps the active conversation and draft while explorer selection filters hom
   fireEvent.click(screen.getByRole('button', { name: '新建会话' }))
   await waitFor(() => expect(api.createConversation).toHaveBeenCalledWith('workspace', undefined, { kind: 'file', path: 'Unit/a.md' }))
   fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '关于这个文件' } })
-  expect(screen.getByLabelText('本条消息的引用')).toHaveTextContent('默认引用 Unit/a.md')
-  expect(captureDocuments).not.toHaveBeenCalled()
+  expect(screen.queryByLabelText('本条消息的引用')).toBeNull()
+  expect(captureDocuments).toHaveBeenCalledWith(true)
   fireEvent.click(screen.getByRole('button', { name: '显示全部会话' }))
   expect(screen.getByRole('button', { name: '根会话' })).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '丙' }))
-  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('所属文件已删除，本条消息不会自动引用该文件'))
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('所属文件已删除；会话和草稿仍保留'))
 })
 
 it('opens ChatGPT OAuth setup directly from the assistant model menu without changing the saved model', async () => {
@@ -427,10 +428,10 @@ it('M07-T07/S10-T05 freezes the exact send without a service notice, pins the sh
   fireEvent.click(screen.getByRole('button', { name: '会话 B' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '会话 B' })).toHaveAttribute('aria-current', 'page'))
   expect(api.draft).toHaveBeenCalledWith({ workspaceId: 'workspace', conversationId: 'a', expectedRevision: 1,
-    text: '保留这份草稿', documents: [{ documentId: 'document-a', epoch: 'epoch', revision: 3, writable: [{ kind: 'document' }] }], attachments: [] })
+    text: '保留这份草稿', documents: [{ documentId: 'document-a', epoch: 'epoch', revision: 3, writable: [{ kind: 'document' }], referenceId: 'document-a:page:', pinned: false, displayLabel: '文档' }], attachments: [] })
   fireEvent.click(screen.getByRole('button', { name: '会话 A' }))
   await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue('保留这份草稿'))
-  expect(captureDocuments).toHaveBeenCalledTimes(1)
+  expect(captureDocuments).toHaveBeenCalledWith(true)
   expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-provider · fixture-model')
   const references = screen.getByLabelText('本条消息的引用')
   expect(references).toHaveTextContent('已绑定文档')
@@ -1088,7 +1089,7 @@ it('displays conversation home location for folder, file, unhomed, missing, othe
   expect(locationBtn).toHaveTextContent('workspace › Unit › Sub')
   expect(locationBtn.querySelector('.lucide-folder')).toBeInTheDocument()
   expect(locationBtn.getAttribute('title')).toContain('C:/workspace/Unit/Sub')
-  expect(locationBtn.getAttribute('title')).toContain('所属位置只决定默认引用和新建文件的位置，不限制可修改的范围')
+  expect(locationBtn.getAttribute('title')).toContain('所属位置用于整理会话；当前引用和连接权限决定任务可访问的内容')
   expect(locationBtn).not.toHaveTextContent('发送首条消息后固定')
 
   // Click reveals folder
@@ -1270,4 +1271,42 @@ it('sends a text-only adjustment on the existing task without capturing temporar
   fireEvent.click(screen.getByRole('menuitemradio', { name: /只读/ }))
   expect(screen.getByRole('button', { name: '调整当前任务' })).toBeDisabled()
   expect(screen.getByRole('button', { name: '加入队列' })).toBeEnabled()
+})
+
+it('removing the current automatic page drops its dependent automatic elements and actual point selection while keeping an independent pin', async () => {
+  const { api } = executionFixture([conversation('page-context', '当前页面')])
+  const a1 = { kind: 'course-instance' as const, surfaceId: 'A', instanceId: 'A1' }
+  const a2 = { kind: 'course-instance' as const, surfaceId: 'A', instanceId: 'A2' }
+  workbenchSelection.setManual('page-project', { documentId: 'page-project', epoch: 'epoch', revision: 1, targets: [a1, a2], label: '所选对象' })
+  const clear = vi.fn(), release = workbenchSelection.registerSelectionClearer('page-project', clear)
+  const capture = vi.fn(async () => [{ documentId: 'page-project', epoch: 'epoch', revision: 1, writable: [{ kind: 'document' as const }], selection: [a1, a2] }])
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={capture} prepareSend={async () => true} />)
+  await screen.findByRole('button', { name: /移除引用.*当前页面/ })
+  const pins = screen.getAllByRole('button', { name: /固定 .*所选对象/ })
+  fireEvent.click(pins[0]!)
+  await waitFor(() => expect(api.draft).toHaveBeenCalled())
+  fireEvent.click(screen.getByRole('button', { name: /移除引用.*当前页面/ }))
+  await waitFor(() => expect(screen.queryByRole('button', { name: /移除引用.*当前页面/ })).toBeNull())
+  expect(screen.getAllByRole('button', { name: /移除引用.*所选对象/ })).toHaveLength(1)
+  expect(clear).toHaveBeenCalledWith([a2])
+  expect(workbenchSelection.getManual('page-project')?.targets).toEqual([a1])
+  await act(async () => workbenchSelection.setManual('unrelated-focus', null))
+  expect(screen.getAllByRole('button', { name: /移除引用.*所选对象/ })).toHaveLength(1)
+  release(); workbenchSelection.setManual('page-project', null)
+})
+
+it('does not let a late older task record overwrite the newer task model and coalesces text-burst reads', async () => {
+  const initial = conversation('a', '并发状态'); initial.runIndex.builtinRunIds = ['older']
+  const { api, emit } = executionFixture([initial])
+  const olderRead = deferred<ExecutionRunRecord | null>(), newerRead = deferred<ExecutionRunRecord | null>()
+  vi.mocked(api.run).mockImplementation(id => id === 'older' ? olderRead.promise : newerRead.promise)
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={async () => []} prepareSend={async () => true} />)
+  await waitFor(() => expect(api.run).toHaveBeenCalledWith('older'))
+  await act(async () => { for (let index = 0; index < 15; index++) emit({ ...streamEvent(1, '过程'), runId: 'newer' }) })
+  expect(vi.mocked(api.run).mock.calls.filter(call => call[0] === 'newer')).toHaveLength(1)
+  const newer = { ...run('a'), runId: 'newer', createdAt: 20, version: 7, input: { ...run('a').input, selection: { ...run('a').input.selection, model: 'new-task-model' } } }
+  await act(async () => newerRead.resolve(newer))
+  expect(screen.getByText(/当前任务：new-task-model/)).toBeTruthy()
+  await act(async () => olderRead.resolve({ ...run('a'), runId: 'older', createdAt: 10, version: 99 }))
+  expect(screen.getByText(/当前任务：new-task-model/)).toBeTruthy()
 })

@@ -20,6 +20,8 @@ import { inlineHtml } from '../../shared/document/html'
 import { readHtmlDocumentText, type DocumentHtmlNode } from '../../shared/document/htmlText'
 import { parse, parseFragment, type DefaultTreeAdapterTypes } from 'parse5'
 import { spatialGraphItem, spatialGraphDependencyPaths } from '../course/courseSpatialEdits'
+import { formatTextContent, type TextStyle } from './textFormatting'
+import { allocateTextSelectionReplacement } from '../../shared/document/textSelectionReplacement'
 
 export type CourseInstanceTarget = Extract<ToolTarget, { kind: 'course-instance' }>
 export type HtmlAuthorFieldTarget = Extract<ToolTarget, { kind: 'html-author-field' }>
@@ -100,6 +102,7 @@ export function prepareHtmlAuthorFieldEdit(model: DocumentModel, target: HtmlAut
   const source = patchHtmlAuthoringRecords(model.source, records)
   return { source, splices: changedSpan(model.source, source) }
 }
+
 /** Source-side binding facts, without unrelated text/image fields or software records. */
 function htmlAuthorFieldSourceIdentity(source: string, target: HtmlAuthorFieldTarget): unknown {
   const document = parse(source), scripts: unknown[] = []
@@ -321,8 +324,8 @@ export function readEditableTargetContent(model: DocumentModel, target: ToolTarg
 /** Both visible selection entry points and Main use the same current-content eligibility. */
 export function prepareExecutionContentOutput(snapshot: DocumentSnapshot, target: ToolTarget): ExecutionContentOutput | undefined {
   if (target.kind !== 'markdown-range' && target.kind !== 'course-instance' && target.kind !== 'html-author-field' && target.kind !== 'text-selection') return undefined
-  try { readEditableTargetContent(snapshot.model, target) } catch { return undefined }
-  return { kind: 'replace-text', documentId: snapshot.documentId, target: structuredClone(target) }
+  try { readTarget(snapshot.model, target) } catch { return undefined }
+  return { kind: 'content', documentId: snapshot.documentId, target: structuredClone(target) }
 }
 /** Content-only replacement is partitioned by the existing text diff; no source gap or platform address comes from the model. */
 export function planTextSelectionReplacement(model: DocumentModel, target: Extract<ToolTarget, { kind: 'text-selection' }>, content: string,
@@ -332,7 +335,6 @@ export function planTextSelectionReplacement(model: DocumentModel, target: Extra
     const selected = readTarget(model, fragment.target)
     return { ...fragment, text: typeof selected === 'string' ? selected : atoms(selected as FlowTextContent) }
   })
-  const base = fragments.map(fragment => (fragment.separatorBefore ?? '') + fragment.text).join('')
   const previous = normalizeDocumentText({ inlines: fragments.flatMap(fragment => {
     const value = readTarget(model, fragment.target)
     return [...(fragment.separatorBefore ? [{ type: 'text' as const, text: fragment.separatorBefore }] : []),
@@ -340,31 +342,9 @@ export function planTextSelectionReplacement(model: DocumentModel, target: Extra
   }) })
   const rich = format === 'html' ? parseEditableInlineHtml(content, previous) : undefined
   const next = rich ? atoms(rich) : content
-  const edits = documentSourceEdits(base, next)
-  const boundary = (offset: number, affinity: 'left' | 'right' = 'right'): number => {
-    if (offset === base.length) return next.length
-    let delta = 0
-    for (const edit of edits) {
-      if (edit.from === edit.to && offset === edit.from && affinity === 'right') { delta += edit.text.length; continue }
-      if (offset <= edit.from) break
-      if (offset >= edit.to) { delta += edit.text.length - edit.to + edit.from; continue }
-      // A fully rewritten inline run retains the original formatting proportions.
-      // This is content allocation within the selected runs, never target relocation.
-      const oldBefore = Array.from(base.slice(edit.from, offset)).length, oldSize = Array.from(base.slice(edit.from, edit.to)).length
-      const inserted = Array.from(edit.text)
-      return edit.from + delta + inserted.slice(0, Math.round(inserted.length * oldBefore / oldSize)).join('').length
-    }
-    return offset + delta
-  }
-  let at = 0
-  return fragments.map(fragment => {
-    const separator = fragment.separatorBefore ?? '', separatorStart = boundary(at)
-    at += separator.length
-    let from = at === 0 ? 0 : boundary(at, separator ? 'left' : 'right')
-    if (next.slice(separatorStart, from) !== separator) from = separatorStart
-    at += fragment.text.length
-    const to = boundary(at)
-    const selected = next.slice(from, to)
+  const allocations = allocateTextSelectionReplacement(fragments, next)
+  return fragments.map((fragment, index) => {
+    const { from, to, text: selected } = allocations[index]!
     if (!rich || fragment.target.kind === 'markdown-range') return { target: fragment.target, content: selected, format: 'text' as const }
     const start = Array.from(next.slice(0, from)).length, end = Array.from(next.slice(0, to)).length
     return { target: fragment.target, content: inlineHtml(sliceDocumentText(rich, start, end)), format: 'html' as const }
@@ -470,6 +450,25 @@ export function courseInstanceTextEdit(model: DocumentModel, target: CourseInsta
   return { type: 'instance.flowLayout.set', instanceId: instance.id, flowLayout: { ...structuredClone(instance.flowLayout), caption: structuredClone(value) } }
 }
 
+/** Formatting follows the captured text field; it never widens a range to object properties. */
+export function formatCourseInstanceText(model: DocumentModel, target: CourseInstanceTarget, style: TextStyle): ComponentEdit {
+  const original = target, context = courseInstanceContext(model, target)
+  if (componentIsLocked(context.project, target.instanceId)) throw new Error('对象已锁定，请先解锁')
+  const builtin = componentDefinitionBuiltinKey(context.project.definitions[context.instance.definitionId])
+  if (builtin === 'guoling.formula' && !original.dataPath && original.from === undefined && original.to === undefined) {
+    if (Object.keys(style).some(key => key !== 'fontSize' && key !== 'color')) throw new Error('独立公式仅支持字号和颜色格式')
+    const formula = (context.instance.data as { formula: { style?: Record<string, JsonValue> } }).formula
+    return { type: 'data.set', instanceId: target.instanceId, path: ['formula', 'style'], value: { ...formula.style, ...style } }
+  }
+  target = courseInstanceTextTarget(model, target)
+  const value = readCourseInstanceText(model, target)
+  if (value === null) throw new Error('当前目标没有可格式化的正文')
+  if (typeof value === 'string' && !(builtin === 'guoling.table' && target.dataPath?.[0] === 'rows' && target.dataPath?.[2] === 'cells'))
+    throw new Error('当前字段保存为无格式文字，不能通过格式操作改变其内容类型')
+  const content = typeof value === 'string' ? { inlines: [{ type: 'text' as const, text: value }] } : value
+  return courseInstanceTextEdit(model, target, formatTextContent(content, target.from ?? 0, target.to ?? documentTextLength(content), style))
+}
+
 export function containsTarget(allowed: ToolTarget, target: ToolTarget, model?: DocumentModel): boolean {
   if (target.kind === 'text-selection') return target.fragments.length > 0 && target.fragments.every(fragment => containsTarget(allowed, fragment.target, model))
   if (allowed.kind === 'text-selection') return allowed.fragments.some(fragment => containsTarget(fragment.target, target, model))
@@ -566,7 +565,7 @@ export function targetFootprint(model: DocumentModel, target: ToolTarget): strin
     return documentDigest({ definitionId: context.instance.definitionId, owner: owningContainer(model.project, target.instanceId),
       stateId: target.stateId ?? null, ...(target.dataPath ? { fieldScope: target.fieldScope ?? 'data', dataPath: target.dataPath } : {}),
       ...(target.dataPath ? { fieldIdentity: courseInstanceFieldIdentity(model, target) } : {}),
-      value: target.dataPath ? context.value : context.instance })
+      value: isCourseInstanceRange(target) ? readTarget(model, target) : target.dataPath ? context.value : context.instance })
   }
   if (target.kind === 'spatial-graph' && model.kind === 'course-v10') return documentDigest({
     graph: readTarget(model, target), dependencies: spatialGraphDependencyPaths(model.project, target).map(path => ({ path, ...componentValueAt(model.project, path) })) })
@@ -574,19 +573,34 @@ export function targetFootprint(model: DocumentModel, target: ToolTarget): strin
 }
 
 /** Conservative verified mapping for a single disjoint source edit; ambiguous/overlapping edits conflict. */
-export function mapMarkdownRange(before: string, after: string, range: Extract<ToolTarget, { kind: 'markdown-range' }>): typeof range {
-  return mapSequenceRange(before, after, range)
+export function mapMarkdownRange(before: string, after: string, range: Extract<ToolTarget, { kind: 'markdown-range' }>, followInside = false): typeof range {
+  return mapSequenceRange(before, after, range, followInside)
+}
+/** Canonical commits map the same professional field; no search for matching text elsewhere. */
+export function mapExternalCourseTextTarget(before: DocumentModel, after: DocumentModel, target: ToolTarget, followInside = false): ToolTarget {
+  if (target.kind === 'text-selection') return { ...target, fragments: target.fragments.map(fragment => ({ ...fragment,
+    target: mapExternalCourseTextTarget(before, after, fragment.target, followInside) as typeof fragment.target })) }
+  if (!isCourseInstanceRange(target)) return target
+  const oldValue = readCourseInstanceText(before, target), newValue = readCourseInstanceText(after, target)
+  if (oldValue === null || newValue === null) throw new Error('正文目标已改变字段类型')
+  const tokens = (value: string | FlowTextContent): string[] => typeof value === 'string' ? Array.from(value)
+    : value.inlines.flatMap(inline => inline.type === 'text' ? Array.from(inline.text) : [`math:${inline.formulaId}:${inline.latex}`])
+  return mapSequenceRange(tokens(oldValue), tokens(newValue), target, followInside)
 }
 /** The same verified mapping for source code units or rich-text code-point/atom tokens. */
 export function mapSequenceRange<T, R extends { from: number; to: number }>(
   before: { readonly length: number; readonly [index: number]: T },
-  after: { readonly length: number; readonly [index: number]: T }, range: R): R {
+  after: { readonly length: number; readonly [index: number]: T }, range: R, followInside = false): R {
   if (before === after) return { ...range }
   let from = 0
   while (from < before.length && from < after.length && before[from] === after[from]) from += 1
   if (from === before.length && from === after.length) return { ...range }
   let oldTo = before.length, newTo = after.length
   while (oldTo > from && newTo > from && before[oldTo - 1] === after[newTo - 1]) { oldTo -= 1; newTo -= 1 }
+  // Explicit current-draft confirmation can adopt edits inside this same logical range.
+  // Ordinary write/read mapping keeps the strict overlap behavior below.
+  if (followInside && from >= range.from && oldTo <= range.to)
+    return { ...range, to: range.to + newTo - oldTo }
   if (oldTo === from) {
     const added = after.length - before.length
     // Equal surrounding text can make several insertion points explain the same

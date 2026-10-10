@@ -1,4 +1,4 @@
-import sharp from 'sharp'
+import { getImageDecoder } from '../imageDecoder'
 import type { MediaFileContent, MediaFileOperation, MediaRectangle } from '../../../shared/workbench/mediaFiles'
 
 const formats: Record<string, string> = { png: 'image/png', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml',
@@ -6,6 +6,7 @@ const formats: Record<string, string> = { png: 'image/png', jpeg: 'image/jpeg', 
 const editableFormats = new Set(['png', 'jpeg', 'webp', 'avif'])
 
 export async function inspectImageFile(bytes: Uint8Array): Promise<Extract<MediaFileContent, { kind: 'image' }>> {
+  const sharp = getImageDecoder()
   const metadata = await sharp(bytes, { animated: true }).metadata()
   const format = metadata.format === 'heif' && metadata.compression === 'av1' ? 'avif' : metadata.format
   const mimeType = format && formats[format]
@@ -27,6 +28,7 @@ export async function editImageFile(bytes: Uint8Array, operations: readonly Medi
   const initial = await inspectImageFile(bytes)
   if (!operations.length) return initial
   if (!initial.editable) throw new Error(initial.editReason)
+  const sharp = getImageDecoder()
   let working = await sharp(bytes).autoOrient().keepMetadata().png().toBuffer()
   let width = initial.width, height = initial.height
   for (const operation of operations) {

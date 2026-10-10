@@ -1,5 +1,5 @@
 {
-  "description": "按文件名搜索文件夹及子文件夹，返回有界路径列表；截断时用同 path/query 和 nextCursor 继续，不把一页无匹配当整个目录无结果。path 省略时从会话所属位置开始。",
+  "description": "按文件名搜索文件夹及子文件夹，返回有界路径列表；截断时用同 path/query 和 nextCursor 继续，不把一页无匹配当整个目录无结果。path 省略时从工作空间根目录开始。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,

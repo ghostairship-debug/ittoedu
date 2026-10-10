@@ -88,11 +88,11 @@ function textReason(content: Extract<HtmlObjectContent, { kind: 'element' }>): s
   if (!root['font-family'] || !root.color) return '文字缺少实际测量的字体或颜色；保留原 HTML。'
   if (root['letter-spacing'] && root['letter-spacing'] !== 'normal' && px(root['letter-spacing']) === undefined) return '字距缺少可直接对应的实际 px 值；保留原 HTML。'
   const line = root['line-height']
-  if (!line || line === 'normal') return '浏览器 normal 行高尚无对应的专业数值行高；保留 Web，未猜测倍率。'
-  if (!(px(line) !== undefined && px(line)! > 0 || /^\d+(?:\.\d+)?$/.test(line) && Number(line) > 0)) return `行高 ${line} 无法原样映射；保留 Web。`
+  if (!line) return '文字缺少实际行高；保留 Web。'
+  if (!(line === 'normal' || px(line) !== undefined && px(line)! > 0 || /^\d+(?:\.\d+)?$/.test(line) && Number(line) > 0)) return `行高 ${line} 无法原样映射；保留 Web。`
   if (!['left', 'center', 'right', 'start', 'end'].includes(root['text-align'] || 'start')
     || root.direction && root.direction !== 'ltr') return '当前文字方向或两端对齐没有等价专业字段；保留 Web。'
-  const commonTags = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div', 'span', 'a', 'b', 'strong', 'i', 'em', 'cite', 'var', 'dfn', 'u', 'ins', 's', 'del', 'strike', 'mark', 'sup', 'sub', 'code', 'kbd', 'samp', 'tt', 'br'])
+  const commonTags = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'figcaption', 'div', 'span', 'a', 'b', 'strong', 'i', 'em', 'cite', 'var', 'dfn', 'u', 'ins', 's', 'del', 'strike', 'mark', 'sup', 'sub', 'code', 'kbd', 'samp', 'tt', 'br'])
   for (const node of elements(content)) {
     const style = node.style
     if (style['background-image'] && style['background-image'] !== 'none') return '文字包含 CSS 图像资源；保留 Web 的现有资源绑定。'
@@ -153,7 +153,7 @@ export function professionalHtmlDraft(object: HtmlAssemblyObject, resourceBindin
     if (warning) return retained(object, warning)
     const measured = content.style, fontSize = px(measured['font-size'])!
     const align = measured['text-align'] === 'end' ? 'right' : measured['text-align'] === 'center' ? 'center' : measured['text-align'] === 'right' ? 'right' : 'left'
-    const lineHeight = px(measured['line-height']) === undefined ? Number(measured['line-height']) : px(measured['line-height'])! / fontSize
+    const lineHeight = measured['line-height'] === 'normal' ? 'normal' : px(measured['line-height']) === undefined ? Number(measured['line-height']) : px(measured['line-height'])! / fontSize
     const data = textComponentDataSchema.parse({ ...createTextComponentData(inlines),
       appearance: { fontFamily: measured['font-family'], fontSize, color: measured.color, align, lineHeight,
         letterSpacing: measured['letter-spacing'] === 'normal' || !measured['letter-spacing'] ? 0 : px(measured['letter-spacing']),

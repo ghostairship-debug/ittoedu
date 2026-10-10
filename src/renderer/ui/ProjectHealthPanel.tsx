@@ -81,7 +81,7 @@ function OpenProjectHealthPanel({
           ? courseProject?.surfaces.find(surface => surface.id === route.surfaceId)
           : undefined
         const label = surface
-          ? `${surface.kind === 'slide' ? '演示页' : surface.kind === 'flow' ? '流式讲义' : '无限画布'} · ${surface.title}`
+          ? `${surface.kind === 'slide' ? '演示页' : surface.kind === 'flow' ? '流式布局' : '无限画布'} · ${surface.title}`
           : '整课与资源'
         groups.set(label, [...(groups.get(label) ?? []), item])
       }

@@ -3,12 +3,13 @@ import path from 'node:path'
 import { promises as fs } from 'node:fs'
 import { executionDesktopRequestSchema, executionDocumentReferenceSchema, executionContentOutputSchema, executionSelectionTargetSchema, matchesDisclosedSelection, type ConversationHomeInput, type ExecutionDocumentReference, type ExecutionSendInput, type ExecutionSendResult, type ExecutionSubmissionRecord, type RendererTimingStamp } from '../../../shared/workbench/executionDesktop'
 import type { ConversationRecord } from '../../../shared/workbench/conversations'
+import type { ToolTarget } from '../../../shared/workbench/tools'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { ExecutionEvent, ExecutionEventInput } from '../../../shared/workbench/executionEvents'
 import type { EditEvent } from '../../../shared/workbench/editSession'
 import type { ModelChatMessage, ModelSelection } from '../../../shared/workbench/modelProvider'
 import type { InputContext } from '../../../shared/workbench/attachments'
-import { type ExecutionRunRecord } from '../../../shared/workbench/execution'
+import { type ExecutionRunRecord, type ExecutionStart } from '../../../shared/workbench/execution'
 import { conversationHistoryIndex } from './ConversationHistoryIndex'
 import { PayloadCompiler } from '../../../core/execution/PayloadCompiler'
 import { AttachmentError, AttachmentService, type AttachmentLiveConversation } from '../attachments/AttachmentService'
@@ -31,8 +32,7 @@ import { executionInputError } from './executionInputErrors'
 import { ExecutionChangeReviewService } from '../review/ExecutionChangeReviewService'
 import type { HostArtifactDeliveryService } from './HostArtifactDeliveryService'
 import { forkDraftFromCheckpoint, indexUserCheckpoint } from './CheckpointForkService'
-import { fileCreated } from './executionOutcome'
-import { sourceFileKind } from '../../../shared/workbench/sourceFileKind'
+import { executionFinalReply, fileCreated } from './executionOutcome'
 import { continueDocumentTargets } from './continuationTargets'
 import { ElementChangeTracker } from './ElementChangeTracker'
 import { diagnosticLog } from '../../diagnosticLog'
@@ -93,9 +93,11 @@ function targetStillExists(snapshot: DocumentSnapshot, target: ExecutionDocument
 function mappedContentOutput(input: ExecutionSendInput, documents: ExecutionDocumentReference[]): ExecutionSendInput['contentOutput'] {
   const output = input.contentOutput
   if (!output) return output
-  const original = input.documents.find(document => document.documentId === output.documentId)
+  const referenceIndex = input.documents.findIndex(document => document.documentId === output.documentId
+    && document.selection?.some(target => JSON.stringify(target) === JSON.stringify(output.target)))
+  const original = input.documents[referenceIndex]
   const index = original?.selection?.findIndex(target => JSON.stringify(target) === JSON.stringify(output.target)) ?? -1
-  const target = index >= 0 ? documents.find(document => document.documentId === output.documentId)?.selection?.[index] : undefined
+  const target = index >= 0 ? documents[referenceIndex]?.selection?.[index] : undefined
   return target ? executionContentOutputSchema.parse({ ...output, target }) : output
 }
 /** Main owns spaces, task freezes and runs. Mounting a view only reads/subscribes. */
@@ -353,7 +355,9 @@ export class ExecutionDesktopService {
     return { kind: home.kind, path: relative.split(path.sep).join('/') }
   }
   private refs(documents: ExecutionDocumentReference[]) {
-    return documents.map(document => ({ contextRefId: document.documentId, documentId: document.documentId, epoch: document.epoch, revision: document.revision, writeScope: document.writable, ...(document.selection?.length ? { selection: document.selection } : {}) }))
+    return documents.map(document => ({ contextRefId: document.referenceId ?? document.documentId, documentId: document.documentId,
+      ...(document.referenceId ? { referenceId: document.referenceId } : {}), ...(document.pinned !== undefined ? { pinned: document.pinned } : {}),
+      ...(document.displayLabel ? { displayLabel: document.displayLabel } : {}), epoch: document.epoch, revision: document.revision, writeScope: document.writable, ...(document.selection?.length ? { selection: document.selection } : {}) }))
   }
   private digest(input: ExecutionSendInput): string {
     return createHash('sha256').update(JSON.stringify({ workspaceId: input.workspaceId, conversationId: input.conversationId,
@@ -392,27 +396,14 @@ export class ExecutionDesktopService {
       pending: run.tools.filter(tool => tool.state !== 'returned').map(tool => ({ name: tool.call.name, state: tool.state })),
       previousFailure: run.failure ?? null }) }
   }
-  private async resolveHomeFile(root: string, home: NonNullable<ConversationRecord['home']>): Promise<string | null> {
-    if (home.kind !== 'file' || home.missing) return null
-    const base = await fs.realpath(root)
-    let filename: string
-    try { filename = await fs.realpath(path.join(base, ...home.path.split('/'))) }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw executionInputError('home-file-missing', error); throw error }
-    const relative = path.relative(base, filename)
-    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw refused('会话所属文件已移出获准的工作空间')
-    return filename
-  }
   private async prepareDocuments(input: Pick<ExecutionSendInput, 'workspaceId' | 'conversationId' | 'documents' | 'permission'>) {
-    const current = await this.required(input.workspaceId, input.conversationId)
-    if (input.documents.length || !current.home) return structuredClone(input.documents)
-    const space = await this.conversations.readWorkspace(current.home.workspaceId ?? current.workspaceId)
-    if (!space) throw refused('会话所属位置的工作空间不存在')
-    const filename = await this.resolveHomeFile(space.rootPath, current.home)
-    if (!filename) return []
-    try { sourceFileKind(filename) } catch { return [] }
-    const snapshot = await this.options.documents.internalAPI.open(filename)
-    return [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
-      writable: input.permission === 'read-only' ? [] : [{ kind: 'document' as const }] }]
+    await this.required(input.workspaceId, input.conversationId)
+    return Promise.all(input.documents.map(async reference => {
+      try {
+        return await continueDocumentTargets(this.options.documents.registry.get(reference.documentId), reference, new Set(),
+          { followCurrent: reference.pinned === true })
+      } catch (error) { throw executionInputError('document-range-changed', error) }
+    }))
   }
 
   private async prepareSubmission(input: ExecutionSendInput, current: ConversationRecord, digest: string,
@@ -422,28 +413,6 @@ export class ExecutionDesktopService {
     const permission = input.permission ?? DEFAULT_PERMISSION_MODE
     const space = await this.conversations.readWorkspace(current.workspaceId)
     if (!space) throw refused('会话工作空间不存在')
-    const homeWorkspaceId = current.home?.workspaceId ?? current.workspaceId
-    const homeSpace = homeWorkspaceId === current.workspaceId ? space : await this.conversations.readWorkspace(homeWorkspaceId)
-    if (!homeSpace) throw refused('会话所属位置的工作空间不存在')
-    // A file home is the default document context only when the teacher did not pin another reference.
-    // The binding is resolved by Main through the formal DocumentHost; home metadata itself grants no write.
-    if (!input.documents.length && current.home?.kind === 'file' && !current.home.missing) {
-      const resolved = await this.resolveHomeFile(homeSpace.rootPath, current.home)
-      if (resolved) {
-        let editable = true
-        try { sourceFileKind(resolved) } catch { editable = false }
-        if (editable) {
-          const snapshot = await this.options.documents.internalAPI.open(resolved)
-          input = { ...input, documents: [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
-            writable: permission === 'read-only' ? [] : [{ kind: 'document' }] }] }
-        } else {
-          const material = await this.attachments.receiveAuthorizedFile({ path: resolved, kind: 'workspace', authorizationId: `home:${input.submissionId}` })
-          const first = material.representations[0]
-          if (!first) throw executionInputError('attachment-unavailable')
-          attachments.push({ attachmentId: material.id, representationId: first.id, role: 'reference', delivery: 'source' })
-        }
-      }
-    }
     if (permission === 'read-only') input = { ...input, documents: input.documents.map(document => ({ ...document, writable: [] })) }
     if (!input.text.trim() && !attachments.length && !input.materials?.selections.length) throw executionInputError('empty-input')
     let explicitImages = false, imageCount = 0, representationBytes = 0
@@ -471,24 +440,30 @@ export class ExecutionDesktopService {
         { detail: { outcome: 'failed', attachmentCount: attachments.length, imageCount, representationBytes } })
       throw error
     }
-    const documents = []
+    const documents: ExecutionStart['documents'][number][] = []
     const preparedReferences: ExecutionDocumentReference[] = []
-    const readOnlyRoots: string[] = []
+    const boundReadPaths: string[] = []
     for (const original of input.documents) {
       let reference = original
       let snapshot: DocumentSnapshot
       try { snapshot = await this.options.documents.registry.get(reference.documentId).drain() }
       catch (error) { throw executionInputError('document-session-changed', error) }
-      if (snapshot.epoch !== reference.epoch) throw executionInputError('document-session-changed')
-      if (snapshot.binding.kind === 'file') readOnlyRoots.push(path.dirname(snapshot.binding.path))
-      if (snapshot.revision !== reference.revision) {
-        try { reference = await continueDocumentTargets(this.options.documents.registry.get(reference.documentId), reference, new Set()) }
+      if (snapshot.epoch !== reference.epoch && !reference.pinned) throw executionInputError('document-session-changed')
+      if (snapshot.binding.kind === 'file') boundReadPaths.push(snapshot.binding.path)
+      if (reference.pinned || snapshot.revision !== reference.revision) {
+        try { reference = await continueDocumentTargets(this.options.documents.registry.get(reference.documentId), reference, new Set(), { followCurrent: reference.pinned === true }) }
         catch (error) { throw executionInputError('document-range-changed', error) }
       }
       // M15: an object or a document block stays the same target while it exists; a text range only while nothing changed.
       if (snapshot.revision !== reference.revision && [...(reference.selection ?? []), ...reference.writable.filter(target => target.kind !== 'document')]
         .some(target => !targetStillExists(snapshot, target))) throw executionInputError('document-range-changed')
-      documents.push({ documentId: reference.documentId, epoch: reference.epoch, revision: reference.revision,
+      const duplicate = documents.find(document => document.documentId === reference.documentId)
+      const uniqueTargets = (targets: readonly ToolTarget[]) => [...new Map(targets.map(target => [JSON.stringify(target), target])).values()]
+      if (duplicate) {
+        if (duplicate.epoch !== reference.epoch || duplicate.revision !== reference.revision) throw executionInputError('document-session-changed')
+        duplicate.writable = uniqueTargets([...duplicate.writable, ...reference.writable])
+        duplicate.selection = uniqueTargets([...(duplicate.selection ?? []), ...(reference.selection ?? [])])
+      } else documents.push({ documentId: reference.documentId, epoch: reference.epoch, revision: reference.revision,
         writable: reference.writable, ...(reference.selection?.length ? { selection: reference.selection } : {}) })
       preparedReferences.push(reference)
     }
@@ -500,7 +475,8 @@ export class ExecutionDesktopService {
         throw refused('正文改写目标与本次固定选区不一致，请重新选择。')
     }
     const selectedMaterials = !frozenContext && input.materials ? await snapshotSelectedLessonMaterials(input.materials,
-      { workspaceRoot: space.rootPath, readOnlyRoots, permission }) : []
+      { workspaceRoot: space.rootPath, boundPaths: boundReadPaths, permission,
+        onBoundPath: filename => { if (!boundReadPaths.includes(filename)) boundReadPaths.push(filename) } }) : []
     const context = frozenContext ? structuredClone(frozenContext) : [
       ...(await conversationHistoryIndex(current, runId => this.engine.read(runId))).context,
       ...selectedMaterials.map((message, index) => ({ message,
@@ -566,8 +542,8 @@ export class ExecutionDesktopService {
         ...(input.materials ? { materials: structuredClone(input.materials) } : {}),
         ...(input.webAuthorization ? { webAuthorization: structuredClone(input.webAuthorization) } : {}),
         ...(visionSelection ? { visionSelection } : {}), ...(visionUnavailableReason ? { visionUnavailableReason } : {}),
-        permission, workspaceRoot: space.rootPath,
-        ...(current.home ? { conversationHome: structuredClone(current.home), conversationHomeRoot: homeSpace.rootPath } : {}),
+        permission, workspaceRoot: space.rootPath, boundReadPaths: [...new Set(boundReadPaths)],
+        ...(current.home ? { conversationHome: structuredClone(current.home), conversationHomeRoot: space.rootPath } : {}),
         ...(input.disclosedSettings ? { disclosedSettings: input.disclosedSettings } : {}),
         selectionSource: { role: selection.role as 'conversation' | 'vision', reason: selectionReason, profileRevision: selection.profileRevision },
         inputContext: { id: `${input.submissionId}:input`, capturedAt: now, instruction: input.text, attachments,
@@ -778,6 +754,7 @@ export class ExecutionDesktopService {
         if (previous.input.inputContext && record.start.inputContext)
           record.start.inputContext.context = structuredClone(previous.input.inputContext.context)
         record.start.workspaceRoot = previous.input.workspaceRoot
+        record.start.boundReadPaths = [...new Set([...(record.start.boundReadPaths ?? []), ...(previous.input.boundReadPaths ?? [])])]
         record.start.conversationHome = previous.input.conversationHome
         record.start.conversationHomeRoot = previous.input.conversationHomeRoot
       }
@@ -843,14 +820,13 @@ export class ExecutionDesktopService {
     return this.submissionResult((await this.submissions.read(record.submissionId))!)
   }
   private async collectReply(run: ExecutionRunRecord) {
-    const runId = run.runId
+    const runId = run.runId, reply = executionFinalReply(run)
+    if (reply === null) return
     for (const workspace of await this.conversations.listWorkspaces()) {
       const current = await this.conversations.readConversation({ workspaceId: workspace.workspaceId, conversationId: run.input.conversationId })
       if (!current || current.messages.some(message => message.role === 'assistant' && message.runId === runId)) continue
-      const last = [...run.messages].reverse().find(message => message.role === 'assistant' && typeof message.content === 'string' && message.content)
-      if (!last || typeof last.content !== 'string') return
       await this.conversations.updateConversation({ workspaceId: workspace.workspaceId, conversationId: current.conversationId, expectedRevision: current.revision,
-        patch: { messages: [...current.messages, { messageId: randomUUID(), role: 'assistant', text: last.content, createdAt: Date.now(), attachmentIds: [], runId }] } })
+        patch: { messages: [...current.messages, { messageId: randomUUID(), role: 'assistant', text: reply, createdAt: Date.now(), attachmentIds: [], runId }] } })
     }
   }
   /**

@@ -18,6 +18,7 @@ import type { CredentialEncryptionPort } from '../../src/main/workbench/provider
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import type { ElementChangeView } from '../../src/shared/workbench/executionDesktop'
 import type { ToolTarget } from '../../src/shared/workbench/tools'
+import type { ConversationRecord } from '../../src/shared/workbench/conversations'
 import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
 import { continueDocumentTargets } from '../../src/main/workbench/execution/continuationTargets'
 
@@ -85,6 +86,12 @@ function sse(res: import('node:http').ServerResponse, chunks: unknown[]) {
   res.writeHead(200, { 'Content-Type': 'text/event-stream' })
   for (const chunk of chunks) res.write(`data: ${JSON.stringify(chunk)}\n\n`)
   res.end('data: [DONE]\n\n')
+}
+
+function finalReplyResponse(model: string, text = '修改已完成'): Response {
+  return new Response(`data: ${JSON.stringify({ id: 'natural-reply', model, choices: [{ index: 0,
+    delta: { role: 'assistant', content: text }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`,
+    { headers: { 'content-type': 'text/event-stream' } })
 }
 
 it('NI01 startNext retains accepted selection baseline through a preceding queued insertion', async () => {
@@ -211,7 +218,7 @@ describe('G20 execution desktop integration', () => {
       .rejects.toThrow('已确认不支持图片输入')
     expect(requests).toHaveLength(1)
   })
-  it('uses a file conversation home as the default formal document reference while preserving the frozen permission', async () => {
+  it('keeps a file conversation home as organization without implicitly referencing its file', async () => {
     const server = createHttpServer(async (_request, response) => {
       for await (const _chunk of _request) { /* consume the deterministic local request */ }
       sse(response, [
@@ -230,17 +237,17 @@ describe('G20 execution desktop integration', () => {
     expect(created.home.path).toBe('draft.md')
     const other = path.join(workspace, 'other.md')
     await fs.writeFile(other, 'other file\n')
-    await documents.internalAPI.open(other) // Focus elsewhere cannot replace the conversation home.
+    await documents.internalAPI.open(other) // The user has not explicitly referenced either file.
     const sent = await service.operate({ type: 'send', workspaceId: space.workspace.workspaceId,
       conversationId: created.conversationId, submissionId: '43333333-3333-4333-8333-333333333333',
       expectedRevision: created.revision, text: '这份文件说了什么？', documents: [], permission: 'read-only' }) as { run: ExecutionRunRecord; submission: { documents: Array<{ documentId: string; writable: unknown[] }> } }
     const run = await waitForRun(service, sent.run.runId)
-    expect(run.input.documents).toEqual([{ documentId: document.documentId, epoch: document.epoch, revision: document.revision, writable: [] }])
+    expect(run.input.documents).toEqual([])
     await waitForCompletedConversation(service, space.workspace.workspaceId, created.conversationId, sent.run.runId)
     expect(run.input.conversationHome).toMatchObject({ kind: 'file', path: 'draft.md' })
     expect(run.input.workspaceRoot).toBe(await fs.realpath(workspace))
     expect(run.input.conversationHomeRoot).toBe(await fs.realpath(workspace))
-    expect(sent.submission.documents).toMatchObject([{ documentId: document.documentId, writable: [] }])
+    expect(sent.submission.documents).toEqual([])
     await expect(service.operate({ type: 'set-conversation-home', workspaceId: space.workspace.workspaceId,
       conversationId: created.conversationId, home: { kind: 'file', path: 'other.md' } })).rejects.toThrow()
   })
@@ -447,7 +454,7 @@ it('M25 stops the live writer of a dynamically attached document and blocks atta
 })
 
 
-it.each(['pdf', 'pptx', 'png'])('starts a material-home conversation without opening %s as editable text', async extension => {
+it.each(['pdf', 'pptx', 'png'])('keeps a material-home conversation from implicitly reading or opening %s', async extension => {
   const requests: unknown[] = []
   const fetcher: typeof fetch = async (_url, init) => {
     requests.push(JSON.parse(String(init?.body)))
@@ -470,14 +477,10 @@ it.each(['pdf', 'pptx', 'png'])('starts a material-home conversation without ope
   const run = await f.service.engine.wait(sent.run.runId)
   expect(run.status).toBe('completed')
   expect(run.input.documents).toEqual([])
-  expect(run.initialPayload?.explicitAttachments).toHaveLength(1)
-  expect(run.initialPayload?.explicitAttachments[0]?.delivery).toBe('source')
+  expect(run.initialPayload?.explicitAttachments).toHaveLength(0)
   expect(run.initialPayload?.totals.imageBytes).toBe(0)
-  expect(JSON.stringify(requests)).toContain('index-only')
+  expect(JSON.stringify(requests)).not.toContain(path.basename(file))
   expect(JSON.stringify(requests)).not.toContain(bytes.toString('base64'))
-  const ref = run.initialPayload!.explicitAttachments[0]!
-  const read = await f.service.attachments.readRepresentation(ref.attachmentId, ref.representationId)
-  expect(Buffer.from(read.bytes)).toEqual(bytes)
   expect(f.documents.registry.list()).toHaveLength(1) // Only the existing draft.md session.
   await waitForCompletedConversation(f.service, identity.workspaceId, identity.conversationId, run.runId)
 })
@@ -563,13 +566,15 @@ it('answers a conversation read made on seeing run.end with the record Main writ
 it('NI01 sends captured aggregate ranges after a human insertion, returns a current card receipt, follows it and undoes once', async () => {
   let calls = 0
   const transport: typeof fetch = async (_url, init) => {
-    const payload = JSON.parse(String(init?.body)), content = ++calls === 1 ? '新甲\n新乙' : '更甲\n更乙'
+    const payload = JSON.parse(String(init?.body))
+    if (payload.messages.some((message: { role: string }) => message.role === 'tool')) return finalReplyResponse(payload.model)
+    const content = ++calls === 1 ? '新甲\n新乙' : '更甲\n更乙'
     expect(payload.messages.some((message: { content: unknown }) => String(message.content).includes(calls === 1 ? '甲\n乙' : '新甲\n新乙'))).toBe(true)
     const raw = JSON.stringify({ content }), split = raw.length - 2
     const chunks = [
       { id: `aggregate-${calls}`, model: payload.model, choices: [{ index: 0, delta: { role: 'assistant', content: '修改已完成', tool_calls: [{ index: 0, id: `replace-${calls}`, type: 'function', function: { name: 'text_replace', arguments: raw.slice(0, split) } }] }, finish_reason: null }] },
       { id: `aggregate-${calls}`, model: payload.model, choices: [{ index: 0, delta: { tool_calls: [
-        { index: 0, function: { arguments: raw.slice(split) } }, { index: 1, id: `finish-${calls}`, type: 'function', function: { name: 'task_finish', arguments: '{}' } },
+        { index: 0, function: { arguments: raw.slice(split) } },
       ] }, finish_reason: 'tool_calls' }] },
     ]
     return new Response(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
@@ -593,7 +598,7 @@ it('NI01 sends captured aggregate ranges after a human insertion, returns a curr
   const firstId = '57777777-7777-4777-8777-111111111111'
   const first = await h.service.operate({ type: 'send', workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId,
     expectedRevision: conversation.revision, submissionId: firstId, text: '改选中的两段', documents: [{ documentId: captured.documentId, epoch: captured.epoch,
-      revision: captured.revision, writable: [target], selection: [target] }], contentOutput: { kind: 'replace-text', documentId: captured.documentId, target } }) as { run: ExecutionRunRecord }
+      revision: captured.revision, writable: [target], selection: [target] }], contentOutput: { kind: 'content', documentId: captured.documentId, target } }) as { run: ExecutionRunRecord }
   expect((await waitForRun(h.service, first.run.runId)).status).toBe('completed')
   await waitForCompletedConversation(h.service, space.workspace.workspaceId, conversation.conversationId, first.run.runId)
   expect(session.read()).toMatchObject({ revision: before.revision + 1, undoDepth: before.undoDepth + 1, model: { source: 'OWNER\n- 新甲\n+ 新乙' } })
@@ -603,7 +608,7 @@ it('NI01 sends captured aggregate ranges after a human insertion, returns a curr
   const secondId = '57777777-7777-4777-8777-222222222222'
   const second = await h.service.operate({ type: 'send', workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId,
     expectedRevision: current.revision, submissionId: secondId, text: '继续改这两段', documents: [{ documentId: captured.documentId, epoch: receipt.epoch!,
-      revision: receipt.revision!, writable: [receipt.target!], selection: [receipt.target!] }], contentOutput: { kind: 'replace-text', documentId: captured.documentId, target: receipt.target! } }) as { run: ExecutionRunRecord }
+      revision: receipt.revision!, writable: [receipt.target!], selection: [receipt.target!] }], contentOutput: { kind: 'content', documentId: captured.documentId, target: receipt.target! } }) as { run: ExecutionRunRecord }
   expect((await waitForRun(h.service, second.run.runId)).status).toBe('completed')
   await waitForCompletedConversation(h.service, space.workspace.workspaceId, conversation.conversationId, second.run.runId)
   expect(session.read().model).toMatchObject({ source: 'OWNER\n- 更甲\n+ 更乙' })
@@ -622,10 +627,11 @@ it.each([
 ])('F02 keeps committed aggregate ACK through cross-run card Undo and cold Session continuation: $source', async ({ source, replacement, first }) => {
   let calls = 0
   const transport: typeof fetch = async (_url, init) => {
-    const payload = JSON.parse(String(init?.body)), content = ++calls === 1 ? replacement : '续'
+    const payload = JSON.parse(String(init?.body))
+    if (payload.messages.some((message: { role: string }) => message.role === 'tool')) return finalReplyResponse(payload.model)
+    const content = ++calls === 1 ? replacement : '续'
     const chunk = { id: `f02-${calls}`, model: payload.model, choices: [{ index: 0, delta: { role: 'assistant', content: '已修改', tool_calls: [
       { index: 0, id: `replace-${calls}`, type: 'function', function: { name: 'text_replace', arguments: JSON.stringify({ content }) } },
-      { index: 1, id: `finish-${calls}`, type: 'function', function: { name: 'task_finish', arguments: '{}' } },
     ] }, finish_reason: 'tool_calls' }] }
     return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
   }
@@ -642,7 +648,7 @@ it.each([
     element: { kind: 'element', documentId: captured.documentId, label: '聚合正文' } }) as { conversationId: string; revision: number }
   const send = async (submissionId: string, revision: number, reference = { documentId: captured.documentId, epoch: captured.epoch, revision: captured.revision, writable: [target], selection: [target] }) => h.service.operate({ type: 'send', workspaceId: space.workspace.workspaceId,
     conversationId: conversation.conversationId, expectedRevision: revision, submissionId, text: '修改原选区',
-    documents: [reference], contentOutput: { kind: 'replace-text', documentId: captured.documentId, target: reference.selection[0] } }) as Promise<{ run: ExecutionRunRecord }>
+    documents: [reference], contentOutput: { kind: 'content', documentId: captured.documentId, target: reference.selection[0] } }) as Promise<{ run: ExecutionRunRecord }>
   const firstId = crypto.randomUUID(), sent = await send(firstId, conversation.revision)
   expect((await waitForRun(h.service, sent.run.runId)).status).toBe('completed')
   await waitForCompletedConversation(h.service, space.workspace.workspaceId, conversation.conversationId, sent.run.runId)
@@ -683,11 +689,12 @@ it.each([
 it('NI01 completes a real Flow card aggregate, follows its current receipt and undoes both fields without changing human geometry', async () => {
   let calls = 0, expectedInput = ''
   const transport: typeof fetch = async (_url, init) => {
-    const payload = JSON.parse(String(init?.body)), content = ++calls === 1 ? '<b>新甲</b><br><i>新乙</i>' : '<b>更甲</b><br><i>更乙</i>'
+    const payload = JSON.parse(String(init?.body))
+    if (payload.messages.some((message: { role: string }) => message.role === 'tool')) return finalReplyResponse(payload.model)
+    const content = ++calls === 1 ? '<b>新甲</b><br><i>新乙</i>' : '<b>更甲</b><br><i>更乙</i>'
     expect(payload.messages.some((message: { content: unknown }) => String(message.content).includes(expectedInput))).toBe(true)
     const chunk = { id: `flow-${calls}`, model: payload.model, choices: [{ index: 0, delta: { role: 'assistant', content: '修改已完成', tool_calls: [
       { index: 0, id: `replace-${calls}`, type: 'function', function: { name: 'text_replace', arguments: JSON.stringify({ content, format: 'html' }) } },
-      { index: 1, id: `finish-${calls}`, type: 'function', function: { name: 'task_finish', arguments: '{}' } },
     ] }, finish_reason: 'tool_calls' }] }
     return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
   }
@@ -720,7 +727,7 @@ it('NI01 completes a real Flow card aggregate, follows its current receipt and u
   const firstId = '58888888-8888-4888-8888-111111111111'
   const first = await h.service.operate({ type: 'send', workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId,
     expectedRevision: conversation.revision, submissionId: firstId, text: '改选中的两段', documents: [{ documentId: captured.documentId, epoch: captured.epoch,
-      revision: captured.revision, writable: [target], selection: [target] }], contentOutput: { kind: 'replace-text', documentId: captured.documentId, target } }) as { run: ExecutionRunRecord }
+      revision: captured.revision, writable: [target], selection: [target] }], contentOutput: { kind: 'content', documentId: captured.documentId, target } }) as { run: ExecutionRunRecord }
   expect((await waitForRun(h.service, first.run.runId)).status).toBe('completed')
   await waitForCompletedConversation(h.service, space.workspace.workspaceId, conversation.conversationId, first.run.runId)
   expect(session.read().undoDepth).toBe(before.undoDepth + 1)
@@ -733,7 +740,7 @@ it('NI01 completes a real Flow card aggregate, follows its current receipt and u
   const secondId = '58888888-8888-4888-8888-222222222222'
   const second = await h.service.operate({ type: 'send', workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId,
     expectedRevision: current.revision, submissionId: secondId, text: '继续改这两段', documents: [{ documentId: captured.documentId, epoch: receipt.epoch!,
-      revision: receipt.revision!, writable: [receipt.target!], selection: [receipt.target!] }], contentOutput: { kind: 'replace-text', documentId: captured.documentId, target: receipt.target! } }) as { run: ExecutionRunRecord }
+      revision: receipt.revision!, writable: [receipt.target!], selection: [receipt.target!] }], contentOutput: { kind: 'content', documentId: captured.documentId, target: receipt.target! } }) as { run: ExecutionRunRecord }
   expect((await waitForRun(h.service, second.run.runId)).status).toBe('completed')
   await waitForCompletedConversation(h.service, space.workspace.workspaceId, conversation.conversationId, second.run.runId)
   const written = session.read(); if (written.model.kind !== 'course-v10') throw new Error('Expected V10')
@@ -749,4 +756,75 @@ it('NI01 completes a real Flow card aggregate, follows its current receipt and u
   expect(after.model.project.surfaces[0].childIds[0]).toBe('prefix')
   expect(calls).toBe(2)
   await h.service.shutdown()
+})
+
+it('refreshes pinned current content and merges multiple composer refs to the same document only for the frozen run', async () => {
+  const requests: Array<{ messages: Array<{ content: unknown }> }> = []
+  const h = await fixture(async (_url, init) => {
+    const payload = JSON.parse(String(init?.body)); requests.push(payload)
+    return finalReplyResponse(payload.model, '已读取当前固定引用。')
+  })
+  await configureConversation(h.settings, 'http://127.0.0.1:1/v1')
+  const session = h.documents.registry.get(h.document.documentId), captured = session.read()
+  const first = { ...reference(captured, [{ kind: 'markdown-range' as const, from: 0, to: 6 }]),
+    selection: [{ kind: 'markdown-range' as const, from: 0, to: 6 }], referenceId: 'pinned-first', pinned: true, displayLabel: '固定正文' }
+  await session.execute({ documentId: captured.documentId, epoch: captured.epoch, baseRevision: captured.revision, operationId: crypto.randomUUID(), actor: 'human',
+    mutation: { type: 'command', command: { type: 'markdown.splice', from: 0, to: 6, text: 'OWNER FIRST' } } })
+  const current = session.read()
+  const second = { ...reference(current, []), referenceId: 'same-doc-read', pinned: true, displayLabel: '同文档参考' }
+  const space = await h.service.operate({ type: 'workspace', root: h.workspace }) as { workspace: { workspaceId: string } }
+  const conversation = await h.service.operate({ type: 'create-conversation', workspaceId: space.workspace.workspaceId }) as { conversationId: string; revision: number }
+  const identity = { workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId }
+  const prepared = await h.service.operate({ type: 'prepare-documents', ...identity, documents: [first, second] }) as Array<typeof first>
+  expect(prepared[0]).toMatchObject({ referenceId: first.referenceId, pinned: true, epoch: current.epoch, revision: current.revision })
+  expect(readEditableTargetContent(current.model, prepared[0].selection[0]).text).toBe('OWNER FIRST')
+  // Sending the original pinned identity must still use today's content; updating only the renderer is insufficient.
+  const sent = await h.service.operate({ type: 'send', ...identity, submissionId: crypto.randomUUID(), expectedRevision: conversation.revision,
+    text: '阅读固定正文', documents: [first, second] }) as { run: ExecutionRunRecord }
+  const final = await h.service.engine.wait(sent.run.runId)
+  expect(final.input.documents).toHaveLength(1)
+  expect(final.input.documents[0]).toMatchObject({ revision: current.revision, writable: prepared[0].writable })
+  expect(JSON.stringify(requests)).toContain('OWNER FIRST')
+  await waitForCompletedConversation(h.service, identity.workspaceId, identity.conversationId, final.runId)
+  const projected = await h.service.operate({ type: 'conversation', ...identity }) as ConversationRecord
+  expect(projected.frozenContextRefs).toEqual(expect.arrayContaining([
+    expect.objectContaining({ contextRefId: 'pinned-first', referenceId: 'pinned-first', pinned: true, displayLabel: '固定正文' }),
+    expect.objectContaining({ contextRefId: 'same-doc-read', referenceId: 'same-doc-read', pinned: true }),
+  ]))
+  expect(session.read().revision).toBe(current.revision)
+})
+
+it('passes an outside bound HTML exact-file grant through the real Engine file reader without granting a sibling', async () => {
+  let requests = 0, outside = '', sibling = ''
+  const h = await fixture(async (_url, init) => {
+    const payload = JSON.parse(String(init?.body)); requests++
+    if (requests > 2) return finalReplyResponse(payload.model, '已读当前 HTML；相邻文件没有授权。')
+    const chunk = { id: `bound-${requests}`, model: payload.model, choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [
+      { index: 0, id: `read-${requests}`, type: 'function', function: { name: 'file_read', arguments: JSON.stringify({ path: requests === 1 ? outside : sibling }) } },
+    ] }, finish_reason: 'tool_calls' }] }
+    return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+  })
+  await configureConversation(h.settings, 'http://127.0.0.1:1/v1')
+  const outsideRoot = path.join(h.root, 'outside'); await fs.mkdir(outsideRoot)
+  outside = path.join(outsideRoot, 'bound.html'); sibling = path.join(outsideRoot, 'secret.txt')
+  await fs.writeFile(outside, '<p>disk HTML</p>'); await fs.writeFile(sibling, 'Sibling is not granted')
+  const opened = await h.documents.open(outside), session = h.documents.registry.get(opened.documentId)
+  await session.execute({ documentId: opened.documentId, epoch: opened.epoch, baseRevision: opened.revision, operationId: crypto.randomUUID(), actor: 'human',
+    mutation: { type: 'command', command: { type: 'markdown.replace', source: '<p>unsaved human HTML</p>' } } })
+  const current = session.read()
+  const space = await h.service.operate({ type: 'workspace', root: h.workspace }) as { workspace: { workspaceId: string } }
+  const conversation = await h.service.operate({ type: 'create-conversation', workspaceId: space.workspace.workspaceId }) as { conversationId: string; revision: number }
+  const sent = await h.service.operate({ type: 'send', workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId,
+    submissionId: crypto.randomUUID(), expectedRevision: conversation.revision, text: '读取明确引用的HTML', permission: 'read-only',
+    documents: [reference(current, [])] }) as { run: ExecutionRunRecord }
+  const final = await h.service.engine.wait(sent.run.runId)
+  const reads = final.tools.filter(tool => tool.call.name === 'file.read')
+  expect(reads[0].result?.kind).toBe('read')
+  expect(JSON.stringify(reads[0].result)).toContain('unsaved human HTML')
+  expect(reads[1].result).toMatchObject({ kind: 'error', code: 'file-tool-failed' })
+  expect(JSON.stringify(reads[1].result)).not.toContain('Sibling is not granted')
+  expect(final.input.boundReadPaths).toEqual([await fs.realpath(outside)])
+  expect(requests).toBe(3)
+  expect(session.read().revision).toBe(current.revision)
+  expect(await fs.readFile(outside, 'utf8')).toBe('<p>disk HTML</p>')
 })

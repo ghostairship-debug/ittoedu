@@ -35,7 +35,7 @@ export function createBlankFlowCourseProject(
   const idFactory = options.idFactory ?? nanoid
   const created = createBlankFlowSurface({
     id: `surface-flow-${idFactory()}`,
-    title: '流式讲义',
+    title: '流式布局',
   })
   return courseProjectDocumentSchema.parse({
     ...slide,

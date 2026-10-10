@@ -76,7 +76,7 @@ export function SlideWorkspaceConnector(props: SlideWorkspaceConnectorProps) {
       updateSpotDraft: (value, composing) => state().updateSlideSpotDraft(value, composing),
       authorSpots: () => runtime.world.authorSpots(), subscribeAuthorSpots: runtime.world.subscribeAuthorSpots,
       previewAuthorSpot: (id, geometry) => runtime.world.previewAuthorSpot(id, geometry),
-      teacherController: runtime.navigation,
+      teacherController: runtime.navigation.editorPort(),
       registerObservation: runtime.registerObservation,
       navigationChanged: runtime.navigation.changed,
       updateDataDraft: (data, composing, height) => state().updateSlideDataDraft(data, composing, height),

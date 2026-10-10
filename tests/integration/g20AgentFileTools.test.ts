@@ -43,7 +43,7 @@ describe('general agent file tools', () => {
     const actualExecute = h.files.execute.bind(h.files)
     h.files.execute = async (...args) => { dispatches++; return actualExecute(...args) }
     const steps = [ { name: 'file.write', input }, { name: 'file.mkdir', input: { name: 'new-lesson', path: '.' } },
-      { name: 'file.write', input }, { name: 'task.finish', input: {} } ]
+      { name: 'file.write', input } ]
     const provider: ModelProvider = { async *stream(request) {
       const step = steps[turn++]
       const calls = step ? [{ id: `step-${turn}`, type: 'function' as const, function: { name: step.name, arguments: JSON.stringify(step.input) } }] : []
@@ -68,7 +68,7 @@ describe('general agent file tools', () => {
     for (const [kind, extension] of [['course-v10', '.glx'], ['markdown', '.md'], ['html', '.html']] as const) {
       const input = { name: `无后缀-${kind}`, kind }
       const scope = await h.files.preflightMutation(h.context, 'file.create', input)
-      const expected = path.join(h.workspace, 'lesson', input.name + extension)
+      const expected = path.join(h.workspace, input.name + extension)
       expect(scope).toEqual({ paths: [expected], outside: false })
       const result = await h.files.execute(h.context, 'file.create', input, `create-suffix-${kind}`)
       expect(result.opened?.name).toBe(expected)
@@ -79,21 +79,21 @@ describe('general agent file tools', () => {
     await expect(h.files.preflightMutation(h.context, 'file.create', { name: 'conflicting.md', kind: 'course-v10' })).rejects.toThrow('格式不符')
     await expect(h.files.execute(h.context, 'file.create', { name: '无后缀-course-v10', kind: 'course-v10' }, 'same-name')).resolves.toMatchObject({ data: { operation: { status: 'failed' } } })
     const text = await h.files.execute(h.context, 'file.create', { name: '无后缀文本', kind: 'text' }, 'text-no-suffix')
-    expect(text.opened?.name).toBe(path.join(h.workspace, 'lesson', '无后缀文本'))
+    expect(text.opened?.name).toBe(path.join(h.workspace, '无后缀文本'))
   })
-  it('lists from file home, creates beside it through FileService, and opens formal DocumentSession', async () => {
+  it('uses the workspace root independently of conversation classification and opens formal DocumentSession', async () => {
     const h = await fixture()
     const listed = await h.files.execute(h.context, 'file.list', {}, 'list')
-    expect(listed.data).toMatchObject({ entries: [{ name: 'existing.md', kind: 'file' }] })
+    expect(listed.data).toMatchObject({ path: h.workspace, entries: [{ name: 'lesson', kind: 'folder' }] })
     const created = await h.files.execute(h.context, 'file.create', { name: 'new.md' }, 'create-1')
     expect(created.data).toMatchObject({ operation: { status: 'success' }, homeMissingFallback: false })
     expect(created.opened).toMatchObject({ writable: true, kind: 'markdown' })
-    expect(await readFile(path.join(h.workspace, 'lesson', 'new.md'), 'utf8')).toBe('')
-    expect(h.host.registry.get(created.opened!.documentId).read().binding).toMatchObject({ kind: 'file', path: path.join(h.workspace, 'lesson', 'new.md') })
+    expect(await readFile(path.join(h.workspace, 'new.md'), 'utf8')).toBe('')
+    expect(h.host.registry.get(created.opened!.documentId).read().binding).toMatchObject({ kind: 'file', path: path.join(h.workspace, 'new.md') })
     const text = await h.files.execute(h.context, 'file.create', { name: 'notes.txt', kind: 'text' }, 'create-txt')
     expect(text.opened).toMatchObject({ writable: true, kind: 'text' })
-    expect(await readFile(path.join(h.workspace, 'lesson', 'notes.txt'), 'utf8')).toBe('')
-    expect(h.host.registry.get(text.opened!.documentId).read()).toMatchObject({ model: { kind: 'text', source: '' }, binding: { kind: 'file', path: path.join(h.workspace, 'lesson', 'notes.txt') } })
+    expect(await readFile(path.join(h.workspace, 'notes.txt'), 'utf8')).toBe('')
+    expect(h.host.registry.get(text.opened!.documentId).read()).toMatchObject({ model: { kind: 'text', source: '' }, binding: { kind: 'file', path: path.join(h.workspace, 'notes.txt') } })
   })
 
   it('confines workspace permission, permits outside only at full level, and never writes at read-only', async () => {
@@ -119,11 +119,11 @@ describe('general agent file tools', () => {
     expect((await h.files.execute(readonly, 'file.search', { path: 'lesson', query: 'existing' }, 'readonly-search')).data).toMatchObject({ matches: [path.join(h.workspace, 'lesson', 'existing.md')] })
   })
 
-  it('falls back to workspace root if home folder was deleted', async () => {
+  it('keeps the workspace root when a classification folder was deleted', async () => {
     const h = await fixture()
     const context = { ...h.context, conversationHome: { kind: 'folder' as const, path: 'removed', missing: true as const } }
     const created = await h.files.execute(context, 'file.create', { name: 'fallback.md' }, 'create-fallback')
-    expect(created.data).toMatchObject({ homeMissingFallback: true })
+    expect(created.data).toMatchObject({ homeMissingFallback: false })
     expect(created.opened?.name).toBe(path.join(h.workspace, 'fallback.md'))
   })
   it('does not widen an existing selection grant when the same file is opened again', async () => {
@@ -138,15 +138,28 @@ describe('general agent file tools', () => {
     expect((await h.host.tools.execute('selection-run', 'outside-edit', { name: 'text.replace', input: { target: outside, content: '越权' } })).kind).toBe('error')
     expect(h.host.registry.get(snapshot.documentId).read().model).toMatchObject({ source: '正文' })
   })
-  it('uses a separate frozen home root and requires a one-call grant for an outside default create', async () => {
+  it('ignores an outside conversation classification root and requires approval only for an explicit outside create', async () => {
     const h = await fixture()
-    await mkdir(path.join(h.outside, 'lesson'))
     const moved = { ...h.context, conversationHomeRoot: h.outside }
-    const preflight = await h.files.preflightCreate(moved, { name: 'moved.md' })
-    expect(preflight).toMatchObject({ directory: path.join(h.outside, 'lesson'), outside: true })
-    await expect(h.files.execute(moved, 'file.create', { name: 'moved.md' }, 'unapproved')).rejects.toThrow('明确批准')
-    const result = await h.files.execute({ ...moved, approvedOutsideDirectory: preflight.directory }, 'file.create', { name: 'moved.md' }, 'approved')
-    expect(result.opened?.name).toBe(path.join(h.outside, 'lesson', 'moved.md'))
+    expect(await h.files.preflightCreate(moved, { name: 'moved.md' })).toEqual({ directory: h.workspace, outside: false })
+    const regular = await h.files.execute(moved, 'file.create', { name: 'moved.md' }, 'default-create')
+    expect(regular.opened?.name).toBe(path.join(h.workspace, 'moved.md'))
+    const input = { path: h.outside, name: 'outside.md' }
+    const preflight = await h.files.preflightCreate(moved, input)
+    expect(preflight).toEqual({ directory: h.outside, outside: true })
+    await expect(h.files.execute(moved, 'file.create', input, 'unapproved')).rejects.toThrow('明确批准')
+    const result = await h.files.execute({ ...moved, approvedOutsideDirectory: preflight.directory }, 'file.create', input, 'approved')
+    expect(result.opened?.name).toBe(path.join(h.outside, 'outside.md'))
+  })
+  it('reads an explicitly bound outside file without granting its siblings, directory or writes', async () => {
+    const h = await fixture(), bound = path.join(h.outside, 'external.md')
+    await writeFile(path.join(h.outside, 'private.md'), '未提供')
+    const context = { ...h.context, boundPaths: [bound] }
+    expect((await h.files.execute(context, 'file.read', { path: bound }, 'bound-read')).data).toMatchObject({ text: '外部' })
+    expect((await h.files.execute(context, 'file.open', { path: bound }, 'bound-open')).opened).toMatchObject({ writable: false })
+    await expect(h.files.execute(context, 'file.read', { path: path.join(h.outside, 'private.md') }, 'sibling-read')).rejects.toThrow('工作空间外')
+    await expect(h.files.execute(context, 'file.list', { path: h.outside }, 'parent-list')).rejects.toThrow('工作空间外')
+    await expect(h.files.execute(context, 'file.patch', { path: bound, oldText: '外部', newText: '越权' }, 'bound-write')).rejects.toThrow('明确批准')
   })
   it('settles failed and successful file receipts as side effects, not generic reads', () => {
     const failed = { kind: 'read' as const, data: { operation: { operationId: 'create-1', status: 'failed', items: [{ error: { message: '同名文件已存在' } }] } } }
@@ -194,7 +207,7 @@ describe('general agent file tools', () => {
     const result = await engine.wait(started.runId)
     expect(result.status).toBe('partial')
     expect(fileCreated('file.create', result.tools[0]?.result)).toBe(true)
-    expect(await readFile(path.join(h.workspace, 'lesson', 'kept.md'), 'utf8')).toBe('')
+    expect(await readFile(path.join(h.workspace, 'kept.md'), 'utf8')).toBe('')
   })
   it('opens a file during a document-free run and receives a live Gateway write handle on the next turn', async () => {
     const h = await fixture()
@@ -240,7 +253,7 @@ describe('general agent file tools', () => {
         // are not yet advertised, even though general file/work tools are.
         expect(request.tools?.map(tool => tool.name)).toEqual(expect.arrayContaining(['file.open', 'file.list']))
         expect(request.tools?.some(tool => tool.name === 'surface.duplicate' || tool.name === 'course.configure' || tool.name === 'object.structure')).toBe(false)
-        const call = { id: 'open-course', type: 'function' as const, function: { name: 'file.open', arguments: JSON.stringify({ path: 'lesson/course.glx' }) } }
+        const call = { id: 'open-course', type: 'function' as const, function: { name: 'file.open', arguments: JSON.stringify({ path: 'course.glx' }) } }
         yield { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: 'r1', actualModel: 'fixture', nativeResponse: {}, finishReason: 'tool_calls',
           toolCalls: [{ id: call.id, name: call.function.name, argumentsText: call.function.arguments }], assistant: { role: 'assistant', content: '', tool_calls: [call] } } as Extract<ModelEvent, { type: 'response.completed' }>
         return
@@ -266,7 +279,7 @@ describe('general agent file tools', () => {
   })
   it.each(['ask', 'workspace'] as const)('waits for explicit approval before creating a file in %s mode', async permission => {
     const h = await fixture()
-    const targetDirectory = permission === 'workspace' ? h.outside : path.join(h.workspace, 'lesson')
+    const targetDirectory = permission === 'workspace' ? h.outside : h.workspace
     let turn = 0
     const provider: ModelProvider = { async *stream(request) {
       turn++
@@ -295,7 +308,7 @@ describe('general agent file tools', () => {
 it('M27 generic UTF-8 data/code and extensionless sources share one dirty document and save/reopen exact bytes', async () => {
   const h = await fixture()
   for (const name of ['data.json', 'table.csv', 'lesson.py', 'Dockerfile']) {
-    const filename = path.join(h.workspace, 'lesson', name), source = '\ufeff# 原稿\r\n中文,1\r\n'
+    const filename = path.join(h.workspace, name), source = '\ufeff# 原稿\r\n中文,1\r\n'
     await writeFile(filename, source)
     const result = await h.files.execute(h.context, 'file.open', { path: filename }, `open-${name}`)
     expect(result.opened).toMatchObject({ kind: 'text', writable: true })
@@ -313,7 +326,7 @@ it('M27 generic UTF-8 data/code and extensionless sources share one dirty docume
   }
   const created = await h.files.execute(h.context, 'file.create', { name: 'new-script.py', kind: 'text' }, 'create-code')
   expect(created.opened).toMatchObject({ kind: 'text' })
-  expect(await readFile(path.join(h.workspace, 'lesson', 'new-script.py'), 'utf8')).toBe('')
+  expect(await readFile(path.join(h.workspace, 'new-script.py'), 'utf8')).toBe('')
 })
 
 it('infers file.create kind from the extension and rejects utf-8 or incompatible formats', async () => {
@@ -321,7 +334,7 @@ it('infers file.create kind from the extension and rejects utf-8 or incompatible
   for (const name of ['data.json', 'results.csv', 'icon.svg', 'manifest.xml', 'no-extension']) {
     const created = await h.files.execute(h.context, 'file.create', { name }, `create-${name}`)
     expect(created.opened, name).toMatchObject({ writable: true, kind: 'text' })
-    expect(await readFile(path.join(h.workspace, 'lesson', name), 'utf8')).toBe('')
+    expect(await readFile(path.join(h.workspace, name), 'utf8')).toBe('')
     // Clean the open session so other creates can re-use the binding without conflict.
     await h.host.operate({ type: 'close', documentId: created.opened!.documentId })
   }
@@ -333,7 +346,7 @@ it('infers file.create kind from the extension and rejects utf-8 or incompatible
     const created = await h.files.execute(h.context, 'file.create', { name }, `create-${name}`)
     const kind = /\.(?:glx|h5lesson)$/.test(name) ? 'course-v10' : name.endsWith('.html') ? 'text' : 'markdown'
     expect(created.data).toMatchObject({ operation: { status: 'success' } })
-    expect(created.opened).toMatchObject({ kind, writable: true, name: path.join(h.workspace, 'lesson', name.replace(/\.h5lesson$/, '.glx')) })
+    expect(created.opened).toMatchObject({ kind, writable: true, name: path.join(h.workspace, name.replace(/\.h5lesson$/, '.glx')) })
     expect(h.host.registry.get(created.opened!.documentId).read().model.kind).toBe(kind)
   }
   for (const input of [{ name: 'picture.png' }, { name: 'broken.h5lesson', kind: 'text' }, { name: 'raw.json', kind: 'utf-8' }]) {

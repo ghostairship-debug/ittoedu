@@ -87,7 +87,7 @@ export function componentPropertiesView(instance: ComponentInstance, definition?
         bold: appearance.bold ?? false, italic: appearance.italic ?? false, underline: appearance.underline ?? false,
         strike: appearance.strike ?? false, emphasis: appearance.emphasis ?? false, highlightColor: appearance.highlightColor ?? null,
         align: appearance.align, verticalAlign: appearance.verticalAlign ?? 'top', writingMode: appearance.writingMode ?? 'horizontal',
-        lineSpacing: appearance.lineSpacing ?? Math.max(0, appearance.fontSize * (appearance.lineHeight - 1.22)),
+        lineSpacing: appearance.lineSpacing ?? Math.max(0, appearance.fontSize * ((appearance.lineHeight === 'normal' ? 1.22 : appearance.lineHeight) - 1.22)),
         letterSpacing: appearance.letterSpacing ?? 0, padding: appearance.padding ?? 0,
         overflow: data.sizing.mode === 'grow-height' ? 'auto-height' : data.sizing.mode === 'shrink-text' ? 'shrink' : 'fixed',
         backgroundColor: appearance.backgroundColor ?? '#ffffff', backgroundOpacity: appearance.backgroundOpacity ?? 0,

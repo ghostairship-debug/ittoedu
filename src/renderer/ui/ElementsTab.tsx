@@ -68,7 +68,7 @@ const SURFACE_INSERTION_HINT: Record<AuthoringSurface, Record<AuthoringScope, st
     global: '演示页全局层：单击或拖入可添加跨场景自由节点。',
   },
   flow: {
-    scene: '流式讲义：单击添加文档块；图形添加为页面浮层。当前不可从面板拖入。',
+    scene: '流式布局：单击添加文档块；图形添加为页面浮层。当前不可从面板拖入。',
     global: 'Flow 全局层：添加的组件跨页面持续存在。',
   },
   spatial: {

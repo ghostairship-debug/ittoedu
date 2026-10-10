@@ -36,6 +36,10 @@ export interface FrozenConversationContextRef {
   /** Read-only context; never an implied grant to write the selected objects. */
   selection?: import('./tools').ToolTarget[]
   writeScope?: import('./tools').ToolTarget[]
+  /** Draft reference identity and pin choice; neither changes authority. */
+  referenceId?: string
+  pinned?: boolean
+  displayLabel?: string
 }
 
 /** Run checkpoints remain owned by ExecutionRunStore; this is only the conversation index. */

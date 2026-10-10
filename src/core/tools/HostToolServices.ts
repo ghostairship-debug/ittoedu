@@ -133,6 +133,8 @@ export interface HostToolServices {
     read(jobId: string): Promise<ImageJobSnapshot>
     stop(jobId: string): Promise<ImageJobSnapshot>
     readResource(resourceId: string): Promise<HostImageInput>
+    registerWorkspaceResource?(scope: string, image: HostImageInput, source: AssetSource): Promise<string>
+    readWorkspaceResource?(scope: string, resource: string): Promise<HostImageInput>
     readReadyResourceFromJob?(input: { jobId: string; sourceRunId: string; sourceDocumentId: string; resourceId: string }): Promise<HostImageInput>
   }
 }
@@ -290,7 +292,7 @@ export class HostToolCoordinator {
     if (previous) return { kind: 'read', data: previous }
     const resolved = resolveArtifactSource(input)
     const source = resolved.kind === 'image' ? await this.readGeneratedImageReference(runId, input.source)
-      : resolved.kind === 'image-resource' ? await this.authority.readRunImage?.(runId, resolved.resource)
+      : resolved.kind === 'image-resource' ? await this.readImageReference(runId, resolved.resource)
       : resolved.kind === 'compute' ? await this.readComputeArtifact(runId, resolved.job, resolved.name)
         : await this.readDelegationArtifact(runId, resolved.job, resolved.name)
     if (!source) throw new Error('图片资源引用无效')
@@ -318,12 +320,17 @@ export class HostToolCoordinator {
   /** Result producers declare pixels once; transport consumers never infer their source. */
   private observationImageResult(result: ToolResult): ToolResult {
     if (result.kind !== 'read' || !result.data || typeof result.data !== 'object') return result
-    const data = result.data as { image?: { resourceId?: unknown; mimeType?: unknown; byteLength?: unknown }; detail?: unknown }
-    const image = data.image
-    if (!image || typeof image.resourceId !== 'string' || typeof image.mimeType !== 'string' || !image.mimeType.startsWith('image/')) return result
-    return { ...result, images: [{ kind: 'image', source: 'observation', resourceId: image.resourceId, mimeType: image.mimeType,
-      ...(typeof image.byteLength === 'number' ? { byteLength: image.byteLength } : {}),
-      ...(data.detail === 'auto' || data.detail === 'low' || data.detail === 'high' ? { detail: data.detail } : {}) }] }
+    type Image = { resourceId?: unknown; mimeType?: unknown; byteLength?: unknown }
+    const data = result.data as { image?: Image; sections?: { image?: Image }[]; detail?: unknown }
+    const candidates = [data.image, ...(Array.isArray(data.sections) ? data.sections.map(section => section?.image) : [])]
+    const images: ToolResultImage[] = []
+    for (const image of candidates) {
+      if (!image || typeof image.resourceId !== 'string' || typeof image.mimeType !== 'string' || !image.mimeType.startsWith('image/')) continue
+      images.push({ kind: 'image', source: 'observation', resourceId: image.resourceId, mimeType: image.mimeType,
+        ...(typeof image.byteLength === 'number' ? { byteLength: image.byteLength } : {}),
+        ...(data.detail === 'auto' || data.detail === 'low' || data.detail === 'high' ? { detail: data.detail } : {}) })
+    }
+    return images.length ? { ...result, images } : result
   }
   /** Authorized bytes shared by UI/model/MCP adapters; no resource or document is created here. */
   async prepareResultImages(runId: string, result: ToolResult): Promise<readonly PreparedToolImage[]> {
@@ -739,10 +746,16 @@ export class HostToolCoordinator {
     return result
   }
   isImageSource(source: string): boolean {
-    return !!this.parseStandaloneImageReference(source) || /^(?:material:|mcp:|compute-[^@\s]+@)/.test(source)
+    return !!this.parseStandaloneImageReference(source) || /^(?:workspace-image:|material:|mcp:|compute-[^@\s]+@)/.test(source)
   }
   /** Existing resource owners validate the source; application still registers bytes in its one canonical transaction. */
   private async readResourceSource(runId: string, source: string): Promise<HostMediaInput | null> {
+    if (source.startsWith('workspace-image:')) {
+      if (!this.services.images?.readWorkspaceResource) throw new Error('独立图片资源读取服务尚未配置')
+      const image = await this.services.images.readWorkspaceResource(this.workspaceImageScope(runId), source)
+      this.builtInRun(runId)
+      return image
+    }
     const generated = await this.readGeneratedImageReference(runId, source)
     if (generated) return generated
     let file: { bytes: Uint8Array; mimeType: string } | undefined, filename: string | undefined
@@ -794,9 +807,16 @@ export class HostToolCoordinator {
   }
   /** One candidate's verified bytes and source; the Gateway places them as a project asset or a run resource. */
   openImageFile(runId: string, image: string, format?: 'jpeg' | 'png' | 'webp', signal?: AbortSignal) {
-    this.writableRun(runId)
+    this.builtInRun(runId)
     if (!this.services.openImages) throw new Error('开放图库服务尚未配置')
     return this.services.openImages.fetch({ runId, image, ...(format ? { format } : {}), signal })
+  }
+  async registerFetchedImage(runId: string, file: HostImageInput, source: AssetSource): Promise<string> {
+    const scope = this.workspaceImageScope(runId)
+    if (!this.services.images?.registerWorkspaceResource) throw new Error('独立图片资源登记服务尚未配置')
+    const resource = await this.services.images.registerWorkspaceResource(scope, file, source)
+    this.builtInRun(runId)
+    return resource
   }
   async assetSearch(runId: string, input: { query: string; limit?: number }): Promise<ToolResult> {
     this.builtInRun(runId)
@@ -1004,6 +1024,7 @@ export class HostToolCoordinator {
       const documentId = target?.snapshot.documentId ?? this.workspaceImageScope(runId)
       if (target) for (const reference of references ?? []) await this.authority.readImage(runId, documentId, reference)
       else for (const reference of references ?? []) {
+        if (await this.readImageSource(runId, reference)) continue
         const source = this.parseStandaloneReference(reference)
         await this.readStandaloneImage(runId, source.jobId, source.resourceId)
       }

@@ -57,7 +57,7 @@ export async function bootstrapInstalledMcp(options: InstalledMcpBootstrapOption
   }
 }
 
-/** Product CLI uses the task location; no teacher-supplied bearer, port or ID. */
+/** Product CLI uses the task location; no teacher-supplied credential or ID. */
 export async function runProductMcpBootstrap(argv: readonly string[], input: { executable: string; cwd: string }): Promise<McpConnectionReady> {
   const values = new Map<string, string>()
   for (let index = 0; index < argv.length; index++) {

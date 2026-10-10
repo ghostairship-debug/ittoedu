@@ -160,6 +160,8 @@ export type HtmlPreviewResponse<T extends HtmlPreviewRequest> =
  * untrusted page output that only ever produces editor-side UI state.
  */
 export const htmlPreviewPageMessageSchema = z.discriminatedUnion('event', [
+  z.object({ event: z.literal('card-targets'), protocol: z.literal(1), leaseId: id, loadId: id,
+    seq: z.number().int().nonnegative(), targets: z.array(htmlPreviewTargetReportSchema).max(HTML_PREVIEW_TARGET_MAX) }).strict(),
   z.object({
     event: z.literal('ready'),
     protocol: z.literal(1),

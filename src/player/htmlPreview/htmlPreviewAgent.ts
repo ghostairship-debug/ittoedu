@@ -20,7 +20,9 @@ type RefreshTargets = { type: 'html-preview.refresh-targets'; loadId: string }
 type Selection = { type: 'html-preview.selection'; loadId: string; handle: string | null; editable: boolean }
 type AuthoringRecords = { type: 'html-preview.authoring-records'; loadId: string; records: Record<string, ComponentAuthorRecord> }
 type AuthoringPreview = { type: 'html-preview.authoring-preview'; loadId: string; authorKey: string; geometry: ComponentAuthorGeometry | null }
-type Command = Init | Patch | Navigate | Restore | EditMode | Visibility | ConfirmTargets | RefreshTargets | Selection | AuthoringRecords | AuthoringPreview
+type CardTargets = { type: 'html-preview.card-targets'; loadId: string; authorKeys: string[] }
+type SelectAuthor = { type: 'html-preview.select-author'; loadId: string; authorKey: string }
+type Command = Init | Patch | Navigate | Restore | EditMode | Visibility | ConfirmTargets | RefreshTargets | Selection | AuthoringRecords | AuthoringPreview | CardTargets | SelectAuthor
 
 interface RuntimeNodeTracking {
   isRuntimeNode(node: Node): boolean
@@ -220,6 +222,18 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
   let scanSerial = 0
   let scanId = ''
   let discoveryFrame = 0
+  let cardAuthorKeys: string[] = []
+  const cardReports = () => {
+    const reports: HtmlPreviewTargetReport[] = []
+    for (const node of nodes.values()) {
+      if (!(node instanceof HTMLImageElement) && !(node instanceof Text)) continue
+      const observation = authoring.describe(node)
+      if (observation && cardAuthorKeys.includes(observation.authorKey)) {
+        const value = report(node); if (value && !reports.some(previous => previous.authoring?.authorKey === value.authoring?.authorKey)) reports.push(value)
+      }
+    }
+    if (cardAuthorKeys.length) send({ event: 'card-targets', targets: reports.slice(0, HTML_PREVIEW_TARGET_MAX) })
+  }
   let hovered: string | null = null
   let selected: string | null = null
   const candidates = new Set<string>()
@@ -227,6 +241,7 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
   let markers: HTMLDivElement | null = null
   let markerContent: ShadowRoot | null = null
   const drawMarkers = () => tracking.withoutTracking(() => {
+    cardReports()
     if (!editMode || !visible) { markers?.remove(); return }
     if (!markers) {
       markers = doc.createElement('div')
@@ -354,6 +369,16 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       return
     }
     if (!loadId || message.loadId !== loadId) return
+    if (message.type === 'html-preview.card-targets') {
+      if (!Array.isArray(message.authorKeys) || message.authorKeys.length > HTML_PREVIEW_TARGET_MAX || message.authorKeys.some(key => typeof key !== 'string' || !key)) return
+      cardAuthorKeys = message.authorKeys; cardReports(); return
+    }
+    if (message.type === 'html-preview.select-author' && typeof message.authorKey === 'string' && editMode && visible) {
+      const node = [...nodes.values()].find(node => authoring.describe(node)?.authorKey === message.authorKey)
+      const value = node instanceof Text || node instanceof HTMLImageElement ? report(node) : null
+      if (value) { selected = value.handle; drawMarkers(); send({ event: 'targets', targets: [value] }) }
+      return
+    }
     if (message.type === 'html-preview.authoring-preview') {
       if (typeof message.authorKey !== 'string' || message.geometry !== null && (!message.geometry || typeof message.geometry !== 'object'
         || Object.values(message.geometry).some(value => typeof value !== 'number' || !Number.isFinite(value)))) return

@@ -90,15 +90,14 @@ test('D3: real Electron MCP observes Runtime auto-target truncation across add/d
       if (!document || document.model.kind !== 'course-v9') throw new Error('正式课件未打开')
       const location = document.model.project.locations.find(entry => entry.kind === 'slide-scene')
       if (!location) throw new Error('缺少 Slide 位置')
-      const status = await desktop.externalMcp!.status()
+      const status = await desktop.externalMcp!.configure({ enabled: true })
       if (status.state !== 'running') throw new Error(`Resident MCP 未运行：${status.message ?? status.state}`)
-      return { endpoint: status.endpoint, bearer: await desktop.externalMcp!.revealToken(), workspaceId,
+      return { endpoint: status.endpoint, workspaceId,
         documentId: document.documentId, locationLabel: location.label }
     }, { folder: workspace, file: COURSE })
 
     client = new Client({ name: 'guoling-d3-audit-e2e', version: '1' })
-    const transport = new StreamableHTTPClientTransport(new URL(connection.endpoint),
-      { requestInit: { headers: { Authorization: `Bearer ${connection.bearer}` } } })
+    const transport = new StreamableHTTPClientTransport(new URL(connection.endpoint))
     await client.connect(transport)
     const readTool = async <T,>(name: string, input: Record<string, unknown>): Promise<T> => {
       const response = await client!.callTool({ name, arguments: { arguments: input } })

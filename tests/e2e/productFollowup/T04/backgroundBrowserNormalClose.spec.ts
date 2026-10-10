@@ -39,7 +39,7 @@ test('a real headless MCP browser promoted to GUI exits its whole owner through 
       const service = await externalMcpService()
       const status = await service.status()
       if (status.state !== 'running') throw new Error(`Actual headless MCP was not listening: ${status.message}`)
-      return { ...await service.connectionInfo(), token: await service.revealToken(), pid: process.pid, executable: process.execPath,
+      return { ...await service.connectionInfo(), pid: process.pid, executable: process.execPath,
         browserWindows: BrowserWindow.getAllWindows().length }
     })
     expect(connection.browserWindows).toBe(0)

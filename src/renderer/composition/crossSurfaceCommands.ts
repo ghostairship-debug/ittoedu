@@ -84,7 +84,9 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     await kernel.editCaptured(kernel.capture(edits, target))
     if (selectedIds) kernel.selectInstances(selectedIds, target.surfaceId, target.documentId)
   }
-  const flush = () => content().commitTextEdit?.()
+  const flush = async () => {
+    if (await content().commitTextEdit?.() === false) throw new Error('当前编辑未能应用，请完成编辑后重试')
+  }
   const run = (operation: () => Promise<void> | void) => { try { void Promise.resolve(operation()).catch(report) } catch (error) { report(error) } }
   const navigateHistory = async (direction: 'undo' | 'redo'): Promise<boolean> => {
     // Local draft submission can await Main. Retain its document even if the

@@ -19,10 +19,7 @@ import { createCourseProjectV10Archive } from '../../../core/drivers/codecs/cour
 import { validateWorkspaceEntryName } from '../WorkspaceFiles'
 
 export function startDirectory(context: Pick<AgentFileContext, 'workspaceRoot' | 'conversationHomeRoot' | 'conversationHome'>): { directory: string; fallback: boolean } {
-  const home = context.conversationHome
-  if (!home) return { directory: context.workspaceRoot, fallback: false }
-  const relative = home.kind === 'file' ? path.dirname(home.path) : home.path
-  return { directory: path.resolve(context.conversationHomeRoot ?? context.workspaceRoot, relative), fallback: !!home.missing }
+  return { directory: context.workspaceRoot, fallback: false }
 }
 
 function createKind(name: string, requested?: 'markdown' | 'text' | 'html' | 'course-v10'): 'markdown' | 'text' | 'html' | 'course-v10' {
@@ -67,6 +64,10 @@ export class AgentFileService implements AgentFilePort {
   }
   private async mayRead(context: AgentFileContext, resolved: string): Promise<boolean> {
     if (context.permission === 'full' || isInsideRoot(context.workspaceRoot, resolved)) return true
+    for (const candidate of context.boundPaths ?? []) {
+      const filename = await fs.realpath(candidate).catch(() => null)
+      if (filename && this.officeKey(filename) === this.officeKey(resolved)) return true
+    }
     for (const candidate of context.readOnlyRoots ?? []) {
       const root = await fs.realpath(candidate).catch(() => null)
       if (root && isInsideRoot(root, resolved)) return true

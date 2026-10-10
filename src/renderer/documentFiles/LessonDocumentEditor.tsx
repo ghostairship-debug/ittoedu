@@ -17,7 +17,7 @@ import { fileClipboardResourcePort, readFileClipboardContext, selectedFileClipbo
 import type { FilePreparedDocumentResources } from '../document/fileDocumentResources'
 import type { DocumentBlock } from '../../shared/document/content'
 import { resolveFileDocumentImage } from '../../shared/document/fileImageReference'
-import { cancelEditPreview, useEditPreview } from '../workbench/EditPreviewProjection'
+import { cancelEditPreview, useEditPreviews } from '../workbench/EditPreviewProjection'
 import { mapMarkdownRange } from '../../core/tools/ToolTargets'
 import { Redo2, Undo2 } from 'lucide-react'
 
@@ -67,6 +67,12 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   const pinned = usePinnedSelection(session.documentId)
   useEffect(() => {
     if (!session.documentId) return
+    return workbenchSelection.registerSelectionClearer(session.documentId, targets => {
+      editor.current?.clearSelection(targets); textEditor.current?.clearSelection(); htmlEditor.current?.clearSelection()
+    })
+  }, [session.documentId])
+  useEffect(() => {
+    if (!session.documentId) return
     return workbenchSelection.register(session.documentId, async () => {
       const current = session.committedDocument?.model.kind === 'markdown' ? await editor.current?.drainSource() : activeDraft()
       if (current && !current.ready) throw new Error('请先完成当前输入。')
@@ -78,15 +84,20 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     })
   }, [session, session.documentId])
   const committed = session.committedDocument
-  const generation = useEditPreview(session.documentId, committed?.revision)
-  const editPreview = useMemo(() => {
-    if (!generation || generation.target.kind !== 'markdown-range' || committed?.model.kind !== 'markdown' || generation.epoch !== committed.epoch
-      || generation.status === 'active' && generation.revision !== committed.revision) return undefined
+  const generations = useEditPreviews(session.documentId, committed?.revision)
+  const editPreviews = useMemo(() => generations.flatMap(generation => {
+    if (generation.target.kind !== 'markdown-range' && generation.target.kind !== 'text-selection' || committed?.model.kind !== 'markdown' || generation.epoch !== committed.epoch
+      || generation.status === 'active' && generation.revision !== committed.revision) return []
     try {
-      const target = mapMarkdownRange(committed.model.source, state.source, generation.target)
-      return { editId: generation.editId, sequence: generation.sequence, target, value: generation.value, cancel: () => { void cancelEditPreview(generation).catch(reason => setError((reason as Error).message)) } }
-    } catch { return undefined }
-  }, [generation, committed, state.source])
+      const committedSource = committed.model.source
+      const target = generation.target.kind === 'markdown-range' ? mapMarkdownRange(committedSource, state.source, generation.target)
+        : { ...generation.target, fragments: generation.target.fragments.map(fragment => {
+          if (fragment.target.kind !== 'markdown-range') throw new Error('当前文件选区已改变。')
+          return { ...fragment, target: mapMarkdownRange(committedSource, state.source, fragment.target) }
+        }) }
+      return [{ editId: generation.editId, sequence: generation.sequence, target, value: generation.value, cancel: () => { void cancelEditPreview(generation).catch(reason => setError((reason as Error).message)) } }]
+    } catch { return [] }
+  }), [generations, committed?.epoch, committed?.revision, committed?.model.kind, committed?.model.kind === 'markdown' ? committed.model.source : undefined, state.source])
   const lastProjection = useRef<MarkdownProjection | undefined>(undefined)
   const [clipboard, setClipboard] = useState<FileClipboardContext | null>(null)
   const operationGroup = useRef<string | undefined>(undefined)
@@ -177,14 +188,14 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   const status = state.conflict ? '存在文件冲突' : committed ? documentSaveLabel({ ...committed, dirty: state.dirty || htmlPendingDraft, saving: state.saving }) : '正在打开'
   const documentActions = <>
     <span role="status" className="lesson-document-status">{status}</span>
-    <button type="button" aria-label="撤销" title="撤销" disabled={!committed?.undoDepth || state.saving || state.composing || Boolean(state.conflict) || state.recovery || Boolean(editPreview)} onClick={() => { void session.undo() }}><Undo2 size={16} aria-hidden="true" /></button>
-    <button type="button" aria-label="重做" title="重做" disabled={!committed?.redoDepth || state.saving || state.composing || Boolean(state.conflict) || state.recovery || Boolean(editPreview)} onClick={() => { void session.redo() }}><Redo2 size={16} aria-hidden="true" /></button>
+    <button type="button" aria-label="撤销" title="撤销" disabled={!committed?.undoDepth || state.saving || state.composing || Boolean(state.conflict) || state.recovery} onClick={() => { void session.undo() }}><Undo2 size={16} aria-hidden="true" /></button>
+    <button type="button" aria-label="重做" title="重做" disabled={!committed?.redoDepth || state.saving || state.composing || Boolean(state.conflict) || state.recovery} onClick={() => { void session.redo() }}><Redo2 size={16} aria-hidden="true" /></button>
     <button type="button" disabled={state.saving || state.composing || Boolean(state.conflict) || state.recovery} onClick={() => { void flush() }}>保存</button>
     <label><input type="checkbox" checked={state.autoSave} disabled={state.saving || state.composing || Boolean(state.conflict) || state.recovery} onChange={event => session.setAutoSave(event.target.checked)} />自动保存</label>
     <details className="lesson-document-more"><summary aria-label="文档更多操作">文件</summary>
       <div className="lesson-document-more__menu">
       <button type="button" disabled={state.saving || state.composing || state.conflictHunks.length > 0} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void saveAs() }}>另存为</button>
-      {committed?.undoHead?.actor === 'agent' && !state.recovery && !state.conflict && !editPreview && <button type="button" onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void session.undoLatestAgent() }}>撤销最近 AI 修改</button>}
+      {committed?.undoHead?.actor === 'agent' && !state.recovery && !state.conflict && <button type="button" onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void session.undoLatestAgent() }}>撤销最近 AI 修改</button>}
       </div>
     </details>
   </>
@@ -201,10 +212,10 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
       <button type="button" disabled={state.saving || state.composing || state.conflictHunks.length > 0} onClick={() => { void (state.conflict === 'deleted' ? saveAs() : session.resolveConflict('local')) }}>{state.conflict === 'deleted' ? '另存当前稿' : '保留当前稿并保存'}</button></>}
     </aside>}
     {isHtml && committed && <div className="lesson-document-editor__html-body" inert={state.conflictHunks.length > 0}><HtmlDocumentEditor ref={htmlEditor} active={active} tabId={htmlTabId} committed={committed} source={state.source} documentActions={documentActions} onPendingDraftChange={setHtmlPendingDraft} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} onSave={() => { void flush() }} /></div>}
-    {isText && !isHtml && committed && <div inert={state.conflictHunks.length > 0}><PlainTextDocumentEditor ref={textEditor} source={state.source} revision={committed.revision} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
-    {committed && committed.model.kind !== 'text' && parsedSource && <div inert={state.conflictHunks.length > 0}><SharedDocumentEditor ref={editor} active={active} document={document} revision={state.source} sourceDraft={state.source} target="file" initialMode={parsedSource.status === 'valid' ? 'layout' : 'source'} resolveImage={resolveImage}
+    {isText && !isHtml && committed && <div inert={state.conflictHunks.length > 0}><PlainTextDocumentEditor documentEpoch={committed.epoch} documentId={session.documentId ?? undefined} active={active} ref={textEditor} source={state.source} revision={committed.revision} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
+    {committed && committed.model.kind !== 'text' && parsedSource && <div inert={state.conflictHunks.length > 0}><SharedDocumentEditor ref={editor} cardDocumentId={session.documentId ?? undefined} active={active} document={document} revision={state.source} sourceDraft={state.source} target="file" initialMode={parsedSource.status === 'valid' ? 'layout' : 'source'} resolveImage={resolveImage}
       sourceMap={parsedSource.status === 'valid' ? parsedSource.sourceMap : undefined}
-      editPreview={editPreview}
+      editPreviews={editPreviews}
       clipboardContext={(resources: MarkdownDocument['resources']) => selectedFileClipboardContext(clipboard, resources)} clipboardResourcePort={fileClipboardResourcePort}
       renderObject={renderObject} objectRevision={clipboard}
       onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }}

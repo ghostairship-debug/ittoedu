@@ -22,6 +22,32 @@ function fixture(source: string, preview: DocumentEditPreview) {
   return { view, range, blocked, parsed }
 }
 describe('structured volatile body projection', () => {
+  it('renders two independent groups in both editors and clearing A keeps B protected and cancellable', () => {
+    const source = '甲甲\n\n中间人工\n\n乙乙\n', cancelA = vi.fn(), cancelB = vi.fn()
+    const a: DocumentEditPreview = { editId: 'A', target: { kind: 'markdown-range', from: 0, to: 2 }, value: 'AI 甲', cancel: cancelA }
+    const b: DocumentEditPreview = { editId: 'B', target: { kind: 'markdown-range', from: source.indexOf('乙乙'), to: source.indexOf('乙乙') + 2 }, value: 'AI 乙', cancel: cancelB }
+    const f = fixture(source, a), rangeB = layoutPreviewRange(f.view.state.doc, b, f.parsed.sourceMap)!
+    f.view.dispatch(f.view.state.tr.setMeta(layoutPreviewKey, [f.range, rangeB]))
+    expect([...f.view.dom.querySelectorAll('[data-edit-preview]')].map(node => node.textContent)).toEqual(['AI 甲', 'AI 乙'])
+    f.view.dispatch(f.view.state.tr.setMeta(layoutPreviewKey, [rangeB]))
+    expect(f.view.dom.querySelector('[data-edit-preview]')?.getAttribute('data-edit-preview')).toBe('B')
+    const original = f.view.state.doc.textContent
+    f.view.dispatch(f.view.state.tr.insertText('覆盖', rangeB.from + 1)); expect(f.view.state.doc.textContent).toBe(original)
+    f.view.dispatch(f.view.state.tr.insertText('人工', 1)); expect(f.view.state.doc.textContent).toContain('人工甲甲')
+    const host = document.createElement('div'); document.body.append(host)
+    const raw = new SourceView({ parent: host, state: SourceState.create({ doc: source, extensions: sourcePreviewExtensions(f.blocked) }) })
+    try {
+      const rawA = sourcePreviewRange(a, f.parsed.sourceMap)!, rawB = sourcePreviewRange(b, f.parsed.sourceMap)!
+      raw.dispatch({ effects: sourcePreviewEffect.of([rawA, rawB]) })
+      expect(host.querySelectorAll('[data-edit-preview]')).toHaveLength(2)
+      raw.dispatch({ effects: sourcePreviewEffect.of([rawB]) })
+      expect(host.querySelector('[data-edit-preview]')?.getAttribute('data-edit-preview')).toBe('B')
+      host.querySelector<HTMLElement>('[data-edit-preview]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+      expect(cancelB).toHaveBeenCalledOnce(); expect(cancelA).not.toHaveBeenCalled()
+      raw.dispatch({ changes: { from: rawB.from + 1, insert: '覆盖' } }); expect(raw.state.doc.toString()).toBe(source)
+      raw.dispatch({ changes: { from: 1, insert: '人工' } }); expect(raw.state.doc.toString()).toContain('甲人工甲')
+    } finally { raw.destroy() }
+  })
   it('keeps the original range visible but read-only before the first generated fragment in layout and source editors', () => {
     const source = '前文\n\n等待改写\n\n后文\n', start = source.indexOf('等待改写'), end = start + '等待改写'.length
     const preview = { editId: 'begin', sequence: -1, target: { kind: 'markdown-range' as const, from: start, to: end }, value: '', cancel() {} }
@@ -105,7 +131,7 @@ describe('structured volatile body projection', () => {
     expect(f.view.dom.querySelector('[data-edit-preview] h1')).toBeNull()
     f.view.dispatch(f.view.state.tr.insertText('人工', f.view.state.doc.content.size - 1))
     expect(f.view.state.doc.textContent).toBe('甲😀乙丙另一段人工')
-    expect(layoutPreviewKey.getState(f.view.state)?.from).toBe(range.from)
+    expect(layoutPreviewKey.getState(f.view.state)?.[0]?.from).toBe(range.from)
     f.view.dispatch(f.view.state.tr.insertText('不行', range.from + 1)); expect(f.view.state.doc.textContent).toBe('甲😀乙丙另一段人工')
     f.view.dispatch(f.view.state.tr.setMeta(layoutPreviewKey, null))
     expect(f.view.dom.querySelector('[data-edit-preview]')).toBeNull(); expect(f.view.state.doc.textContent).toBe('甲😀乙丙另一段人工')

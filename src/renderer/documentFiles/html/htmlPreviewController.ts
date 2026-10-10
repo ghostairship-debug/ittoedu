@@ -32,6 +32,8 @@ export class HtmlPreviewController {
   private requestSerial = 0
   private modeRequest: { requestId: string; enabled: boolean } | null = null
   private editMode = false
+  private readonly cardKeys = new Set<string>()
+  private readonly cardTargets = new Map<string, HtmlTargetReport>()
   private modeSerial = 0
   constructor(
     private readonly iframe: HTMLIFrameElement,
@@ -68,6 +70,11 @@ export class HtmlPreviewController {
     if (message.event !== 'ready') this.lastSeq = message.seq
     if (message.event === 'ready') { this.lastSeq = -1; this.reloading = false; this.events.onReady(message.sectionCount, message.sectionsAmbiguous) }
     if (message.event === 'page') this.events.onPage(message.pageIndex, message.perPageScroll)
+    if (message.event === 'card-targets') {
+      this.cardTargets.clear()
+      for (const target of message.targets) if (target.authoring) this.cardTargets.set(target.authoring.authorKey, target)
+      window.dispatchEvent(new Event('guoling:text-card-anchor-changed'))
+    }
     if (message.event === 'edit-mode-ready' && this.modeRequest?.requestId === message.requestId
       && this.modeRequest.enabled === message.enabled) {
       this.modeRequest = null
@@ -80,6 +87,22 @@ export class HtmlPreviewController {
   init(): void {
     this.iframe.contentWindow?.postMessage({ type: 'html-preview.init', leaseId: this.lease.leaseId, loadId: this.lease.loadId }, '*')
   }
+  cardRect(authorKey: string): DOMRect | null {
+    if (!this.cardKeys.has(authorKey)) {
+      this.cardKeys.add(authorKey)
+      this.iframe.contentWindow?.postMessage({ type: 'html-preview.card-targets', loadId: this.lease.loadId, authorKeys: [...this.cardKeys] }, '*')
+    }
+    const target = this.cardTargets.get(authorKey)
+    if (!target || !this.visible) return null
+    const owner = this.iframe.getBoundingClientRect(), sx = this.iframe.clientWidth ? owner.width / this.iframe.clientWidth : 1, sy = this.iframe.clientHeight ? owner.height / this.iframe.clientHeight : 1
+    return new DOMRect(owner.left + target.rect.x * sx, owner.top + target.rect.y * sy, target.rect.width * sx, target.rect.height * sy)
+  }
+  selectAuthor(authorKey: string): boolean {
+    if (!this.cardTargets.has(authorKey) || !this.visible || !this.editMode) return false
+    this.iframe.contentWindow?.postMessage({ type: 'html-preview.select-author', loadId: this.lease.loadId, authorKey }, '*')
+    return true
+  }
+  clearSelection(): void { this.select(null) }
 
   beginReload(): void {
     this.reloading = true

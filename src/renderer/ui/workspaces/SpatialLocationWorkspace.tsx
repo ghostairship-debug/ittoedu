@@ -1,4 +1,4 @@
-import { Hand, Maximize2, Minus, MousePointer2, Play, Plus } from 'lucide-react'
+import { Hand, Maximize2, Minus, Plus } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react'
 import type { ComponentEdit, ComponentFrame, ComponentSurface, CourseProjectV10 } from '../../../shared/contracts/component-platform'
 import { isComponentVisibleAtSurface } from '../../../shared/contracts/component-platform'
@@ -23,6 +23,7 @@ import type { SlideContentEdit } from '../../store/slices/slideAuthoringSlice'
 import { resolveComponentBackground } from '../../../shared/contracts/component-platform'
 import { createTeacherControllerHudGeometry, teacherControllerReferenceSize, isGlobalTeacherController, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, type TeacherControllerDisplayPort, type TeacherControllerHudGeometry } from '../../../shared/teacherControllerViewportGeometry'
 import { SlideLayerSelectionOverlay } from './SlideLayerSelectionOverlay'
+import { CourseNavigationControls } from './CourseNavigationControls'
 
 export interface SpatialLocationWorkspaceProps {
   documentId: string
@@ -44,6 +45,7 @@ export interface SpatialLocationWorkspaceProps {
   onActivateFrame(frameId: string | null): void
   onGraphSelect(selection: SpatialGraphSelection): void
   onCanvasModeChange(mode: 'edit' | 'run'): void
+  onResetPlayback?(playing: boolean): Promise<void>
   onEditContent?(instanceId: string): void
   contentEdit?: SlideContentEdit | null
   contentEditor?: {
@@ -303,10 +305,8 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     <NativeSelectionContext documentId={props.documentId} revision={props.project.revision} locationId={props.surface.id} itemIds={props.selectionIds} stateId={props.activeStateId} enabled={props.canvasMode === 'edit'} textEditing={Boolean(props.contentEdit)}
       bounds={id => { const element = [...(viewport.current?.querySelectorAll<HTMLElement>('[data-component-instance]') ?? [])].find(value => value.dataset.componentInstance === id); return element?.getBoundingClientRect() ?? null }} />
     {menu.element}
-    <div className="canvas-mode-switch" role="group" aria-label="画布模式">
-      <button type="button" className={props.canvasMode === 'edit' ? 'canvas-mode-switch__active' : ''} aria-pressed={props.canvasMode === 'edit'} onClick={() => props.onCanvasModeChange('edit')}><MousePointer2 size={13} />编辑状态</button>
-      <button type="button" className={props.canvasMode === 'run' ? 'canvas-mode-switch__active' : ''} aria-pressed={props.canvasMode === 'run'} onClick={() => props.onCanvasModeChange('run')}><Play size={13} />当前位置试运行</button>
-    </div>
+    <CourseNavigationControls canvasMode={props.canvasMode} onCanvasModeChange={props.onCanvasModeChange}
+      navigation={props.teacherController} beforeNavigate={props.contentEditor?.commit} resetPlayback={props.onResetPlayback} report={setError} />
     {props.canvasMode === 'edit' && <div className="canvas-view-controls" role="group" aria-label="画布视图">
       <button type="button" aria-label="缩小画布" onClick={() => zoom(-0.1)}><Minus size={14} /></button><output aria-label="画布缩放比例">{Math.round(props.view.camera.zoom * 100)}%</output>
       <button type="button" aria-label="放大画布" onClick={() => zoom(0.1)}><Plus size={14} /></button>

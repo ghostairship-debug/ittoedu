@@ -20,7 +20,7 @@ it('same workspace/settings retain V10 targets and closing one document or detac
     const second = await host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('Second teacher lesson'), resources: { assets: {}, components: {} } }, 'second.h5lesson')
     await host.saveToPath(second.documentId, path.join(workspace, 'second.h5lesson'))
     fixture = await residentMcpFixture({ host, directory, workspaceRoot: workspace })
-    const connection = readExplicitMcpConnection({ endpoint: (await fixture.service.status()).endpoint, token: fixture.token() })
+    const connection = readExplicitMcpConnection({ endpoint: (await fixture.service.status()).endpoint })
     const a = await connectExplicitMcp(connection, 'client-a'); clients.push(a)
     const b = await connectExplicitMcp(connection, 'client-b'); clients.push(b)
     const opened = await b.call('file.open', { path: 'lesson.h5lesson' })

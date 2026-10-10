@@ -1,4 +1,4 @@
-import sharp from 'sharp'
+import { getImageDecoder } from '../imageDecoder'
 import type { AssetSource } from '../../../shared/contracts/media-v1'
 import type { HostImageInput } from '../../../core/tools/imageResource'
 import { LibraryUnavailableError, type AssetHttpPort, type ImageSearchInput, type ImageSearchPage, type OpenImageCandidate, type OpenLibrary } from './assetSourceTypes'
@@ -66,6 +66,7 @@ export type ImageFileFormat = 'jpeg' | 'png' | 'webp'
  * 其余按指定格式转换，未指定时线稿、透明图转为 PNG，照片转为 JPEG。
  */
 export async function normalizeImage(bytes: Uint8Array, maxWidth: number, format?: ImageFileFormat): Promise<{ bytes: Uint8Array; mimeType: string; width: number; height: number }> {
+  const sharp = getImageDecoder()
   const metadata = await sharp(bytes, { failOn: 'error' }).metadata().catch(() => { throw new Error('下载内容不是可识别的图片') })
   const { width, height } = metadata, actual = metadata.format
   if (!actual || !width || !height) throw new Error('下载内容不是可识别的图片')
@@ -179,6 +180,7 @@ export class OpenImageService {
       if (!candidate) return { image, reason: '候选句柄不属于本任务，请重新检索' }
       try {
         const normalized = await this.call(run, input.signal, async signal => {
+          const sharp = getImageDecoder()
           const url = candidate.previewUrl
             ?? (candidate.commonsTitle ? await commonsRendition(this.options.http, candidate.commonsTitle, PREVIEW_SIZE, signal) : candidate.fileUrl)
           const response = await this.options.http.getBytes(url, { signal, maxBytes: PREVIEW_MAX_BYTES, headers: { Accept: IMAGE_ACCEPT } })

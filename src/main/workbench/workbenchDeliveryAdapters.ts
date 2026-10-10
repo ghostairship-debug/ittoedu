@@ -52,7 +52,7 @@ export async function resolveSaveDestination(
     return snapshot.binding.path
   }
   if (!scope && requested) throw new Error('外部连接只可保存原绑定文件')
-  const base = snapshot.binding.kind === 'file' ? path.dirname(snapshot.binding.path)
+  const base = requested && scope?.workspaceRoot ? scope.workspaceRoot : snapshot.binding.kind === 'file' ? path.dirname(snapshot.binding.path)
     : scope ? await preferredDirectory(scope) : null
   if (!base) throw new Error('未命名文档没有已授权的保存文件夹')
   const desired = requested ? path.resolve(base, requested)

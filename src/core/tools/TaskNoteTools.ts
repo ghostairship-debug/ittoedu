@@ -2,7 +2,6 @@ import { z } from 'zod'
 import type { ExecutionRunRecord, ExecutionStart, WorkingNote } from '../../shared/workbench/execution'
 import type { ModelToolDefinition } from '../../shared/workbench/modelProvider'
 import type { ToolResult } from '../../shared/workbench/tools'
-import { taskFinishDeliverySchema } from './DocumentDeliveryTools'
 
 const MAX_GOAL_CHARS = 3_000
 const MAX_NOTE_BYTES = 16 * 1024
@@ -25,14 +24,6 @@ export const taskNoteTool: ModelToolDefinition = {
   name: 'task.note',
   description: '更新本次任务的简短工作笔记：已作取舍、待办、待确认和风险。只写当前 run 的检查点，不修改用户原话、冻结约束、权限、文档或真实工具回执。笔记中的“完成”不作为交付证明。sourceRefs 可省略；需要引用时使用 task:instruction 或已返回工具的调用编号，宿主自动定位来源。',
   inputSchema: z.toJSONSchema(taskNoteInputSchema) as ModelToolDefinition['inputSchema'],
-}
-
-export const taskFinishInputSchema = z.object({ delivery: taskFinishDeliverySchema.optional() }).strict()
-/** Engine run control; it does not register a document operation or change a grant. */
-export const taskFinishTool: ModelToolDefinition = {
-  name: 'task.finish',
-  description: '结束本轮任务。模型根据用户原话和当前正式作品判断内容与互动是否完整；软件按当前交付事实结算终态。可以在同一响应中先写入，再把 task.finish 放在最后。用户要求保存或导出时，用可选 delivery 声明最终交付；target 可省略使用当前文档，或使用宿主返回的文档短句柄，destination 是目标路径，format 省略为保存。软件负责机械顺序及真实回执，普通 task.finish({}) 不自动保存。目标当前版本已保存、指定产物已真实写出且版本匹配时返回 completed；中间确定失败、重试与诊断保留为 warnings，不要求逐项修复历史错误。缺失交付、未保存或版本不匹配时如实 partial；原操作仍在运行或结果未知时查询原结果，不得重放。completed 表示机械交付完成，不替代内容、互动或视觉质量验收。',
-  inputSchema: z.toJSONSchema(taskFinishInputSchema) as ModelToolDefinition['inputSchema'],
 }
 
 /** Host-only initialization; long instructions are explicitly abbreviated in this advisory projection. */

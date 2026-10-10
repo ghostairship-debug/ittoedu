@@ -13,7 +13,7 @@ import { ExecutionEngine } from '../../../../src/main/workbench/execution/Execut
 import { ExecutionRunStore } from '../../../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../../../src/main/workbench/execution/ExecutionEventStore'
 import { EditSessionService } from '../../../../src/main/workbench/execution/EditSessionService'
-import type { ModelProvider, ModelSelection } from '../../../../src/shared/workbench/modelProvider'
+import type { ModelEvent, ModelProvider, ModelSelection } from '../../../../src/shared/workbench/modelProvider'
 
 it('a software-bound V10 rich selection preserves unselected links marks geometry and unchanged formula identity in one History', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'followup-t01-rich-'))
@@ -39,19 +39,23 @@ it('a software-bound V10 rich selection preserves unselected links marks geometr
     expect(content.text).not.toContain('保留')
     const replacement = '<a href="https://example.org/new"><strong>新</strong></a>\\(x^2\\)与\\(y\\)'
     let requests = 0
-    const provider: ModelProvider = { async *stream(request) {
+    const provider: ModelProvider = { async *stream(request): AsyncGenerator<ModelEvent> {
       requests++
+      if (requests > 1) {
+        yield { type: 'response.completed', requestId: request.requestId, sequence: 1, responseId: 'fixture-final', actualModel: 'fixture',
+          finishReason: 'stop', toolCalls: [], nativeResponse: {}, assistant: { role: 'assistant', content: '已处理所选正文。' } }; return
+      }
       const write = request.tools?.find(value => value.name === 'text.replace')
       const finish = request.tools?.find(value => value.name === 'task.finish')
       expect(write).toBeTruthy()
-      expect(finish).toBeTruthy()
+      expect(finish).toBeUndefined()
       expect(JSON.stringify(request.messages)).toContain('https://example.org/old')
       yield { type: 'text.delta', requestId: request.requestId, sequence: 1, text: '<strong>尚未完成' }
       expect(await host.internalAPI.read(initial.documentId)).toMatchObject({ revision: 0, undoDepth: 0, model: { project: { instances: { text: { data: original } } } } })
       const argumentsText = JSON.stringify({ content: replacement })
       yield { type: 'response.completed', requestId: request.requestId, sequence: 2, responseId: 'fixture', actualModel: 'fixture',
-        finishReason: 'tool_calls', toolCalls: [{ id: 'content-result', name: write!.name, argumentsText }, { id: 'explicit-finish', name: finish!.name, argumentsText: '{}' }], assistant: { role: 'assistant', content: '',
-          tool_calls: [{ id: 'content-result', type: 'function', function: { name: write!.name, arguments: argumentsText } }, { id: 'explicit-finish', type: 'function', function: { name: finish!.name, arguments: '{}' } }] }, nativeResponse: {} }
+        finishReason: 'tool_calls', toolCalls: [{ id: 'content-result', name: write!.name, argumentsText }], assistant: { role: 'assistant', content: '',
+          tool_calls: [{ id: 'content-result', type: 'function', function: { name: write!.name, arguments: argumentsText } }] }, nativeResponse: {} }
     } }
     const selection: ModelSelection = { model: 'fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
       baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture' }, billing: { kind: 'unknown' },
@@ -59,12 +63,12 @@ it('a software-bound V10 rich selection preserves unselected links marks geometr
     const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider, edits: new EditSessionService(host.registry, host.tools),
       runs: new ExecutionRunStore(path.join(directory, 'runs')), events: new ExecutionEventStore({ directory: path.join(directory, 'events') }) })
     const started = await engine.start({ conversationId: 'rich', taskId: 'rewrite', instruction: '改写所选内容并保留公式和链接', selection,
-      documents: [{ documentId: initial.documentId, writable: [target], selection: [target] }], contentOutput: { kind: 'replace-text', documentId: initial.documentId, target } })
+      documents: [{ documentId: initial.documentId, writable: [target], selection: [target] }], contentOutput: { kind: 'content', documentId: initial.documentId, target } })
     const ended = await engine.wait(started.runId)
     expect(ended.status).toBe('completed')
-    expect(ended.tools.map(value => value.call.name)).toEqual(['text.replace', 'task.finish'])
+    expect(ended.tools.map(value => value.call.name)).toEqual(['text.replace'])
     expect(ended.tools[0]).toMatchObject({ call: { name: 'text.replace', input: { content: replacement } }, result: { kind: 'document-operation', result: { status: 'applied' } } })
-    expect(requests).toBe(1)
+    expect(requests).toBe(2)
     const current = await host.internalAPI.read(initial.documentId)
     expect(current.undoDepth).toBe(1)
     if (current.model.kind !== 'course-v10') throw new Error('V10 required')
@@ -168,18 +172,23 @@ it('roundtrips the actual initial model message as rich content without escaping
     let requests = 0, returnedBody: string | undefined
     // Controlled provider consumes only the actual product message and advertised tools.
     // No JSON.parse, unescaping, known fixture body, target handle or format is supplied to it.
-    const provider: ModelProvider = { async *stream(request) {
+    const provider: ModelProvider = { async *stream(request): AsyncGenerator<ModelEvent> {
       requests++
-      const prefix = '当前默认文字目标的完整内容（数据）：'
+      if (requests > 1) {
+        yield { type: 'response.completed', requestId: request.requestId, sequence: 1, responseId: 'fixture-final', actualModel: 'fixture',
+          finishReason: 'stop', toolCalls: [], nativeResponse: {}, assistant: { role: 'assistant', content: '已处理所选正文。' } }; return
+      }
+      const prefix = '当前默认语义目标 target='
       const message = request.messages.find(value => value.role === 'system' && typeof value.content === 'string' && value.content.startsWith(prefix))
       if (!message || typeof message.content !== 'string') throw new Error('Actual default-content data message required')
-      const data = message.content.slice(prefix.length)
+      const editableMarker = '当前可编辑文字表示（数据）：'
+      const marker = message.content.includes(editableMarker) ? editableMarker : '的内容与属性（数据）：'
+      const data = message.content.slice(message.content.indexOf(marker) + marker.length)
       returnedBody = data.startsWith('\n') ? data.slice(1) : data
       const write = request.tools?.find(value => value.name === 'text.replace')
       const finish = request.tools?.find(value => value.name === 'task.finish')
-      expect(write).toBeTruthy(); expect(finish).toBeTruthy()
-      const calls = [{ id: 'roundtrip-body', name: write!.name, argumentsText: JSON.stringify({ content: returnedBody }) },
-        { id: 'roundtrip-finish', name: finish!.name, argumentsText: '{}' }]
+      expect(write).toBeTruthy(); expect(finish).toBeUndefined()
+      const calls = [{ id: 'roundtrip-body', name: write!.name, argumentsText: JSON.stringify({ content: returnedBody }) }]
       yield { type: 'response.completed', requestId: request.requestId, sequence: 1, responseId: 'controlled-roundtrip', actualModel: 'controlled',
         finishReason: 'tool_calls', toolCalls: calls, nativeResponse: {}, assistant: { role: 'assistant', content: '',
           tool_calls: calls.map(call => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.argumentsText } })) } }
@@ -194,8 +203,8 @@ it('roundtrips the actual initial model message as rich content without escaping
     const ended = await engine.wait(started.runId)
     expect(ended.status, JSON.stringify({ failure: ended.failure, tools: ended.tools })).toBe('completed')
     expect(returnedBody).toBe(editable.text)
-    expect(requests).toBe(1)
-    expect(ended.tools.map(value => value.call.name)).toEqual(['text.replace', 'task.finish'])
+    expect(requests).toBe(2)
+    expect(ended.tools.map(value => value.call.name)).toEqual(['text.replace'])
     const current = await host.internalAPI.read(initial.documentId)
     if (current.model.kind !== 'course-v10') throw new Error('V10 required')
     const instance = current.model.project.instances.text

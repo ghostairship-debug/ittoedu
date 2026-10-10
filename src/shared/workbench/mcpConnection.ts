@@ -4,7 +4,6 @@ import { executionPermissionModeSchema, type ExecutionPermissionMode } from './e
 export interface McpConnectionReady {
   status: 'ready'
   endpoint: string
-  token: string
   workspace: string
   workspaceId: string
   permission: ExecutionPermissionMode
@@ -45,7 +44,7 @@ export function readMcpConnectionReady(value: unknown): McpConnectionReady {
   if (!value || typeof value !== 'object') throw new Error('MCP 连接配置不是 JSON 对象')
   const reply = value as Record<string, unknown>
   if (reply.status === 'failed') throw new Error(typeof reply.message === 'string' ? reply.message : 'MCP 启动失败')
-  for (const field of ['endpoint', 'token', 'workspace', 'workspaceId', 'profile', 'requestedWorkspace']) {
+  for (const field of ['endpoint', 'workspace', 'workspaceId', 'profile', 'requestedWorkspace']) {
     if (typeof reply[field] !== 'string' || !reply[field]) throw new Error(`MCP ready 缺少 ${field}`)
   }
   if (reply.status !== 'ready' || !Number.isSafeInteger(reply.pid) || Number(reply.pid) <= 0

@@ -8,7 +8,7 @@ import { applicationEventFacts, committedFact, contentApplyFact, currentSave, mo
 import { AgentFileMissingParent, agentFileMutationNames, agentFileTools, isAgentFileTool, type AgentFileContext, type AgentFileMutationName,
   type AgentFileOutcome, type AgentFileToolName } from '../../../core/tools/AgentFileTools'
 import { createCourseFromHtmlInputSchema, createCourseFromHtmlTool } from '../../../core/tools/HtmlImportTools'
-import { toolFamilies } from '../../../core/tools/ToolCatalog'
+import { toolFamilies, toolRegistration } from '../../../core/tools/ToolCatalog'
 import { isInsideRoot, permissionLabels, type ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
 import type { ExecutionEventInput } from '../../../shared/workbench/executionEvents'
 import { externalMcpEndpoint, type ExternalMcpSettings, type ExternalMcpState, type ExternalMcpStatus,
@@ -28,7 +28,7 @@ export interface ExternalFilePort {
   releaseRun(runId: string): void
 }
 export interface ExternalMcpServiceOptions {
-  settings: Pick<ResidentMcpSettingsStore, 'read' | 'update' | 'token' | 'regenerateToken'>
+  settings: Pick<ResidentMcpSettingsStore, 'read' | 'update'>
   conversations: Pick<ConversationStore, 'listWorkspaces' | 'readWorkspace' | 'listConversations' | 'createConversation' | 'updateConversation'>
   registry: DocumentRegistry
   gateway: DocumentToolGateway
@@ -47,15 +47,19 @@ export interface ExternalMcpServiceOptions {
 }
 type ToolKind = 'gateway' | 'file' | 'course' | 'load' | 'service'
 interface HostTool { name: string; description: string; schema: Record<string, unknown>; read: boolean; label: string; kind: ToolKind }
-interface CallScope { runId: string; taskId: string; workspaceId: string }
+interface CallScope {
+  runId: string; taskId: string; workspaceId: string; workspaceRoot: string; permission: ExecutionPermissionMode
+  boundPaths: readonly string[]; boundDocumentIds: readonly string[]; children: Map<string, ToolResult>
+}
+interface OperationScope { runId: string; workspaceId: string; workspaceRoot: string }
 interface OperationSummary {
   status: 'applied' | 'unchanged' | 'completed' | 'pending' | 'failed'; documentId?: string; revision?: number; operationId?: string; message?: string
   commit?: string; usability?: string; delivery?: string
   save?: { savedRevision: number; currentRevision: number; dirty: boolean; current: boolean }
 }
 interface Operation {
-  ticket: string; runId: string; tool: string; label: string; digest: string; time: number
-  /** Retained only until the reply is known to have reached the client; a delivered reply is never replayed. */
+  ticket: string; runId: string; workspaceId: string; workspaceRoot: string; tool: string; label: string; digest: string; time: number
+  /** Existing in-memory receipt retained for exact-identity retries until the session ends; never a persistent ledger. */
   result?: Promise<ToolResult>
   summary?: OperationSummary
   delivered?: boolean
@@ -70,6 +74,7 @@ interface Session {
   /** Child receipts of composite calls (course.createFromHtml), keyed by their host-assigned call id. */
   children: Map<string, ToolResult>
   notices: string[]; listChanged: boolean
+  authority: Promise<void>; transitioning: boolean; boundDocumentIds: readonly string[]
 }
 
 const STOPPED = '此外部会话已被用户在果铃中停止，后续调用不会执行。如需继续，请在客户端重新连接（重新初始化 MCP 会话）。'
@@ -84,7 +89,7 @@ const serviceTools: HostTool[] = [
   { name: 'workspace.list', label: '列出工作空间', description: '列出果铃中已登记的工作空间及本会话当前绑定的空间。', read: true },
   { name: 'workspace.switch', label: '切换工作空间', description: '把本会话切换到另一个已登记的工作空间。之前打开的文档句柄随之失效，需在新空间按路径重新打开。', read: true },
   { name: 'workbench.state', label: '查看当前界面', description: '只读：用户在果铃中当前打开的文档、前台文档和选中内容。选中内容带可用的目标句柄，不修改任何内容。', read: true },
-  { name: 'operation.recent', label: '最近操作结果', description: '只读：本会话最近的修改类调用及其正式结果与回复是否送达。用于连接中断后核对，不会执行或重放工具。', read: true },
+  { name: 'operation.recent', label: '最近操作结果', description: '只读：本会话最近的修改、资源获取和新发起任务的正式结果及回复是否送达。用于连接中断后核对，不会执行或重放工具。', read: true },
 ].map(tool => ({ ...tool, kind: 'service' as const, schema: z.toJSONSchema(serviceSchemas[tool.name as keyof typeof serviceSchemas]) as Record<string, unknown> }))
 const fileLabels: Record<AgentFileToolName, string> = { 'file.list': '列出文件', 'file.search': '搜索文件', 'file.open': '打开文件', 'file.create': '新建文件',
   'file.observe': '比较磁盘版本', 'file.reconcile': '处理文件变化',
@@ -137,13 +142,10 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const settings = await this.options.settings.read()
     this.message = undefined
     if (!settings.enabled) { this.state = 'disabled'; return }
-    let token: string
-    try { token = await this.options.settings.token() }
-    catch (cause) { this.state = 'failed'; this.message = `外部连接令牌不可用：${cause instanceof Error ? cause.message : String(cause)}`; return }
     this.detachCatalog ??= this.options.gateway.subscribeCatalogChanges(runId => {
       for (const session of this.sessions.values()) if (session.runId === runId) session.listChanged = true
     })
-    const started = await this.server.start(settings.port, token)
+    const started = await this.server.start(settings.port)
     this.state = started.state
     if (started.state !== 'running') this.message = started.message
   }
@@ -158,18 +160,18 @@ export class ExternalMcpService implements ResidentMcpHandler {
   configure(patch: Partial<ExternalMcpSettings>): Promise<ExternalMcpStatus> {
     return this.serial(async () => {
       const before = await this.options.settings.read(), after = await this.options.settings.update(patch)
-      // A new permission level applies to sessions that connect afterwards; existing sessions keep their frozen level.
+      // This preference sets new connections; host-only configureSession rotates the selected live connection.
       if (before.enabled !== after.enabled || before.port !== after.port || after.enabled && this.state !== 'running') await this.restart()
       return this.status()
     })
   }
-  revealToken(): Promise<string> { return this.options.settings.token() }
-  regenerateToken(): Promise<{ token: string; status: ExternalMcpStatus }> {
+  /** Host/UI authority change for one live connection, without transport reinitialization. */
+  configureSession(sessionId: string, permission: ExecutionPermissionMode): Promise<ExternalMcpStatus> {
     return this.serial(async () => {
-      const token = await this.options.settings.regenerateToken()
-      this.server.replaceToken(token)
-      await this.closeSessions()
-      return { token, status: await this.status() }
+      const session = this.sessions.get(sessionId)
+      if (!session || session.stopped) throw new Error('外部会话已停止或不存在')
+      await this.bind(session, session.workspaceId, permission)
+      return this.status()
     })
   }
   /** Revokes one session: its run is stopped and later calls are refused with an explanation. */
@@ -250,29 +252,42 @@ export class ExternalMcpService implements ResidentMcpHandler {
     if (recent) return recent.workspaceId
     throw new McpProtocolError(-32000, '果铃还没有打开任何工作空间。请先在果铃中打开工作空间，再重新连接。')
   }
-  /** (Re)binds a session to a workspace with a fresh run; the previous run and all of its handles stop. */
-  private async bind(session: Session, workspaceId: string): Promise<void> {
+  /** Serialize only authority changes; nonconflicting tool calls remain concurrent. */
+  private bind(session: Session, workspaceId: string, permission?: ExecutionPermissionMode): Promise<void> {
+    const pending = session.authority.then(() => this.rebind(session, workspaceId, permission ?? session.permission))
+    session.authority = pending.catch(() => undefined)
+    return pending
+  }
+  /** The same connection gets a fresh frozen run; old uncommitted work stops before the new grant exists. */
+  private async rebind(session: Session, workspaceId: string, permission: ExecutionPermissionMode): Promise<void> {
     const workspace = await this.options.conversations.readWorkspace(workspaceId)
     if (!workspace) throw new Error('工作空间不存在或已移除')
     const root = await this.options.workspaceRoot(workspace.rootPath), runId = randomUUID(), previous = session.runId
-    // Selecting the already-bound workspace does not revoke live document handles or replay facts.
     if (previous) this.assertActive(session, previous)
-    if (session.workspaceId === workspaceId && session.workspaceRoot === root && previous) return
-    // Same actor and file scope as a built-in task, so the shared catalog selection and Main's permission checks apply unchanged.
-    await this.options.gateway.beginRun({ runId, actor: 'agent', documents: [], fileAccess: { permission: session.permission, workspaceRoot: root } })
-    if (previous) {
-      try { this.assertActive(session, previous) }
-      catch (cause) { await this.stopRun(runId); throw cause }
-    }
-    if (session.workspaceId !== workspaceId) { session.conversation = undefined; session.conversationId = undefined; session.taskId = randomUUID() }
-    Object.assign(session, { runId, workspaceId, workspaceRoot: root, workspaceName: workspaceName(root), listChanged: true })
-    session.children = new Map()
-    this.lastWorkspaceId = workspaceId
-    if (previous) await this.stopRun(previous)
+    if (session.workspaceId === workspaceId && session.workspaceRoot === root && session.permission === permission && previous) return
+    const ui = await this.options.uiState().catch(() => null)
+    // Foreground identities come only from trusted host/renderer state, never client-supplied paths.
+    const boundDocumentIds = [...new Set([ui?.activeDocumentId, ui?.selection?.documentId].filter((id): id is string => !!id))]
+    const boundPaths = Object.fromEntries(this.options.registry.list().filter(snapshot => boundDocumentIds.includes(snapshot.documentId)
+      && snapshot.binding.kind === 'file').map(snapshot => [snapshot.documentId, snapshot.binding.kind === 'file' ? snapshot.binding.path : '']))
+    session.transitioning = true
+    try {
+      if (previous) await this.stopRun(previous)
+      if (session.stopped || previous && !this.sessions.has(session.sessionId)) throw new Error('外部会话已停止')
+      await this.options.gateway.beginRun({ runId, actor: 'agent', documents: [], fileAccess: { permission, workspaceRoot: root, boundPaths } })
+      if (session.stopped || previous && !this.sessions.has(session.sessionId)) { await this.stopRun(runId); throw new Error('外部会话已停止') }
+      session.conversation = undefined; session.conversationId = undefined
+      Object.assign(session, { runId, taskId: randomUUID(), workspaceId, workspaceRoot: root, permission,
+        workspaceName: workspaceName(root), listChanged: true, boundDocumentIds, children: new Map<string, ToolResult>() })
+      this.lastWorkspaceId = workspaceId
+    } catch (cause) {
+      if (previous) session.stopped = true
+      throw cause
+    } finally { session.transitioning = false }
   }
 
   initialize(client: ResidentMcpClientInfo): Promise<{ sessionId: string; instructions: string }> {
-    const pending = this.openSession(client, this.sessionGeneration)
+    const pending = this.serial(() => this.openSession(client, this.sessionGeneration))
     this.requests.add(pending)
     void pending.then(() => this.requests.delete(pending), () => this.requests.delete(pending))
     return pending
@@ -282,7 +297,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const settings = await this.options.settings.read()
     const session: Session = { sessionId: randomUUID(), clientName: client.title ?? client.name, permission: settings.permission,
       connectedAt: this.now(), pending: 0, stopped: false, workspaceId: '', workspaceName: '', workspaceRoot: '', runId: '', taskId: randomUUID(),
-      operations: [], children: new Map(), notices: [], listChanged: false }
+      operations: [], children: new Map(), notices: [], listChanged: false, authority: Promise.resolve(), transitioning: false, boundDocumentIds: [] }
     await this.bind(session, await this.currentWorkspace())
     // Revocation while initialization awaits disk/workspace facts must not leave a late, live run behind.
     if (generation !== this.sessionGeneration || this.state !== 'running') {
@@ -295,7 +310,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
       `已连接到正在运行的果铃。本会话绑定工作空间「${session.workspaceName}」（${session.workspaceRoot}），权限为「${permissionLabels[session.permission]}」，由果铃主进程执行。`,
       '用 file.* 按路径在空间内打开、新建、读写文件与文档；打开后用返回的 target 句柄调用读取和编辑工具。宿主按当前文档接入可用能力；tools.load 可用于手动浏览其他工具族。',
       'workspace.list / workspace.switch 查看和切换空间；workbench.state 只读查看用户当前打开的文档与选中内容。',
-      '操作票据由果铃自动编号，不需要填写 ticket。若某次修改的回复没有收到，原样重发同一调用会直接返回原正式回执而不会重复执行；也可用 operation.recent 核对最近结果。',
+      '操作票据由果铃自动编号，不需要填写 ticket。同一授权范围内，未送达修改可原样重发取回回执。切空间/调权后重试原操作须带原 ticket 与 _meta[guoling/operation]=operationScope；普通新调用在新范围执行。operation.recent 可核对最近事实。',
       '果铃只记录收到的工具调用；你自己的对话、用量与磁盘操作不由果铃管理。',
     ].join('\n') }
   }
@@ -314,7 +329,8 @@ export class ExternalMcpService implements ResidentMcpHandler {
     if (session.stopped) throw new McpProtocolError(-32000, STOPPED)
     if (call.method === 'tools/list') {
       session.listChanged = false
-      return { tools: (await this.catalog(session)).map(tool => ({ name: tool.name, title: tool.label, description: tool.description,
+      await session.authority
+      return { tools: (await this.catalog(this.scope(session))).map(tool => ({ name: tool.name, title: tool.label, description: tool.description,
         inputSchema: tool.schema,
         ...(tool.read ? { annotations: { readOnlyHint: true } } : {}) })) }
     }
@@ -329,15 +345,15 @@ export class ExternalMcpService implements ResidentMcpHandler {
   }
 
   /** Same selection as a built-in task in this space: Gateway catalog for the run, file tools by permission, family loading. */
-  private async catalog(session: Session, runId = session.runId): Promise<HostTool[]> {
-    const domain = await this.options.gateway.describeRun(runId)
-    const families = await this.options.gateway.availableToolFamilies(runId)
+  private async catalog(scope: CallScope): Promise<HostTool[]> {
+    const domain = await this.options.gateway.describeRun(scope.runId)
+    const families = await this.options.gateway.availableToolFamilies(scope.runId)
     const tools: HostTool[] = domain.map(tool => ({ name: tool.name, description: tool.description, schema: tool.schema, read: tool.manual.group === 'read', label: tool.manual.label, kind: 'gateway' }))
     for (const tool of agentFileTools) {
       const mutation = (agentFileMutationNames as readonly string[]).includes(tool.name)
-      if (!mutation || session.permission !== 'read-only') tools.push({ name: tool.name, description: tool.description, schema: tool.inputSchema, read: !mutation, label: fileLabels[tool.name], kind: 'file' })
+      if (!mutation || scope.permission !== 'read-only') tools.push({ name: tool.name, description: tool.description, schema: tool.inputSchema, read: !mutation, label: fileLabels[tool.name], kind: 'file' })
     }
-    if (session.permission !== 'read-only') tools.push({ name: createCourseFromHtmlTool.name, description: createCourseFromHtmlTool.description,
+    if (scope.permission !== 'read-only') tools.push({ name: createCourseFromHtmlTool.name, description: createCourseFromHtmlTool.description,
       schema: z.toJSONSchema(createCourseFromHtmlInputSchema) as Record<string, unknown>, read: false, label: createCourseFromHtmlTool.manual.label, kind: 'course' })
     if (families.length) tools.push({ name: loadToolsDefinition.name, label: '展开工具', read: true, kind: 'load', schema: z.toJSONSchema(loadToolsSchema) as Record<string, unknown>,
       description: `${loadToolsDefinition.description} 展开后请重新获取工具列表。当前可展开：${families.map(item => `${item.family} ${item.description}`).join('；')}。` })
@@ -345,7 +361,8 @@ export class ExternalMcpService implements ResidentMcpHandler {
   }
 
   private async callTool(session: Session, call: ResidentMcpCall): Promise<unknown> {
-    const scope: CallScope = { runId: session.runId, taskId: session.taskId, workspaceId: session.workspaceId }
+    await session.authority
+    const scope = this.scope(session)
     const name = typeof call.params.name === 'string' ? call.params.name : ''
     const input = call.params.arguments ?? {}
     if (!record(input)) throw new McpProtocolError(-32602, '工具 arguments 必须是对象')
@@ -353,7 +370,19 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const supplied = record(call.params._meta) ? call.params._meta['guoling/ticket'] : undefined
     // Client correlation text is not the host's operation identity. Non-string metadata carries no identity.
     const clientTicket = typeof supplied === 'string' && supplied.length > 0 ? supplied : undefined
-    let tool = (await this.catalog(session, scope.runId)).find(item => item.name === name)
+    const original = record(call.params._meta) ? call.params._meta['guoling/operation'] : undefined
+    if (original !== undefined) {
+      if (!clientTicket || !record(original) || typeof original.runId !== 'string' || typeof original.workspaceId !== 'string' || typeof original.workspaceRoot !== 'string')
+        return this.reply(session, failure('invalid-retry', '原操作重试需要原 ticket 和完整 operationScope；未执行。'))
+      const prior = session.operations.find(item => item.ticket === clientTicket && item.runId === original.runId
+        && item.workspaceId === original.workspaceId && item.workspaceRoot === original.workspaceRoot)
+      if (!prior) return this.reply(session, failure('unknown-operation', '本连接没有该原范围的操作回执；未执行。'))
+      if (prior.tool !== name || prior.digest !== callDigest(name, input))
+        return this.reply(session, failure('operation-payload-mismatch', '原操作身份已用于其他参数；未执行。'))
+      this.track(prior, call.delivery)
+      return this.reply(session, await prior.result!, prior.ticket, true, prior.tool, prior.runId, prior)
+    }
+    let tool = (await this.catalog(scope)).find(item => item.name === name)
     if (!tool) {
       const definition = await this.options.gateway.resolveRunTool(scope.runId, name)
       if (definition) tool = { name: definition.name, description: definition.description, schema: definition.schema,
@@ -361,9 +390,15 @@ export class ExternalMcpService implements ResidentMcpHandler {
     }
     this.assertActive(session, scope.runId)
     if (!tool) return this.reply(session, failure('unknown-tool', '工具不存在，或在本会话的权限与已打开的文档下不可用。可先打开文档，或用 tools.load 展开工具族。'))
-    if (tool.read) {
+    const registration = toolRegistration(tool.name)
+    let effectful = !tool.read
+    if (registration) {
+      try { effectful = (typeof registration.effect === 'function' ? registration.effect(input) : registration.effect) !== null }
+      catch { effectful = true } // Invalid arguments retain one operation identity; the owner returns the precise error.
+    }
+    if (!effectful) {
       const ticket = randomUUID()
-      return this.reply(session, await this.traced(session, scope, tool, ticket, input, () => this.execute(session, scope.runId, tool, ticket, input)), ticket, false, tool.name, scope.runId)
+      return this.reply(session, await this.traced(session, scope, tool, ticket, input, () => this.execute(session, scope, tool, ticket, input)), ticket, false, tool.name, scope.runId)
     }
     const digest = callDigest(tool.name, input)
     // The previous identical call's reply never reached the client: answer with its receipt instead of executing again.
@@ -372,24 +407,30 @@ export class ExternalMcpService implements ResidentMcpHandler {
     if (undelivered) {
       undelivered.delivered = undefined
       this.track(undelivered, call.delivery)
-      return this.reply(session, await undelivered.result!, undelivered.ticket, true, tool.name, scope.runId)
+      return this.reply(session, await undelivered.result!, undelivered.ticket, true, tool.name, scope.runId, undelivered)
     }
     const ticket = clientTicket === undefined ? randomUUID() : /^[A-Za-z0-9_.:-]{1,200}$/.test(clientTicket)
       ? clientTicket : `client:${createHash('sha256').update(clientTicket).digest('hex')}`
-    const operation: Operation = { ticket, runId: scope.runId, tool: tool.name, label: tool.label, digest, time: this.now() }
-    operation.result = this.traced(session, scope, tool, ticket, input, () => this.execute(session, scope.runId, tool, ticket, input))
+    const prior = clientTicket ? session.operations.find(item => item.ticket === ticket && item.runId === scope.runId) : undefined
+    if (prior) {
+      if (prior.tool !== tool.name || prior.digest !== digest) return this.reply(session, failure('operation-payload-mismatch', '操作身份已用于其他参数；未执行。'))
+      this.track(prior, call.delivery)
+      return this.reply(session, await prior.result!, prior.ticket, true, tool.name, prior.runId, prior)
+    }
+    const operation: Operation = { ticket, runId: scope.runId, workspaceId: scope.workspaceId, workspaceRoot: scope.workspaceRoot, tool: tool.name, label: tool.label, digest, time: this.now() }
+    operation.result = this.traced(session, scope, tool, ticket, input, () => this.execute(session, scope, tool, ticket, input))
       .then(result => { operation.summary = summarize(tool.name, result); return result })
     session.operations.push(operation)
     this.track(operation, call.delivery)
-    return this.reply(session, await operation.result, ticket, false, tool.name, scope.runId)
+    return this.reply(session, await operation.result, ticket, false, tool.name, scope.runId, operation)
   }
   private track(operation: Operation, delivery: Promise<boolean>): void {
-    void delivery.then(delivered => { operation.delivered = delivered; if (delivered) operation.result = undefined })
+    void delivery.then(delivered => { operation.delivered = delivered })
   }
-  private async reply(session: Session, result: ToolResult, ticket?: string, replayed = false, toolName = '', runId = session.runId) {
+  private async reply(session: Session, result: ToolResult, ticket?: string, replayed = false, toolName = '', runId = session.runId, operation?: OperationScope) {
     const publicResult = modelToolResult(toolName, result)
     const content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[] = [{ type: 'text', text: JSON.stringify(publicResult) }]
-    if (replayed) content.push({ type: 'text', text: '这是此前同一调用的正式回执：上次回复没有送达，本次未重复执行。' })
+    if (replayed) content.push({ type: 'text', text: '这是原范围同一调用的正式回执，本次未重复执行。' })
     let imageMissing = false
     if (result.kind === 'read' && result.images?.length) {
       try {
@@ -405,15 +446,22 @@ export class ExternalMcpService implements ResidentMcpHandler {
     // An accepted background job is unfinished, but its MCP call succeeded. The
     // client must keep the session and query that job instead of treating it as a failed call.
     const pending = serviceToolOutcome(toolName, result)?.status === 'pending'
-    return { content, structuredContent: { result: publicResult, ...(ticket ? { ticket } : {}), ...(replayed ? { replayed: true } : {}) }, isError: !pending && toolFailed(toolName, result) || imageMissing }
+    return { content, structuredContent: { result: publicResult, ...(ticket ? { ticket } : {}), ...(operation ? { operationScope: { runId: operation.runId, workspaceId: operation.workspaceId, workspaceRoot: operation.workspaceRoot } } : {}), ...(replayed ? { replayed: true } : {}) }, isError: !pending && toolFailed(toolName, result) || imageMissing }
+  }
+  private scope(session: Session): CallScope {
+    this.assertActive(session, session.runId)
+    const access = this.options.gateway.runFileAccess(session.runId)
+    return { runId: session.runId, taskId: session.taskId, workspaceId: session.workspaceId, workspaceRoot: session.workspaceRoot,
+      permission: session.permission, boundPaths: Object.values(access?.boundPaths ?? {}), boundDocumentIds: [...session.boundDocumentIds], children: session.children }
   }
   private assertActive(session: Session, runId: string): void {
-    if (session.stopped || session.runId !== runId || !this.sessions.has(session.sessionId)) throw new Error('外部会话已停止或已切换，操作未提交')
+    if (session.stopped || session.transitioning || session.runId !== runId || !this.sessions.has(session.sessionId)) throw new Error('外部会话已停止或已切换，操作未提交')
   }
-  private async execute(session: Session, runId: string, tool: HostTool, ticket: string, input: unknown): Promise<ToolResult> {
+  private async execute(session: Session, scope: CallScope, tool: HostTool, ticket: string, input: unknown): Promise<ToolResult> {
+    const { runId } = scope
     try {
       this.assertActive(session, runId)
-      if (tool.kind === 'service') return { kind: 'read', data: await this.service(session, runId, tool.name, input) }
+      if (tool.kind === 'service') return { kind: 'read', data: await this.service(session, scope, tool.name, input) }
       if (tool.kind === 'load') {
         const families = loadToolsSchema.parse(input).families
         const available = await this.options.gateway.loadToolFamilies(runId, families)
@@ -428,18 +476,21 @@ export class ExternalMcpService implements ResidentMcpHandler {
         this.assertActive(session, runId)
         this.options.gateway.authorizeOperationPaths(runId, ticket, [artifact.path])
       }
-      if (!artifact && !tool.read && session.permission === 'ask' && tool.kind !== 'file' && tool.kind !== 'course'
+      const registration = toolRegistration(tool.name)
+      const effect = registration && (typeof registration.effect === 'function' ? registration.effect(input) : registration.effect)
+      const modifies = registration ? registration.capability === 'write' || registration.capability === 'save' || effect === 'document-edit' : !tool.read
+      if (!artifact && modifies && scope.permission === 'ask' && tool.kind !== 'file' && tool.kind !== 'course'
         && !await this.options.confirm({ clientName: session.clientName, label: tool.label, reason: 'ask' })) return failure('approval-denied', '用户未批准此次修改，未执行。')
       this.assertActive(session, runId)
       if (tool.kind === 'gateway') return await this.options.gateway.execute(runId, ticket, { name: tool.name, input })
-      if (tool.kind === 'file') return await this.file(session, runId, ticket, tool, input, true)
-      const children = session.children
-      return await createCourseFromHtml(createCourseFromHtmlInputSchema.parse(input), { callId: ticket, permission: session.permission,
+      if (tool.kind === 'file') return await this.file(session, scope, ticket, tool, input, true)
+      const children = scope.children
+      return await createCourseFromHtml(createCourseFromHtmlInputSchema.parse(input), { callId: ticket, permission: scope.permission,
         assertActive: () => this.assertActive(session, runId) }, {
         lookupChild: async callId => children.get(callId) ?? null,
         executeChild: async (callId, child: ModelToolCall) => {
           const result = isAgentFileTool(child.name)
-            ? await this.file(session, runId, callId, { name: child.name, label: tool.label, kind: 'file', read: false, description: '', schema: {} }, child.input, true)
+            ? await this.file(session, scope, callId, { name: child.name, label: tool.label, kind: 'file', read: false, description: '', schema: {} }, child.input, true)
             : await this.options.gateway.execute(runId, callId, child)
           children.set(callId, result)
           return result
@@ -449,16 +500,19 @@ export class ExternalMcpService implements ResidentMcpHandler {
     } catch (cause) { return failure('tool-failed', cause instanceof Error ? cause.message : String(cause),
       cause instanceof AgentFileMissingParent ? { pendingCreationPath: cause.pendingCreationPath } : undefined) }
   }
-  private async file(session: Session, runId: string, ticket: string, tool: HostTool, input: unknown, approve: boolean): Promise<ToolResult> {
+  private async file(session: Session, scope: CallScope, ticket: string, tool: HostTool, input: unknown, approve: boolean): Promise<ToolResult> {
+    const { runId } = scope
     const name = tool.name as AgentFileToolName
-    const context: AgentFileContext = { runId, workspaceRoot: session.workspaceRoot, permission: session.permission, assertActive: () => this.assertActive(session, runId) }
+    const context: AgentFileContext = { runId, workspaceRoot: scope.workspaceRoot, permission: scope.permission, boundPaths: scope.boundPaths, assertActive: () => this.assertActive(session, runId) }
     if (approve && (agentFileMutationNames as readonly string[]).includes(name)) {
       const preflight = await this.options.files.preflightMutation(context, name as AgentFileMutationName, input)
-      const reason = session.permission === 'ask' ? 'ask' : session.permission === 'workspace' && preflight.outside ? 'outside-workspace' : null
+      this.assertActive(session, runId)
+      const reason = scope.permission === 'ask' ? 'ask' : scope.permission === 'workspace' && preflight.outside ? 'outside-workspace' : null
       if (reason && !await this.options.confirm({ clientName: session.clientName, label: tool.label, reason, paths: preflight.paths }))
         return failure('approval-denied', '用户未批准此次修改，未执行。')
       if (reason && preflight.outside) context.approvedOutsidePaths = preflight.paths
     }
+    this.assertActive(session, runId)
     const outcome = await this.options.files.execute(context, name, input, this.options.gateway.operationIdentity(runId, ticket))
     if (!outcome.opened) return { kind: 'read', data: outcome.data }
     const opened = await this.options.gateway.completeOpenedDocument(runId, outcome.opened, { selection: 'select' })
@@ -466,11 +520,11 @@ export class ExternalMcpService implements ResidentMcpHandler {
     return { kind: 'read', data: { ...outcome.data as object, target: opened.target, writable: opened.writable,
       ...(opened.kind === 'markdown' ? { markdown: opened.source } : opened.kind === 'text' ? { text: opened.source } : {}) } }
   }
-  private async service(session: Session, runId: string, name: string, raw: unknown): Promise<unknown> {
+  private async service(session: Session, scope: CallScope, name: string, raw: unknown): Promise<unknown> {
     if (name === 'workspace.list') {
       serviceSchemas['workspace.list'].parse(raw)
-      return { current: session.workspaceId, workspaces: (await this.options.conversations.listWorkspaces()).map(workspace => ({
-        workspaceId: workspace.workspaceId, name: workspaceName(workspace.rootPath), rootPath: workspace.rootPath, current: workspace.workspaceId === session.workspaceId })) }
+      return { current: scope.workspaceId, workspaces: (await this.options.conversations.listWorkspaces()).map(workspace => ({
+        workspaceId: workspace.workspaceId, name: workspaceName(workspace.rootPath), rootPath: workspace.rootPath, current: workspace.workspaceId === scope.workspaceId })) }
     }
     if (name === 'workspace.switch') {
       const input = serviceSchemas['workspace.switch'].parse(raw)
@@ -480,23 +534,30 @@ export class ExternalMcpService implements ResidentMcpHandler {
     if (name === 'operation.recent') {
       const input = serviceSchemas['operation.recent'].parse(raw)
       return { operations: session.operations.slice(-(input.limit ?? 20)).reverse().map(item => ({ ticket: item.ticket, tool: item.tool, label: item.label,
-        runId: item.runId, time: new Date(item.time).toISOString(), ...(item.summary ?? { status: 'running' }),
+        runId: item.runId, workspaceId: item.workspaceId, workspaceRoot: item.workspaceRoot, time: new Date(item.time).toISOString(), ...(item.summary ?? { status: 'running' }),
         delivered: item.delivered === undefined ? 'pending' : item.delivered })) }
     }
     serviceSchemas['workbench.state'].parse(raw)
-    return this.workbenchState(session, runId)
+    return this.workbenchState(session, scope)
   }
   /** Read-only view of the user's foreground. Handles follow the same path rule as file.open in this session. */
-  private async workbenchState(session: Session, runId: string): Promise<unknown> {
+  private async workbenchState(session: Session, scope: CallScope): Promise<unknown> {
+    const { runId } = scope
     const ui = await this.options.uiState().catch(() => null)
     this.assertActive(session, runId)
-    const writableFor = (filePath?: string) => session.permission !== 'read-only'
-      && (session.permission === 'full' || !filePath || isInsideRoot(session.workspaceRoot, filePath))
-    const documents = this.options.registry.list().map(snapshot => ({ ...documentSnapshotFacts(snapshot),
+    const writableFor = (filePath?: string) => scope.permission !== 'read-only'
+      && (scope.permission === 'full' || !filePath || isInsideRoot(scope.workspaceRoot, filePath))
+    const normalize = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value)
+    const readable = (snapshot: ReturnType<DocumentRegistry['list']>[number]) => scope.permission === 'full'
+      || (snapshot.binding.kind === 'file' ? isInsideRoot(scope.workspaceRoot, snapshot.binding.path)
+        || scope.boundPaths.some(bound => normalize(bound) === normalize(snapshot.binding.kind === 'file' ? snapshot.binding.path : ''))
+        : scope.boundDocumentIds.includes(snapshot.documentId))
+    const allowed = this.options.registry.list().filter(readable)
+    const documents = allowed.map(snapshot => ({ ...documentSnapshotFacts(snapshot),
       name: snapshot.binding.kind === 'file' ? path.basename(snapshot.binding.path) : snapshot.binding.suggestedName,
       active: snapshot.documentId === ui?.activeDocumentId }))
     const handles = async (documentId: string) => {
-      const snapshot = this.options.registry.list().find(item => item.documentId === documentId)
+      const snapshot = allowed.find(item => item.documentId === documentId)
       if (!snapshot) return null
       const opened = await this.options.gateway.completeOpenedDocument(runId, { documentId,
         writable: writableFor(snapshot.binding.kind === 'file' ? snapshot.binding.path : undefined) },
@@ -511,7 +572,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
       if (owner) selection = { documentId: ui.selection.documentId, targets: await Promise.all(ui.selection.targets.map(async target => ({ kind: target.kind,
         target: await this.options.gateway.issueTarget(runId, ui.selection!.documentId, target, { readOnly: !owner.writable }) }))) }
     }
-    return { workspace: { workspaceId: session.workspaceId, name: session.workspaceName, rootPath: session.workspaceRoot,
+    return { workspace: { workspaceId: scope.workspaceId, name: session.workspaceName, rootPath: scope.workspaceRoot,
       appWorkspaceId: ui?.workspaceId ?? null }, documents, activeDocument: ui?.activeDocumentId && active ? { documentId: ui.activeDocumentId, ...active } : null, selection,
       ...(ui ? {} : { note: '果铃窗口暂未回报前台状态；文档列表来自主进程。' }) }
   }

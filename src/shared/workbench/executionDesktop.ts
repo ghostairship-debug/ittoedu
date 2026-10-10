@@ -37,7 +37,7 @@ export const executionSelectionTargetSchema = z.discriminatedUnion('kind', [
   ...executionEditTargetSchema.options,
 ])
 export type ExecutionSelectionTarget = z.infer<typeof executionSelectionTargetSchema>
-export const executionContentOutputSchema = z.object({ kind: z.literal('replace-text'), documentId: id,
+export const executionContentOutputSchema = z.object({ kind: z.literal('content'), documentId: id,
   target: executionEditTargetSchema }).strict()
 export const executionMaterialsSchema = z.object({ target: z.object({ lessonId: id, rootPath: id }).strict(),
   selections: z.array(lessonAuthoringMaterialSelectionSchema) }).strict()
@@ -45,7 +45,10 @@ export type ExecutionMaterials = z.infer<typeof executionMaterialsSchema>
 export const webTaskAuthorizationSchema = z.object({ origins: z.array(z.string().url()), actions: z.array(z.enum(['submit', 'upload', 'download'])) }).strict()
 export type WebTaskAuthorization = z.infer<typeof webTaskAuthorizationSchema>
 const scope = z.union([z.object({ kind: z.literal('document') }).strict(), executionSelectionTargetSchema])
-export const executionDocumentReferenceSchema = z.object({ documentId: id, epoch: id, revision: index, writable: z.array(scope), selection: z.array(executionSelectionTargetSchema).min(1).optional() }).strict()
+export const executionDocumentReferenceSchema = z.object({ documentId: id, epoch: id, revision: index, writable: z.array(scope), selection: z.array(executionSelectionTargetSchema).min(1).optional(),
+  /** Composer identity; independent references may address the same document. */
+  referenceId: id.optional(), pinned: z.boolean().optional(), displayLabel: id.optional(),
+}).strict()
 export type ExecutionDocumentReference = z.infer<typeof executionDocumentReferenceSchema>
 const disclosedRoleSchema = z.object({ connectionId: id, connectionRevision: index, provider: id, model: id,
   billingKind: z.enum(['metered', 'token-plan', 'subscription', 'prepaid', 'unknown']) }).strict()
@@ -119,7 +122,8 @@ export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('checkpoint'), ...identity, runId: id }).strict(),
   z.object({ type: z.literal('fork-checkpoint'), ...identity, runId: id, instruction: z.string().optional() }).strict(),
   z.object({ type: z.literal('stop'), runId: id }).strict(),
-  z.object({ type: z.literal('answer'), runId: id, callId: id, answer: userAnswerSchema }).strict(),
+  z.object({ type: z.literal('answer'), runId: id, callId: id, answer: userAnswerSchema,
+    currentDraft: z.array(z.object({ documentId: id, epoch: id, revision: index }).strict()).optional() }).strict(),
   z.object({ type: z.literal('approve'), runId: id, callId: id, decision: approvalDecisionSchema }).strict(),
   z.object({ type: z.literal('events'), conversationId: id, after: index.optional(), limit: z.number().int().min(1).max(5000).optional() }).strict(),
   z.object({ type: z.literal('search-events'), conversationId: id, query: z.string().trim().min(1), after: index.optional(), limit: z.number().int().min(1).max(100).optional() }).strict(),
@@ -232,7 +236,7 @@ export interface ExecutionDesktopAPI {
     conversation: ConversationRecord; fork: import('./executionReview').ForkDraft }>
   stop(runId: string): Promise<ExecutionRunRecord | null>
   /** Answers the open ask_user question of a live built-in run with the user's own choice. */
-  answer?(input: { runId: string; callId: string; answer: UserAnswer }): Promise<ExecutionRunRecord>
+  answer?(input: { runId: string; callId: string; answer: UserAnswer; currentDraft?: { documentId: string; epoch: string; revision: number }[] }): Promise<ExecutionRunRecord>
   /** Decides the open modification approval of a live built-in run. */
   approve?(input: { runId: string; callId: string; decision: ApprovalDecision }): Promise<ExecutionRunRecord>
   /** What an element card's request changed on its object, and whether the card can undo or redo it (M15). */

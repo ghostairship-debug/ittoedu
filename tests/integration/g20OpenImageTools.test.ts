@@ -12,6 +12,7 @@ import type { OpenImageCandidate } from '../../src/main/workbench/assetSources/a
 import { openverseLicense } from '../../src/main/workbench/assetSources/licensePolicy'
 import { assetSourceSchema } from '../../src/shared/contracts/media-v1/schema'
 import type { ToolResult } from '../../src/shared/workbench/tools'
+import { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
 
 function data(result: ToolResult): unknown { if (result.kind !== 'read') throw new Error(JSON.stringify(result)); return result.data }
 const photo: OpenImageCandidate = { library: 'openverse', providerId: 'flickr-1', title: 'Autumn maple leaves', author: 'Jane Doe',
@@ -19,14 +20,18 @@ const photo: OpenImageCandidate = { library: 'openverse', providerId: 'flickr-1'
   sourceName: 'Flickr', pageUrl: 'https://www.flickr.com/photos/1/2', fileUrl: 'https://live.staticflickr.com/1/2_b.jpg',
   previewUrl: 'https://api.openverse.org/v1/images/flickr-1/thumb/', width: 1024, height: 768 }
 
-it('keeps actual previews and licensed image bytes run-scoped, rejects unauthorized downloads before HTTP and inserts once with provenance through save undo and cold reopen', async () => {
+it('keeps previews run-scoped and fetched images workspace-owned, permits independent reads and inserts once with provenance through save undo and cold reopen', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-current-open-image-'))
   const jpeg = await sharp({ create: { width: 1024, height: 768, channels: 3, background: '#c86428' } }).jpeg().toBuffer()
   const getBytes = vi.fn(async (url: string) => ({ url, contentType: 'image/jpeg', bytes: Uint8Array.from(jpeg) }))
   const search = vi.fn(async () => ({ library: 'openverse' as const, candidates: [photo], excluded: 0, hasMore: false }))
   const openImages = new OpenImageService({ http: { getJson: async () => { throw new Error('No remote JSON in this fixture') }, getBytes }, libraries: [['openverse', search]] })
   const host = new DocumentHostService(path.join(root, 'documents'))
-  host.tools.configureHostServices({ openImages, beginRun: async grant => { openImages.beginRun(grant.runId) }, stopRun: runId => { openImages.stopRun(runId) } })
+  const imageOwner = new ImageGenerationService({ directory: path.join(root, 'images'), provider: { generate: async () => { throw new Error('Fetched images must not call a generator') } } })
+  host.tools.configureHostServices({ openImages, beginRun: async grant => { openImages.beginRun(grant.runId) }, stopRun: runId => { openImages.stopRun(runId) },
+    images: { selection: () => { throw new Error('No model selection for fetched images') }, run: imageOwner.run.bind(imageOwner), read: imageOwner.read.bind(imageOwner),
+      stop: imageOwner.stop.bind(imageOwner), readResource: imageOwner.readResource.bind(imageOwner),
+      registerWorkspaceResource: imageOwner.registerWorkspaceResource.bind(imageOwner), readWorkspaceResource: imageOwner.readWorkspaceResource.bind(imageOwner) } })
   const initial = await host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('秋天'), resources: { assets: {}, components: {} } }, '秋天.h5lesson')
   if (initial.model.kind !== 'course-v10') throw new Error('V10 required')
   const surfaceId = initial.model.project.surfaces[0].id
@@ -36,11 +41,12 @@ it('keeps actual previews and licensed image bytes run-scoped, rejects unauthori
   try {
     await begin('reader', 'read-only')
     expect(data(await call('reader', 'reader-search', 'image.search', { query: 'maple' }))).toMatchObject({ status: 'results', candidates: [{ image: 'img1' }] })
-    for (const input of [{ image: 'img1' }, { image: 'img1', path: 'assets/x.jpg' }]) {
-      expect(await call('reader', 'denied-' + JSON.stringify(input), 'image.fetch', input)).toMatchObject({ kind: 'error', code: 'not-authorized' })
-    }
-    expect(getBytes).not.toHaveBeenCalled()
+    expect(data(await call('reader', 'independent-fetch', 'image.fetch', { image: 'img1' })))
+      .toMatchObject({ status: 'ready', resource: expect.stringMatching(/^workspace-image:/) })
+    expect(await call('reader', 'denied-apply', 'image.fetch', { image: 'img1', path: 'assets/x.jpg' })).toMatchObject({ kind: 'error', code: 'not-authorized' })
+    expect(getBytes).toHaveBeenCalledTimes(1)
     expect(await host.internalAPI.read(initial.documentId)).toEqual(initial)
+    getBytes.mockClear()
     await begin('writer', 'workspace')
     expect(data(await call('writer', 'foreign-candidate', 'image.fetch', { image: 'img1' })))
       .toMatchObject({ status: 'rejected', reason: expect.stringContaining('image.search') })
@@ -75,7 +81,7 @@ it('keeps actual previews and licensed image bytes run-scoped, rejects unauthori
     expect(inserted.undoDepth).toBe(1)
     const [asset] = Object.values(inserted.model.project.assets)
     expect(asset.source).toEqual(fetched.source)
-    expect(inserted.model.resources.assets[asset.id]).toEqual(resource.bytes)
+    expect(Buffer.from(inserted.model.resources.assets[asset.id])).toEqual(Buffer.from(resource.bytes))
     expect(inserted.model.project.surfaces[0].childIds).toHaveLength(1)
     const saved = path.join(root, 'saved.h5lesson'); await host.internalAPI.save(initial.documentId, saved)
     const head = await host.internalAPI.read(initial.documentId)
@@ -90,6 +96,13 @@ it('keeps actual previews and licensed image bytes run-scoped, rejects unauthori
     expect(reopened.model).toEqual(inserted.model)
     await host.tools.stop('writer')
     await expect(host.tools.readOpenImagePreview('writer', previewed.previews[0].resourceId)).rejects.toThrow('任务已停止')
+    await imageOwner.releaseRunJobs(['reader', 'writer'])
+    await host.tools.beginRun({ runId: 'next', actor: 'agent', documents: [], fileAccess: { permission: 'read-only', workspaceRoot: root } })
+    expect(data(await call('next', 'preview-existing', 'image.preview', { images: [fetched.resource] })))
+      .toMatchObject({ status: 'prepared', previews: [{ resourceId: fetched.resource }] })
+    await host.tools.beginRun({ runId: 'other', actor: 'agent', documents: [], fileAccess: { permission: 'full', workspaceRoot: path.join(root, 'other') } })
+    expect(data(await call('other', 'preview-foreign', 'image.preview', { images: [fetched.resource] })))
+      .toMatchObject({ status: 'failed', failures: [{ reason: expect.stringContaining('不属于当前工作空间') }] })
     expect(getBytes).toHaveBeenCalledTimes(2)
     expect(search).toHaveBeenCalledTimes(2)
   } finally { await host.tools.stop('reader'); await fs.rm(root, { recursive: true, force: true }) }

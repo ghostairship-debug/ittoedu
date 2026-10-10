@@ -4,7 +4,7 @@ import type { ToolTarget } from '../../../shared/workbench/tools'
 import { DocumentRegistry } from '../../../core/documents/DocumentRegistry'
 import type { DocumentToolGateway } from '../../../core/tools/DocumentToolGateway'
 import { documentDigest } from '../../../core/documents/documentDigest'
-import { courseInstanceContext, mapMarkdownRange, readCourseInstanceText, readTarget, readEditableTargetContent, targetFootprint } from '../../../core/tools/ToolTargets'
+import { containsTarget, courseInstanceContext, courseInstanceTextTarget, isCourseInstanceRange, mapExternalCourseTextTarget, mapHtmlAuthorFieldTarget, mapMarkdownRange, readCourseInstanceText, readTarget, readEditableTargetContent, targetFootprint } from '../../../core/tools/ToolTargets'
 
 type EditGateway = Pick<DocumentToolGateway, 'resolveEditTarget' | 'operationIdentity'>
 interface Entry {
@@ -32,7 +32,7 @@ function editable(model: DocumentModel, target: ToolTarget): EditTarget {
     return target
   }
   readTarget(model, target)
-  if (target.kind === 'markdown-range') return target
+  if (target.kind === 'markdown-range' || target.kind === 'html-author-field') return target
   if (target.kind === 'course-instance') {
     if (courseInstanceContext(model, target).instance.locked || readCourseInstanceText(model, target) === null) throw new Error('当前对象不是可编辑的文字字段')
     return target
@@ -40,10 +40,30 @@ function editable(model: DocumentModel, target: ToolTarget): EditTarget {
   throw new Error('此目标不支持正文生成预览')
 }
 
+function intersectingRanges(left: { from: number; to: number }, right: { from: number; to: number }): boolean {
+  if (left.from === left.to) return left.from >= right.from && left.from <= right.to
+  if (right.from === right.to) return right.from >= left.from && right.from <= left.to
+  return left.from < right.to && right.from < left.to
+}
+/** Scope overlap uses existing author targets, never a second lock or character identity system. */
+function conflictingTargets(left: ToolTarget, right: ToolTarget, model: DocumentModel): boolean {
+  if (left.kind === 'text-selection') return left.fragments.some(fragment => conflictingTargets(fragment.target, right, model))
+  if (right.kind === 'text-selection') return right.fragments.some(fragment => conflictingTargets(left, fragment.target, model))
+  const a = left.kind === 'course-instance' ? courseInstanceTextTarget(model, left) : left
+  const b = right.kind === 'course-instance' ? courseInstanceTextTarget(model, right) : right
+  if (containsTarget(a, b, model) || containsTarget(b, a, model)) return true
+  const sourceRange = (target: ToolTarget) => target.kind === 'markdown-range' ? target : target.kind === 'html-author-field' ? target.source : undefined
+  const aSource = sourceRange(a), bSource = sourceRange(b)
+  if (aSource && bSource) return intersectingRanges(aSource, bSource)
+  return isCourseInstanceRange(a) && isCourseInstanceRange(b) && a.surfaceId === b.surfaceId && a.instanceId === b.instanceId
+    && (a.stateId ?? null) === (b.stateId ?? null) && (a.fieldScope ?? 'data') === (b.fieldScope ?? 'data')
+    && documentDigest(a.dataPath) === documentDigest(b.dataPath) && intersectingRanges(a, b)
+}
+
 /** Volatile projection owner. Only the Gateway/DocumentSession can commit canonical content. */
 export class EditSessionService {
   private entries = new Map<string, Entry>()
-  private documents = new Map<string, string>()
+  private documents = new Map<string, Set<string>>()
   private beginnings = new Map<string, { request: BeginEditSession; promise: Promise<EditSessionSnapshot> }>()
   private cancelled = new Map<string, string>()
   private listeners = new Set<(event: EditEvent) => void>()
@@ -55,8 +75,10 @@ export class EditSessionService {
     return () => { this.listeners.delete(listener) }
   }
   list(documentId: string): EditSessionSnapshot[] {
-    const editId = this.documents.get(documentId), entry = editId ? this.entries.get(editId) : undefined
-    return entry?.snapshot.status === 'active' ? [structuredClone(entry.snapshot)] : []
+    return [...(this.documents.get(documentId) ?? [])].flatMap(id => {
+      const entry = this.entries.get(id)
+      return entry?.snapshot.status === 'active' ? [structuredClone(entry.snapshot)] : []
+    })
   }
   private emit(event: EditEvent): void {
     for (const listener of this.listeners) {
@@ -66,7 +88,9 @@ export class EditSessionService {
   private active(entry: Entry): boolean { return entry.snapshot.status === 'active' }
   private release(entry: Entry): void {
     entry.stop()
-    if (this.documents.get(entry.snapshot.documentId) === entry.snapshot.editId) this.documents.delete(entry.snapshot.documentId)
+    const groups = this.documents.get(entry.snapshot.documentId)
+    groups?.delete(entry.snapshot.editId)
+    if (!groups?.size) this.documents.delete(entry.snapshot.documentId)
   }
   private sameRequest(left: BeginEditSession, right: BeginEditSession): boolean {
     return left.runId === right.runId && left.targetHandle === right.targetHandle
@@ -93,7 +117,11 @@ export class EditSessionService {
     const resolved = await this.gateway.resolveEditTarget(request.runId, request.targetHandle)
     if (this.cancelled.has(request.editId)) throw new EditSessionError(request.editId, 'edit-aborted', this.cancelled.get(request.editId)!)
     const target = editable(resolved.model, resolved.target)
-    if (this.documents.has(resolved.documentId)) throw new EditSessionError(request.editId, 'document-busy', '该文档已有正在生成的正文，请等待或停止当前编辑')
+    for (const editId of this.documents.get(resolved.documentId) ?? []) {
+      const entry = this.entries.get(editId)
+      if (entry && this.active(entry) && conflictingTargets(entry.snapshot.target, target, resolved.model))
+        throw new EditSessionError(request.editId, 'target-busy', '该范围已有正在生成的正文，请等待或停止该编辑')
+    }
     const session = this.registry.get(resolved.documentId)
     const entry: Entry = {
       request, snapshot: { editId: request.editId, runId: request.runId, documentId: resolved.documentId,
@@ -103,7 +131,9 @@ export class EditSessionService {
       operationId: this.gateway.operationIdentity(request.runId, request.toolCallId ?? request.editId),
       fragments: new Map(), stop: () => undefined, changes: 0,
     }
-    this.entries.set(request.editId, entry); this.documents.set(resolved.documentId, request.editId)
+    this.entries.set(request.editId, entry)
+    const groups = this.documents.get(resolved.documentId) ?? new Set<string>()
+    groups.add(request.editId); this.documents.set(resolved.documentId, groups)
     entry.stop = session.subscribe(event => this.changed(entry, event))
     // Close the resolve/subscribe race with the actual current session, without consulting focus.
     this.changed(entry, { type: 'changed', snapshot: session.read() })
@@ -129,11 +159,16 @@ export class EditSessionService {
         if (!isSourceDocumentModel(entry.model) || !isSourceDocumentModel(event.snapshot.model)) throw new Error('正文格式已改变')
         target = mapMarkdownRange(entry.model.source, event.snapshot.model.source, target)
       }
+      if (target.kind === 'html-author-field' && isSourceDocumentModel(entry.model) && isSourceDocumentModel(event.snapshot.model)) {
+        target = mapHtmlAuthorFieldTarget(entry.model.source, event.snapshot.model.source, target)
+      }
       if (target.kind === 'text-selection' && isSourceDocumentModel(entry.model) && isSourceDocumentModel(event.snapshot.model)) {
         const before = entry.model.source, after = event.snapshot.model.source
         target = { ...target, fragments: target.fragments.map(fragment => ({ ...fragment,
           target: fragment.target.kind === 'markdown-range' ? mapMarkdownRange(before, after, fragment.target) : fragment.target })) }
       }
+      if (entry.model.kind === 'course-v10' && event.snapshot.model.kind === 'course-v10')
+        target = mapExternalCourseTextTarget(entry.model, event.snapshot.model, target) as EditTarget
       if (targetFootprint(event.snapshot.model, target) !== entry.footprint) throw new Error('生成目标与新的文档修改重叠或已失效')
       const changed = event.snapshot.revision !== entry.snapshot.revision || documentDigest(target) !== documentDigest(entry.snapshot.target)
       entry.model = event.snapshot.model; entry.snapshot.target = target; entry.snapshot.revision = event.snapshot.revision

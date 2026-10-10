@@ -75,8 +75,8 @@ it.each([true, false])('NI01 final production payload reaches provider and its m
   expect(manifest.tools).toEqual(request.tools?.map(tool => ({ name: tool.name, digest: digest(JSON.stringify(tool)) })))
 })
 
-it.each([{ sameSource: true, finish: true }, { sameSource: false, finish: false }])(
-  'NI02 auxiliary vision settles only the same stored source (same=$sameSource, finish=$finish)', async ({ sameSource, finish }) => {
+it.each([{ sameSource: true }, { sameSource: false }])(
+  'NI02 auxiliary vision settles only the same stored source before natural completion (same=$sameSource)', async ({ sameSource }) => {
     let visualCalls = 0, turns = 0, sourceId = '', secondSourceId = ''
     const visionSelection = { ...selection, model: 'vision-fixture' }
     const visual = new VisualAnalysisService({ frozenSelection: () => visionSelection,
@@ -93,7 +93,7 @@ it.each([{ sameSource: true, finish: true }, { sameSource: false, finish: false 
       if (turns === 3) {
         const references = JSON.parse(String(request.messages[1]!.content).split('：')[1]!)
         yield complete(request, [{ id: 'applied-text', name: 'text.replace', argumentsText: JSON.stringify({
-          target: references[0].writable[0].target, content: 'DONE' }) }, ...(finish ? [{ id: 'finish', name: 'task.finish', argumentsText: '{}' }] : [])]); return
+          target: references[0].writable[0].target, content: 'DONE' }) }]); return
       }
       yield complete(request)
     } }
@@ -169,7 +169,7 @@ it.each([true, false])('NI01 sends aggregate content-only output through the can
     { target: { kind: 'markdown-range' as const, from: 2, to: 3 } }, { target: { kind: 'markdown-range' as const, from: 6, to: 7 }, separatorBefore: '\n' },
   ] }
   h.input.documents = [{ documentId: before.documentId, epoch: before.epoch, revision: before.revision, writable: [target], selection: [target] }]
-  h.input.contentOutput = { kind: 'replace-text', documentId: before.documentId, target }
+  h.input.contentOutput = { kind: 'content', documentId: before.documentId, target }
   const previews: string[] = []
   const unsubscribe = h.edits.subscribe(event => { if (event.type === 'edit.changed') {
     previews.push(event.snapshot.value)

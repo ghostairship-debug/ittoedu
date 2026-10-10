@@ -148,7 +148,7 @@ export class AgentFileText {
       }
       await this.host.tools.attachRunDocument(context.runId, snapshot.documentId, true)
       const target = await this.host.tools.issueTarget(context.runId, snapshot.documentId,
-        { kind: 'markdown-range', from: edit?.from ?? 0, to: edit?.to ?? current.source.length })
+        { kind: 'markdown-range', from: edit?.from ?? 0, to: edit?.to ?? current.source.length }, { observed: snapshot })
       context.assertActive?.()
       const receipt = await this.host.tools.execute(context.runId, operationId,
         { name: 'text.replace', input: { target, content: edit?.newText ?? next } })

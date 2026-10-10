@@ -1,5 +1,5 @@
 {
-  "description": "列出本次显式材料或宿主冻结来源的不可变原件、表示、实际页段与缺口。省略 attachmentId 时列授权目录；path 可读取已授权工作空间内的具体材料，软件负责登记来源；指定 attachmentId 时分页列表示。目录不是正文，随后用 material.extract/find/read。读取参考不扩大作品修改权限。",
+  "description": "列出本次显式材料或宿主冻结来源的不可变原件、表示、实际页段与缺口。省略 attachmentId 时列授权目录；path 可读取已授权工作空间内的具体材料，软件负责登记来源；指定 attachmentId 时分页列表示。目录不是正文，普通读取或检索直接用原材料 attachmentId，无需手工提取或搬派生编号。读取参考不扩大作品修改权限。",
   "inputSchema": {
     "$defs": {
       "__schema0": {

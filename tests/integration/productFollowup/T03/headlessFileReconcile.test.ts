@@ -31,7 +31,7 @@ it('headless public MCP compares real disk changes, reconciles disk or local the
       execute: async (...args) => { if (args[1] === 'file.reconcile' && (args[2] as { path?: string }).path === 'stopped.md') { reachedStop(); await held }
         return real.execute(...args) }, preflightMutation: real.preflightMutation.bind(real), releaseRun: real.releaseRun.bind(real),
     }) })
-    client = await connectExplicitMcp(readExplicitMcpConnection({ endpoint: (await fixture.service.status()).endpoint, token: fixture.token() }))
+    client = await connectExplicitMcp(readExplicitMcpConnection({ endpoint: (await fixture.service.status()).endpoint }))
     const data = (reply: Awaited<ReturnType<NonNullable<typeof client>['call']>>) => (reply.structuredContent?.result as { data: any }).data
     const open = async (name: string) => {
       const opened = await client!.call('file.open', { path: name }); expect(opened.isError, JSON.stringify(opened)).toBe(false)

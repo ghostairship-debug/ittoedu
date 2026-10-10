@@ -54,6 +54,7 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
   private readonly observations = new Map<string, ComponentObservationBinding>()
   private transition?: AbortController
   private teacherNavigation?: TeacherControllerPort & { subscribeSceneReplay: ComponentNavigationOwner['subscribeSceneReplay']; placement: ComponentNavigationOwner['placement'] }
+  private editorNavigation?: TeacherControllerPort & Pick<ComponentNavigationOwner, 'placement'>
   private retired = false
   constructor(private readonly ports: NavigationPorts) {}
   subscribe = (listener: () => void) => { if (this.retired) return () => {}; this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
@@ -188,8 +189,8 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
       muted: this.ports.audio?.()?.muted() ?? false, fullscreen: typeof document !== 'undefined' && Boolean(document.fullscreenElement) }
   }
   canExecute = (action: TeacherControllerAction): boolean => this.canExecuteAction(action)
-  private canExecuteAction(action: TeacherControllerAction, teacher = false, pausedReplay = false): boolean {
-    if (this.retired || this.ports.interactive?.() === false && !pausedReplay) return false
+  private canExecuteAction(action: TeacherControllerAction, teacher = false, pausedNavigation = false): boolean {
+    if (this.retired || this.ports.interactive?.() === false && !pausedNavigation) return false
     const state = this.read(), index = state.progress?.sceneIndex ?? -1
     if (action.type === 'step.previous' && this.stepIndex() > 0 || action.type === 'step.next' && this.stepIndex() < this.steps().length) return true
     if (action.type === 'scene.previous' || action.type === 'step.previous') return index > 0 && !this.blocked(state.scenes[index - 1].id)
@@ -207,6 +208,16 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
     canExecute: action => this.canExecuteAction(action, true), execute: action => this.executeAction(action, undefined, true),
     setCollapsed: this.setCollapsed, moveBy: this.moveBy, setZoom: this.setZoom, resetView: this.resetView,
   }
+  /** The host's editor chrome navigates the same paused scene; authored controls stay paused. */
+  editorPort = () => this.editorNavigation ??= {
+    read: this.read, subscribe: this.subscribe, viewportBounds: this.viewportBounds, placement: this.placement,
+    canExecute: action => this.canExecuteAction(action, false, this.editorNavigationAction(action)),
+    execute: action => this.executeAction(action, undefined, false, this.editorNavigationAction(action)),
+    setCollapsed: this.setCollapsed, moveBy: this.moveBy, setZoom: this.setZoom, resetView: this.resetView,
+  }
+  private editorNavigationAction(action: TeacherControllerAction): boolean {
+    return ['step.previous', 'step.next', 'scene.previous', 'scene.next', 'scene.go', 'scene.replay'].includes(action.type)
+  }
   execute = (action: TeacherControllerAction, signal?: AbortSignal): Promise<boolean> => this.executeAction(action, signal)
   /** Explicit editor return-to-initial is allowed while this same run is paused. */
   replayCurrentSurface = (signal?: AbortSignal): Promise<boolean> => this.executeAction({ type: 'scene.replay' }, signal, false, true)
@@ -223,9 +234,9 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
     prepare() {}, commit: (action, signal) => !signal.aborted && this.canExecute(action),
     transition: (action, signal) => this.execute(action, signal),
   })
-  private async executeAction(action: TeacherControllerAction, signal?: AbortSignal, teacher = false, pausedReplay = false): Promise<boolean> {
+  private async executeAction(action: TeacherControllerAction, signal?: AbortSignal, teacher = false, pausedNavigation = false): Promise<boolean> {
     if (this.retired || signal?.aborted) return false
-    if (!this.canExecuteAction(action, teacher, pausedReplay)) { if (action.type === 'scene.go') this.blocked(action.sceneId, true); return false }
+    if (!this.canExecuteAction(action, teacher, pausedNavigation)) { if (action.type === 'scene.go') this.blocked(action.sceneId, true); return false }
     if (action.type === 'audio.toggle-mute' || action.type === 'player.fullscreen.toggle' || action.type === 'scene.open-picker') return this.executeNavigation(action, signal)
     const request = new AbortController(), previous = this.transition
     this.transition = request

@@ -519,11 +519,11 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
         onPointerDownCapture={event => { paperPointer.current = { x: event.clientX, y: event.clientY } }}
         onClick={event => { if (!readOnly && event.target === event.currentTarget) editor.current?.focusEndParagraph() }}
         onDragOver={event => { if (onDropWorkspaceMedia && event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }}
-        onDrop={drop} style={{ position: 'relative', width: '100%', maxWidth: flowPaperMaxWidth(layout), minHeight: '100%', margin: '0 auto', padding: FLOW_BODY_PAPER_PADDING, backgroundColor: background.color,
+        onDrop={drop} style={{ position: 'relative', width: flowPaperMaxWidth(layout), maxWidth: flowPaperMaxWidth(layout), containerType: 'inline-size', minHeight: '100%', margin: '0 auto', padding: FLOW_BODY_PAPER_PADDING, backgroundColor: background.color,
           backgroundImage: background.assetId && assetUrls[background.assetId] ? `url("${assetUrls[background.assetId]}")` : undefined,
           backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit, backgroundPosition: 'center', backgroundRepeat: 'no-repeat', color: '#1f2937' }}>
         <style>{FLOW_BODY_CSS}</style>
-        <div style={{ position:'relative',zIndex:2 }}><SharedDocumentEditor key={`${documentId}/${surfaceId}`} ref={editor} document={document} revision={String(project.revision)} readOnly={readOnly}
+        <div style={{ position:'relative',zIndex:2 }}><SharedDocumentEditor key={`${documentId}/${surfaceId}`} ref={editor} cardDocumentId={documentId ?? undefined} document={document} revision={String(project.revision)} readOnly={readOnly}
           objectRevision={JSON.stringify(Object.values(project.instances).map(instance=>[instance.id,instance.definitionId,
             instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation,
             componentLayoutInput(instance,{kind:'flow',inlineSize:paperLayout.width,definition:project.definitions[instance.definitionId]}).mode,

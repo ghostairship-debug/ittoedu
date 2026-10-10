@@ -1,5 +1,13 @@
 # 当前状态与剩余范围
 
+更新：2026-10-10。Owner 已授权按 [10月10日汇总方案](20261010-workbench-consolidated/EXECUTION_PLAN.md)执行 W1—W4，随后追加 Portable 已知问题修复和“构建exe，然后git commit并push远端”。从云工作树基线 df21debd 接续，代码/配置实施、定向验证及独立复审均已完成；Windows x64 Portable 和完整目录版 ZIP 已在新目录 `release/glx-20261010/` 构建成功。本轮代码、方案和结果一并 Git 提交、同步远端 main，准确提交身份以 Git 和制品交付回执为准。固定设计比例、人工自由拖拽、AI 当前投影、卡完成高亮点击选中及 MCP 同源权限为最终规则。未发布 GitHub Release、部署或替换原 EXE。
+
+实施事实见 [W1—W4 结果](20261010-workbench-consolidated/IMPLEMENTATION_RESULT.md)、[Portable 修复结果](20261010-portable-sharp-diagnosis/REPAIR_RESULT.md)与最新 [构建交付记录](20261010-portable-sharp-diagnosis/BUILD_DELIVERY.md)。Portable 修了四条启动可达 sharp 静态加载链、图片错误误分类及必要诊断，按 builder 真实生成行为设置 `unpackDirName: true`，新增两同批制品各5轮冷启动/真实 PNG 解码的专项入口；34项定向检查、三套类型及 Main 构建通过。新实际制品的原生依赖、当前编译结果和全部163文件同批身份已核对；扫描38条命中独立复核为代码/上游内容，原 failed 报告保留。原故障的 DLL/加载底层原因仍待实机证据，Windows 启动/解码仍为0/10。
+
+W1—W4 的三套统一类型检查、定向测试、开发构建和真实 Chromium 固定比例/Flow/Mermaid 消费已通过；独立审查及最后多片预览/复制增量复审闭合，完成协调卡删除。Windows 正常 GUI、Office 实际视觉、在线模型与 Portable 原制品/故障机验收仍未执行，不记为 accepted。既有有效成果、用户稿和历史验证保全；上一轮 blocked 只保留其原运行与证据，不重放付费创作或恢复旧 queued。
+
+## 上一轮基线与 Windows 阻断（原记录保留）
+
 更新：2026-10-09。正式目录 D:/果铃工作台／main，HEAD 3095ea02；有效未提交成果、隔离候选、用户原件、恢复稿和原始证据保全。**原生 `.glx`、果铃工作台名称／图标、本地 Windows 包及清理批次已收口；§9＋§10 最终目标保留，当前因正常GUI外部步骤连续三目标轮未就绪而 blocked。先内置核心，再判断公开 MCP；沿原材料、Luna/medium、既有 GPT OAuth、有效独审和费用／权限边界，不重写总方案，不自动启动原 queued。实际状态只读本页，完成事实只记既有结果；不上传、推送或远端发布。**
 
 工作流精简继续沿用，主执行者直接实施、自检和交付，必要独审按[工作协议](WORKING_PROTOCOL.md)。接续事实、检查与未完成仅记录在[原目标结果](20261008-core-experience-unified/REVIEW_RESULT.md#resume-20261009)；品牌／发行／清理详见同文件[已收口批次](20261008-core-experience-unified/REVIEW_RESULT.md#brand-release-cleanup-20261009)。

@@ -21,4 +21,4 @@ HTML/CSS 修订保留原有 DOM 结构及相关选择器；专业正文或图表
 
 修改和保存按共享指南的[文件与保存](../workbench-usage/references/files-and-delivery.md)及实际回执说明。若环境只能生成建议或候选，如实交付该状态。
 
-新建教学作品使用 `orchestrate-courseware`；已有 HTML 新建为课件使用 `build-courseware-project`；Word、Excel、PowerPoint 原格式内容修改使用 `office-content`。任务涉及特定文档格式时，只加载当前可用的对应专业 Skill，不把它的全部接口说明常驻到通用上下文。
+新建教学作品使用 `orchestrate-courseware`；已有 HTML 新建为课件使用 `build-courseware-project`；Word、Excel、PowerPoint 原格式内容修改使用 `office-content`。需要特定格式的内容策略时，按需读取当前可用的专业方法；已有工具入口明确时直接修改。Skill 不解锁工具，也不把完整软件接口常驻到通用上下文。

@@ -7,7 +7,7 @@ export interface RunToolScope {
   writableTargetKinds: readonly ToolTarget['kind'][]
   wholeDocumentWritable: boolean
 }
-export const toolFamilies = ['content', 'layout', 'navigation', 'interaction', 'media', 'build', 'jobs', 'office'] as const
+export const toolFamilies = ['content', 'layout', 'navigation', 'interaction', 'media', 'build', 'jobs', 'office', 'external'] as const
 export type ToolFamily = typeof toolFamilies[number]
 
 /** These are the existing service owners, supplied by the composition root. */
@@ -38,6 +38,8 @@ export interface ToolRegistration<Context> {
   /** Equal values identify existing effects which must not replay an unresolved operation. */
   effect: string | null | ((input: unknown) => string | null)
   family?: ToolFamily | null
+  /** Common target actions stay direct; other family tools are revealed on demand. */
+  exposure?: 'direct'
   supports(context: ToolSupportContext): boolean
   targets(input: unknown, resolver: ToolTargetResolver): TargetResolution | Promise<TargetResolution>
   handler(context: Context, input: unknown): Promise<ToolResult>
@@ -52,6 +54,7 @@ export function toolRegistrationFor<Context>() {
       capability: ToolCapability
       effect: string | null | ((input: z.output<Schema>) => string | null)
       family?: ToolFamily | null
+      exposure?: 'direct'
       supports(context: ToolSupportContext): boolean
       targets(input: z.output<Schema>, resolver: ToolTargetResolver): TargetResolution | Promise<TargetResolution>
       handler(context: Context, input: z.output<Schema>): Promise<ToolResult>

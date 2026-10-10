@@ -10,15 +10,9 @@ function loadMermaid(): Promise<MermaidApi> {
       const mermaid = api.default
       mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' })
       return mermaid
-    })
+    }).catch(error => { mermaidPromise = null; throw error })
   }
   return mermaidPromise
-}
-
-function isMermaidSource(source: string): boolean {
-  const head = source.trimStart().slice(0, 40)
-  return /^(flowchart\b|graph\b|sequenceDiagram\b|classDiagram\b|stateDiagram(?:-v2)?\b|erDiagram\b|journey\b|gantt\b|pie\b|gitGraph\b|mindmap\b|timeline\b|quadrantChart\b|requirementDiagram\b|C4) /.test(head + ' ')
-    || /^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie|gitGraph|mindmap|timeline|quadrantChart|requirementDiagram)\s*$/.test(head.trim())
 }
 
 /**
@@ -104,7 +98,7 @@ export class MermaidCodeBlockView implements NodeView {
     this.lastSource = source
     const token = ++this.renderToken
     const preview = this.preview
-    if (!source.trim() || !isMermaidSource(source)) {
+    if (!source.trim()) {
       preview.replaceChildren()
       preview.dataset.state = 'empty'
       return
@@ -134,9 +128,15 @@ export class MermaidCodeBlockView implements NodeView {
         document.getElementById(`d${id}`)?.remove()
         document.getElementById(id)?.remove()
       }
-    }).catch(() => {
+    }).catch(error => {
       if (this.disposed || token !== this.renderToken || !this.preview) return
       this.preview.dataset.state = 'error'
+      const message = document.createElement('div')
+      message.className = 'mermaid-preview__error'
+      message.textContent = `Mermaid 加载失败：${error instanceof Error ? error.message : String(error)}`
+      const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = '重试'
+      retry.addEventListener('click', () => { this.lastSource = ''; this.render(source) })
+      this.preview.replaceChildren(message, retry)
     })
   }
 }

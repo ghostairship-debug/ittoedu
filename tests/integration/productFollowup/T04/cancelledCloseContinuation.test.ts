@@ -33,7 +33,7 @@ it('cancelled close can reopen A for a real edit while old A authority remains s
     await host.internalAPI.dispatch({ documentId: a.snapshot.documentId, epoch: a.snapshot.epoch, baseRevision: a.snapshot.revision, operationId: 'dirty-A', actor: 'human',
       mutation: { type: 'command', command: captureComponentOperation(a.snapshot.model.project, [{ type: 'project.title.set', title: 'A dirty teacher content' }]) } })
     fixture = await residentMcpFixture({ host, directory, workspaceRoot: workspace })
-    client = await connectExplicitMcp(readExplicitMcpConnection({ endpoint: (await fixture.service.status()).endpoint, token: fixture.token() }))
+    client = await connectExplicitMcp(readExplicitMcpConnection({ endpoint: (await fixture.service.status()).endpoint }))
     const openedA = await client.call('file.open', { path: 'A.h5lesson' })
     const openedB = await client.call('file.open', { path: 'B.h5lesson' })
     expect(openedA.isError).toBe(false); expect(openedB.isError).toBe(false)

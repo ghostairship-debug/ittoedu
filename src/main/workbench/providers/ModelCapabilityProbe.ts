@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto'
-import sharp from 'sharp'
+import { getImageDecoder } from '../imageDecoder'
 import type { ModelAssistantMessage, ModelChatMessage, ModelEvent, ModelProvider, ModelSelection, ModelToolDefinition } from '../../../shared/workbench/modelProvider'
 import type { ModelCapabilityFact, ModelCapabilityProbeOutcome, ModelCapabilityProbeResult, ProbedModelCapability } from '../../../shared/workbench/modelCapabilities'
 
@@ -27,7 +27,7 @@ async function visionChallenge(): Promise<VisionChallenge> {
     return { body, answer: `${color.color}-${shape}` }
   })
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="120" viewBox="0 0 360 120"><rect width="360" height="120" fill="white"/>${cells.map(cell => cell.body).join('')}</svg>`
-  const png = await sharp(Buffer.from(svg)).png().toBuffer()
+  const png = await getImageDecoder()(Buffer.from(svg)).png().toBuffer()
   return { dataUrl: `data:image/png;base64,${png.toString('base64')}`, expected: cells.map(cell => cell.answer).join('|') }
 }
 

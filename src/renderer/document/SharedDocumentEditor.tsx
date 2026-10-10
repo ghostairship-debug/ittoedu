@@ -2,6 +2,8 @@ import { bindMarkdownIdentities, type MarkdownProjection } from '../../shared/do
 import { editMarkdownSource, sameMarkdownContent } from '../../shared/document/markdownSourceEdit'
 import { editorPositionToPoint } from './documentAdapter'
 import type { ExecutionSelectionTarget } from '../../shared/workbench/executionDesktop'
+import { workbenchSelection } from '../workbench/SelectionContextController'
+import { cancelEditPreview, useEditPreviews } from '../workbench/EditPreviewProjection'
 import { pinnedSelectionKey, pinnedSelectionPlugin, sourcePinnedSelectionEffect, sourcePinnedSelectionField } from './selectionDecorations'
 import { FONT_FAMILY_OPTIONS } from '../../shared/fonts/fontFamilyCatalog'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, useMemo, type ReactNode } from 'react'
@@ -13,7 +15,7 @@ import { QuickBarAiButton, QuickBarButton, QuickBarColorButton, QuickBarPopoverB
 import { usePointerGesture } from '../editing/quickbar/usePointerGesture'
 import { CommandMenuItems, useContextMenu, type MenuCommand } from '../editing/commands/CommandMenu'
 import { createPortal } from 'react-dom'
-import { EditorState as SourceState } from '@codemirror/state'
+import { EditorState as SourceState, EditorSelection as SourceSelection } from '@codemirror/state'
 import { EditorView as SourceView, keymap as sourceKeymap } from '@codemirror/view'
 import { markdown } from '@codemirror/lang-markdown'
 import { foldGutter, foldEffect } from '@codemirror/language'
@@ -40,7 +42,7 @@ import { type DocumentBlock } from '../../shared/document/content'
 import type { DocumentClipboardResourcePort } from './documentClipboard'
 import './sharedDocumentEditor.css'
 import 'katex/dist/katex.min.css'
-import { layoutPreviewClipboard, layoutPreviewKey, layoutPreviewPlugin, layoutPreviewRange, sourcePreviewEffect, sourcePreviewExtensions, sourcePreviewRange, type DocumentEditPreview } from './editPreviewWidgets'
+import { layoutPreviewClipboard, layoutPreviewKey, layoutPreviewPlugin, layoutPreviewRange, layoutPreviewRanges, sourcePreviewRanges, sourcePreviewEffect, sourcePreviewExtensions, sourcePreviewField, type DocumentEditPreview } from './editPreviewWidgets'
 
 const FORMAT_FLAGS = ['bold', 'italic', 'underline', 'strike', 'emphasis'] as const
 
@@ -155,14 +157,18 @@ export interface SharedDocumentEditorProps {
   /** The right-click menu of a document object (picture, chart, component), asked after the object is selected. */
   objectMenu?(blockId: string): readonly MenuCommand[]
   pinnedTargets?: readonly ExecutionSelectionTarget[]
+  /** The host document identity for floating result cards; not an author field. */
+  cardDocumentId?: string
   contextualCommandIssue?(target: DocumentContextSelection): string | null
   contextualCardSuppressed?: boolean
+  editPreviews?: readonly DocumentEditPreview[]
   editPreview?: DocumentEditPreview
   onContextualDismiss?(target: DocumentContextSelection | null): void
   onUndo(): void
   onRedo(): void
 }
 export interface SharedDocumentEditorHandle {
+  clearSelection(targets?: readonly ExecutionSelectionTarget[]): void
   focusAtClientPoint(point: { x: number; y: number }): boolean
   /** Apply synchronous layout projection without treating its wrapper styles as author input. */
   paintProjection(paint: () => void): void
@@ -345,10 +351,9 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       ...(mapped.status === 'unmapped' ? { message: mapped.message } : {}) })
   }
   function publishSourceSelection(view: SourceView) {
-    const current = view.state.selection.main
-    const from = Math.min(current.from, current.to), to = Math.max(current.from, current.to)
-    if (from === to || sourceComposing.current) { publishContextualTarget(null); return }
-    publishContextualTarget({ selection: null, ranges: [{ from, to, before: draft.current.slice(from, to) }], revision: latest.current.revision, mode: 'source', source: draft.current, label: '所选源文' })
+    const ranges = view.state.selection.ranges.filter(range => !range.empty).map(range => ({ from: range.from, to: range.to, before: draft.current.slice(range.from, range.to) }))
+    if (!ranges.length || sourceComposing.current) { publishContextualTarget(null); return }
+    publishContextualTarget({ selection: null, ranges, revision: latest.current.revision, mode: 'source', source: draft.current, label: '所选源文' })
   }
   function acceptSource(text: string) {
     draft.current = text
@@ -423,7 +428,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         editor.view.dispatch(editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, at)).scrollIntoView())
         editor.view.focus()
       } : undefined,
-      disabledReason: latest.current.editPreview ? '正在生成的范围暂时只读' : null })
+      disabledReason: previewSelection() ? '正在生成的范围暂时只读' : null })
   }
   function clipboardMenu(): MenuCommand[] {
     const editor = layout.current
@@ -443,7 +448,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     const unavailable = bridge ? undefined : '当前环境无法使用系统剪贴板'
     return ([['cut', '剪切'], ['copy', '复制'], ['paste', '粘贴'], ['paste-plain', '粘贴为纯文本']] as const).map(([id, label]) => ({
       id: `clipboard-${id}`, label, group: '剪贴板',
-      disabledReason: latest.current.editPreview ? '正在生成的范围暂时只读' : unavailable ??
+      disabledReason: id !== 'copy' && previewSelection() ? '正在生成的范围暂时只读' : unavailable ??
         ((id === 'cut' || id === 'copy') && !hasSelection ? '请先选择文字或对象' : undefined),
       run: () => { void run(id) },
     }))
@@ -489,14 +494,14 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     }
     const items = (Object.keys(documentTableCommandLabels) as DocumentTableCommand[]).map(command => ({
       id: `table-${command}`, label: documentTableCommandLabels[command], group: '表格',
-      disabledReason: latest.current.editPreview ? '正在生成的范围暂时只读' : disabled(command), run: () => run(command),
+      disabledReason: previewSelection() ? '正在生成的范围暂时只读' : disabled(command), run: () => run(command),
     }))
     return [...items, { id: 'table-toggle-header', label: table.headerEnabled === false ? '开启表头' : '关闭表头', group: '表格',
-      disabledReason: latest.current.editPreview ? '正在生成的范围暂时只读' : null, run: () => run('toggle-header') },
+      disabledReason: previewSelection() ? '正在生成的范围暂时只读' : null, run: () => run('toggle-header') },
     { id: 'table-delete', label: '删除表格', group: '表格', danger: true,
-      disabledReason: latest.current.editPreview ? '正在生成的范围暂时只读' : null, run: () => run('delete-table') }]
+      disabledReason: previewSelection() ? '正在生成的范围暂时只读' : null, run: () => run('delete-table') }]
   }
-  const options = () => ({ draftSession, contentScope: latest.current.contentScope, presentation: latest.current.target === 'flow' ? 'flow' as const : undefined, stateChanged: (state: EditorState) => { setFormat(readDocumentFormatting(state, latest.current.inlineStyleDefaults)); updateActiveBlock(state) }, requestMathDraft: (request: { from: number; to: number; display: true; latex: ''; formulaId: string }) => setMathDraft({ ...request, accessibleText: '' }), document: projection.current.document, sourceMap: mapRef.current, revision: latest.current.revision,
+  const options = () => ({ draftSession, contentScope: latest.current.contentScope, presentation: latest.current.target === 'flow' ? 'flow' as const : undefined, stateChanged: (state: EditorState) => { const next = readDocumentFormatting(state, latest.current.inlineStyleDefaults); setFormat(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next); updateActiveBlock(state) }, requestMathDraft: (request: { from: number; to: number; display: true; latex: ''; formulaId: string }) => setMathDraft({ ...request, accessibleText: '' }), document: projection.current.document, sourceMap: mapRef.current, revision: latest.current.revision,
     projectionPlugins: [previewPlugin, pinPlugin, inlineDefaultsPlugin], projectionClipboard: (view: Parameters<typeof layoutPreviewClipboard>[0], event: ClipboardEvent, cut: boolean) => {
       const handled = layoutPreviewClipboard(view, event, cut)
       if (handled && cut) previewBlocked()
@@ -521,8 +526,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       return commit(document, operation, owner)
     },
     selection: publishLayoutSelection,
-    undo: (draftSession.retained ? draftOwner.current ?? latest.current : latest.current).editPreview?.cancel
-      ?? (draftSession.retained ? draftOwner.current ?? latest.current : latest.current).onUndo,
+    undo: (draftSession.retained ? draftOwner.current ?? latest.current : latest.current).onUndo,
     redo: (draftSession.retained ? draftOwner.current ?? latest.current : latest.current).onRedo, diagnostic: fail,
   })
   function commit(document: MarkdownDocument, operation: DocumentOperation, owner: SharedDocumentEditorProps): DocumentCommitResult {
@@ -557,7 +561,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       return () => { setActiveBlock(null); layoutSelection.current = editor.view.state.selection.toJSON(); editor.destroy(); if (layout.current === editor) layout.current = null }
     }
     if (mode === 'source' && sourceHost.current) {
-      source.current = new SourceView({ parent: sourceHost.current, state: SourceState.create({ doc: draft.current, extensions: [sourcePinnedSelectionField, ...sourcePreviewExtensions(previewBlocked), markdown(), foldGutter(), SourceView.lineWrapping, SourceState.readOnly.of(Boolean(latest.current.readOnly)),
+      source.current = new SourceView({ parent: sourceHost.current, state: SourceState.create({ doc: draft.current, extensions: [SourceState.allowMultipleSelections.of(true), sourcePinnedSelectionField, ...sourcePreviewExtensions(previewBlocked), markdown(), foldGutter(), SourceView.lineWrapping, SourceState.readOnly.of(Boolean(latest.current.readOnly)),
         SourceView.contentAttributes.of({ 'aria-label': '正文源文编辑' }),
         sourceKeymap.of([{ key: 'Mod-z', run: () => { void navigateHistory('undo'); return true } }, { key: 'Mod-Shift-z', run: () => { void navigateHistory('redo'); return true } }]),
         SourceView.domEventHandlers({ compositionstart: () => { sourceComposing.current = true }, compositionend: (_event, view) => { sourceComposing.current = false; queueMicrotask(() => { if (source.current === view) { acceptSource(view.state.doc.toString()); publishSourceSelection(view) } }) } }),
@@ -610,13 +614,22 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     }
     reportDiagnostics(parsed?.diagnostics ?? [])
   }, [props.revision, props.sourceDraft, documentScope])
+  const hostPreviews = useEditPreviews(props.editPreviews || props.editPreview ? undefined : props.cardDocumentId, Number.isSafeInteger(Number(props.revision)) ? Number(props.revision) : undefined)
+  const allPreviews = useMemo(() => props.editPreviews ?? (props.editPreview ? [props.editPreview] : hostPreviews.map(preview => ({ editId: preview.editId,
+    sequence: preview.sequence, target: preview.target, value: preview.value, cancel: () => { void cancelEditPreview(preview).catch(error => fail(String(error))) } }))), [props.editPreviews, props.editPreview, hostPreviews])
+  function previewSelection() {
+    const view = layout.current?.view
+    const values = mode === 'layout' && view ? layoutPreviewKey.getState(view.state) ?? [] : source.current?.state.field(sourcePreviewField, false) ?? []
+    const selected = mode === 'layout' && view ? view.state.selection : source.current?.state.selection.main
+    return Boolean(selected && values.some(value => selected.from === selected.to ? selected.from > value.from && selected.from < value.to : selected.from < value.to && selected.to > value.from))
+  }
   useEffect(() => {
     if (layout.current) {
       const view = layout.current.view
-      view.dispatch(view.state.tr.setMeta(layoutPreviewKey, layoutPreviewRange(view.state.doc, props.editPreview, mapRef.current)))
+      view.dispatch(view.state.tr.setMeta(layoutPreviewKey, allPreviews.flatMap(preview => layoutPreviewRanges(view.state.doc, preview, mapRef.current))))
     }
-    if (source.current) source.current.dispatch({ effects: sourcePreviewEffect.of(sourcePreviewRange(props.editPreview, mapRef.current)) })
-  }, [mode, props.editPreview, props.revision, props.document, fallbackMap])
+    if (source.current) source.current.dispatch({ effects: sourcePreviewEffect.of(allPreviews.flatMap(preview => sourcePreviewRanges(preview, mapRef.current, draft.current, toEditorDocument(projection.current.document.content)))) })
+  }, [mode, allPreviews, props.revision, props.document])
   useEffect(() => {
     const current = contextualTargetRef.current
     if (!current || current.revision === props.revision) return
@@ -626,15 +639,69 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     else if (mode === 'source' && source.current) { publishSourceSelection(source.current); return }
     publishContextualTarget(null)
   }, [props.revision])
+  function clearDocumentSelection(targets?: readonly ExecutionSelectionTarget[]) {
+    const raw = source.current
+    if (raw && targets) {
+      const removed = targets.flatMap(target => target.kind === 'course-surface' ? [] : sourcePreviewRanges({ editId: 'remove-selection', target, value: '', cancel() {} }, mapRef.current, draft.current, toEditorDocument(projection.current.document.content)))
+      const retained = raw.state.selection.ranges.filter(selected => !removed.some(value => selected.from < value.to && selected.to > value.from))
+      if (retained.length === raw.state.selection.ranges.length) return
+      raw.dispatch({ selection: retained.length ? SourceSelection.create(retained) : SourceSelection.cursor(raw.state.selection.main.head) })
+      return
+    }
+    const view = layout.current?.view
+    if (view) view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(view.state.selection.head))))
+    if (raw) raw.dispatch({ selection: { anchor: raw.state.selection.main.head } })
+    publishContextualTarget(null)
+  }
+  useEffect(() => {
+    if (!props.cardDocumentId || props.active === false) return
+    const adapted = (target: ExecutionSelectionTarget): ExecutionSelectionTarget => target.kind === 'course-instance'
+      ? target.from !== undefined && target.to !== undefined ? { kind: 'flow-range', surfaceId: target.surfaceId, blockId: target.instanceId, parentId: null,
+        slot: { kind: 'field', field: target.fieldScope === 'flowLayout' ? 'caption' : ['content', 'citation', 'caption', 'title', 'body'].includes(target.dataPath?.at(-1) ?? '') ? target.dataPath!.at(-1)! as 'content' : 'content' }, from: target.from, to: target.to }
+        : { kind: 'flow-block', surfaceId: target.surfaceId, blockId: target.instanceId, parentId: null } : target
+    const range = (target: ExecutionSelectionTarget) => {
+      const projected = adapted(target); if (projected.kind === 'course-surface') return null
+      const preview = { editId: 'card-result', target: projected, value: '', cancel() {} }
+      const pieces = mode === 'layout' && layout.current ? layoutPreviewRanges(layout.current.view.state.doc, preview, mapRef.current) : sourcePreviewRanges(preview, mapRef.current, draft.current, toEditorDocument(projection.current.document.content))
+      return pieces.length ? { from: Math.min(...pieces.map(piece => piece.from)), to: Math.max(...pieces.map(piece => piece.to)), pieces } : null
+    }
+    const clear = workbenchSelection.registerSelectionClearer(props.cardDocumentId, clearDocumentSelection)
+    const unregister = workbenchSelection.registerTargetView(props.cardDocumentId, {
+      root: () => mode === 'layout' ? layout.current?.view.dom ?? null : source.current?.dom ?? null,
+      rect: target => {
+        try {
+          const bounds = range(target); if (!bounds) return null
+          if (mode === 'layout' && layout.current) {
+            const from = layout.current.view.coordsAtPos(bounds.from), to = layout.current.view.coordsAtPos(bounds.to)
+            return new DOMRect(Math.min(from.left, to.left), Math.min(from.top, to.top), Math.max(1, Math.max(from.right, to.right) - Math.min(from.left, to.left)), Math.max(from.bottom, to.bottom) - Math.min(from.top, to.top))
+          }
+          const from = source.current?.coordsAtPos(bounds.from), to = source.current?.coordsAtPos(bounds.to)
+          return from && to ? new DOMRect(Math.min(from.left, to.left), Math.min(from.top, to.top), Math.max(1, Math.max(from.right, to.right) - Math.min(from.left, to.left)), Math.max(from.bottom, to.bottom) - Math.min(from.top, to.top)) : null
+        } catch { return null }
+      },
+      select: target => {
+        const bounds = range(target); if (!bounds) return false
+        if (mode === 'layout' && layout.current) {
+          const view = layout.current.view, pieces = [...bounds.pieces].sort((a,b) => a.from-b.from)
+          if (pieces.some((piece,index) => index > 0 && view.state.doc.textBetween(pieces[index-1].to,piece.from,'\n','\uFFFC').trim())) throw new Error('这些结果位于多个文字区域，请在源码视图中选择。')
+          view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, bounds.from, bounds.to)).scrollIntoView()); view.focus(); return true
+        }
+        if (source.current) { source.current.dispatch({ selection: SourceSelection.create(bounds.pieces.map(piece => SourceSelection.range(piece.from,piece.to))), scrollIntoView: true }); source.current.focus(); return true }
+        return false
+      },
+    })
+    return () => { clear(); unregister() }
+  }, [props.cardDocumentId, props.active, mode])
   useEffect(() => {
     const pins = (props.pinnedTargets ?? []).filter(target => target.kind !== 'course-object' && target.kind !== 'course-surface').map(target => ({ editId: 'pinned-selection', target, value: '', cancel() {} }))
     if (layout.current) {
       const view = layout.current.view
-      view.dispatch(view.state.tr.setMeta(pinnedSelectionKey, [...pins.flatMap(pin => { const range = layoutPreviewRange(view.state.doc, pin, mapRef.current); return range ? [range] : [] }), ...(localPin?.mode === 'layout' && localPin.revision === props.revision ? [localPin] : [])]))
+      view.dispatch(view.state.tr.setMeta(pinnedSelectionKey, [...pins.flatMap(pin => layoutPreviewRanges(view.state.doc, pin, mapRef.current)), ...(localPin?.mode === 'layout' && localPin.revision === props.revision ? [localPin] : [])]))
     }
-    if (source.current) source.current.dispatch({ effects: sourcePinnedSelectionEffect.of([...pins.flatMap(pin => { const range = sourcePreviewRange(pin, mapRef.current); return range ? [range] : [] }), ...(localPin?.mode === 'source' && localPin.revision === props.revision ? [localPin] : [])]) })
+    if (source.current) source.current.dispatch({ effects: sourcePinnedSelectionEffect.of([...pins.flatMap(pin => sourcePreviewRanges(pin, mapRef.current, draft.current, toEditorDocument(projection.current.document.content))), ...(localPin?.mode === 'source' && localPin.revision === props.revision ? [localPin] : [])]) })
   }, [mode, props.pinnedTargets, props.revision, fallbackMap, localPin])
   useImperativeHandle(ref, () => ({
+    clearSelection: clearDocumentSelection,
     focusAtClientPoint: point => {
       const editor = layout.current
       if (!editor || mode !== 'layout' || latest.current.active === false || latest.current.readOnly || editor.view.composing) return false
@@ -732,7 +799,6 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   }
   async function navigateHistory(direction: 'undo' | 'redo') {
     const owner = draftSession.retained ? draftOwner.current ?? latest.current : latest.current
-    if (direction === 'undo' && owner.editPreview) { owner.editPreview.cancel(); return }
     if (!(await drain()).ready) return
     try { await (direction === 'undo' ? owner.onUndo() : owner.onRedo()) }
     catch (error) { fail(error instanceof Error ? error.message : String(error)) }
@@ -1092,8 +1158,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
      {props.active !== false && !props.readOnly && (props.toolbarHost ? createPortal(<>{toolbar}{editorForms}</>, props.toolbarHost) : <>{toolbar}{editorForms}</>)}
      {quickBar}
      {props.active !== false && objectMenu.element}
-      {props.active !== false && documentScope && mode === 'layout' && !props.readOnly && activeBlock && <DocumentBlockHandle blockId={activeBlock.id} rect={activeBlock.rect} commands={activeBlockMenu(activeBlock.id)} disabledReason={props.editPreview ? '正在生成的范围暂时只读' : null} />}
-     {props.active !== false && props.editPreview && <div className="document-generation-status" role="status">正文正在生成，生成部分尚未保存。<button type="button" onClick={props.editPreview.cancel}>停止生成</button>{commandError && <span role="alert">{commandError}</span>}</div>}
+      {props.active !== false && documentScope && mode === 'layout' && !props.readOnly && activeBlock && <DocumentBlockHandle blockId={activeBlock.id} rect={activeBlock.rect} commands={activeBlockMenu(activeBlock.id)} disabledReason={previewSelection() ? '正在生成的范围暂时只读' : null} />}
+     {props.active !== false && allPreviews.length > 0 && <div className="document-generation-status" role="status">{allPreviews.length} 处正文正在生成，生成部分尚未保存。{allPreviews.map((preview, index) => <button key={preview.editId} type="button" aria-label={`停止生成第 ${index + 1} 处`} onClick={preview.cancel}>停止生成 {index + 1}</button>)}{commandError && <span role="alert">{commandError}</span>}</div>}
      {mode === 'layout' ? <div ref={layoutHost} /> : <div ref={sourceHost} />}
     {diagnostics.length > 0 && <ul role="alert">{diagnostics.map((diagnostic, index) => <li key={index}><button type="button" onClick={() => { const editor = source.current; if (!editor) return; const position = Math.min(editor.state.doc.length, diagnostic.offset); editor.dispatch({ selection: { anchor: position }, effects: SourceView.scrollIntoView(position) }); editor.focus() }}>第 {diagnostic.line} 行：{diagnostic.message}</button></li>)}</ul>}
   </div>

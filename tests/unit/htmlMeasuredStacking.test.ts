@@ -91,3 +91,23 @@ it('keeps ordinary block backgrounds below text and only detaches paint that CSS
   expect(flex.assembly.root.children[0]!.stacking).toEqual({ zIndex: '0', layoutOrder: '1', positioned: true })
   expect(flex.assembly.root.children[0]!.kind).toBe('group')
 })
+
+
+it('keeps ordinary normal-line-height paragraphs and figure captions as independent professional text', () => {
+  const { draft } = measured('<section><p style="line-height:normal">普通正文</p><figure><img src="fg.png"><figcaption style="line-height:normal">题注文字</figcaption></figure></section>')
+  const section = draft.children![0]!, paragraph = section.children![0]!, figure = section.children![1]!
+  expect(paragraph.definitionId).toBe(TEXT_DEFINITION.id)
+  expect(paragraph.data).toMatchObject({ appearance: { lineHeight: 'normal' }, content: { inlines: [{ type: 'text', text: '普通正文' }] } })
+  expect(figure.children!.map(child => child.definitionId)).toEqual([IMAGE_DEFINITION.id, TEXT_DEFINITION.id])
+  expect(figure.children![1]!.data).toMatchObject({ appearance: { lineHeight: 'normal' }, content: { inlines: [{ type: 'text', text: '题注文字' }] } })
+})
+
+
+it('retains a named layout wrapper as an editable group while unnamed wrappers may flatten', () => {
+  const named = measured('<div id="experiment" style="display:grid"><h1>原理</h1><p>说明</p></div>')
+  expect(named.assembly.root.children).toHaveLength(1)
+  expect(named.assembly.root.children[0]!.kind).toBe('group')
+  expect(htmlOf(named.draft.children![0]!)).toContain('id="experiment"')
+  const unnamed = measured('<div style="display:grid"><h1>原理</h1><p>说明</p></div>')
+  expect(unnamed.assembly.root.children.map(child => child.kind)).toEqual(['text', 'text'])
+})

@@ -8,6 +8,7 @@ import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { MarkdownDriver } from '../../src/core/drivers/MarkdownDriver'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { createDocumentJournal } from '../../src/main/workbench/documentJournal'
+import { executionFinalReply } from '../../src/main/workbench/execution/executionOutcome'
 import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
 import { EditSessionService } from '../../src/main/workbench/execution/EditSessionService'
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
@@ -32,8 +33,7 @@ const selection: ModelSelection = { model: 'fixture', connection: { id: 'fixture
   baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture' }, billing: { kind: 'unknown' },
   capabilities: { tools: 'supported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } }
 function completed(request: ModelRequest, content: string, edit = true): Extract<ModelEvent, { type: 'response.completed' }> {
-  const calls = edit ? [{ id: 'replace', name: 'text.replace', argumentsText: JSON.stringify({ content }) },
-    { id: 'finish', name: 'task.finish', argumentsText: '{}' }] : []
+  const calls = edit ? [{ id: 'replace', name: 'text.replace', argumentsText: JSON.stringify({ content }) }] : []
   return { type: 'response.completed', requestId: request.requestId, sequence: 10, responseId: 'fixture', actualModel: 'fixture',
     finishReason: edit ? 'tool_calls' : 'stop', toolCalls: calls, assistant: { role: 'assistant', content: edit ? null : content,
       ...(edit ? { tool_calls: calls.map(call => ({ id: call.id, type: 'function' as const, function: { name: call.name, arguments: call.argumentsText } })) } : {}) }, nativeResponse: {} }
@@ -50,7 +50,7 @@ async function fixture(provider: ModelProvider, source = '前文 OLD 后文') {
   const target = { kind: 'markdown-range' as const, from: 0, to: source.length }
   const input: ExecutionStart = { conversationId: 'conversation', taskId: randomUUID(), instruction: '改写选中的正文', selection,
     documents: [{ documentId: session.documentId, writable: [target], selection: [target] }],
-    contentOutput: { kind: 'replace-text', documentId: session.documentId, target } }
+    contentOutput: { kind: 'content', documentId: session.documentId, target } }
   return { registry, gateway, edits, runs, engine, session, input }
 }
 
@@ -76,7 +76,7 @@ describe('U01 explicit bound content output', () => {
     h = await fixture(provider, source)
     const start = await h.engine.start(h.input), result = await h.engine.wait(start.runId)
     expect(result.status, JSON.stringify(result)).toBe('completed')
-    expect(result.tools).toHaveLength(2)
+    expect(result.tools).toHaveLength(1)
     expect(result.tools[0]).toMatchObject({ call: { name: 'text.replace' }, result: { kind: 'document-operation', result: { status: 'applied' } } })
     expect(result.messages.some(message => message.role === 'tool')).toBe(true)
     expect(h.session.read()).toMatchObject({ model: { source: '改写后的完整正文' }, undoDepth: 1 })
@@ -86,8 +86,13 @@ describe('U01 explicit bound content output', () => {
     const current = { ...h.input, taskId: randomUUID(), documents: [{ documentId: h.session.documentId, writable: [target], selection: [target] }],
       contentOutput: { ...h.input.contentOutput!, target } }
     const resumed = await h.engine.start(current, { runId: start.runId, facts: '', sameTask: true })
-    expect((await h.engine.wait(resumed.runId)).status).toBe('completed')
-    expect(requests).toHaveLength(1)
+    const restored = await h.engine.wait(resumed.runId)
+    expect(restored.status).toBe('completed')
+    expect(executionFinalReply(restored)).toBeNull()
+    expect(requests).toHaveLength(2)
+    const newAsk = await h.engine.start({ ...current, taskId: randomUUID() }, { runId: start.runId, facts: '', sameTask: false })
+    expect((await h.engine.wait(newAsk.runId)).status).toBe('completed')
+    expect(requests).toHaveLength(3)
     expect(h.session.read().undoDepth).toBe(1)
     const { contentOutput: _output, ...ordinary } = current
     const chat = await h.engine.start({ ...ordinary, taskId: randomUUID(), instruction: '解释这段话，不修改',
@@ -150,12 +155,11 @@ describe('U01 explicit bound content output', () => {
       if (at === 1) { entered.resolve(); await release.promise }
       const payload = JSON.parse(String(init?.body)) as { tools: Array<{ function: { name: string; description: string } }> }
       const name = (prefix: string) => { const tool = payload.tools.find(tool => tool.function.description.startsWith(prefix)); if (!tool) throw new Error('Missing '+prefix); return tool.function.name }
-      const delta = at === 1 ? { role: 'assistant', content: '普通回答' } : { role: 'assistant', tool_calls: [
+      const delta = at !== 2 ? { role: 'assistant', content: '普通回答' } : { role: 'assistant', tool_calls: [
         { index: 0, id: 'replace', type: 'function', function: { name: name('替换已授权文字字段'), arguments: JSON.stringify({ content: '队列改写正文' }) } },
-        { index: 1, id: 'finish', type: 'function', function: { name: name('结束本轮任务'), arguments: '{}' } },
       ] }
       return new Response(`data: ${JSON.stringify({ id: `reply-${at}`, model: 'fixture', choices: [{ index: 0,
-        delta, finish_reason: at === 1 ? 'stop' : 'tool_calls' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
+        delta, finish_reason: at !== 2 ? 'stop' : 'tool_calls' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
     }
     const service = new ExecutionDesktopService({ directory: path.join(root, 'desktop'), documents, settings, fetch, authorizeWorkspaceRoot: async wanted => ({ resolvedPath: wanted }) })
     const space = await service.operate({ type: 'workspace', root }) as { workspace: { workspaceId: string } }
@@ -165,7 +169,7 @@ describe('U01 explicit bound content output', () => {
     await entered.promise
     conversation = await service.operate({ type: 'conversation', ...common }) as ConversationRecord
     const target = { kind: 'markdown-range' as const, from: 0, to: 5 }
-    const output = { kind: 'replace-text' as const, documentId: document.documentId, target }
+    const output = { kind: 'content' as const, documentId: document.documentId, target }
     const input = { type: 'send' as const, ...common, submissionId: randomUUID(), expectedRevision: conversation.revision, text: '改写正文',
       documents: [{ documentId: document.documentId, epoch: document.epoch, revision: document.revision, selection: [target], writable: [target] }], contentOutput: output }
     const queued = await service.operate(input) as ExecutionSendResult

@@ -42,7 +42,7 @@ export function newPageCommands(add: (kind: NewPageKind) => void, sceneReason: s
   return [
     { id: 'page.add.scene', label: '新建场景', group: 'scene', run: () => add('scene'), disabledReason: sceneReason },
     { id: 'page.add.slide', label: '新建演示页', group: 'page', run: () => add('slide-page') },
-    { id: 'page.add.flow', label: '新建流式讲义', group: 'page', run: () => add('flow-page') },
+    { id: 'page.add.flow', label: '新建流式布局', group: 'page', run: () => add('flow-page') },
     { id: 'page.add.spatial', label: '新建无限画布', group: 'page', run: () => add('spatial-page') },
   ]
 }

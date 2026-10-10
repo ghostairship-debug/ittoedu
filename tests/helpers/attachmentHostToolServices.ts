@@ -35,7 +35,7 @@ export function attachmentHostToolServices(attachments: AttachmentService, host:
             if (!access?.workspaceRoot) throw Object.assign(new Error('Task has no workspace file grant'), { code: 'not-authorized' })
             const file = await host.agentFiles.readAuthorizedFile({ runId, workspaceRoot: access.workspaceRoot,
               permission: access.permission, conversationHome: access.conversationHome,
-              conversationHomeRoot: access.conversationHomeRoot, readOnlyRoots: Object.values(access.boundPaths ?? {}) }, requested.path)
+              conversationHomeRoot: access.conversationHomeRoot, boundPaths: Object.values(access.boundPaths ?? {}) }, requested.path)
             const snapshot = await attachments.receiveBytes({ name: file.name, bytes: file.bytes,
               source: { kind: 'workspace', authorizationId: runId, pathHint: file.path } }, { signal: controllers.get(runId)?.signal })
             ids.add(snapshot.id)

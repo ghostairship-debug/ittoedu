@@ -549,7 +549,7 @@ export function addCourseFlowPage(
   project: CourseProjectDocument,
   input: { title?: string } & CourseLocationCommandOptions = {},
 ): CourseLocationCommandResult {
-  const title = input.title ?? '流式讲义'
+  const title = input.title ?? '流式布局'
   return runMutation(project, (draft) => {
     return appendFlowPageInDraft(draft, title).locationId
   }, input)

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "883c950ebc89526da39161d0e89bbfdf1ddaeb37b2237b6ee70fac4bc5114592",
+  "semanticVersion": "19900eb2d37d059a3f9cae0c4f7bf9fe771b5dd18301be1fd873a730423c0b07",
   "entries": [
     {
       "id": "artifact.save",
@@ -512,7 +512,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "新建并打开正式文档。kind 可省略，按扩展名自动识别；显式 kind=markdown/html/course-v10 且 name 无后缀时，软件补对应标准后缀。kind=text 适用任意 UTF-8 数据/源文件（.json/.csv/.svg/.xml/.yaml/代码/无后缀），.md、.glx 和二进制扩展名不可用此 kind。已有完整内容用 file.write mode=create 写入保存。path 指定父文件夹，name 只填写单独的文件名称；path 省略时放在会话所属文件夹。新课件回执返回已存在的页面事实，后续沿实际工程内容接续。"
+      "summary": "新建并打开正式文档。kind 可省略，按扩展名自动识别；显式 kind=markdown/html/course-v10 且 name 无后缀时，软件补对应标准后缀。kind=text 适用任意 UTF-8 数据/源文件（.json/.csv/.svg/.xml/.yaml/代码/无后缀），.md、.glx 和二进制扩展名不可用此 kind。已有完整内容用 file.write mode=create 写入保存。path 指定父文件夹，name 只填写单独的文件名称；path 省略时放在工作空间根目录。新课件回执返回已存在的页面事实，后续沿实际工程内容接续。"
     },
     {
       "id": "file.grep",
@@ -554,7 +554,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "列出文件夹内容。path 可用绝对路径或工作空间相对路径；省略时从会话所属位置开始。返回有界列表；截断时用同 path 和返回的 nextCursor 续页，目录变化需重读。"
+      "summary": "列出文件夹内容。path 可用绝对路径或工作空间相对路径；省略时从工作空间根目录开始。返回有界列表；截断时用同 path 和返回的 nextCursor 续页，目录变化需重读。"
     },
     {
       "id": "file.mkdir",
@@ -575,7 +575,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "在工作空间或已明确授权的位置新建文件夹，目标已存在时失败。path 指定父文件夹，name 只填写单独的文件夹名称；path 省略时放在会话所属文件夹。"
+      "summary": "在工作空间或已明确授权的位置新建文件夹，目标已存在时失败。path 指定父文件夹，name 只填写单独的文件夹名称；path 省略时放在工作空间根目录。"
     },
     {
       "id": "file.move",
@@ -764,7 +764,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "按文件名搜索文件夹及子文件夹，返回有界路径列表；截断时用同 path/query 和 nextCursor 继续，不把一页无匹配当整个目录无结果。path 省略时从会话所属位置开始。"
+      "summary": "按文件名搜索文件夹及子文件夹，返回有界路径列表；截断时用同 path/query 和 nextCursor 继续，不把一页无匹配当整个目录无结果。path 省略时从工作空间根目录开始。"
     },
     {
       "id": "file.trash",
@@ -1247,7 +1247,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "在一份授权 PDF/DOCX/PPTX 或文本材料的已提取表示中按原文字面量检索，返回真实页/段落、短上下文、缺口与续扫游标；图片或提取失败不冒充没有命中。用 material.read 回读命中表示。"
+      "summary": "在一份授权 PDF/DOCX/PPTX 或文本材料中按原文字面量检索，软件按需准备缓存，不必先提取。可指定 pages；省略时分批扫描，nextCursor 配合同一原材料/query 续扫。返回真实页/段落、短上下文、缺口与未读页段；未扫描、图片或提取失败不冒充没有命中。用 material.read 回读命中表示。"
     },
     {
       "id": "material.list",
@@ -1268,7 +1268,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "列出本次显式材料或宿主冻结来源的不可变原件、表示、实际页段与缺口。省略 attachmentId 时列授权目录；path 可读取已授权工作空间内的具体材料，软件负责登记来源；指定 attachmentId 时分页列表示。目录不是正文，随后用 material.extract/find/read。读取参考不扩大作品修改权限。"
+      "summary": "列出本次显式材料或宿主冻结来源的不可变原件、表示、实际页段与缺口。省略 attachmentId 时列授权目录；path 可读取已授权工作空间内的具体材料，软件负责登记来源；指定 attachmentId 时分页列表示。目录不是正文，普通读取或检索直接用原材料 attachmentId，无需手工提取或搬派生编号。读取参考不扩大作品修改权限。"
     },
     {
       "id": "material.read",
@@ -1289,7 +1289,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "按 material.list 返回的 attachmentId/representationId 回读已提取文本或原图，返回原件版本、表示版本与真实页/段落出处。文本分页不冒充全文；图片进入下一轮输入，准备好图片不表示模型已理解。原件尚未提取时明确提示 material.extract，不执行文件内容。"
+      "summary": "读取授权材料，软件按需准备并缓存所需页段，无需先 material.extract。attachmentId 用原材料；可指定 pages 和 representation=text/image，省略时优先正文。representationId 只用于回读明确命中的表示。返回真实出处、缺口及未读页段；截断后将 nextCursor 传给 cursor，仍使用同一原材料。图片进入下一轮输入，准备好图片不表示模型已理解。不会自动全件 OCR 或执行文件内容。"
     },
     {
       "id": "mcp.discover",
@@ -1583,7 +1583,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "修改获授权整对象的公开属性。使用 target 句柄，或使用 project.list/read 返回的对象 path；project 可选。data/style 只修改提供字段，省略字段和人工位置保持；专业 appearance/style 等子记录可局部修改，数组和正文仍使用该字段完整值。implementation 是实例源码覆盖或 null 恢复默认，不能充当专业类型转换；frame 可局部调位置尺寸。文字范围授权不能扩大为整对象。"
+      "summary": "修改获授权整对象的公开属性。使用 target 句柄，或使用 project.list/read 返回的对象 path；project 可选。复制 A 的颜色或阴影到 B 时优先 properties.appearanceFrom:{target:已观察来源整对象只读句柄,fields:[\"color\",\"shadows\"]}，软件确定性读取指定字段，此例保留正文、字号和位置。properties.appearance 直接修改专业外观，显式字段覆盖来源同名字段；文字阴影 shadows 是对象数组，每项 x/y/blur/color。不需要猜 data.appearance，不补省略项默认值。data/style 保留高级局部路径，数组和正文仍使用该字段完整值。implementation 是实例源码覆盖或 null 恢复默认，不能充当专业类型转换；frame 可局部调位置尺寸。文字范围格式使用 text.format，不能扩大为整对象。"
     },
     {
       "id": "office.create",
@@ -1731,27 +1731,6 @@
         "component"
       ],
       "summary": "读取project.list返回的工程虚拟路径的当前正式内容与人工修改；不用file.read读取这些路径。普通Web读HTML，专业组件读data.json；正文读body.html/body.md；空间镜头读spatial.json；单路径/关系target只可修改所选图项，保留首页、镜头与其他图项。components/源码作用于共享定义，页面/global内源码为实例独立实现；workspace中的模块和二进制文件原样保留。很长文本将回执nextOffset传给offset并用limit续读，不使用cursor。后续project.apply固定本次观察的原目标，提交失败保留原文与诊断。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。"
-    },
-    {
-      "id": "project.save",
-      "kind": "tool",
-      "label": "project.save",
-      "path": "tools/project.save.json",
-      "scopes": [
-        "slide:surface",
-        "slide:global",
-        "slide:instance",
-        "flow:surface",
-        "flow:global",
-        "flow:instance",
-        "spatial:surface",
-        "spatial:global",
-        "spatial:instance"
-      ],
-      "carriers": [
-        "component"
-      ],
-      "summary": "把课件保存到它的文件。只在用户明确要求保存时调用：修改默认留在编辑器中，由用户保存，关闭时会提示；只读任务不能保存。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。"
     },
     {
       "id": "published-course-v3",
@@ -2624,6 +2603,27 @@
       "summary": "为已观察演示页准备教师控制台；复用已有控制台，否则使用人工插入默认、共享层和软件身份创建。涉及全局层时需要整课授权，一次事务可撤销。"
     },
     {
+      "id": "text.format",
+      "kind": "tool",
+      "label": "text.format",
+      "path": "tools/text.format.json",
+      "scopes": [
+        "slide:surface",
+        "slide:global",
+        "slide:instance",
+        "flow:surface",
+        "flow:global",
+        "flow:instance",
+        "spatial:surface",
+        "spatial:global",
+        "spatial:instance"
+      ],
+      "carriers": [
+        "component"
+      ],
+      "summary": "对已观察且获授权的 Markdown 或课件原生正文范围设置加粗、斜体、字号、字体、颜色等真实文字格式，保留原文、范围外格式和对象位置。style 只应用提供字段。纯文本文件没有格式；普通 HTML 源文件的范围格式当前不支持，不扩大为父元素样式。"
+    },
+    {
       "id": "text.replace",
       "kind": "tool",
       "label": "text.replace",
@@ -2826,7 +2826,6 @@
     "tools/project.apply.json",
     "tools/project.list.json",
     "tools/project.read.json",
-    "tools/project.save.json",
     "tools/read.json",
     "tools/skills.list.json",
     "tools/skills.read.json",
@@ -2836,6 +2835,7 @@
     "tools/surface.remix.inspect.json",
     "tools/surface.remix.json",
     "tools/teacher.ensure.json",
+    "tools/text.format.json",
     "tools/text.replace.json",
     "tools/view.observe.json",
     "tools/web.open.json",

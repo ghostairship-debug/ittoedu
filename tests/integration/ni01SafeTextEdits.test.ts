@@ -133,7 +133,12 @@ it('continues the same observed table cell after its acknowledged rich-text upgr
   const current = h.session.read()
   await h.session.execute({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision,
     operationId: randomUUID(), actor: 'human', mutation: { type: 'undo' } })
-  expect(await h.replace('<b>不得重放</b>')).toMatchObject({ kind: 'error', code: 'target-conflict' })
+  const stale = await h.replace('<b>不得重放</b>')
+  expect(stale).toMatchObject({ kind: 'error' })
+  if (stale.kind !== 'error') throw new Error('Expected a refused stale scope')
+  expect(['target-conflict', 'not-authorized']).toContain(stale.code)
+  expect(h.session.read().revision).toBe(current.revision + 1)
+  expect(h.session.read().undoDepth).toBe(current.undoDepth - 1)
 })
 
 it.each([
@@ -160,7 +165,7 @@ it.each([
   const target = textSelectionTarget(session.read().model, mapped.ranges.map(range => ({ kind: 'markdown-range', from: range.from, to: range.to })))
   const gateway = new DocumentToolGateway(registry, [driver], randomUUID)
   await gateway.beginRun({ runId: 'fragments', actor: 'agent', documents: [{ documentId: session.documentId, writable: [target], selection: [target] }],
-    contentOutput: { kind: 'replace-text', documentId: session.documentId, target } })
+    contentOutput: { kind: 'content', documentId: session.documentId, target } })
   const observed = await gateway.issueTarget('fragments', session.documentId, target)
   expect(await gateway.execute('fragments', randomUUID(), { name: 'text.replace', input: { content: next } }))
     .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
@@ -429,6 +434,7 @@ it('uses observed geometry targets and controller defaults in one public batch w
     .toMatchObject({ kind: 'error', code: 'not-authorized' })
   expect(h.session.read().undoDepth).toBe(0)
   await h.gateway.beginRun({ runId: 'geometry', actor: 'agent', documents: [{ documentId: h.session.documentId, writable: [{ kind: 'document' }] }] })
+  await h.gateway.loadToolFamilies('geometry', ['navigation'])
   const surfaceId = h.project.surfaces[0].id
   const targets = await Promise.all(['a', 'b', 'locked'].map(instanceId => h.gateway.issueTarget('geometry', h.session.documentId, { kind: 'course-instance', surfaceId, instanceId })))
   const page = await h.gateway.issueTarget('geometry', h.session.documentId, { kind: 'course-surface', surfaceId })
@@ -568,6 +574,7 @@ it('resolves public observed references only in declared fields and delivers its
   })
   const runId = 'public-refs', surfaceId = h.project.surfaces[0].id
   await h.gateway.beginRun({ runId, actor: 'agent', documents: [{ documentId: h.session.documentId, writable: [{ kind: 'document' }] }] })
+  await h.gateway.loadToolFamilies(runId, ['interaction', 'layout'])
   const page = await h.gateway.issueTarget(runId, h.session.documentId, { kind: 'course-surface', surfaceId })
   const object = await h.gateway.issueTarget(runId, h.session.documentId, { kind: 'course-instance', surfaceId, instanceId: 'a' })
   const paragraph = await h.gateway.issueTarget(runId, h.session.documentId, { kind: 'course-instance', surfaceId, instanceId: 'b' })

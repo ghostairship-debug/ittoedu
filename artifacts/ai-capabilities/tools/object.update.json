@@ -1,10 +1,18 @@
 {
-  "description": "修改获授权整对象的公开属性。使用 target 句柄，或使用 project.list/read 返回的对象 path；project 可选。data/style 只修改提供字段，省略字段和人工位置保持；专业 appearance/style 等子记录可局部修改，数组和正文仍使用该字段完整值。implementation 是实例源码覆盖或 null 恢复默认，不能充当专业类型转换；frame 可局部调位置尺寸。文字范围授权不能扩大为整对象。",
+  "description": "修改获授权整对象的公开属性。使用 target 句柄，或使用 project.list/read 返回的对象 path；project 可选。复制 A 的颜色或阴影到 B 时优先 properties.appearanceFrom:{target:已观察来源整对象只读句柄,fields:[\"color\",\"shadows\"]}，软件确定性读取指定字段，此例保留正文、字号和位置。properties.appearance 直接修改专业外观，显式字段覆盖来源同名字段；文字阴影 shadows 是对象数组，每项 x/y/blur/color。不需要猜 data.appearance，不补省略项默认值。data/style 保留高级局部路径，数组和正文仍使用该字段完整值。implementation 是实例源码覆盖或 null 恢复默认，不能充当专业类型转换；frame 可局部调位置尺寸。文字范围格式使用 text.format，不能扩大为整对象。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
         "additionalProperties": false,
         "properties": {
+          "appearance": {
+            "$ref": "#/$defs/__schema2",
+            "description": "目标真实专业外观的局部参数；文字可用 fontFamily、fontSize、color、shadows、lineHeight 等。shadows 是对象数组，每项使用 x、y、blur、color。表格、图表与图形使用其公开专业样式。只应用提供字段，不改变正文、位置或省略参数；实际适用键与类型由目标领域数据验证。复制已观察对象的外观优先 appearanceFrom；显式 appearance 字段覆盖来源同名字段。不支持项明确反馈，文字范围格式使用 text.format。"
+          },
+          "appearanceFrom": {
+            "$ref": "#/$defs/__schema5",
+            "description": "从已观察且可读的整对象确定性复制指定外观字段；不需要模型转抄 CSS，也不补默认值。可与 appearance 合并，显式字段覆盖来源字段。"
+          },
           "data": {
             "$ref": "#/$defs/__schema3",
             "description": "Only supplied data properties change; omitted properties are preserved. Professional appearance, sizing, style, crop, feather, filters and poster records accept partial properties. Arrays and content values use their existing complete-value format."
@@ -30,7 +38,7 @@
             "type": "object"
           },
           "implementation": {
-            "$ref": "#/$defs/__schema5",
+            "$ref": "#/$defs/__schema8",
             "description": "源码只需 source 正文或 from 文件路径；省略 language 保留现有语言。null 恢复定义实现。workspace、模块和资源绑定由软件维护。"
           },
           "label": {
@@ -61,7 +69,7 @@
             },
             "description": "Only supplied style properties change; omitted properties are preserved. Use null to explicitly clear a CSS value.",
             "propertyNames": {
-              "$ref": "#/$defs/__schema4"
+              "$ref": "#/$defs/__schema7"
             },
             "type": "object"
           },
@@ -75,6 +83,18 @@
         "type": "number"
       },
       "__schema2": {
+        "additionalProperties": {
+          "$ref": "#/$defs/__schema3"
+        },
+        "propertyNames": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "__schema3": {
+        "$ref": "#/$defs/__schema4"
+      },
+      "__schema4": {
         "anyOf": [
           {
             "type": "null"
@@ -105,13 +125,39 @@
           }
         ]
       },
-      "__schema3": {
-        "$ref": "#/$defs/__schema2"
+      "__schema5": {
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "description": "明确复制的外观字段，例如 color、shadows；不复制正文、位置、尺寸或未列出字段。",
+            "items": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "target": {
+            "description": "已观察来源整对象的只读句柄；软件按该来源当前捕获内容读取外观。",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "fields"
+        ],
+        "type": "object"
       },
-      "__schema4": {
+      "__schema6": {
+        "minLength": 1,
         "type": "string"
       },
-      "__schema5": {
+      "__schema7": {
+        "type": "string"
+      },
+      "__schema8": {
         "anyOf": [
           {
             "anyOf": [

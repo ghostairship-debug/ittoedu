@@ -98,7 +98,7 @@ function instanceHtml(project: CourseProjectV10, instance: ComponentInstance): s
 }
 
 /** Reconstructed from current canonical objects; no HTML source or mapping is persisted beside them. */
-export function projectHtmlProjection(project: CourseProjectV10, rootIds: readonly string[]): HtmlContentProjection | undefined {
+export function projectHtmlProjection(project: CourseProjectV10, rootIds: readonly string[], viewport?: { width: number; height: number }): HtmlContentProjection | undefined {
   if (rootIds.length === 1) {
     const instance = project.instances[rootIds[0]!]!
     const implementation = instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation
@@ -118,6 +118,8 @@ export function projectHtmlProjection(project: CourseProjectV10, rootIds: readon
     if (roots.length !== 1 || parsed.childNodes.some(node => node.nodeName === '#text' && (node as DefaultTreeAdapterTypes.TextNode).value.trim())) return undefined
     const root = roots[0]!
     mappings.set(root, id)
+    // A current projection anchor is software-owned, never a second persisted identity.
+    if (!root.attrs.some(value => value.name === 'id')) root.attrs.push({ name: 'id', value: `guoling-object-${id}` })
     const data = instance.data as Record<string, unknown>
     if (typeof data.css === 'string') css.add(data.css)
     const styles = Object.entries(instance.style ?? {}).map(([key, value]) => `${key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}:${value}`).join(';')
@@ -148,7 +150,8 @@ export function projectHtmlProjection(project: CourseProjectV10, rootIds: readon
     node.childNodes.forEach((child, index) => { if (element(child)) visit(child, [...sourcePath, index]) })
   }
   body.childNodes.forEach((node, index) => { if (element(node)) visit(node, [index]) })
-  return { html: `<!doctype html><html><head>${[...css].map(value => `<style>${value}</style>`).join('')}</head>${serializeOuter(body)}</html>`, entries }
+  const canvasCss = `html,body{margin:0;padding:0;${viewport ? `width:${viewport.width}px;height:${viewport.height}px;` : ''}}`
+  return { html: `<!doctype html><html><head><style>${canvasCss}</style>${[...css].map(value => `<style>${value}</style>`).join('')}</head>${serializeOuter(body)}</html>`, entries }
 }
 
 /** Natural paths are derived once per observation from current order and names. */
@@ -247,7 +250,7 @@ export function componentProjectFiles(project: CourseProjectV10, resources: Docu
     const programViewport = { width: (layout?.widthMode === 'fluid' ? layout.wideContentWidth : layout?.readingWidth)
       ?? surface.designSize?.width ?? defaultViewport.width, height: surface.designSize?.height ?? defaultViewport.height }
     const target: ContentApplyTarget = { kind: 'container', container: { kind: 'surface', surfaceId: surface.id } }
-    const projection = projectHtmlProjection(project, surface.childIds)
+    const projection = projectHtmlProjection(project, surface.childIds, programViewport)
     if (projection) files.push({ path: `${base}.html`, kind: 'page', content: projection.html, target, projection, programViewport })
     files.push({ path: `${base}.json`, kind: 'structure', content: json({ title: surface.title, kind: surface.kind,
       designSize: surface.designSize, objects: surface.childIds.map((id, order) => ({ order: order + 1, type: project.definitions[project.instances[id]!.definitionId]!.title ?? project.instances[id]!.definitionId,

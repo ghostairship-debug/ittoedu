@@ -7,7 +7,7 @@ import { EditPreviewProjection } from '../../src/renderer/workbench/EditPreviewP
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../../src/renderer/document/SharedDocumentEditor'
 import { LessonDocumentEditor, type LessonDocumentEditorHandle } from '../../src/renderer/documentFiles/LessonDocumentEditor'
 import * as editorSession from '../../src/renderer/document/editorSession'
-import { layoutPreviewKey } from '../../src/renderer/document/editPreviewWidgets'
+import { layoutPreviewKey, sourcePreviewField } from '../../src/renderer/document/editPreviewWidgets'
 import { parseDocumentMarkdown, serializeDocumentMarkdown } from '../../src/shared/document/markdown'
 import type { EditEvent, EditSessionSnapshot } from '../../src/shared/workbench/editSession'
 import type { OpenDocumentResult } from '../../src/shared/document/ports'
@@ -23,6 +23,38 @@ const preview = (patch: Partial<EditSessionSnapshot> = {}): EditSessionSnapshot 
   targetHandle: 'handle', target: { kind: 'markdown-range', from: 0, to: 3 }, value: '生成内容', sequence: 0, status: 'active', ...patch })
 
 describe('mounted canonical editors with volatile generation projection', () => {
+  it('hydrates and retains every independent group with stable arrays and removes only each acknowledged or aborted preview', async () => {
+    let listener!: (event: EditEvent) => void, resolve!: (value: EditSessionSnapshot[]) => void
+    const store = new EditPreviewProjection({ edits: () => new Promise(done => { resolve = done }), subscribeEdits: next => { listener = next; return () => {} }, stop: vi.fn() })
+    const unsubscribe = store.subscribe(() => {}), attached = store.attach('doc')
+    const a = preview({ editId: 'a', runId: 'a', value: 'A' })
+    const b = preview({ editId: 'b', runId: 'b', target: { kind: 'markdown-range', from: 10, to: 13 }, value: 'B' })
+    listener({ type: 'edit.changed', snapshot: a })
+    resolve([a, b]); await attached
+    const both = store.readAll('doc', 0)
+    expect(both.map(value => value.editId)).toEqual(['a', 'b'])
+    expect(store.readAll('doc', 0)).toBe(both)
+    const withoutRevision = store.readAll('doc')
+    expect(store.readAll('doc', 0)).toBe(both)
+    expect(store.readAll('doc')).toBe(withoutRevision)
+    listener({ type: 'edit.finished', snapshot: { ...a, status: 'finished', revision: 1 }, result: {
+      status: 'applied', documentId: 'doc', operationId: 'a', beforeRevision: 0, revision: 1, persistence: 'recoverable',
+    } })
+    expect(store.readAll('doc', 0)).toHaveLength(2)
+    const afterAck = store.readAll('doc', 1)
+    expect(afterAck.map(value => value.editId)).toEqual(['b'])
+    const beforeAck = store.readAll('doc', 0)
+    expect(beforeAck).toHaveLength(2)
+    expect(store.readAll('doc', 1)).toBe(afterAck)
+    expect(store.readAll('doc', 0)).toBe(beforeAck)
+    listener({ type: 'edit.changed', snapshot: { ...a, sequence: 99, value: 'late A' } })
+    expect(store.readAll('doc', 1).map(value => value.editId)).toEqual(['b'])
+    listener({ type: 'edit.aborted', snapshot: { ...b, status: 'aborted' }, reason: 'stop B' })
+    expect(store.readAll('doc', 1)).toEqual([])
+    expect(store.readAll('doc', 1)).toBe(store.readAll('doc', 1))
+    unsubscribe()
+  })
+
   it('renders a whole Markdown draft across heading, paragraph separators and trailing newline without committing the preview', () => {
     const source = '# 原有标题\n\n原有正文😀。\n'
     const parsed = parseDocumentMarkdown(source, { target: 'file', createId: () => crypto.randomUUID() })
@@ -83,6 +115,8 @@ describe('mounted canonical editors with volatile generation projection', () => 
     expect(canonical.read().model).toMatchObject({ source: disk.source })
     await act(async () => { await edits.snapshot('edit', 1, '最终😀正文') })
     await waitFor(() => expect(source.dom.querySelector('[data-edit-preview]')?.textContent).toBe('最终😀正文'))
+    const activeRange = source.state.field(sourcePreviewField)[0]
+    act(() => source.dispatch({ selection: { anchor: activeRange.from, head: activeRange.to } }))
     fireEvent.keyDown(source.contentDOM, { key: 'z', ctrlKey: true })
     await waitFor(() => expect(source.dom.querySelector('[data-edit-preview]')).toBeNull())
     expect(stop).toHaveBeenCalledWith('run'); expect(canonical.read().undoDepth).toBe(1)
@@ -102,7 +136,7 @@ describe('mounted canonical editors with volatile generation projection', () => 
     const ui = render(<SharedDocumentEditor ref={handle} {...props} />)
     const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof editorSession.createLayoutEditor>, originalView = editor.view
     expect(screen.getByText('新内容😀')).toBeTruthy(); expect(onChange).not.toHaveBeenCalled(); expect(onDraft).not.toHaveBeenCalled()
-    const range = layoutPreviewKey.getState(editor.view.state)!
+    const range = layoutPreviewKey.getState(editor.view.state)![0]
     act(() => editor.view.dispatch(editor.view.state.tr.insertText('不可插入', range.from + 1)))
     expect(onChange).not.toHaveBeenCalled(); expect(screen.getAllByRole('alert').every(node => node.textContent?.includes('暂时只读'))).toBe(true)
     act(() => editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 1, 6))))
@@ -124,6 +158,8 @@ describe('mounted canonical editors with volatile generation projection', () => 
     const source = SourceView.findFromDOM(screen.getByLabelText('正文源文编辑'))!
     expect(source.state.doc.toString()).toBe(serializeDocumentMarkdown(next, 'flow'))
     expect(source.dom.querySelector('[data-edit-preview]')?.textContent).toBe('继续生成')
+    const activeRange = source.state.field(sourcePreviewField)[0]
+    act(() => source.dispatch({ selection: { anchor: activeRange.from, head: activeRange.to } }))
     fireEvent.keyDown(source.contentDOM, { key: 'z', ctrlKey: true })
     expect(cancel).toHaveBeenCalledTimes(1); expect(onUndo).not.toHaveBeenCalled()
   })

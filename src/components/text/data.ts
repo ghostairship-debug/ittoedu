@@ -12,7 +12,8 @@ export const textAppearanceSchema = z.object({
   fontSize: z.number().finite().positive().default(24),
   color: z.string().default('#000000'),
   align: z.enum(['left', 'center', 'right']).default('left'),
-  lineHeight: z.number().finite().positive().default(1.4),
+  /** CSS normal uses the actual font metrics in the shared renderer, without guessing a multiplier. */
+  lineHeight: z.union([z.number().finite().positive(), z.literal('normal')]).default(1.4),
   /** Native professional line gap in px. Absent retains the existing lineHeight multiplier API. */
   lineSpacing: z.number().finite().min(0).max(200).optional(),
   bold: z.boolean().default(false),
@@ -91,10 +92,13 @@ export function replaceTextComponentRange(data: TextComponentData, from: number,
 export function formatTextComponentRange(data: TextComponentData, from: number, to: number, style: InlineStyle): TextComponentData {
   if (to < from) throw new RangeError('文字范围顺序错误')
   const parsed = documentTextStyleSchema.parse(style)
+  if (!Object.keys(parsed).length) return data
   const [, tail] = split(data.content, from), [selected] = split({ inlines: tail }, to - from)
-  const inlines = selected.map(inline => ({ ...inline, style: { ...inline.style,
-    ...(inline.type === 'math' ? { ...(parsed.fontSize === undefined ? {} : { fontSize: parsed.fontSize }), ...(parsed.color === undefined ? {} : { color: parsed.color }) } : parsed),
-  } }))
+  const inlines = selected.map(inline => {
+    const applicable = inline.type === 'math'
+      ? { ...(parsed.fontSize === undefined ? {} : { fontSize: parsed.fontSize }), ...(parsed.color === undefined ? {} : { color: parsed.color }) } : parsed
+    return Object.keys(applicable).length ? { ...inline, style: { ...inline.style, ...applicable } } : inline
+  })
   return replaceTextComponentRange(data, from, to, { inlines })
 }
 export function editFormulaComponentSource(data: FormulaComponentData, latex: string): FormulaComponentData {

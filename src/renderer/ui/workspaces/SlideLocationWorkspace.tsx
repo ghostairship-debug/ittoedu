@@ -1,4 +1,4 @@
-import { Hand, Maximize2, Minus, MousePointer2, Play, Plus } from 'lucide-react'
+import { Hand, Maximize2, Minus, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { resolveComponentBackground, resolveComponentPresentation, isComponentVisibleAtSurface, type ComponentAuthorGeometry, type ComponentAuthorSpot, type ComponentEdit, type ComponentFrame, type CourseProjectV10 } from '../../../shared/contracts/component-platform'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
@@ -27,6 +27,7 @@ import { WORKSPACE_MEDIA_DRAG_TYPE } from '../../lessonWorkspace/workspaceMediaD
 import type { ImportedImageAsset } from '../../project/assetManager'
 import { authorSpotEdits, authorSpotGeometryEdits, authorSpotImageEdits } from '../../componentPlatform/surfaces/slide/authorSpots'
 import { createTeacherControllerHudGeometry, teacherControllerReferenceSize, isGlobalTeacherController, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, type TeacherControllerDisplayPort } from '../../../shared/teacherControllerViewportGeometry'
+import { CourseNavigationControls } from './CourseNavigationControls'
 
 export type SlideCanvasMode = 'edit' | 'run'
 export type SlideLineDrawTool = 'line' | 'elbow-arrow' | null
@@ -112,7 +113,7 @@ function SlideInstance({ id, project, surfaceId, preview, ports }: {
   </div>
 }
 const emptyPreview = (): SlideWorkspaceAuthoringResult => ({ preview: {}, guides: [], marquee: null })
-const controls = '.canvas-mode-switch,.canvas-view-controls,.canvas-label,.live-scene-bar,.command-menu,.selection-quick-bar,.text-edit-overlay,.text-edit-toolbar,[data-component-professional-editor]'
+const controls = '.canvas-mode-switch,.canvas-view-controls,.canvas-label,.command-menu,.selection-quick-bar,.text-edit-overlay,.text-edit-toolbar,[data-component-professional-editor]'
 const outsideStage = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest(controls))
 const spotKey = (spot: ComponentAuthorSpot) => `${spot.instanceId}:${spot.authorKey ?? spot.id}:${JSON.stringify(spot.scope ?? {})}`
 
@@ -137,23 +138,8 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     instanceToSurface: AffineMatrix; frame?: ComponentFrame; geometry?: ReturnType<AuthorSpotTransformGesture['update']>['geometry']; moved: boolean;
     preview?: SlideWorkspacePorts['previewAuthorSpot'] } | null>(null)
   const suppressSpotClick = useRef(false)
-  const [liveScene, setLiveScene] = useState(false), [resettingScene, setResettingScene] = useState(false)
   const [, refreshNavigation] = useState(0)
   useEffect(() => ports.teacherController?.subscribe(() => refreshNavigation(value => value + 1)), [ports.teacherController])
-  useEffect(() => { setLiveScene(false) }, [snapshot.documentId])
-  useEffect(() => { if (snapshot.canvasMode === 'run') setLiveScene(true) }, [snapshot.canvasMode, snapshot.documentId])
-  const resetScene = async (playing: boolean) => {
-    if (!ports.resetPlayback) return
-    const documentId = snapshot.documentId
-    setResettingScene(true)
-    try {
-      await ports.resetPlayback(playing)
-      if (latest.current.ports.read().documentId !== documentId) return
-      ports.setCanvasMode(playing ? 'run' : 'edit')
-      setLiveScene(playing)
-    } catch (error) { ports.report(error instanceof Error ? error.message : String(error)) }
-    finally { setResettingScene(false) }
-  }
   useEffect(() => {
     const update = () => setSpots(ports.authorSpots?.() ?? [])
     const stop = ports.subscribeAuthorSpots?.(update); update()
@@ -401,7 +387,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
   const linePoints = selectedLine?.success && lineGeometry && selected.length === 1
     ? resolveNativeLinePoints(lineGeometry, selected[0].frame.width, selected[0].frame.height).map(at => transformPoint(frameToSpaceMatrix(selected[0].frame, selected[0].parentToSurface), at)) : null
   const stop = (event: React.PointerEvent) => { event.preventDefault(); event.stopPropagation() }
-  return <main ref={workspaceRef} className={'workspace workspace--' + snapshot.canvasMode + (liveScene ? ' workspace--live' : '')} aria-label="画布"
+  return <main ref={workspaceRef} className={'workspace workspace--' + snapshot.canvasMode} aria-label="画布"
     style={snapshot.drawTool ? { cursor: 'crosshair' } : undefined}
     onDragOver={event => {
       if (snapshot.canvasMode !== 'edit') return
@@ -419,14 +405,23 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       if (event.button !== 0) return
       if (!snapshot.contentEdit && !snapshot.drawTool) {
         const selectedHandle = event.target instanceof Element && event.target.closest('[data-internal-selection]')
+        const outerHandle = !selectedHandle && event.target instanceof Element && event.target.closest('[data-handle]')
         const at = surfacePoint(event.clientX, event.clientY)
-        const hit = selectedHandle ? selectedInternal : [...spotTargets].reverse().find(value => frameContainsPoint(value.frame, at))
+        const hit = selectedHandle ? selectedInternal : outerHandle ? undefined : [...spotTargets].reverse().find(value => frameContainsPoint(value.frame, at))
         if (hit) {
           stop(event); suppressSpotClick.current = false
           if (componentIsLocked(project, hit.spot.instanceId)) return
           setSelectedSpotKey(spotKey(hit.spot)); ports.select([hit.spot.instanceId])
-          // A rich text run can be editable without an independently resizable parent box.
-          if (!hit.spot.geometry || !hit.spot.authorKey || !hit.spot.binding) return
+          // Plain professional text/image spots edit content inside an ordinary free frame.
+          // Their missing internal geometry must not swallow the outer object's drag.
+          if (!hit.spot.geometry || !hit.spot.authorKey || !hit.spot.binding) {
+            const instance = project.instances[hit.spot.instanceId], implementation = instance?.implementationOverride ?? project.definitions[instance?.definitionId]?.implementation
+            if (instance?.frame && implementation?.kind === 'builtin' && ['guoling.text', 'guoling.formula', 'guoling.image'].includes(implementation.key)) {
+              pointer.current = event.pointerId; event.currentTarget.setPointerCapture(event.pointerId)
+              setPreview(authoring.current!.pointerDown({ x: event.clientX, y: event.clientY, additive: event.shiftKey || event.ctrlKey || event.metaKey, altKey: event.altKey }, mapping()))
+            }
+            return
+          }
           event.currentTarget.setPointerCapture(event.pointerId)
           const handle = selectedHandle && event.target instanceof Element ? event.target.closest('[data-handle]')?.getAttribute('data-handle') as FreeResizeHandle | 'rotate' | null : null
           const instanceToSurface = frameToSpaceMatrix(hit.target.frame, hit.target.parentToSurface), captured = ports.capture()
@@ -518,7 +513,9 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         const value = line.current, proposal = proposeSlideLineHandle(value.initial, value.geometry, value.handle, snapLine(at, event.altKey, value.instanceId))
         if (proposal) setLinePreview({ instanceId: value.instanceId, ...proposal }); return
       }
-      setPreview(authoring.current!.pointerMove({ x: event.clientX, y: event.clientY, altKey: event.altKey, shiftKey: event.shiftKey }, mapping()))
+      const next = authoring.current!.pointerMove({ x: event.clientX, y: event.clientY, altKey: event.altKey, shiftKey: event.shiftKey }, mapping())
+      if (Object.keys(next.preview).length) suppressSpotClick.current = true
+      setPreview(next)
     }}
     onPointerUpCapture={event => {
       if (internalGesture.current?.pointerId === event.pointerId) {
@@ -646,22 +643,8 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
           top: (viewportBounds?.top ?? 0) + bounds.top * viewportScale, width: bounds.width * viewportScale, height: bounds.height * viewportScale }
         return { left: rect.left + bounds.left * scale, top: rect.top + bounds.top * scale, width: bounds.width * scale, height: bounds.height * scale }
       }} />
-    <div className="canvas-mode-switch" role="group" aria-label="画布模式">
-      <button type="button" className={snapshot.canvasMode === 'edit' ? 'canvas-mode-switch__active' : ''} aria-pressed={snapshot.canvasMode === 'edit'} onClick={() => ports.setCanvasMode('edit')}><MousePointer2 size={13} />编辑状态</button>
-      <button type="button" className={snapshot.canvasMode === 'run' ? 'canvas-mode-switch__active' : ''} aria-pressed={snapshot.canvasMode === 'run'} onClick={() => ports.setCanvasMode('run')}><Play size={13} />当前位置试运行</button>
-      {snapshot.canvasMode === 'run' && <div role="group" aria-label="试运行翻页" data-testid="course-try-run-chrome" style={{ display: 'flex', gap: 6, marginLeft: 8 }}>
-        <button type="button" data-testid="course-try-run-previous" disabled={!ports.teacherController?.execute || ports.teacherController.canExecute?.({ type: 'scene.previous' }) === false}
-          onClick={() => { void ports.teacherController?.execute?.({ type: 'scene.previous' }).then(accepted => { if (!accepted) ports.report('当前不能切换到上一页') }).catch(error => ports.report(String(error))) }}>上一页</button>
-        <button type="button" data-testid="course-try-run-next" disabled={!ports.teacherController?.execute || ports.teacherController.canExecute?.({ type: 'scene.next' }) === false}
-          onClick={() => { void ports.teacherController?.execute?.({ type: 'scene.next' }).then(accepted => { if (!accepted) ports.report('当前不能切换到下一页') }).catch(error => ports.report(String(error))) }}>下一页</button>
-        {ports.resetPlayback && <button type="button" disabled={resettingScene} onClick={() => { void resetScene(true) }}>从初始状态重播</button>}
-      </div>}
-    </div>
-    {snapshot.canvasMode === 'edit' && liveScene && <div className="live-scene-bar" role="region" aria-label="运行现场" data-testid="live-scene-bar">
-      <strong>运行现场</strong><span className="live-scene-bar__message" role="status">{resettingScene ? '正在恢复初始编辑画面…' : '宿主互动与媒体已暂停；自定义脚本可能继续运行。源码修改会重新加载组件。'}</span>
-      <button type="button" disabled={resettingScene} onClick={() => ports.setCanvasMode('run')}><Play size={13} />继续运行</button>
-      {ports.resetPlayback && <button type="button" disabled={resettingScene} onClick={() => { void resetScene(false) }}>回到编辑画面</button>}
-    </div>}
+    <CourseNavigationControls canvasMode={snapshot.canvasMode} onCanvasModeChange={ports.setCanvasMode}
+      navigation={ports.teacherController} beforeNavigate={ports.commitTextEdit} resetPlayback={ports.resetPlayback} report={ports.report} />
     {snapshot.canvasMode === 'edit' && <div className="canvas-view-controls" role="group" aria-label="画布视图">
       <button type="button" aria-label="缩小画布" onClick={() => setZoom(view.zoom - 0.1)}><Minus size={14} /></button>
       <output aria-label="画布缩放比例">{Math.round(view.zoom * 100)}%</output>

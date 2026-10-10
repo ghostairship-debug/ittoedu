@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { attachmentSnapshotSchema, type AttachmentReader, type AttachmentSnapshot, type AttachmentRepresentation, type AttachmentExtractor, type AttachmentPageRange } from '../../../shared/workbench/attachments'
 import { prepareImageResource } from '../admittedImageResource'
+import { ImageDecoderUnavailableError } from '../imageDecoder'
 import { MATERIAL_EXTRACTION_LIMITS } from '../../../shared/materialExtraction'
 
 export class AttachmentError extends Error {
@@ -177,7 +178,10 @@ export class AttachmentService implements AttachmentReader {
       if (declared && declared !== mediaType && declared !== 'application/octet-stream') throw new AttachmentError('media-type-mismatch', '图片声明类型与真实字节不匹配')
       let admitted: Awaited<ReturnType<typeof prepareImageResource>>
       try { admitted = await prepareImageResource({ bytes, mimeType: mediaType, filename: name }, randomUUID) }
-      catch (cause) { throw new AttachmentError('invalid-image', '附件图片无法完整解码', { cause }) }
+      catch (cause) {
+        if (cause instanceof ImageDecoderUnavailableError) throw new AttachmentError(cause.code, cause.message, { cause })
+        throw new AttachmentError('invalid-image', '附件图片无法完整解码', { cause })
+      }
       representations.push({ id: 'original-image', kind: 'image', mediaType, blobRef, width: admitted.meta.width!, height: admitted.meta.height!, provenance: { ...provenance, producer: 'sharp-verified-v1' } })
     } else if (declared?.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(name)) {
       throw new AttachmentError('invalid-image', '附件没有有效的图片字节')
@@ -242,16 +246,20 @@ export class AttachmentService implements AttachmentReader {
 
   /** Derivation creates a new immutable record; callers explicitly replace their draft reference. */
   /** Process bounded batches but keep the immutable source and completed batches for resume. */
-  async extract(attachmentId: string, options: { pages?: AttachmentPageRange; images?: 'auto' | 'all'; signal?: AbortSignal; onProgress?(loaded: number, total: number): void } = {}): Promise<AttachmentSnapshot> {
+  async extract(attachmentId: string, options: { pages?: AttachmentPageRange; images?: 'auto' | 'all'; maxPages?: number; fromPage?: number; signal?: AbortSignal; onProgress?(loaded: number, total: number): void } = {}): Promise<AttachmentSnapshot> {
     abort(options.signal)
     const original = await this.readSnapshot(attachmentId)
     const format = original.name.split('.').pop()?.toLowerCase()
-    if (format === 'docx') return this.extractBatch(attachmentId, options)
-    if (format !== 'pdf' && format !== 'pptx') return this.extractBatch(attachmentId, options)
+    if (options.maxPages !== undefined && (!Number.isSafeInteger(options.maxPages) || options.maxPages < 1)
+      || options.fromPage !== undefined && (!Number.isSafeInteger(options.fromPage) || options.fromPage < 1))
+      throw new AttachmentError('invalid-extraction', '读取批次页范围无效')
     const requested = options.pages && structuredClone(options.pages)
     if (requested && (!Number.isSafeInteger(requested.from) || !Number.isSafeInteger(requested.to)
       || requested.from < 1 || requested.to < requested.from)) throw new AttachmentError('invalid-extraction', '页范围无效')
-    const key = hash(Buffer.from(JSON.stringify(['batches-v1', original.id, original.digest, requested ?? null, options.images ?? 'all'])))
+    const bounded = options.maxPages !== undefined || options.fromPage !== undefined
+    const key = hash(Buffer.from(JSON.stringify(bounded
+      ? ['batches-v2', original.id, original.digest, requested ?? null, options.images ?? 'all', options.maxPages ?? null, options.fromPage ?? 1]
+      : ['batches-v1', original.id, original.digest, requested ?? null, options.images ?? 'all'])))
     const filename = path.join(this.directory, 'extraction-progress', `${key}.json`)
     type Progress = { source: string; digest: string; batches: string[]; result?: string }
     let progress: Progress = { source: original.id, digest: original.digest, batches: [] }
@@ -269,8 +277,14 @@ export class AttachmentService implements AttachmentReader {
       await fs.mkdir(path.dirname(filename), { recursive: true })
       await this.atomic(filename, Buffer.from(JSON.stringify(progress)))
     })
+    if (format !== 'pdf' && format !== 'pptx') {
+      const extracted = await this.extractBatch(attachmentId, options)
+      progress.result = extracted.id; await persist()
+      return extracted
+    }
     const batches: AttachmentSnapshot[] = []
-    let next = requested?.from ?? 1, total: number | undefined
+    const from = requested?.from ?? options.fromPage ?? 1
+    let next = from, total: number | undefined
     for (const id of progress.batches) {
       const batch = await this.readSnapshot(id), coverage = batch.coverage
       if (batch.derivedFrom !== original.id || batch.digest !== original.digest || !coverage?.selectedPages
@@ -278,13 +292,16 @@ export class AttachmentService implements AttachmentReader {
         throw new AttachmentError('invalid-extraction', '已保存提取批次不连续或来源改变')
       total = coverage.totalPages; next = coverage.selectedPages.to + 1; batches.push(batch)
     }
-    const report = () => options.onProgress?.(next - (requested?.from ?? 1), (requested?.to ?? total ?? 0) - (requested?.from ?? 1) + 1)
+    const last = () => Math.min(requested?.to ?? total ?? Infinity, total ?? Infinity,
+      options.maxPages === undefined ? Infinity : from + options.maxPages - 1)
+    const report = () => options.onProgress?.(next - from, Number.isFinite(last()) ? last() - from + 1 : 0)
     if (batches.length) report()
-    while (total === undefined || next <= (requested?.to ?? total)) {
+    while (total === undefined || next <= last()) {
       abort(options.signal)
       const batch = await this.extractBatch(attachmentId, { ...options,
         ...(requested ? { pages: { from: next, to: requested.to } } : { pages: undefined }),
-        fromPage: next, maxPages: MATERIAL_EXTRACTION_LIMITS.pages })
+        fromPage: next, maxPages: Math.min(MATERIAL_EXTRACTION_LIMITS.pages,
+          options.maxPages === undefined ? MATERIAL_EXTRACTION_LIMITS.pages : from + options.maxPages - next) })
       const coverage = batch.coverage!
       if (!coverage.selectedPages || coverage.selectedPages.from !== next || !coverage.totalPages
         || total !== undefined && total !== coverage.totalPages) throw new AttachmentError('invalid-extraction', '提取批次页码不连续')
@@ -299,7 +316,7 @@ export class AttachmentService implements AttachmentReader {
       representations.push(...batch.representations.map(item => ({ ...item, id: id(item.id) })))
       gaps.push(...batch.gaps.map(gap => ({ ...gap, ...(gap.resolutionRepresentationId ? { resolutionRepresentationId: id(gap.resolutionRepresentationId) } : {}) })))
     }
-    const selectedPages = { from: requested?.from ?? 1, to: next - 1 }
+    const selectedPages = { from, to: next - 1 }
     const combined = attachmentSnapshotSchema.parse({ ...original, id: randomUUID(), derivedFrom: original.id,
       capturedAt: Date.now(), representations, gaps,
       coverage: { format, ...(options.images === 'auto' ? { imageMode: 'auto' as const } : {}), totalPages: total, selectedPages, complete: !gaps.length && selectedPages.from === 1 && selectedPages.to === total } })
@@ -349,7 +366,10 @@ export class AttachmentService implements AttachmentReader {
         if (!mediaType || mediaType !== asset.mime) { gaps.push({ code: 'unsupported-image', message: `图片 ${asset.id} 尚无可发送的已验证像素表示（${asset.mime}）`, locator: fragment.locator }); continue }
         let admitted: Awaited<ReturnType<typeof prepareImageResource>>
         try { admitted = await prepareImageResource({ bytes: assetBytes, mimeType: mediaType, filename: asset.id }, randomUUID) }
-        catch { gaps.push({ code: 'unsupported-image', message: `图片 ${asset.id} 无法完整解码；已保留原件与其他可读片段`, locator: fragment.locator }); continue }
+        catch (cause) {
+          if (cause instanceof ImageDecoderUnavailableError) throw new AttachmentError(cause.code, cause.message, { cause })
+          gaps.push({ code: 'unsupported-image', message: `图片 ${asset.id} 无法完整解码；已保留原件与其他可读片段`, locator: fragment.locator }); continue
+        }
         const pageImage = extracted.pageImages.find(image => image.assetId === asset.id)
         if (material.format === 'pdf' && (!pageImage || pageImage.width !== admitted.meta.width || pageImage.height !== admitted.meta.height)) throw new AttachmentError('invalid-extraction', 'PDF 页图尺寸与实际像素不一致')
         const blobRef = { digest: hash(assetBytes), byteLength: assetBytes.length }

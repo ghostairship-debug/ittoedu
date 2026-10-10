@@ -30,7 +30,7 @@ export function HtmlImportDialog({ sourceName, destinations, busy, error, onCanc
       <label style={{ display: 'grid', gap: 6, marginBottom: 12 }}>目标页面
         <select aria-label="导入目标页面" value={locationId} disabled={busy} onChange={event => { setLocationId(event.target.value); setAnchorBlockId('') }}>
           {destinations.map(target => <option key={target.locationId} value={target.locationId}>
-            {target.surfaceType === 'slide' ? '演示页' : '流式讲义'} · {target.label}
+            {target.surfaceType === 'slide' ? '演示页' : '流式布局'} · {target.label}
           </option>)}
         </select>
       </label>

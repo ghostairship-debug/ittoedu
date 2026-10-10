@@ -8,14 +8,14 @@ import type {
 
 const DROPDOWN_LABELS: Record<CourseEditorDropdownAction, string> = {
   'slide-page': '新增演示页面',
-  'flow-page': '新增流式讲义',
+  'flow-page': '新增流式布局',
   'spatial-page': '新增无限画布',
 }
 
 const PRIMARY_LABELS: Record<CourseEditorPrimaryAction, string> = {
   scene: '新建场景',
   'slide-page': '新增演示页面',
-  'flow-page': '新增流式讲义',
+  'flow-page': '新增流式布局',
   'spatial-page': '新增无限画布',
 }
 

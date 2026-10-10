@@ -38,7 +38,7 @@ describe('MermaidCodeBlockView', () => {
     host.remove()
   })
 
-  it('leaves empty preview when source has no mermaid keyword', async () => {
+  it('passes every nonempty Mermaid block to the real renderer without a type whitelist', async () => {
     const host = document.createElement('div')
     document.body.append(host)
     const node = codeBlock('just some\nplain text\nno diagram keyword here', 'mermaid')
@@ -51,8 +51,8 @@ describe('MermaidCodeBlockView', () => {
     await new Promise(resolve => setTimeout(resolve, 50))
     const preview = host.querySelector<HTMLElement>('.mermaid-preview')
     expect(preview).toBeTruthy()
-    expect(preview!.dataset.state).toBe('empty')
-    expect(preview!.querySelector('svg')).toBeNull()
+    expect(preview!.dataset.state).toBe('ready')
+    expect(preview!.querySelector('svg')).toBeTruthy()
     view.destroy()
     host.remove()
   })

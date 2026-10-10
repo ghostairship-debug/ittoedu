@@ -1,5 +1,5 @@
 {
-  "description": "在一份授权 PDF/DOCX/PPTX 或文本材料的已提取表示中按原文字面量检索，返回真实页/段落、短上下文、缺口与续扫游标；图片或提取失败不冒充没有命中。用 material.read 回读命中表示。",
+  "description": "在一份授权 PDF/DOCX/PPTX 或文本材料中按原文字面量检索，软件按需准备缓存，不必先提取。可指定 pages；省略时分批扫描，nextCursor 配合同一原材料/query 续扫。返回真实页/段落、短上下文、缺口与未读页段；未扫描、图片或提取失败不冒充没有命中。用 material.read 回读命中表示。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -18,6 +18,26 @@
         "maximum": 100,
         "minimum": 1,
         "type": "integer"
+      },
+      "pages": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "to": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
       },
       "query": {
         "minLength": 1,

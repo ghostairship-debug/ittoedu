@@ -121,15 +121,14 @@ test('D3: real Electron Component instances preserve declared targets and publis
       if (!document || document.model.kind !== 'course-v9') throw new Error('正式课件未打开')
       const location = document.model.project.locations.find(entry => entry.kind === 'slide-scene')
       if (!location) throw new Error('缺少 Slide 位置')
-      const status = await desktop.externalMcp!.status()
+      const status = await desktop.externalMcp!.configure({ enabled: true })
       if (status.state !== 'running') throw new Error(`Resident MCP 未运行：${status.message ?? status.state}`)
-      return { endpoint: status.endpoint, bearer: await desktop.externalMcp!.revealToken(), workspaceId,
+      return { endpoint: status.endpoint, workspaceId,
         documentId: document.documentId, documentRevision: document.revision, locationLabel: location.label }
     }, { folder: workspace, file: COURSE })
 
     client = new Client({ name: 'guoling-d3-component-audit-e2e', version: '1' })
-    await client.connect(new StreamableHTTPClientTransport(new URL(connection.endpoint),
-      { requestInit: { headers: { Authorization: `Bearer ${connection.bearer}` } } }))
+    await client.connect(new StreamableHTTPClientTransport(new URL(connection.endpoint)))
     const readTool = async <T,>(name: string, input: Record<string, unknown>): Promise<T> => {
       const response = await client!.callTool({ name, arguments: { arguments: input } })
       const result = (response.structuredContent as { result: ToolResult }).result

@@ -3,7 +3,7 @@ import { Plugin, EditorState, NodeSelection, TextSelection, type Transaction } f
 import { Decoration, DecorationSet, EditorView } from 'prosemirror-view'
 import { baseKeymap, chainCommands, exitCode, splitBlock } from 'prosemirror-commands'
 import { keymap } from 'prosemirror-keymap'
-import { type MarkdownDocument } from '../../shared/document/markdown'
+import { parseDocumentMarkdown, type MarkdownDocument } from '../../shared/document/markdown'
 import type { DocumentPoint, DocumentSelection } from '../../shared/document/ports'
 import { toEditorDocument, fromEditorDocument, renewEditorIdentities, editorPositionToPoint } from './documentAdapter'
 import { documentEditorSchema as schema } from './editorSchema'
@@ -240,7 +240,18 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         return true
       }
       const data = event.clipboardData?.getData(clipboardType)
-      if (!data) return false
+      if (!data) {
+        const text = event.clipboardData?.getData('text/plain') ?? ''
+        // Explicit fences carry structure in rich document paste. Within a code block, or
+        // for explicit plain paste above, keep the user's literal input.
+        if (view.state.selection.$from.parent.type.name === 'code_block' || !/^ {0,3}(?:`{3,}|~{3,})[^\n]*\n/m.test(text)) return false
+        const parsed = parseDocumentMarkdown(text, { createId: () => crypto.randomUUID(), target: 'file', recoverUnsupportedBlocks: true })
+        if (parsed.status !== 'valid') { options.diagnostic(parsed.diagnostics.map(value => value.message).join('；')); return false }
+        const fragment = toEditorDocument(parsed.document.content).content
+        event.preventDefault()
+        view.dispatch(view.state.tr.replaceSelection(new Slice(fragment, 0, 0)).scrollIntoView())
+        return true
+      }
       try {
         const payload = JSON.parse(data)
         const moved = payload.editorId === editorId && payload.cutToken && payload.cutToken === pendingCut
@@ -346,7 +357,11 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       const slice = Slice.fromJSON(schema, payload.slice)
       const source = { content: fromEditorDocument(schema.nodes.doc.create(null, slice.content)), resources: payload.resources, identity }
       prepared = await prepareDocumentClipboard(source, targetOptions.document.resources, port)
-      if (view.isDestroyed || !view.state.doc.eq(targetState.doc) || !view.state.selection.eq(targetState.selection) || options.revision !== revision) { await port.discard(prepared.prepared); return }
+      if (view.isDestroyed || !view.state.doc.eq(targetState.doc) || !view.state.selection.eq(targetState.selection) || options.revision !== revision) {
+        await port.discard(prepared.prepared)
+        targetOptions.diagnostic('粘贴目标已改变，素材未应用；请在需要的位置重新粘贴。')
+        return
+      }
       const assets = new Map(options.document.resources.assets.map(asset => [asset.assetId, asset])); prepared.document.resources.assets.forEach(asset => assets.set(asset.assetId, asset))
       const components = new Map(options.document.resources.components.map(component => [`${component.packageId}@${component.version}`, component])); prepared.document.resources.components.forEach(component => components.set(`${component.packageId}@${component.version}`, component))
       options = { ...options, document: { ...options.document, resources: { assets: [...assets.values()], components: [...components.values()] } } }

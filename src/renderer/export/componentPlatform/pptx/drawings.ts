@@ -57,13 +57,14 @@ export function drawProfessional(target: PptxDrawingTarget, key: string, instanc
         ...(inline.style.fontSize ? { fontSize: inline.style.fontSize * frame.scaleY } : {}) } }] : []
     })
     const { appearance: style } = data
+    if (style.lineHeight === 'normal' && style.lineSpacing === undefined) warnings.push('PPTX 使用自身字体度量计算普通行距；浏览器 normal 行高在 HTML 中原样保留。')
     if ((style.highlightColor && pptxColorAlpha(style.highlightColor) < 1)
       || inlines.some(inline => inline.type === 'text' && inline.style?.highlightColor && pptxColorAlpha(inline.style.highlightColor) < 1))
       warnings.push('PPTX 原生文字高亮不支持透明色，保留高亮 RGB 与可编辑文字；原透明度保留在工程。')
     const node: TextNode = { ...base(instance, frame), type: 'text', text: textOutputAdapter.text(data), runs,
       flipX: style.flipX, flipY: style.flipY !== frame.flipY,
       style: { ...style, fontSize: style.fontSize * frame.scaleY,
-        lineSpacing: (style.lineSpacing ?? style.fontSize * (style.lineHeight - 1.22)) * frame.scaleY,
+        lineSpacing: (style.lineSpacing ?? style.fontSize * ((style.lineHeight === 'normal' ? 1.22 : style.lineHeight) - 1.22)) * frame.scaleY,
         letterSpacing: style.letterSpacing * frame.scaleX, padding: style.padding * frame.scaleY,
         cornerRadius: style.cornerRadius * Math.min(frame.scaleX, frame.scaleY),
         overflow: data.sizing.mode === 'shrink-text' ? 'shrink' : data.sizing.mode === 'fixed' ? 'fixed' : 'auto-height',

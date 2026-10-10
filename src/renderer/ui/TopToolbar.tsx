@@ -183,7 +183,7 @@ export function TopToolbar({
                       onNewFlow()
                     }}
                   >
-                    空白流式讲义
+                    空白流式布局
                   </button>
                 ) : null}
               </div>

@@ -6,6 +6,7 @@ import type { ExecutionDocumentReference, ExecutionSelectionTarget } from '../..
 import { containsTarget, readTarget, prepareExecutionContentOutput, flowTextSelectionTarget } from '../../core/tools/ToolTargets'
 import type { ExecutionContentOutput } from '../../shared/workbench/execution'
 import { isCourseInstanceRange, type CourseInstanceTarget } from '../../core/tools/ToolTargets'
+import type { UserQuestionView } from '../../shared/workbench/userQuestion'
 
 export interface SelectionCapture {
   documentId: string
@@ -58,6 +59,11 @@ export function captureMarkdownSelection(snapshot: DocumentSnapshot, value: Docu
   if (!value.ranges?.length) throw new Error(value.message ?? '正文选区无法定位。')
   return captureSelection(snapshot, value.ranges.map(range => ({ kind: 'markdown-range', from: range.from, to: range.to })), value.label, value.source)
 }
+/** Literal source selections in TXT and HTML source mode retain UTF-16 source ranges. */
+export function capturePlainTextSelection(snapshot: DocumentSnapshot, value: DocumentContextSelection): SelectionCapture {
+  if (snapshot.model.kind !== 'text' || snapshot.model.source !== value.source || !value.ranges?.length) throw new Error('文本输入尚未确认或选区已改变，请重新选择。')
+  return captureSelection(snapshot, value.ranges.map(range => ({ kind: 'markdown-range', from: range.from, to: range.to })), value.label, value.source)
+}
 /** One block of a Flow document as a whole, found by its identity whatever else changed (an element AI card, M15). */
 export function captureFlowBlock(snapshot: DocumentSnapshot, surfaceId: string, blockId: string, label: string): SelectionCapture {
   return captureCourseInstanceSelection(snapshot, surfaceId, [blockId], label)
@@ -81,17 +87,45 @@ export class SelectionContextController {
   private requestHandler?: (request: ContextualEditRequest) => void
   private preparers = new Map<string, () => Promise<DocumentSnapshot>>()
   private fallback?: (documentId: string) => Promise<DocumentSnapshot>
+  private clearers = new Map<string, Set<(targets?: readonly ExecutionSelectionTarget[]) => void>>()
+  private removed = new Map<string, string>()
+  private targetViews = new Map<string, { rect(target: ExecutionSelectionTarget): DOMRect | null; select(target: ExecutionSelectionTarget): boolean; root(): HTMLElement | null }>()
   constructor(private readonly readDocument = (id: string) => window.desktopAPI!.documents!.read(id)) {}
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   readVersion = () => this.version
   private notify() { ++this.version; for (const listener of this.listeners) listener() }
   getManual(id: string) { return this.manual.get(id) ?? null }
   getPinned(id: string) { return this.pinned.get(id) ?? null }
-  setManual(id: string, value: SelectionCapture | null) {
+  setManual(id: string, value: SelectionCapture | null, explicit = true) {
+    const identity = value ? JSON.stringify(value.targets) : null
+    if (!explicit && identity && this.removed.get(id) === identity) return
+    if (explicit || identity && this.removed.get(id) !== identity) this.removed.delete(id)
     // Explicit user/card navigation takes precedence over a read of an earlier canvas selection.
     this.tickets.set(id, (this.tickets.get(id) ?? 0) + 1)
     if (JSON.stringify(this.manual.get(id) ?? null) === JSON.stringify(value)) return
     if (value) this.manual.set(id, structuredClone(value)); else this.manual.delete(id)
+    this.notify()
+  }
+  registerSelectionClearer(id: string, clear: (targets?: readonly ExecutionSelectionTarget[]) => void) {
+    const clearers = this.clearers.get(id) ?? new Set<(targets?: readonly ExecutionSelectionTarget[]) => void>()
+    this.clearers.set(id, clearers); clearers.add(clear)
+    return () => { clearers.delete(clear); if (!clearers.size) this.clearers.delete(id) }
+  }
+  registerTargetView(id: string, view: { rect(target: ExecutionSelectionTarget): DOMRect | null; select(target: ExecutionSelectionTarget): boolean; root(): HTMLElement | null }) {
+    this.targetViews.set(id, view)
+    this.notify()
+    return () => { if (this.targetViews.get(id) === view) { this.targetViews.delete(id); this.notify() } }
+  }
+  targetView(id: string) { return this.targetViews.get(id) }
+  /** Remove only a currently selected target; an offscreen pin must not disturb another selection. */
+  removeSelection(id: string, targets: readonly ExecutionSelectionTarget[]) {
+    const current = this.manual.get(id)
+    if (!current || !current.targets.some(target => targets.some(value => JSON.stringify(value) === JSON.stringify(target)))) return
+    this.tickets.set(id, (this.tickets.get(id) ?? 0) + 1)
+    this.removed.set(id, JSON.stringify(current.targets))
+    const remaining = current.targets.filter(target => !targets.some(value => JSON.stringify(value) === JSON.stringify(target)))
+    if (remaining.length) this.manual.set(id, { ...current, targets: remaining }); else this.manual.delete(id)
+    for (const clear of this.clearers.get(id) ?? []) clear(targets)
     this.notify()
   }
   async observe(id: string, revision: number, make: (snapshot: DocumentSnapshot) => SelectionCapture | null, active = () => true) {
@@ -99,18 +133,34 @@ export class SelectionContextController {
     try {
       const snapshot = await this.readDocument(id)
       if (this.tickets.get(id) !== ticket || !active()) return
-      this.setManual(id, snapshot.revision === revision ? make(snapshot) : null)
+      const value = snapshot.revision === revision ? make(snapshot) : null
+      if (!value) this.removed.delete(id)
+      this.setManual(id, value, false)
     } catch { if (this.tickets.get(id) === ticket && active()) this.setManual(id, null) }
   }
   register(id: string, prepare: () => Promise<DocumentSnapshot>) { this.preparers.set(id, prepare); return () => { if (this.preparers.get(id) === prepare) this.preparers.delete(id) } }
   setFallback(prepare: (id: string) => Promise<DocumentSnapshot>) { this.fallback = prepare; return () => { if (this.fallback === prepare) this.fallback = undefined } }
   async prepare(id: string) { return this.preparers.get(id)?.() ?? this.fallback?.(id) ?? this.readDocument(id) }
+  async prepareQuestion(question: UserQuestionView) {
+    const references = question.currentDraft ?? []
+    const ids = [...new Set(references.map(reference => reference.documentId))]
+    const snapshots = await Promise.all(ids.map(id => this.prepare(id)))
+    return snapshots.map(snapshot => {
+      const reference = references.find(value => value.documentId === snapshot.documentId)
+      if (!reference || snapshot.epoch !== reference.epoch) throw new Error('确认的作品已关闭或重新打开，请重新核对当前稿。')
+      // Main owns the captured handle and commit history. A renderer raw range
+      // from the original question cannot map later human edits safely.
+      return { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision }
+    })
+  }
   setPinned(references: readonly ExecutionDocumentReference[]) {
     const next = new Map<string, SelectionCapture>()
-    for (const reference of references) if (reference.selection?.length) {
+    for (const reference of references) if (reference.pinned !== false && reference.selection?.length) {
       const old = this.pinned.get(reference.documentId), manual = this.manual.get(reference.documentId)
       const matching = [old, manual].find(value => value?.epoch === reference.epoch && value.revision === reference.revision && JSON.stringify(value.targets) === JSON.stringify(reference.selection))
-      next.set(reference.documentId, matching ?? { documentId: reference.documentId, epoch: reference.epoch, revision: reference.revision, targets: structuredClone(reference.selection), label: `选中 ${reference.selection.length} 处内容` })
+      const previous = next.get(reference.documentId)
+      const capture = matching ?? { documentId: reference.documentId, epoch: reference.epoch, revision: reference.revision, targets: structuredClone(reference.selection), label: `选中 ${reference.selection.length} 处内容` }
+      next.set(reference.documentId, previous ? { ...capture, targets: [...previous.targets, ...capture.targets.filter(target => !previous.targets.some(value => JSON.stringify(value) === JSON.stringify(target)))] } : capture)
     }
     if (JSON.stringify([...next]) === JSON.stringify([...this.pinned])) return
     this.pinned = next; this.notify()

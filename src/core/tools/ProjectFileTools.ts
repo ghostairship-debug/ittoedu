@@ -36,7 +36,7 @@ const descriptions: Record<ProjectFileToolName, string> = {
 }
 
 /** Current public tools; legacy file mutation parsers above are not advertised as V10 writers. */
-const publicProjectFileNames = ['project.list', 'project.read', 'project.apply', 'project.save'] as const
+const publicProjectFileNames = ['project.list', 'project.read', 'project.apply'] as const
 export type PublicProjectFileToolName = typeof publicProjectFileNames[number]
 export interface ProjectFileToolHandlers {
   /** The existing project-file owner and document delivery, including captured-path planning. */
@@ -49,13 +49,13 @@ export const projectFileRegistrations = publicProjectFileNames.map(name => regis
     'project.move': '移动工程文件', 'project.delete': '删除工程文件', 'project.save': '保存课件', 'project.apply': '应用工程内容' }[name],
     group: (name === 'project.list' || name === 'project.read' ? 'read' : 'edit') as 'read' | 'edit', targetKinds: ['document'] as ['document'] },
 }, {
-  capability: name === 'project.save' ? 'save' : name === 'project.apply' ? 'write' : 'read',
-  effect: name === 'project.apply' ? 'document-edit' : name === 'project.save' ? 'document-save' : null,
+  capability: name === 'project.apply' ? 'write' : 'read',
+  effect: name === 'project.apply' ? 'document-edit' : null,
   family: 'content',
+  exposure: 'direct',
   supports: context => context.componentContent !== false
-    && (name === 'project.save' ? context.deliveries !== false : true)
-    && (name === 'project.apply' || name === 'project.save'
-      ? hasRunWrite(context, name === 'project.apply' ? ['spatial-graph'] : [], 'course-v10') || context.projectFilesAccess === 'write'
+    && (name === 'project.apply'
+      ? hasRunWrite(context, ['spatial-graph'], 'course-v10') || context.projectFilesAccess === 'write'
       : hasRunDocument(context, 'course-v10') || context.projectFilesAccess !== undefined),
   targets: projectToolTarget,
   handler: (context, input) => context.projectFiles(name, input),

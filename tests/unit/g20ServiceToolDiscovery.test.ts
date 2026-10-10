@@ -8,12 +8,29 @@ import type { HostJobRef, HostToolServices } from '../../src/core/tools/HostTool
 import { workbenchServiceToolCatalog } from '../../src/core/tools/WorkbenchServiceTools'
 import type { ComputeJobInput, ComputeJobSnapshot } from '../../src/shared/workbench/compute'
 import type { ExecutionPermissionMode } from '../../src/shared/workbench/executionPermission'
+import { canonicalToolRegistration, describeTools } from '../../src/core/tools/ToolCatalog'
+import { objectUpdateInputSchema } from '../../src/core/tools/toolSchemas'
 
 const jobs = ['job.status', 'job.wait', 'job.logs', 'job.cancel', 'compute.run', 'delegate.start', 'local.run', 'delegate.readonly', 'delegate.read']
-const baseline = [...jobs, 'media.discover', 'media.start']
+const baseline = ['media.discover']
 const serviceNames = new Set<string>(workbenchServiceToolCatalog.map(tool => tool.name))
 
-function fixture() {
+it('projects observed appearance copying with distinct read-source fields and no invented HTML range formatting', () => {
+  const input = { target: 'writable-b', properties: { appearanceFrom: { target: 'readonly-a', fields: ['color', 'shadows'] }, appearance: { color: '#FFFF00' } } }
+  expect(objectUpdateInputSchema.parse(input)).toEqual(input)
+  for (const fields of [[], ['color', 'color'], Array.from({ length: 65 }, (_, index) => `field-${index}`)])
+    expect(objectUpdateInputSchema.safeParse({ ...input, properties: { appearanceFrom: { target: 'readonly-a', fields } } }).success).toBe(false)
+  expect(objectUpdateInputSchema.safeParse({ ...input, properties: { appearanceFrom: { target: 'readonly-a', fields: ['color'], frame: {} } } }).success).toBe(false)
+  const schema = JSON.stringify(describeTools(['object.update'])[0].schema)
+  expect(schema).toContain('appearanceFrom'); expect(schema).toContain('"uniqueItems":true')
+  const format = canonicalToolRegistration('text.format')!
+  expect(format.manual.targetKinds).not.toContain('html-author-field')
+  expect(format.supports({ scopes: [{ kind: 'text', writableTargetKinds: ['html-author-field'], wholeDocumentWritable: true }] })).toBe(false)
+  expect(format.supports({ scopes: [{ kind: 'markdown', writableTargetKinds: ['html-author-field'], wholeDocumentWritable: false }] })).toBe(false)
+  expect(format.supports({ scopes: [{ kind: 'markdown', writableTargetKinds: ['markdown-range'], wholeDocumentWritable: false }] })).toBe(true)
+})
+
+function fixture(external = false) {
   const driver = new MarkdownDriver()
   const registry = new DocumentRegistry({ drivers: [driver], createId: randomUUID, bindingKey: binding => binding.path,
     persistence: { append: async () => {}, save: async () => { throw new Error('Discovery must not save files') } } })
@@ -42,6 +59,8 @@ function fixture() {
       calls.push('media.start'); return { status: 'not-configured' }
     } },
   }
+  if (external) services.web = { search: async () => ({ status: 'not-configured', reason: '没有搜索连接' }),
+    open: async () => { calls.push('web.open'); return { status: 'not-configured', reason: '没有网页读取连接' } } }
   gateway.configureHostServices(services)
   const begin = (runId: string, permission: ExecutionPermissionMode = 'workspace') => gateway.beginRun({
     runId, actor: 'agent', documents: [], fileAccess: { permission, workspaceRoot: 'D:/catalog-fixture' },
@@ -50,7 +69,7 @@ function fixture() {
   return { driver, registry, gateway, calls, begin, names }
 }
 
-it('advertises configured services in empty and Markdown runs without granting unavailable web or MCP routes', async () => {
+it('discovers authorized services in empty and Markdown runs while keeping long-tail schemas deferred and unavailable routes absent', async () => {
   const h = fixture()
   await h.begin('empty')
   const document = await h.registry.create(h.driver.load(new TextEncoder().encode('draft')), 'draft.md')
@@ -76,7 +95,9 @@ it('one jobs load exposes working compute, delegation and all job management rou
   await h.gateway.loadToolFamilies('work', ['jobs'])
   const loaded = await h.names('work')
   expect(loaded.filter(name => jobs.includes(name))).toEqual(jobs)
-  expect(loaded).toContain('media.start')
+  expect(loaded).not.toContain('media.start')
+  await h.gateway.loadToolFamilies('work', ['media'])
+  expect(await h.names('work')).toContain('media.start')
   const compute = await h.gateway.execute('work', 'compute', { name: 'compute.run', input: { code: 'print(1)' } })
   expect(compute).toMatchObject({ kind: 'read', data: { status: 'running' } })
   if (compute.kind !== 'read') throw new Error('Expected a compute receipt')
@@ -109,4 +130,19 @@ it('loading jobs and media never grants write permission to a read-only run', as
     .toMatchObject({ kind: 'error', message: expect.stringContaining('只读') })
   expect(h.calls).toEqual([])
   expect(h.gateway.runFileAccess('read-only')?.permission).toBe('read-only')
+})
+
+it('exposes an exact deferred service from the registration and honestly returns its missing connection without granting unrelated routes', async () => {
+  const h = fixture(true)
+  await h.begin('external', 'read-only')
+  expect(await h.names('external')).not.toContain('web.open')
+  expect(await h.gateway.availableToolFamilies('external')).toContainEqual(expect.objectContaining({ family: 'external', count: 2 }))
+  const tool = await h.gateway.resolveRunTool('external', 'web.open')
+  expect(tool?.schema).toHaveProperty('properties.url')
+  expect(await h.names('external')).toContain('web.open')
+  expect(await h.gateway.execute('external', 'open', { name: 'web.open', input: { url: 'https://example.org/' } }))
+    .toMatchObject({ kind: 'read', data: { status: 'not-configured' } })
+  expect(await h.gateway.resolveRunTool('external', 'mcp.invoke')).toBeNull()
+  expect(h.calls).toEqual(['web.open'])
+  expect(h.gateway.runFileAccess('external')?.permission).toBe('read-only')
 })

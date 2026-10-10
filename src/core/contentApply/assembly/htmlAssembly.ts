@@ -209,7 +209,7 @@ export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAss
     const kind = kindOf(index)
     // Layout-only wrappers disappear after measurement; their children keep exact parent coordinates.
     if (kind === 'group' && !SEMANTIC_GROUP.has(value.tagName) && !hasPaint(value) && !hasStackingContext(value)
-      && !value.attributes['aria-label'] && !value.attributes.title
+      && !value.attributes.id && !value.attributes['aria-label'] && !value.attributes.title
       && (!value.style.transform || value.style.transform === 'none')
       && (!value.style.rotate || value.style.rotate === 'none')
       && (!value.style.scale || value.style.scale === 'none')

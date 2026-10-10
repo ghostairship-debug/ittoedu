@@ -162,6 +162,10 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
   }, [root, contextMenu.open])
   useEffect(() => { setNotice(''); setCropping(null) }, [documentId, locationId, ids, stateId])
   useEffect(() => {
+    if (!documentId || !ownsDocumentSelection || !enabled) return
+    return workbenchSelection.registerSelectionClearer(documentId, targets => { const owner = useEditorStore.getState(); const removed = targets?.flatMap(target => target.kind === 'course-instance' ? [target.instanceId] : target.kind === 'course-object' ? [target.itemId] : []) ?? []; owner.selectNodes(targets ? owner.courseView.selectedInstanceIds.filter(id => !removed.includes(id)) : []) })
+  }, [documentId, ownsDocumentSelection, enabled])
+  useEffect(() => {
     if (!documentId || !ownsDocumentSelection) return
     let active = true
     void workbenchSelection.observe(documentId, revision, snapshot => enabled && locationId && itemIds.length

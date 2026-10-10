@@ -171,8 +171,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   externalMcp: {
     status: () => invoke(IPC_CHANNELS.externalMcp, { type: 'status' }),
     configure: patch => invoke(IPC_CHANNELS.externalMcp, { type: 'configure', patch }),
-    revealToken: () => invoke(IPC_CHANNELS.externalMcp, { type: 'token' }),
-    regenerateToken: () => invoke(IPC_CHANNELS.externalMcp, { type: 'regenerate-token' }),
+    configureSession: (sessionId, permission) => invoke(IPC_CHANNELS.externalMcp, { type: 'configure-session', sessionId, permission }),
     stopSession: sessionId => invoke(IPC_CHANNELS.externalMcp, { type: 'stop-session', sessionId }),
     serveUiState(provider) {
       const receive = (_event: Electron.IpcRendererEvent, requestId: unknown) => {

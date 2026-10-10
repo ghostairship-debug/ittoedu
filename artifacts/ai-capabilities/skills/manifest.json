@@ -37,7 +37,7 @@
       "name": "edit-content",
       "path": "skills/edit-content/SKILL.md",
       "references": [],
-      "version": "3e2d77280efd4b57666942fa37fcb21d6fb7d924405858e746bb6b3ae782848d"
+      "version": "30a85a861dec7431ed0eaf87824685ef9b9c5fa26a36b57eb817c40e52c66b1d"
     },
     {
       "description": "新建或局部修改 Word、Excel、PowerPoint 原格式文件；适用于 DOCX 报告与表格、XLSX 数据与公式、PPTX 幻灯片文字，不用于课件导入或软件代码开发。",
@@ -73,7 +73,7 @@
         "skills/workbench-usage/references/selection-and-editing.md",
         "skills/workbench-usage/references/sources-and-continuation.md"
       ],
-      "version": "19f0de54aaab7dbe81e544105f4b4ab329a4ad0ce2e9d8e4714a197a17a216f3"
+      "version": "c2be13e10c787e420c2b64ad4b3c3ba60935a3805d0647cd465b9203e33d2bfd"
     }
   ]
 }

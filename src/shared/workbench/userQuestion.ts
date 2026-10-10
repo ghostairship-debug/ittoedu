@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { ModelToolDefinition } from './modelProvider'
+import type { ToolTarget } from './tools'
 
 /** Built-in executor tool. It is not a document tool: never in ToolCatalog, the Gateway or the external MCP surface. */
 export const USER_QUESTION_TOOL = 'ask_user'
@@ -11,8 +12,9 @@ const optionSchema = z.object({
 }).strict()
 const options = z.array(optionSchema)
   .refine(value => new Set(value.map(option => option.label)).size === value.length, '选项名称不能重复')
+const draftRequest = z.object({ target: z.string().min(1), label: z.string().min(1).optional(), candidateId: z.string().min(1).optional() }).strict()
 const questionShape = { question: z.string().trim().min(1),
-  options, multiple: z.boolean().optional(), responseKind: responseKind.optional() }
+  options, multiple: z.boolean().optional(), responseKind: responseKind.optional(), currentDraft: z.array(draftRequest).min(1).optional() }
 const validQuestion = (value: { options: readonly { label: string }[]; multiple?: boolean; responseKind?: z.infer<typeof responseKind> },
   ctx: z.RefinementCtx) => {
   const kind = value.responseKind ?? 'choice'
@@ -27,7 +29,10 @@ export const userQuestionInputSchema = z.object(questionShape).strict().superRef
 export type UserQuestionInput = z.infer<typeof userQuestionInputSchema>
 /** What the timeline and the option card show. */
 export const userQuestionViewSchema = z.object({ text: z.string().min(1), options,
-  multiple: z.boolean(), responseKind: responseKind.optional() }).strict().superRefine(validQuestion)
+  multiple: z.boolean(), responseKind: responseKind.optional(), currentDraft: z.array(z.object({
+    documentId: z.string().min(1), epoch: z.string().min(1), revision: z.number().int().nonnegative(),
+    target: z.custom<ToolTarget>().optional(), label: z.string().min(1).optional(), candidateId: z.string().min(1).optional(),
+  }).strict()).min(1).optional() }).strict().superRefine(validQuestion)
 export type UserQuestionView = z.infer<typeof userQuestionViewSchema>
 export const userAnswerSchema = z.object({
   choices: z.array(z.number().int().nonnegative()),
@@ -61,7 +66,7 @@ export const sameAnswer = (a: UserAnswer, b: UserAnswer) =>
   JSON.stringify([...a.choices].sort((x, y) => x - y)) === JSON.stringify([...b.choices].sort((x, y) => x - y)) && (a.other ?? '') === (b.other ?? '')
 
 export const USER_QUESTION_USAGE_GUIDANCE = `需要用户在几个明确方案中做决定且无法从用户原话和文档推断，或正在执行的 Skill 明确要求用户审阅并确认当前阶段的新产物时，调用 ${USER_QUESTION_TOOL} 并等待回答。普通选择用 choice，自由输入用 free-text，单步确认用 confirm；不要为了满足选项数量编造假选项。`
-  + '阶段确认前先提供当前产物供用户审阅；用户已明确选择跳过确认的自动模式或免去该确认时，不再追加确认。每次只问一个问题，不用于寒暄或重复确认已明确的输入要求，不自行增加阶段确认。'
+  + '阶段确认前先提供当前产物供用户审阅，并在 currentDraft 中引用实际作品的 target；确认后读取用户眼前的当前稿，包含其人工修改，不要求先保存。普通问题不附 currentDraft。用户已明确选择跳过确认的自动模式或免去该确认时，不再追加确认。每次只问一个问题，不用于寒暄或重复确认已明确的输入要求，不自行增加阶段确认。'
 
 export const userQuestionToolDefinition: ModelToolDefinition = {
   name: USER_QUESTION_TOOL,
@@ -79,6 +84,10 @@ export const userQuestionToolDefinition: ModelToolDefinition = {
           description: { type: 'string', description: '可选：这个选项意味着什么' },
         } } },
       multiple: { type: 'boolean', description: '是否允许多选，默认单选' },
+      currentDraft: { type: 'array', minItems: 1, description: '仅用于确认当前作品；引用已取得的 target。普通问题省略。',
+        items: { type: 'object', additionalProperties: false, required: ['target'], properties: {
+          target: { type: 'string', description: '当前作品或范围的 target 句柄' }, label: { type: 'string' }, candidateId: { type: 'string' },
+        } } },
     },
   },
 }

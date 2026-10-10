@@ -2,7 +2,7 @@ import { readFile, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { connectExplicitMcp, readExplicitMcpConnection, requireCurrentProjectSave } from './mcpSdkClient'
 
-const usage = 'tsx scripts/connect-mcp.ts --connection "<ready JSON文件>" --file "<已有课件绝对路径>" [--apply "<project.apply参数JSON文件>"] [--save]\n也可显式配置 --endpoint/--token 或 GUOLING_MCP_ENDPOINT/GUOLING_MCP_TOKEN；此样例断开后保留宿主。'
+const usage = 'tsx scripts/connect-mcp.ts --connection "<ready JSON文件>" --file "<已有课件绝对路径>" [--apply "<project.apply参数JSON文件>"] [--save]\n也可显式配置 --endpoint 或 GUOLING_MCP_ENDPOINT；此样例断开后保留宿主。'
 
 async function main(): Promise<void> {
   const options = new Map<string, string>()
@@ -12,7 +12,7 @@ async function main(): Promise<void> {
     if (argument === '--help') { process.stderr.write(`${usage}\n`); return }
     if (argument === '--save') { save = true; continue }
     const name = argument.split('=', 1)[0]!
-    if (!['--connection', '--endpoint', '--token', '--workspace-id', '--file', '--apply'].includes(name)) throw new Error(`未知参数：${name}`)
+    if (!['--connection', '--endpoint', '--workspace-id', '--file', '--apply'].includes(name)) throw new Error(`未知参数：${name}`)
     const value = argument.includes('=') ? argument.slice(argument.indexOf('=') + 1) : process.argv[++index]
     if (!value || value.startsWith('--')) throw new Error(`${name} 需要参数`)
     options.set(name, value)
@@ -22,7 +22,6 @@ async function main(): Promise<void> {
   const filename = await realpath(file)
   const configuration: unknown = options.has('--connection') ? JSON.parse(await readFile(options.get('--connection')!, 'utf8')) : {
     endpoint: options.get('--endpoint') ?? process.env.GUOLING_MCP_ENDPOINT,
-    token: options.get('--token') ?? process.env.GUOLING_MCP_TOKEN,
     workspaceId: options.get('--workspace-id'),
   }
   const connection = readExplicitMcpConnection(configuration)

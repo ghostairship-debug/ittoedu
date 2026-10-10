@@ -39,6 +39,9 @@ win:
   requestedExecutionLevel: asInvoker
 portable:
   artifactName: guoling-workbench-portable-${version}.${ext}
+  # In electron-builder 26.15.3, true omits UNPACK_DIR_NAME and uses each launch's $PLUGINSDIR/app.
+  # The upstream option comment says false, but NsisTarget.buildInstaller implements the opposite.
+  unpackDirName: true
 artifactName: guoling-workbench-${version}-${arch}.${ext}
 npmRebuild: false
 publish: null

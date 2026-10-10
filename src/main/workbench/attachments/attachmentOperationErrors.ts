@@ -2,6 +2,7 @@ import { DesktopOperationError } from '../../errors'
 import { AttachmentError } from './AttachmentService'
 
 const reasons: Record<string, readonly [string, string]> = {
+  'image-decoder-unavailable': ['本机图片处理模块暂时无法加载，本次图片操作未完成。', '请导出本地诊断并保留完整加载错误；模块恢复后可重试。重新导出图片不能修复模块加载问题。'],
   'invalid-image': ['这份附件没有可解码的图片内容。', '请重新导出为 PNG、JPEG、WebP 或 GIF 后添加；仅修改文件扩展名不能修复图片。'],
   'media-type-mismatch': ['附件声明的图片类型与实际内容不一致。', '请用图片软件重新另存为支持的格式后添加。'],
   'source-changed': ['原文件在读取期间发生了变化，本次未完成添加。', '请等原文件保存完成后重新添加。'],

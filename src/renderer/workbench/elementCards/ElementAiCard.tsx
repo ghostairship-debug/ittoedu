@@ -1,12 +1,14 @@
 import { Redo2, Sparkles, Undo2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { QuickBarPopoverButton } from '../../editing/quickbar/SelectionQuickBar'
+import { QuickBarButton } from '../../editing/quickbar/SelectionQuickBar'
 import type { ExecutionSelectionTarget } from '../../../shared/workbench/executionDesktop'
 import { ExecutionApprovalCard } from '../ExecutionApprovalCard'
 import { ExecutionQuestionCard } from '../ExecutionQuestionCard'
 import type { SelectionCapture } from '../SelectionContextController'
 import { elementCardKey, elementCards, useElementCard, type ElementCardEntryState } from './elementCardController'
 import './elementCards.css'
+import { ExecutionTimeline } from '../ExecutionTimeline'
+import { ExecutionReplyContent } from '../ExecutionReplyContent'
 
 const STATE_LABEL: Record<ElementCardEntryState, string> = {
   sending: '发送中…', queued: '排队中', running: '进行中…', completed: '已完成', partial: '部分完成', failed: '未完成', stopped: '已停止', cancelled: '已取消',
@@ -20,9 +22,9 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
   const setDraft = (value: string) => elementCards.setDraft(cardKey, value)
   const [conflict, setConflict] = useState<{ direction: 'undo' | 'redo'; submissionId: string; fields: readonly string[] } | null>(null)
   const input = useRef<HTMLTextAreaElement>(null), body = useRef<HTMLDivElement>(null)
-  useEffect(() => { input.current?.focus({ preventScroll: true }) }, [])
   const count = card?.entries.length ?? 0
-  useEffect(() => { if (body.current) body.current.scrollTop = body.current.scrollHeight }, [count])
+  const follow = useRef(true)
+  useEffect(() => { if (body.current && follow.current) body.current.scrollTop = body.current.scrollHeight }, [count, card?.projection.cursor, card?.entries])
   if (!card) return null
   const send = async () => {
     const text = draft.trim()
@@ -43,6 +45,8 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
   const question = card.question, approval = card.approval, text = card.kind === 'text'
   const undoTitle = card.undo ? `撤销 AI 对${card.undo.fields.join('、')}的修改` : card.undoUnavailable ?? '没有可撤销的 AI 修改'
   const redoTitle = card.redo ? `重做 AI 对${card.redo.fields.join('、')}的修改` : '没有可重做的 AI 修改'
+  const process = { ...card.projection, items: card.projection.items.filter(item => item.type !== 'text'
+    || !card.entries.some(entry => entry.runId === item.runId && entry.reply === item.content.map(part => part.kind === 'text' ? part.text : '').join(''))) }
   return <section className="element-ai-card" aria-label={`AI 修改：${card.label}`} onKeyDown={event => event.stopPropagation()}>
     <header className="element-ai-card__header">
       <Sparkles size={14} aria-hidden="true" />
@@ -53,9 +57,11 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
         onClick={() => { if (card.redo) void revert('redo', card.redo.submissionId) }}><Redo2 size={13} aria-hidden="true" /></button>
       {text && onRebind && <button type="button" aria-label="重新选择文字并保留输入" title="重新选择文字并保留输入" onClick={onRebind}>重选</button>}
       <button type="button" className="element-ai-card__close" aria-label={text ? '关闭 AI 卡' : '收起 AI 卡'}
-        title={text ? '关闭（这张卡随之结束，修改保留）' : '收起（记录保留到文件关闭）'} onClick={onClose}>×</button>
+        disabled={card.busy || Boolean(card.question || card.approval)} title={card.busy ? '任务结束后可关闭；可先停止任务' : text ? '关闭（修改保留）' : '收起（修改保留）'} onClick={onClose}>×</button>
     </header>
-    <div ref={body} className="element-ai-card__body">
+    <div ref={body} className="element-ai-card__body" onScroll={event => { const node = event.currentTarget; follow.current = node.scrollHeight - node.clientHeight - node.scrollTop < 32 }}>
+    {process.items.length > 0 && <ExecutionTimeline projection={process}
+      readBlob={ref => window.desktopAPI!.execution!.blob(card.projection.conversationId, ref)} workspaceId={card.workspaceId ?? undefined} />}
     {conflict && <div className="element-ai-card__confirm" role="alertdialog" aria-label={conflict.direction === 'undo' ? '确认撤销' : '确认重做'}>
       <p>{conflict.fields.join('、')}在 AI 修改后又改过。仍要{conflict.direction === 'undo' ? '撤销' : '重做'}吗？这会覆盖后来的修改。</p>
       <div className="element-ai-card__actions">
@@ -70,7 +76,7 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
         {card.entries.map(entry => <li key={entry.submissionId} className="element-ai-card__entry" data-state={entry.state}>
           <p className="element-ai-card__request">{entry.text}</p>
           <p className="element-ai-card__state">{entry.queuePausedReason === 'user' ? '排队已暂停' : STATE_LABEL[entry.state]}</p>
-          {entry.reply && <p className="element-ai-card__reply">{entry.reply}</p>}
+          {entry.reply && <div className="element-ai-card__reply"><ExecutionReplyContent text={entry.reply} /></div>}
           {entry.change?.lostTexts?.length ? <p className="element-ai-card__notice" role="status">
             之前改过的文字“{entry.change.lostTexts.join('”“')}”在新页面里找不到原文，这些文字修改不再生效。</p> : null}
           {entry.failure && entry.state !== 'completed' && <p className="element-ai-card__failure" role="alert">{entry.failure}</p>}
@@ -124,8 +130,8 @@ export function ElementAiButton({ documentId, target, label, capture, disabledRe
   // A jump from the top bar's indicator opens the card as soon as the element's quick bar is here.
   const [openToken, setOpenToken] = useState(0)
   useEffect(() => { if (elementCards.takeOpenRequest(key)) setOpenToken(value => value + 1) })
-  return <QuickBarPopoverButton label="AI 修改" text={busy ? 'AI 进行中' : 'AI 修改'} icon={<Sparkles size={14} />} popoverLabel={`AI 修改：${label}`}
-    disabled={Boolean(disabledReason)} openToken={openToken}>
-    {close => <ElementAiCard cardKey={key} capture={capture} onClose={close} />}
-  </QuickBarPopoverButton>
+  useEffect(() => { elementCards.registerCapture(key, capture); return () => elementCards.registerCapture(key, undefined) }, [key, capture])
+  useEffect(() => { if (openToken) elementCards.reveal(key) }, [key, openToken])
+  return <QuickBarButton label="AI 修改" text={busy ? 'AI 进行中' : 'AI 修改'} icon={<Sparkles size={14} />}
+    disabled={Boolean(disabledReason)} onClick={() => elementCards.reveal(key)} />
 }

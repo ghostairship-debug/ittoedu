@@ -4,6 +4,7 @@ import path from 'node:path'
 import type { ExecutionStart } from '../../../shared/workbench/execution'
 import type { ExecutionSubmissionRecord } from '../../../shared/workbench/executionDesktop'
 import { executionContentOutputSchema } from '../../../shared/workbench/executionDesktop'
+import { restoreStoredContentOutput } from './storedContentOutput'
 
 export interface StoredExecutionSubmission extends ExecutionSubmissionRecord {
   schemaVersion: 1
@@ -34,7 +35,7 @@ export class ExecutionSubmissionStore {
     this.tail = operation
     return operation
   }
-  private validate(value: unknown, submissionId?: string): StoredExecutionSubmission {
+  private validate(value: unknown, submissionId?: string, restored = false): StoredExecutionSubmission {
     const record = value as StoredExecutionSubmission
     if (!record || typeof record !== 'object' || record.schemaVersion !== 1 || !record.submissionId
       || submissionId && record.submissionId !== submissionId || !record.workspaceId || !record.conversationId
@@ -44,13 +45,12 @@ export class ExecutionSubmissionStore {
       || !Array.isArray(record.documents) || !Array.isArray(record.start.documents) || !Array.isArray(record.attachments) || !Array.isArray(record.attachmentIds)
       || !Number.isSafeInteger(record.createdAt) || !Number.isSafeInteger(record.updatedAt)) throw new Error('执行提交恢复记录无效')
     if (record.steeringRunId && (record.mode !== 'adjust' || typeof record.steeringRunId !== 'string')) throw new Error('调整提交的原运行身份无效')
-    if (record.contentOutput) executionContentOutputSchema.parse(record.contentOutput)
-    if (record.start.contentOutput) executionContentOutputSchema.parse(record.start.contentOutput)
+    if (record.contentOutput) record.contentOutput = restored ? restoreStoredContentOutput(record.contentOutput) : executionContentOutputSchema.parse(record.contentOutput)
+    if (record.start.contentOutput) record.start.contentOutput = restored ? restoreStoredContentOutput(record.start.contentOutput) : executionContentOutputSchema.parse(record.start.contentOutput)
     // Public retry retains the original selection; Main may rebind the same indexed document in start.
     const documentIndex = record.contentOutput ? record.documents.findIndex(document => document.documentId === record.contentOutput!.documentId) : -1
     const continuedDocument = Boolean(record.retryOfRunId) && documentIndex >= 0
-      && record.documents.length === record.start.documents.length
-      && record.start.documents[documentIndex]?.documentId === record.start.contentOutput?.documentId
+      && record.start.documents.some(document => document.documentId === record.start.contentOutput?.documentId)
     if (Boolean(record.contentOutput) !== Boolean(record.start.contentOutput)
       || record.contentOutput?.documentId !== record.start.contentOutput?.documentId && !continuedDocument)
       throw new Error('正文改写的冻结输出目标不一致')
@@ -93,7 +93,7 @@ export class ExecutionSubmissionStore {
     let bytes: string
     try { bytes = await fs.readFile(this.file(submissionId), 'utf8') }
     catch (error) { if (missing(error)) return null; throw error }
-    return this.validate(JSON.parse(bytes), submissionId)
+    return this.validate(JSON.parse(bytes), submissionId, true)
   }
   read(submissionId: string): Promise<StoredExecutionSubmission | null> {
     return this.serial(async () => clone(await this.readDirect(submissionId)))
@@ -106,7 +106,7 @@ export class ExecutionSubmissionStore {
       const records: StoredExecutionSubmission[] = []
       for (const name of names.filter(value => /^[a-f0-9]{64}\.json$/.test(value))) {
         try {
-          const record = this.validate(JSON.parse(await fs.readFile(path.join(this.directory, name), 'utf8')))
+          const record = this.validate(JSON.parse(await fs.readFile(path.join(this.directory, name), 'utf8')), undefined, true)
           if (path.basename(this.file(record.submissionId)) !== name) throw new Error('执行提交恢复记录身份不匹配')
           records.push(record); this.unavailable.delete(name)
         } catch { this.unavailable.set(name, `一份历史提交记录无法读取，原文件保留：${name}`) }

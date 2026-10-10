@@ -1,5 +1,5 @@
 {
-  "description": "列出文件夹内容。path 可用绝对路径或工作空间相对路径；省略时从会话所属位置开始。返回有界列表；截断时用同 path 和返回的 nextCursor 续页，目录变化需重读。",
+  "description": "列出文件夹内容。path 可用绝对路径或工作空间相对路径；省略时从工作空间根目录开始。返回有界列表；截断时用同 path 和返回的 nextCursor 续页，目录变化需重读。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,

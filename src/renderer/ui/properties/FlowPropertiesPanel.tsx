@@ -199,7 +199,7 @@ function FlowPageProperties({ context }: { context: FlowPropertiesContext }) {
       />
       <SharedBackgroundProperties
         key={`flow-surface-background:${view.surfaceId}`}
-        ownerLabel="流式讲义页"
+        ownerLabel="流式布局页"
         color={view.backgroundColor}
         assetId={view.backgroundAssetId}
         assets={context.assets}

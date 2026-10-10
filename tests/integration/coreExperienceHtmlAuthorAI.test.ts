@@ -68,14 +68,16 @@ it('maps the frozen source field at Main send, follows its first drag, and resum
   const ready = deferred(), release = deferred(), literal = 'AI <img src=x> & 😀'
   const service = new ExecutionDesktopService({ directory: path.join(root, 'desktop'), documents, settings,
     authorizeWorkspaceRoot: async input => ({ resolvedPath: await fs.realpath(input) }), fetch: async (_url, init) => {
-      const payload = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> }
+      const payload = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> }
+      if (payload.messages.some(message => message.role === 'tool')) {
+        return new Response(`data: ${JSON.stringify({ id: 'final', model: 'fixture', choices: [{ index: 0, finish_reason: 'stop', delta: { role: 'assistant', content: '已改 A 正文。' } }] })}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
+      }
       expect(payload.messages.find(message => typeof message.content === 'string'
-        && message.content.startsWith('当前默认文字目标的完整内容（数据）：'))?.content)
-        .toBe('当前默认文字目标的完整内容（数据）：\nA & B')
+        && message.content.startsWith('当前默认语义目标 target='))?.content?.split('的内容与属性（数据）：\n')[1])
+        .toBe('A & B')
       ready.resolve(); await release.promise
       const chunk = { id: 'fixture', model: 'fixture', choices: [{ index: 0, finish_reason: 'tool_calls', delta: { role: 'assistant', tool_calls: [
         { index: 0, id: 'replace', type: 'function', function: { name: 'text_replace', arguments: JSON.stringify({ content: literal }) } },
-        { index: 1, id: 'finish', type: 'function', function: { name: 'task_finish', arguments: '{}' } },
       ] } }] }
       return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
     } })
@@ -93,7 +95,7 @@ it('maps the frozen source field at Main send, follows its first drag, and resum
   const submissionId = randomUUID()
   const sent = await service.operate({ type: 'send', workspaceId: space.workspaceId, conversationId: conversation.conversationId,
     submissionId, expectedRevision: conversation.revision, text: '只改 A 正文', documents: [frozen],
-    contentOutput: { kind: 'replace-text', documentId: snapshot.documentId, target: address } }) as ExecutionSendResult
+    contentOutput: { kind: 'content', documentId: snapshot.documentId, target: address } }) as ExecutionSendResult
   if (!sent.run) throw new Error('fixture run required')
   await ready.promise
   const anchored = { ...address.record, binding: { ...address.record.binding, path: [{ tag: 'body', index: 0 },
@@ -128,8 +130,7 @@ const record: ComponentAuthorRecord = { kind: 'text', binding: { kind: 'dom', pa
 const target: HtmlAuthorFieldTarget = { kind: 'html-author-field', authorKey: 'a', field: 'text', record }
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
 function completed(request: ModelRequest, content: string): Extract<ModelEvent, { type: 'response.completed' }> {
-  const calls = [{ id: 'replace', name: 'text.replace', argumentsText: JSON.stringify({ content }) },
-    { id: 'finish', name: 'task.finish', argumentsText: '{}' }]
+  const calls = [{ id: 'replace', name: 'text.replace', argumentsText: JSON.stringify({ content }) }]
   return { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: 'fixture-response',
     actualModel: 'controlled-fixture', nativeResponse: {}, finishReason: 'tool_calls', toolCalls: calls,
     assistant: { role: 'assistant', content: null, tool_calls: calls.map(call => ({ id: call.id, type: 'function',
@@ -146,7 +147,7 @@ async function fixture(source: string, provider: ModelProvider, address: HtmlAut
   engines.push(engine)
   const input = (taskId: string, captured: HtmlAuthorFieldTarget = address) => ({ conversationId: 'card', taskId, instruction: '只改写当前选中的文字', selection,
     documents: [{ documentId: session.documentId, writable: [captured], selection: [captured] }],
-    contentOutput: { kind: 'replace-text' as const, documentId: session.documentId, target: captured } })
+    contentOutput: { kind: 'content' as const, documentId: session.documentId, target: captured } })
   const sourceNow = () => {
     const model = session.read().model
     if (model.kind !== 'text') throw new Error('HTML text fixture required')
@@ -165,10 +166,13 @@ it('reads the effective HTML author value, preserves concurrent geometry and sta
   const ready = deferred(), release = deferred(), finalText = 'AI <正文> & "引号" 😀'
   let turns = 0
   const provider: ModelProvider = { async *stream(request) {
+    if (request.messages.some(message => message.role === 'tool')) {
+      yield { ...completed(request, ''), finishReason: 'stop', toolCalls: [], assistant: { role: 'assistant', content: '已处理当前正文。' } }; return
+    }
     if (++turns === 1) {
       const current = request.messages.find(message => typeof message.content === 'string'
-        && message.content.startsWith('当前默认文字目标的完整内容（数据）：'))
-      expect(current?.content).toBe('当前默认文字目标的完整内容（数据）：\n教师已改 A')
+        && message.content.startsWith('当前默认语义目标 target='))
+      expect(String(current?.content).split('的内容与属性（数据）：\n')[1]).toBe('教师已改 A')
       ready.resolve(); await release.promise
     }
     yield completed(request, turns === 1 ? finalText : '下一轮 AI 正文')
@@ -210,6 +214,9 @@ it('keeps the generated draft and reports a same-field conflict instead of overw
   const ready = deferred(), release = deferred(), proposed = '应当保留的 AI 稿'
   let turns = 0
   const provider: ModelProvider = { async *stream(request) {
+    if (request.messages.some(message => message.role === 'tool')) {
+      yield { ...completed(request, ''), finishReason: 'stop', toolCalls: [], assistant: { role: 'assistant', content: '已处理当前正文。' } }; return
+    }
     if (++turns === 1) { ready.resolve(); await release.promise; yield completed(request, proposed) }
     else yield { ...completed(request, proposed), finishReason: 'stop', toolCalls: [],
       assistant: { role: 'assistant', content: '所选正文已改动，生成稿保留，未覆盖教师的新值。' } }
@@ -238,10 +245,13 @@ it('follows the encoded extent of an exact static HTML field while preserving lo
   const ready = deferred(), release = deferred(), literal = 'show <img src=x> & "fun" 😀'
   let turns = 0
   const provider: ModelProvider = { async *stream(request) {
+    if (request.messages.some(message => message.role === 'tool')) {
+      yield { ...completed(request, ''), finishReason: 'stop', toolCalls: [], assistant: { role: 'assistant', content: '已处理当前正文。' } }; return
+    }
     if (++turns === 1) {
-      expect(request.messages.find(message => typeof message.content === 'string'
-        && message.content.startsWith('当前默认文字目标的完整内容（数据）：'))?.content)
-        .toBe('当前默认文字目标的完整内容（数据）：\nA & B')
+      expect(String(request.messages.find(message => typeof message.content === 'string'
+        && message.content.startsWith('当前默认语义目标 target='))?.content).split('的内容与属性（数据）：\n')[1])
+        .toBe('A & B')
       ready.resolve(); await release.promise
     }
     yield completed(request, turns === 1 ? literal : '第二轮 <literal> & 😀')

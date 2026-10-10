@@ -40,6 +40,7 @@ import { TaskBrowserViewport } from './browserEmbedded/TaskBrowserViewport'
 import type { LessonMaterialTarget } from '../../shared/materialExtraction'
 import type { LessonAuthoringMaterialSelection } from '../../shared/lessonAuthoring'
 import { currentSave, saveFact } from '../../core/tools/modelToolResult'
+import { mergeAutomaticReferences, pinReferences, referenceIdentity, splitComposerReferences } from './composerReferences'
 
 export interface ExecutionAssistantHandle { preserveDraft(): Promise<void> }
 type BrowserControlState = Awaited<ReturnType<NonNullable<ExecutionDesktopAPI['browserControl']>>>
@@ -83,12 +84,17 @@ const restoredDocuments = (conversation: ConversationRecord): ExecutionDocumentR
     const restored = executionSelectionTargetSchema.safeParse(scope)
     return restored.success ? [restored.data] : []
   }),
+  referenceId: value.referenceId ?? value.contextRefId, pinned: value.pinned ?? true,
+  ...(value.displayLabel ? { displayLabel: value.displayLabel } : {}),
 }))
 // Structural equality: Main returns schema-ordered keys while the composer builds its own
 // order, so object keys are sorted; array order (documents, ranges) stays significant.
 const canonicalJSON = (value: unknown) => JSON.stringify(value, (_key, item: unknown) => item && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item)
 const sameDocuments = (a: readonly ExecutionDocumentReference[], b: readonly ExecutionDocumentReference[]) => canonicalJSON(a) === canonicalJSON(b)
+const sameExecutionReferences = (a: readonly ExecutionDocumentReference[], b: readonly ExecutionDocumentReference[]) => sameDocuments(
+  a.map(({ referenceId: _id, pinned: _pin, displayLabel: _label, ...reference }) => reference),
+  b.map(({ referenceId: _id, pinned: _pin, displayLabel: _label, ...reference }) => reference))
 const sameAttachments = (a: readonly InputAttachmentReference[], b: readonly InputAttachmentReference[]) => canonicalJSON(a) === canonicalJSON(b)
 const connectionFailure = (run: ExecutionRunRecord | null): string | null => {
   if (!run || !['failed', 'partial', 'interrupted'].includes(run.status)) return null
@@ -125,7 +131,7 @@ function defaultExecutionAPI(): ExecutionDesktopAPI | undefined {
 export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, ExecutionAssistantProps>(function ExecutionAssistant({ root, captureDocuments, captureMaterials, prepareSend, api: suppliedAPI, settingsAPI: suppliedSettingsAPI, externalAPI: suppliedExternalAPI, onLocateDocument }, ref) {
   const sessionDock = useWorkbenchSessionDock()
   const sessionScope = sessionDock.scope
-  useSyncExternalStore(workbenchSelection.subscribe, workbenchSelection.readVersion)
+  const selectionVersion = useSyncExternalStore(workbenchSelection.subscribe, workbenchSelection.readVersion)
   const api = suppliedAPI ?? defaultExecutionAPI()
   const settingsAPI = suppliedSettingsAPI ?? window.desktopAPI?.executionSettings
   const externalAPI = suppliedExternalAPI ?? window.desktopAPI?.externalMcp
@@ -202,6 +208,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const contextFrozenRef = useRef(false)
   const persistQueue = useRef<Promise<unknown>>(Promise.resolve())
   const submittingRef = useRef(false), composingRef = useRef(false)
+  const referenceCapture = useRef(0), removedAutomatic = useRef(new Set<string>()), automaticFocus = useRef('')
 
   useEffect(() => { activeRef.current = active }, [active])
   useEffect(() => { runRef.current = run }, [run])
@@ -281,7 +288,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     const remembered = documentsByConversation.current.get(conversation.conversationId)
     const restored = remembered ?? restoredDocuments(conversation)
     documentsByConversation.current.set(conversation.conversationId, restored)
-    const frozen = frozenByConversation.current.get(conversation.conversationId) ?? Boolean(conversation.inputDraft || conversation.inputAttachments.length || conversation.frozenContextRefs.length)
+    const frozen = restored.some(reference => reference.pinned)
     frozenByConversation.current.set(conversation.conversationId, frozen)
     setDocuments(restored); documentsRef.current = restored
     setContextFrozen(frozen); contextFrozenRef.current = frozen
@@ -310,23 +317,25 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     return () => { ++generation.current }
   }, [api, root])
 
-  // Explorer selection changes the list only. An empty, unhomed conversation may acquire
-  // that place; Main checks this against the durable record so a draft cannot be reassigned.
+  // Homes organize the list only. Navigation changes the next draft's automatic references,
+  // including while typing and while the previous task is running; submitted tasks stay frozen.
   useEffect(() => {
     const selected = activeRef.current
-    if (!api?.setConversationHome || !conversationScope || !selected || selected.home || selected.workspaceId !== workspaceId
-      || draftRef.current || attachmentsRef.current.length || documentsRef.current.length
-      || selected.messages.length || selected.inputDraft || selected.inputAttachments.length || selected.frozenContextRefs.length
-      || selected.runIndex.builtinRunIds.length || selected.runIndex.externalRunIds.length) return
-    let live = true
-    void api.setConversationHome({ workspaceId, conversationId: selected.conversationId, home: conversationHomeInput! })
-      .then(saved => {
-        if (!live) return
-        setConversations(value => updateConversation(value, saved))
-        if (activeRef.current?.conversationId === saved.conversationId) { setActive(saved); activeRef.current = saved }
-      }).catch(() => { /* Main may reject a raced draft; its existing home remains authoritative. */ })
-    return () => { live = false }
-  }, [api, workspaceId, sessionScope?.kind, sessionScope?.path, active?.conversationId])
+    if (!selected) return
+    const ticket = ++referenceCapture.current
+    const pending = captureDocuments(true).then(captured => {
+      if (ticket !== referenceCapture.current || activeRef.current?.conversationId !== selected.conversationId) return documentsRef.current
+      const automatic = splitComposerReferences(captured)
+      const focus = automatic.filter(reference => reference.displayLabel === '当前页面' || reference.displayLabel === '文档').map(referenceIdentity).join('|')
+      if (focus !== automaticFocus.current) { automaticFocus.current = focus; removedAutomatic.current.clear() }
+      const refs = mergeAutomaticReferences(documentsRef.current, automatic, removedAutomatic.current)
+      elementCards.setFocus(automatic[0]?.documentId ?? null, automatic[0]?.selection?.find(target => target.kind === 'course-surface')?.surfaceId ?? null)
+      if (!sameDocuments(refs, documentsRef.current)) { setDocuments(refs); documentsRef.current = refs; documentsByConversation.current.set(selected.conversationId, refs) }
+      return refs
+    }).catch(() => documentsRef.current).finally(() => { if (capturePromise.current === pending) capturePromise.current = null })
+    capturePromise.current = pending
+    return () => { if (referenceCapture.current === ticket) ++referenceCapture.current }
+  }, [captureDocuments, active?.conversationId, selectionVersion])
 
   useEffect(() => {
     const subscribe = window.desktopAPI?.onWorkspaceFilesChanged
@@ -451,6 +460,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
             const activeNow = activeRef.current
             if (latest && !disposed && activeNow?.conversationId === conversationId && latest.revision > activeNow.revision) {
               const hasLocalDraft = draftRef.current !== activeNow.inputDraft || !sameAttachments(attachmentsRef.current, activeNow.inputAttachments)
+                || !sameDocuments(documentsRef.current.filter(value => value.pinned !== false), restoredDocuments(activeNow).filter(value => value.pinned !== false))
               setActive(latest); activeRef.current = latest
               setConversations(value => updateConversation(value, latest))
               if (!hasLocalDraft) {
@@ -502,19 +512,39 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       })().catch(() => { if (!disposed) setError('任务过程暂不可读取，已保留会话内容。') })
         .finally(() => { catchingUp = false; if (catchUpPending && !disposed) catchUp() })
     }
+    const runReads = new Map<string, boolean>()
+    let submissionsTicket = 0
+    const refreshRun = (runId: string, changed = false) => {
+      if (runReads.has(runId)) { if (changed) runReads.set(runId, true); return }
+      runReads.set(runId, false)
+      void api.run(runId).then(value => {
+        if (!value || disposed) return
+        const previous = runRef.current
+        if (previous && (previous.runId === value.runId ? previous.version > value.version
+          || !['queued', 'running', 'stopping'].includes(previous.status) && ['queued', 'running', 'stopping'].includes(value.status)
+          : previous.createdAt > value.createdAt)) return
+        setRun(value); runRef.current = value
+      }).catch(() => { if (!disposed) setError('当前任务状态暂不可读取，已保留任务内容。') })
+        .finally(() => { const pending = runReads.get(runId); runReads.delete(runId); if (pending && !disposed) refreshRun(runId) })
+    }
+    const refreshSubmissions = () => {
+      const selected = activeRef.current, ticket = ++submissionsTicket
+      if (selected) void api.submissions({ workspaceId: selected.workspaceId, conversationId }).then(value => {
+        if (!disposed && ticket === submissionsTicket) setSubmissions(value)
+      }).catch(() => { if (!disposed) setError('排队消息暂不可读取，已保留输入。') })
+    }
     const unsubscribe = api.subscribe(event => {
       if (event.conversationId !== conversationId) return
       catchUp()
-      if (event.type === 'run.end' || runRef.current?.runId !== event.runId) {
+      if (event.type === 'run.end' || event.type === 'run.state' || runRef.current?.runId !== event.runId) {
         if (event.type === 'run.end') void settingsAPI?.read().then(setSettings).catch(() => undefined)
-        void api.run(event.runId).then(value => { if (!disposed) { setRun(value); runRef.current = value } })
-        const selected = activeRef.current
-        if (selected) void api.submissions({ workspaceId: selected.workspaceId, conversationId }).then(value => { if (!disposed) setSubmissions(value) })
+        refreshRun(event.runId, event.type === 'run.end' || event.type === 'run.state')
+        if (event.type === 'run.end' || event.type === 'run.state') refreshSubmissions()
       }
     })
     catchUp()
     const latestRunId = active.runIndex.builtinRunIds.at(-1)
-    if (latestRunId) void api.run(latestRunId).then(value => { if (!disposed) { setRun(value); runRef.current = value } })
+    if (latestRunId) refreshRun(latestRunId)
     return () => { disposed = true; unsubscribe() }
   }, [api, active?.conversationId])
 
@@ -718,23 +748,6 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     } finally { setBusy(false) }
   }
 
-  const freezeDocuments = (text: string) => {
-    if (!active || !text || contextFrozenRef.current || capturePromise.current) return
-    const conversationId = active.conversationId
-    frozenByConversation.current.set(conversationId, true); setContextFrozen(true); contextFrozenRef.current = true
-    // A file home is the default reference at send time. Browsing another tab must not
-    // silently replace it; explicit "+" references still capture that tab below.
-    if (active.home?.kind === 'file' && documentsRef.current.length === 0) return
-    const pending = captureDocuments(true).then(value => {
-      if (activeRef.current?.conversationId === conversationId) {
-        documentsByConversation.current.set(conversationId, value); setDocuments(value); documentsRef.current = value
-      }
-      return value
-    }).catch(() => { setError('当前文档引用未能冻结；你仍可在无引用会话中继续对话。'); return [] })
-      .finally(() => { if (capturePromise.current === pending) capturePromise.current = null })
-    capturePromise.current = pending
-  }
-
   const persist = (documentOverride?: ExecutionDocumentReference[]) => {
     const ticket = generation.current
     const task = persistQueue.current.then(async () => {
@@ -842,8 +855,9 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     setDraft(result.conversation.inputDraft); draftRef.current = result.conversation.inputDraft
     setAttachments(result.conversation.inputAttachments); attachmentsRef.current = result.conversation.inputAttachments
     if (result.submission.state === 'queued' || result.submission.state === 'accepted') {
-      documentsByConversation.current.delete(result.conversation.conversationId); frozenByConversation.current.delete(result.conversation.conversationId)
-      setDocuments([]); documentsRef.current = []; setContextFrozen(false); contextFrozenRef.current = false
+      documentsByConversation.current.set(result.conversation.conversationId, documentsRef.current)
+      const frozen = documentsRef.current.some(reference => reference.pinned)
+      setContextFrozen(frozen); contextFrozenRef.current = frozen
     }
     if (result.run) setRun(result.run)
     revealSubmission(result.submission)
@@ -873,7 +887,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         const consumable = (text: string, attachments: readonly InputAttachmentReference[]) =>
           (!text || text === source.text) && (attachments.length === 0 || sameAttachments(attachments, source.attachments))
         if (!consumable(draftRef.current, attachmentsRef.current) || !consumable(persisted.inputDraft, persisted.inputAttachments)
-          || !sameDocuments(restoredDocuments(persisted), source.documents))
+          || !sameExecutionReferences(restoredDocuments(persisted).filter(reference => reference.pinned), source.documents.filter(reference => reference.pinned !== false)))
           throw new Error('输入框已有新的文字、附件或文档引用；新草稿已保留。请先处理新草稿，再继续原任务。')
         request = { workspaceId: source.workspaceId, conversationId: source.conversationId, submissionId: crypto.randomUUID(),
           expectedRevision: persisted.revision, text: source.text, documents: structuredClone(source.documents),
@@ -896,10 +910,10 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       else {
         const materials = await captureMaterials?.()
         const pinned = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
+        const ready = await prepareSend([...new Set(pinned.map(document => document.documentId))])
+        if (!ready) { setError('引用文档的输入尚未同步；请处理对应文档后重试。'); return }
         const preparedDocuments = api.prepareDocuments ? await api.prepareDocuments({ workspaceId: selected.workspaceId,
           conversationId: selected.conversationId, documents: pinned, permission: permissionOverride ?? permission }) : pinned
-        const ready = await prepareSend(preparedDocuments.map(document => document.documentId))
-        if (!ready) { setError('引用文档的输入尚未同步；请处理对应文档后重试。'); return }
         // A click blurs the textarea first. Wait for that CAS, then freeze one exact payload.
         await persist()
         const current = activeRef.current
@@ -999,38 +1013,46 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   }
   useEffect(() => workbenchSelection.onRequest(request => contextualHandler.current(request)), [])
   /** "+" menu: reference the current document, or its current selection, for this message. */
-  const changeSelection = async (requireSelection = true) => {
+  const changeSelection = async (requireSelection = true, replaceStale = false) => {
     setPlusOpen(false)
     try {
       const captured = await captureDocuments(true)
       if (!captured.length) throw new Error('当前没有打开的文档，原引用仍保留。')
       if (requireSelection && !captured.some(value => value.selection?.length)) throw new Error('当前没有有效选区，原引用仍保留。')
-      const refs = requireSelection ? captured : captured.map(({ selection: _selection, ...value }) => value)
+      const split = splitComposerReferences(captured)
+      const added = requireSelection ? split.filter(reference => reference.selection?.some(target => target.kind !== 'course-surface'))
+        : split.filter(reference => reference.displayLabel === '当前页面' || reference.displayLabel === '文档')
+      const base = replaceStale ? documentsRef.current.filter(reference => !captured.some(value => value.documentId === reference.documentId && value.epoch !== reference.epoch)) : documentsRef.current
+      const refs = pinReferences(base, added)
       setDocuments(refs); documentsRef.current = refs; contextFrozenRef.current = true; setContextFrozen(true)
       if (activeRef.current) { documentsByConversation.current.set(activeRef.current.conversationId, refs); frozenByConversation.current.set(activeRef.current.conversationId, true) }
       await persist()
     } catch (failure) { setError(failure instanceof Error ? failure.message : '选区未改变。') }
   }
-  const unpinSelection = () => {
-    const refs = documentsRef.current.map(({ selection, ...value }) => ({ ...value, writable: value.writable.filter(scope => scope.kind === 'document') }))
-    setDocuments(refs); documentsRef.current = refs; workbenchSelection.setPinned(refs)
-    if (activeRef.current) documentsByConversation.current.set(activeRef.current.conversationId, refs)
-    void persist().catch(() => setError('引用草稿未保存，请重试。'))
-  }
   /** Chip ×: drop one document reference (or all) from this message; the other references stay. */
-  const removeDocumentReferences = async (documentId?: string) => {
+  const removeDocumentReferences = async (referenceId?: string) => {
     const selected = activeRef.current
     if (!selected || busy || !documentsRef.current.length) return
     setBusy(true); setError('')
     try {
       await (capturePromise.current ?? Promise.resolve())
       if (activeRef.current?.conversationId !== selected.conversationId) throw new Error('会话已切换')
-      const remaining = documentId ? documentsRef.current.filter(value => value.documentId !== documentId) : []
+      const clicked = referenceId ? documentsRef.current.find(value => referenceIdentity(value) === referenceId) : undefined
+      const removesPage = clicked?.pinned === false && (!clicked.selection?.length || clicked.selection.every(target => target.kind === 'course-surface'))
+      const removed = referenceId ? documentsRef.current.filter(value => referenceIdentity(value) === referenceId
+        || removesPage && value.pinned === false && value.documentId === clicked.documentId) : documentsRef.current
+      for (const reference of removed) {
+        removedAutomatic.current.add(referenceIdentity(reference))
+        if (reference.selection?.some(target => target.kind !== 'course-surface')) workbenchSelection.removeSelection(reference.documentId, reference.selection)
+      }
+      const removedIds = new Set(removed.map(referenceIdentity))
+      const remaining = documentsRef.current.filter(value => !removedIds.has(referenceIdentity(value)))
       await persist(remaining)
       documentsByConversation.current.set(selected.conversationId, remaining)
       frozenByConversation.current.set(selected.conversationId, true)
       setDocuments(remaining); documentsRef.current = remaining
-      setContextFrozen(true); contextFrozenRef.current = true
+      const frozen = remaining.some(reference => reference.pinned)
+      setContextFrozen(frozen); contextFrozenRef.current = frozen
       workbenchSelection.setPinned(remaining)
       setSubmissions(value => value.filter(item => item.conversationId !== selected.conversationId || item.failure?.code !== 'document-session-changed'))
     } catch { setError('文档引用未移除；草稿和原引用已保留，请重试。') }
@@ -1212,7 +1234,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const locationKind = active?.home?.kind ?? 'folder'
   const locationIcon = locationKind === 'file' ? <File size={13} className="execution-assistant__location-icon" /> : <Folder size={13} className="execution-assistant__location-icon" />
   const fullPath = isOtherWorkspace ? homePath : [root?.replace(/[/\\]+$/, ''), homePath].filter(Boolean).join('/')
-  const locationTitle = `${fullPath ? `${fullPath}\n` : ''}所属位置只决定默认引用和新建文件的位置，不限制可修改的范围`
+  const locationTitle = `${fullPath ? `${fullPath}\n` : ''}所属位置用于整理会话；当前引用和连接权限决定任务可访问的内容`
   const handleLocationClick = () => {
     if (!active) return
     const path = active.home?.path ?? ''
@@ -1258,7 +1280,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         {forkAdvisory.remaining.length > 0 && <><strong>原计划提示（请核对）</strong><ul>{forkAdvisory.remaining.map((item, index) => <li key={index}>{item}</li>)}</ul></>}
       </section>}
       {error && <p className="execution-assistant__error" role="alert">{error}</p>}
-      {active?.home?.missing && <p className="execution-assistant__home-notice" role="status">所属文件已删除，本条消息不会自动引用该文件；可重新引用文件。</p>}
+      {active?.home?.missing && <p className="execution-assistant__home-notice" role="status">所属文件已删除；会话和草稿仍保留，可调整分类。</p>}
       <div className="execution-assistant__history">
         {isEmptySession && projection.items.length === 0 && submissions.length === 0 && !historySearchOpen ? <section className="execution-assistant__welcome" aria-label="开始创作">
           <span className="execution-assistant__welcome-mark" aria-hidden="true">✦</span>
@@ -1268,7 +1290,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
             <button type="button" className="primary-button" onClick={() => { setSettingsEntry('default'); setSettingsOpen(true) }}>连接模型</button></div>}
           <div className="execution-assistant__welcome-examples" aria-label="试试这些任务">
             {['帮我整理材料，提炼重点并给出清晰的结构。', '帮我制作一份演示，先和我确认主题与内容。'].map((text, index) => <button type="button" key={text} disabled={!active || busy}
-              onClick={() => { setDraft(text); draftRef.current = text; freezeDocuments(text); composerRef.current?.focus() }}>{index === 0 ? '整理材料' : '制作演示'}<span aria-hidden="true">↗</span></button>)}
+              onClick={() => { setDraft(text); draftRef.current = text; composerRef.current?.focus() }}>{index === 0 ? '整理材料' : '制作演示'}<span aria-hidden="true">↗</span></button>)}
           </div>
         </section> : <>
         {userHistory.windowCount > 1 && <section aria-label="用户消息历史">
@@ -1326,7 +1348,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       </div>
       {openQuestion && <ExecutionQuestionCard key={`${openQuestion.runId}:${openQuestion.callId}`} pending={openQuestion}
         onAnswer={api?.answer ? async answer => {
-          const record = await api.answer!({ runId: openQuestion.runId, callId: openQuestion.callId, answer })
+          const currentDraft = openQuestion.question.currentDraft ? await workbenchSelection.prepareQuestion(openQuestion.question) : undefined
+          const record = await api.answer!({ runId: openQuestion.runId, callId: openQuestion.callId, answer, ...(currentDraft ? { currentDraft } : {}) })
           if (runRef.current?.runId === record.runId) { setRun(record); runRef.current = record }
         } : undefined} />}
       {openApproval && <ExecutionApprovalCard key={`${openApproval.runId}:${openApproval.callId}`} pending={openApproval}
@@ -1342,27 +1365,27 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       <footer className="execution-assistant__composer">
         {Object.keys(documentReferenceIssues).length > 0 && <div className="execution-assistant__reference-notice" role="status">
           <p>{Object.entries(documentReferenceIssues).map(([id, issue]) => `${documentNames[id] ?? '原文档'}：${issue}`).join('；')}。文字和附件仍保留。</p>
-          <div><button type="button" disabled={busy} onClick={() => void changeSelection(false)}>重新引用当前文档</button>
-            <button type="button" disabled={busy} onClick={() => void changeSelection(true)}>重新引用当前选区</button></div>
+          <div><button type="button" disabled={busy} onClick={() => void changeSelection(false, true)}>重新引用当前文档</button>
+            <button type="button" disabled={busy} onClick={() => void changeSelection(true, true)}>重新引用当前选区</button></div>
         </div>}
         {(documents.length > 0 || contextFrozen) && <div className="execution-assistant__references" aria-label="本条消息的引用">
           {documents.map(value => {
             const name = documentNames[value.documentId] ?? '已绑定文档'
-            return <span className="execution-assistant__chip" key={value.documentId}>
-              <span className="execution-assistant__chip-label" title={name}>{name}</span>
-              <button type="button" aria-label={`移除引用 ${name}`} disabled={busy} onClick={() => void removeDocumentReferences(value.documentId)}>×</button>
+            return <span className="execution-assistant__chip" key={referenceIdentity(value)}>
+              <span className="execution-assistant__chip-label" title={name}>{name}{value.displayLabel ? ` · ${value.displayLabel}` : ''}</span>
+              <button type="button" aria-label={`${value.pinned ? '取消固定' : '固定'} ${name} ${value.displayLabel ?? ''}`} disabled={busy} onClick={() => {
+                const refs = documentsRef.current.map(reference => referenceIdentity(reference) === referenceIdentity(value) ? { ...reference, pinned: !reference.pinned } : reference)
+                documentsRef.current = refs; setDocuments(refs); const frozen = refs.some(reference => reference.pinned); contextFrozenRef.current = frozen; setContextFrozen(frozen)
+                void persist().catch(() => setError('引用草稿未保存，请重试。'))
+              }}>{value.pinned ? '已固定' : '固定'}</button>
+              <button type="button" aria-label={`移除引用 ${name}${value.displayLabel ? ` ${value.displayLabel}` : ''}`} disabled={busy} onClick={() => void removeDocumentReferences(referenceIdentity(value))}>×</button>
             </span>
           })}
-          {documents.some(value => value.selection?.length) && <span className="execution-assistant__chip">
-            <span className="execution-assistant__chip-label">{`选区 ${documents.reduce((n, value) => n + (value.selection?.length ?? 0), 0)} 处`}</span>
-            <button type="button" aria-label="移除选区引用" disabled={busy} onClick={unpinSelection}>×</button>
-          </span>}
-          {contextFrozen && documents.length === 0 && <span className="execution-assistant__chip is-muted">{active?.home?.kind === 'file' && !active.home.missing ? `默认引用 ${active.home.path}` : '本条消息不引用文档'}</span>}
+          {contextFrozen && documents.length === 0 && <span className="execution-assistant__chip is-muted">本条消息不引用文档</span>}
         </div>}
         <AttachmentComposer workspaceDirectory={root ?? undefined} key={active?.conversationId ?? 'no-conversation'} value={attachments} disabled={!active || busy}
           onBusyChange={setAttachmentBusy} onChange={value => {
             setAttachments(value); attachmentsRef.current = value
-            if (value.length > 0) freezeDocuments(draftRef.current || '附件')
             void persist().catch(() => setError('附件草稿未保存，请重试。'))
           }}>
           {actions => <div className="execution-assistant__input-row">
@@ -1380,7 +1403,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
             <textarea ref={composerRef} aria-label="给创作助手发消息" aria-describedby="assistant-composer-hint" data-attachment-paste-target value={draft} disabled={!active} readOnly={busy} placeholder="描述你要讨论或完成的内容"
               onFocus={() => { setPlusOpen(false); setPermissionOpen(false) }}
               onCompositionStart={() => { composingRef.current = true }} onCompositionEnd={() => { composingRef.current = false }} onKeyDown={onComposerKeyDown}
-              onChange={event => { setDraft(event.target.value); draftRef.current = event.target.value; freezeDocuments(event.target.value) }} onBlur={() => { void persist().catch(failure => setError(failure instanceof Error ? failure.message : '草稿未保存，请重试。')) }} />
+              onChange={event => { setDraft(event.target.value); draftRef.current = event.target.value }} onBlur={() => { void persist().catch(failure => setError(failure instanceof Error ? failure.message : '草稿未保存，请重试。')) }} />
           </div>}
         </AttachmentComposer>
         <div className="execution-assistant__toolbar">
@@ -1399,7 +1422,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
             <span className={configured ? 'is-ready' : 'is-unavailable'} aria-hidden="true" />
             {/* Like common agents, the model summary itself opens the model menu. */}
             <button ref={modelButtonRef} type="button" aria-label="切换模型" aria-describedby={modelSummaryId} aria-expanded={modelMenuOpen} aria-controls="assistant-model-choices" onClick={toggleModelMenu}>
-              <span id={modelSummaryId}>{modelSummary}{connection ? ` · ${billingLabels[connection.connection.billing.kind]}` : ''}{!configured && conversationSelection ? ' · 不可用' : ''}</span>
+              <span id={modelSummaryId}>{run && ['queued', 'running', 'stopping'].includes(run.status) ? `当前任务：${run.input.selection.model} · 下次：` : ''}{modelSummary}{connection ? ` · ${billingLabels[connection.connection.billing.kind]}` : ''}{!configured && conversationSelection ? ' · 不可用' : ''}</span>
               <span aria-hidden="true">▾</span>
             </button>
             {modelMenuOpen && createPortal(<div ref={modelMenuRef} id="assistant-model-choices" className={`execution-assistant__model-menu${!allModelsOpen && favoriteModelOptions.length === 0 ? ' execution-assistant__model-menu--empty' : ''}`} role="group" aria-label="对话模型选择"

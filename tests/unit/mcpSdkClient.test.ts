@@ -16,7 +16,7 @@ describe('direct MCP SDK connection facts', () => {
       const workspace = path.join(directory, 'workspace'); await mkdir(workspace)
       await writeFile(path.join(workspace, 'example.md'), 'Existing editable document')
       fixture = await residentMcpFixture({ host: new DocumentHostService(path.join(directory, 'documents')), directory, workspaceRoot: workspace })
-      const connection = readExplicitMcpConnection({ endpoint: (await fixture.service.status()).endpoint, token: fixture.token() })
+      const connection = readExplicitMcpConnection({ endpoint: (await fixture.service.status()).endpoint })
       sdk = await connectExplicitMcp(connection)
       const opened = await sdk.call('file.open', { path: 'example.md' })
       expect(opened.isError).toBe(false)
@@ -29,10 +29,10 @@ describe('direct MCP SDK connection facts', () => {
       await rm(directory, { recursive: true, force: true })
     }
   })
-  it('uses explicit ready/configuration credentials and retains the owner workspace', () => {
-    expect(readExplicitMcpConnection({ endpoint: 'http://127.0.0.1:45888/mcp', token: 'explicit', workspaceId: 'existing-owner-space', pid: 123 }))
-      .toEqual({ endpoint: 'http://127.0.0.1:45888/mcp', token: 'explicit', workspaceId: 'existing-owner-space' })
-    expect(() => readExplicitMcpConnection({ endpoint: 'http://127.0.0.1:45888/mcp' })).toThrow('token')
+  it('uses explicit ready/configuration without credentials and retains the owner workspace', () => {
+    expect(readExplicitMcpConnection({ endpoint: 'http://127.0.0.1:45888/mcp', workspaceId: 'existing-owner-space', pid: 123 }))
+      .toEqual({ endpoint: 'http://127.0.0.1:45888/mcp', workspaceId: 'existing-owner-space' })
+    expect(readExplicitMcpConnection({ endpoint: 'http://127.0.0.1:45888/mcp' })).not.toHaveProperty('token')
   })
   it('requires the actual absolute save target and a current clean saved revision', () => {
     const filename = path.resolve('lesson.h5lesson')

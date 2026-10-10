@@ -2,6 +2,7 @@ import type { ConversationRecord } from '../../../shared/workbench/conversations
 import type { InputContext } from '../../../shared/workbench/attachments'
 import type { ExecutionRunRecord } from '../../../shared/workbench/execution'
 import { contextMessageId } from './ExecutionContextProjection'
+import { executionFinalReply } from './executionOutcome'
 import { knownApplication, serviceToolOutcome } from '../../../core/tools/modelToolResult'
 
 /** One index entry per real conversation message; original run payloads never recursively copy into new tasks. */
@@ -22,9 +23,14 @@ export async function conversationHistoryIndex(conversation: ConversationRecord,
         const adjustment = run.steering?.find(value => value.submissionId === message.messageId)
         index = adjustment ? adjustment.messageIndex ?? -1 : run.initialPayload?.userText?.messageIndex ?? run.initialPayload?.explicitAttachments[0]?.messageIndex ?? -1
       }
-      else for (let i = (lastAssistantIndex.get(run.runId) ?? (run.initialMessageCount - 1)) + 1; i < run.messages.length; i++) {
-        if (run.messages[i]!.role === 'assistant' && run.messages[i]!.content === message.text) {
-          index = i; lastAssistantIndex.set(run.runId, i); break
+      else {
+        const request = (run.requests ?? []).filter(request => request.kind === undefined).at(-1)
+        if (request?.assistantMessageIndex !== undefined) {
+          if (executionFinalReply(run) === message.text) index = request.assistantMessageIndex
+        } else for (let i = (lastAssistantIndex.get(run.runId) ?? (run.initialMessageCount - 1)) + 1; i < run.messages.length; i++) {
+          if (run.messages[i]!.role === 'assistant' && run.messages[i]!.content === message.text) {
+            index = i; lastAssistantIndex.set(run.runId, i); break
+          }
         }
       }
     }

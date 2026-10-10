@@ -65,7 +65,7 @@ export function ExportMenu({ busy, hasFlowSurface, onExport, onExportSettings, v
         <span><strong>PDF</strong><small>静态页面，互动组件将静态化</small></span>
       </button>
       <button type="button" role="menuitem" data-testid={testId('export-docx')} className="export-menu__item" disabled={!hasFlowSurface}
-        title={hasFlowSurface ? undefined : '请先新增流式讲义页面'}
+        title={hasFlowSurface ? undefined : '请先新增流式布局页面'}
         onClick={(event) => { if (hasFlowSurface) choose(event, 'docx') }}>
         <FileText size={18} />
         <span><strong>DOCX 讲义</strong><small>Flow 内容导出为可编辑 Word 文档</small></span>

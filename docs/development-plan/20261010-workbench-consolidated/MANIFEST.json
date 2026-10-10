@@ -1,0 +1,62 @@
+{
+  "package": "果铃工作台-汇总可执行方案包",
+  "date": "2026-10-10",
+  "status": "plan_only_not_implemented",
+  "repository": "ittoedu",
+  "reviewed_head": "df21debdde2a86e7108a1af41b7aa4df62746b67",
+  "repository_directory": "docs/development-plan/20261010-workbench-consolidated",
+  "execution_specification": "EXECUTION_PLAN.md",
+  "scope": "W1-W4 future implementation; P1 diagnosis only, repair requires separate authorization",
+  "original_gpt_pro_plan_sha256": "01a6323e47ee93018f9d814718eced18b2440419e17cb59c0e55879dbaf7c2c7",
+  "manifest_note": "File integrity only. This manifest excludes its own hash and does not prove product tests passed.",
+  "files": [
+    {
+      "path": "EXECUTION_PLAN.md",
+      "role": "sole_execution_specification",
+      "bytes": 97324,
+      "sha256": "4d4e1b17f7df3488bab2cda893e79185d7f53e7d5c726b5ff1564ab156986089"
+    },
+    {
+      "path": "PORTABLE_SHARP_DIAGNOSIS.md",
+      "role": "diagnostic_report_only_no_repair_authorization",
+      "bytes": 16800,
+      "sha256": "1b49c6ad35314335c803a6b49cf30779dc8a8b9feb8b0491d527d8c3781d6e72"
+    },
+    {
+      "path": "README.md",
+      "role": "package_entry",
+      "bytes": 3170,
+      "sha256": "0d3b2bee31fdc686c580b626e76ef53e4d69128be06b1b4c291121bd5685d851"
+    },
+    {
+      "path": "START_PROMPT.md",
+      "role": "future_implementation_instruction",
+      "bytes": 3983,
+      "sha256": "8d0722ed70cc7111eb4672cea43c17765d802037c897875d6fafc7b2b01540fb"
+    },
+    {
+      "path": "evidence/ORIGINAL_GPT_PRO_PLAN.md",
+      "role": "historical_source_only",
+      "bytes": 90065,
+      "sha256": "01a6323e47ee93018f9d814718eced18b2440419e17cb59c0e55879dbaf7c2c7"
+    },
+    {
+      "path": "evidence/REVIEW_FACTS.md",
+      "role": "review_facts_and_evidence_boundaries",
+      "bytes": 5761,
+      "sha256": "edd6a4ce341e54edd2179e3c9202c98253a4edb49b0d0bc5d9d12b00c981117f"
+    },
+    {
+      "path": "evidence/verify-execution-file-race.ts",
+      "role": "baseline_reproduction_not_passing_regression",
+      "bytes": 1990,
+      "sha256": "f198c018c278eab45a469c19160b6cc87a12fc62799aceb07760cd86b046e05f"
+    },
+    {
+      "path": "evidence/verify-execution-reply.ts",
+      "role": "baseline_reproduction_not_passing_regression",
+      "bytes": 1340,
+      "sha256": "e05eb732c824b7966568c4b910045f045a547bb17f077bbcf8bd5da6b278f5b2"
+    }
+  ]
+}

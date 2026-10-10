@@ -10,6 +10,7 @@ import type { ImageProviderPort, ImageProviderReference } from './ImageProviderP
 import { imageProvenance } from './imageRoute'
 import { waitForGenerationRetry } from '../execution/modelGenerationRetry'
 import { waitForHostWork } from '../../../shared/workbench/jobWait'
+import { assetSourceSchema, type AssetSource } from '../../../shared/contracts/media-v1'
 
 export interface ImageGenerationServiceOptions {
   directory: string
@@ -176,7 +177,9 @@ export class ImageGenerationService {
         let source: HostImageInput
         const admitted = admittedReferences?.find(reference => reference.referenceId === referenceId)
         if (admitted) source = admitted
-        else if (request.documentId.startsWith('workspace:')) {
+        else if (request.documentId.startsWith('workspace:') && referenceId.startsWith('workspace-image:')) {
+          source = await this.readWorkspaceResource(request.documentId, referenceId)
+        } else if (request.documentId.startsWith('workspace:')) {
           const reference = parseGeneratedImageReference(referenceId)
           if (!reference || reference.jobId === request.jobId) throw new ImageGenerationError('reference-unavailable', '独立参考图须来自本任务已完成的另一图片作业。')
           // Public workspace lookup already permits a Ready result from an
@@ -302,6 +305,11 @@ export class ImageGenerationService {
         await fs.rm(filename, { force: true })
       }
       const resourceNames = await fs.readdir(resourcesRoot).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [] as string[]; throw error })
+      for (const name of resourceNames.filter(value => /^[a-f0-9]{64}\.json$/.test(value))) {
+        const reference = JSON.parse(await fs.readFile(path.join(resourcesRoot, name), 'utf8')) as { workspaceSources?: Record<string, unknown> }
+        if (Object.entries(reference.workspaceSources ?? {}).some(([scope, source]) => /^workspace:[a-f0-9]{64}$/.test(scope)
+          && assetSourceSchema.safeParse(source).success)) retainedDigests.add(name.slice(0, -5))
+      }
       let removed = 0
       for (const name of resourceNames) {
         const match = /^([a-f0-9]{64})\.(blob|json)$/.exec(name)
@@ -313,7 +321,7 @@ export class ImageGenerationService {
     this.maintenance = work.then(() => undefined, () => undefined)
     return work
   }
-  private async storeImage(input: HostImageInput): Promise<ImageResourceReference> {
+  private async storeImage(input: HostImageInput, workspace?: { scope: string; source: AssetSource }): Promise<ImageResourceReference> {
     const image = await prepareImageResource(input, randomUUID)
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(image.meta.mimeType)) throw new ImageGenerationError('unsupported-image', '生成结果必须是真实栅格图片。')
     const digest = hash(image.bytes), resourceId = `image_${digest}`
@@ -331,9 +339,33 @@ export class ImageGenerationService {
         try { const file = await fs.open(temporary, 'wx', 0o600); try { await file.writeFile(image.bytes); await file.sync() } finally { await file.close() }; await fs.rename(temporary, filename) }
         finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }
       }
-      await this.atomic(path.join(this.directory, 'resources', `${digest}.json`), reference)
+      const metadataFile = path.join(this.directory, 'resources', `${digest}.json`)
+      let workspaceSources: Record<string, AssetSource> | undefined
+      try { workspaceSources = (JSON.parse(await fs.readFile(metadataFile, 'utf8')) as { workspaceSources?: Record<string, AssetSource> }).workspaceSources }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+      if (workspace) workspaceSources = { ...workspaceSources, [workspace.scope]: workspace.source }
+      await this.atomic(metadataFile, { ...reference, ...(workspaceSources ? { workspaceSources } : {}) })
     })
     return reference
+  }
+  /** Downloaded candidates use the same immutable blobs, without pretending a model generation happened. */
+  registerWorkspaceResource(scope: string, image: HostImageInput, source: AssetSource): Promise<string> {
+    if (!/^workspace:[a-f0-9]{64}$/.test(scope)) return Promise.reject(new ImageGenerationError('invalid-image-scope', '独立图片缺少实际工作空间范围'))
+    const frozenImage = { ...image, bytes: Uint8Array.from(image.bytes) }, frozenSource = assetSourceSchema.parse(source)
+    const work = this.maintenance.then(async () => {
+      const reference = await this.storeImage(frozenImage, { scope, source: frozenSource })
+      return `workspace-image:${scope.slice('workspace:'.length)}:${reference.resourceId}`
+    })
+    this.maintenance = work.then(() => undefined, () => undefined)
+    return work
+  }
+  async readWorkspaceResource(scope: string, resource: string): Promise<HostImageInput> {
+    const match = /^workspace-image:([a-f0-9]{64}):(image_[a-f0-9]{64})$/.exec(resource)
+    if (!match || scope !== `workspace:${match[1]}`) throw new ImageGenerationError('image-scope-mismatch', '图片不属于当前工作空间')
+    await this.maintenance
+    const reference = JSON.parse(await fs.readFile(path.join(this.directory, 'resources', `${match[2]!.slice(6)}.json`), 'utf8')) as { workspaceSources?: Record<string, AssetSource> }
+    const source = assetSourceSchema.parse(reference.workspaceSources?.[scope])
+    return { ...await this.readResource(match[2]!), source }
   }
   /** Main-only bytes port. Caller must grant a new Gateway resource handle for the current run/document. */
   async readResource(resourceId: string): Promise<HostImageInput> {
