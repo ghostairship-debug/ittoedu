@@ -33,6 +33,7 @@ export async function readHtmlClosure(input: ReadHtmlClosureInput): Promise<Read
   if (!confined(root, htmlFile)) throw new Error('HTML 文件不在批准的资源根目录内')
   const html = input.sourceHtml ?? await input.currentSource?.(htmlFile) ?? (await readFile(htmlFile)).toString('utf8')
   const files = new Map<string, Uint8Array>()
+  const unreadable = new Map<string, string>()
   let result = extractHtmlResources({ html, siblingFiles: files })
   for (;;) {
     const missing = result.diagnostics.filter(diagnostic => diagnostic.code === 'missing-relative-resource' && diagnostic.reference)
@@ -45,14 +46,20 @@ export async function readHtmlClosure(input: ReadHtmlClosureInput): Promise<Read
       let target: string
       try { target = await realpath(path) } catch { continue }
       if (!confined(root, target)) continue
-      const current = await input.currentSource?.(target)
-      const bytes = current === undefined ? new Uint8Array(await readFile(target)) : new TextEncoder().encode(current)
-      files.set(key, bytes)
-      added = true
+      try {
+        const current = await input.currentSource?.(target)
+        const bytes = current === undefined ? new Uint8Array(await readFile(target)) : new TextEncoder().encode(current)
+        files.set(key, bytes)
+        added = true
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') throw error
+        unreadable.set(key, error instanceof Error ? error.message : String(error))
+      }
     }
     if (!added) break
     result = extractHtmlResources({ html, siblingFiles: files })
   }
+  for (const [reference, message] of unreadable) result.diagnostics.push({ level: 'warning', code: 'resource-read', reference, message: `无法读取相对资源 ${reference}：${message}；原引用与其他可用内容已保留` })
   return { ...result, siblingFiles: files }
 }
 

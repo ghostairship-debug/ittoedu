@@ -128,6 +128,8 @@ export interface AudioManagerOptions {
   mode?: RuntimeExecutionMode
   createAudio?: (source: string) => HTMLAudioElement
   unlockTarget?: EventTarget
+  sceneIdForNode?(nodeId: string): string | null | undefined
+  isPlaybackActive?(): boolean
   maxConcurrent?: Partial<Record<'sfx' | 'ui', number>>
 }
 
@@ -146,6 +148,7 @@ interface ManagedVoice {
   fadeTimer: ReturnType<typeof setTimeout> | null
   playing: boolean
   stopping: boolean
+  requestId: number
   disposeListeners(): void
 }
 
@@ -154,6 +157,9 @@ interface RegisteredVideo {
   element: ManagedMediaPlayback
   volume: number
   muted: boolean
+  sceneId?: string
+  lifetime: AudioLifetime
+  revision: number
 }
 
 const DEFAULT_CHANNEL_VOLUMES: Record<AudioChannel, number> = {
@@ -274,6 +280,9 @@ export class AudioManager implements CourseAudioApi {
   private playbackSequence = 0
   private destroyed = false
   private unlockListenersInstalled = false
+  private playbackPaused = false
+  private readonly sceneIdForNode?: AudioManagerOptions['sceneIdForNode']
+  private readonly isPlaybackActive?: AudioManagerOptions['isPlaybackActive']
 
   constructor(
     project: AudioManagerProjectSource,
@@ -287,6 +296,8 @@ export class AudioManager implements CourseAudioApi {
     this.captureMode = options.mode === 'capture'
     this.createAudio = options.createAudio ?? defaultAudioFactory
     this.unlockTarget = options.unlockTarget
+    this.sceneIdForNode = options.sceneIdForNode
+    this.isPlaybackActive = options.isPlaybackActive
     this.maxConcurrent = {
       sfx: positiveInteger(options.maxConcurrent?.sfx),
       ui: positiveInteger(options.maxConcurrent?.ui),
@@ -352,7 +363,7 @@ export class AudioManager implements CourseAudioApi {
   }
 
   play(soundId: string, options: AudioPlayOptions = {}): boolean {
-    if (this.destroyed || this.captureMode) return false
+    if (this.destroyed || this.captureMode || this.playbackPaused || this.isPlaybackActive?.() === false) return false
     const registered = this.voices.find(voice => voice.external && voice.definition.id === soundId)
     if (registered) {
       const policy = options.ifPlaying ?? 'restart'
@@ -421,6 +432,7 @@ export class AudioManager implements CourseAudioApi {
       fadeTimer: null,
       playing: false,
       stopping: false,
+      requestId: 0,
       disposeListeners() {},
     }
     voice.disposeListeners = this.bindVoiceEvents(voice)
@@ -495,7 +507,9 @@ export class AudioManager implements CourseAudioApi {
         (sceneId === undefined || voice.sceneId === undefined || voice.sceneId === sceneId),
     )
     matched.forEach((voice) => this.stopVoice(voice))
-    return matched.length > 0
+    const videos = [...this.videos].filter(video => video.lifetime === 'scene' && (sceneId === undefined || video.sceneId === undefined || video.sceneId === sceneId))
+    for (const video of videos) { video.revision++; video.element.pause() }
+    return matched.length + videos.length > 0
   }
 
   registerVideo(
@@ -506,11 +520,13 @@ export class AudioManager implements CourseAudioApi {
   }
 
   registerPlaybackVideo(element: ManagedMediaPlayback, options: RegisteredVideoOptions): VideoAudioRegistration {
+    const surfaceId = this.sceneIdForNode?.(options.nodeId)
     const registration: RegisteredVideo = {
       nodeId: options.nodeId,
       element,
       volume: clampUnit(options.volume, 1),
       muted: options.muted === true,
+      sceneId: surfaceId ?? this.currentSceneId, lifetime: surfaceId === null ? 'course' : 'scene', revision: 0,
     }
     this.videos.add(registration)
     this.applyVideoVolume(registration)
@@ -539,14 +555,15 @@ export class AudioManager implements CourseAudioApi {
 
   registerPlaybackAudio(element: ManagedMediaPlayback, options: RegisteredAudioOptions): AudioElementRegistration {
     const soundId = options.soundId ?? options.nodeId
+    const surfaceId = this.sceneIdForNode?.(options.nodeId)
     const voice: ManagedVoice = {
       external: { nodeId: options.nodeId, muted: options.muted === true },
       playbackId: `audio-${++this.playbackSequence}`,
       definition: { id: soundId, name: options.nodeId, assetId: '', channel: options.channel,
         defaultVolume: clampUnit(options.volume, 1), defaultLoop: element.loop },
-      element, lifetime: options.channel === 'music' ? 'course' : 'scene', sceneId: this.currentSceneId,
+      element, lifetime: options.channel === 'music' || surfaceId === null ? 'course' : 'scene', sceneId: surfaceId ?? this.currentSceneId,
       volume: clampUnit(options.volume, 1), pendingUnlock: false, pendingFadeInMs: 0, fadeGain: 1,
-      fadeTimer: null, playing: !element.paused, stopping: false, disposeListeners() {},
+      fadeTimer: null, playing: !element.paused, stopping: false, requestId: 0, disposeListeners() {},
     }
     voice.disposeListeners = this.bindVoiceEvents(voice)
     this.voices.push(voice); this.applyVoiceVolume(voice); this.updateMusicDuckGain()
@@ -554,7 +571,12 @@ export class AudioManager implements CourseAudioApi {
     return {
       update: patch => {
         if (!active || this.destroyed) return
-        if (patch.channel !== undefined) voice.definition.channel = patch.channel
+        if (patch.channel !== undefined) {
+          voice.definition.channel = patch.channel
+          const surfaceId = this.sceneIdForNode?.(options.nodeId)
+          voice.lifetime = patch.channel === 'music' || surfaceId === null ? 'course' : 'scene'
+          voice.sceneId = surfaceId ?? this.currentSceneId
+        }
         if (patch.volume !== undefined) voice.volume = voice.definition.defaultVolume = clampUnit(patch.volume, voice.volume)
         if (patch.muted !== undefined) voice.external!.muted = patch.muted
         this.applyVoiceVolume(voice); this.updateMusicDuckGain()
@@ -565,6 +587,13 @@ export class AudioManager implements CourseAudioApi {
 
   updateProject(project: AudioManagerProjectSource): void {
     const next = normalizedSettings(project)
+    for (const voice of [...this.voices]) {
+      if (voice.external) continue
+      const definition = next.sounds[voice.definition.id]
+      if (!definition || definition.assetId !== voice.definition.assetId) { this.stopVoice(voice); continue }
+      if (definition.channel !== voice.definition.channel) voice.lifetime = definition.channel === 'music' ? 'course' : 'scene'
+      voice.definition = definition
+    }
     if (next.defaultMuted !== this.settings.defaultMuted) this.mutedValue = next.defaultMuted
     if (next.masterVolume !== this.settings.masterVolume) this.masterVolumeValue = next.masterVolume
     Object.assign(this.settings, next)
@@ -572,13 +601,16 @@ export class AudioManager implements CourseAudioApi {
   }
 
   pauseActive(): () => void {
-    const voices = this.voices.filter(voice => voice.playing || voice.pendingUnlock)
+    this.playbackPaused = true
+    const voices = this.voices.filter(voice => voice.playing || voice.pendingUnlock || this.backgroundPausedVoices.has(voice))
     const videos = [...this.videos].filter(video => !video.element.paused)
     voices.forEach(voice => this.pauseVoice(voice)); videos.forEach(video => video.element.pause())
+    const voiceRequests = new Map(voices.map(voice => [voice, voice.requestId])), videoRequests = new Map(videos.map(video => [video, video.revision]))
     return () => {
       if (this.destroyed) return
-      for (const voice of voices) if (this.voices.includes(voice)) this.attemptPlay(voice)
-      for (const video of videos) if (this.videos.has(video)) void video.element.play().catch(() => {})
+      this.playbackPaused = false
+      for (const video of videos) if (this.videos.has(video) && video.revision === videoRequests.get(video)) void video.element.play().catch(() => {})
+      for (const voice of voices) if (this.voices.includes(voice) && voice.requestId === voiceRequests.get(voice)) this.attemptPlay(voice)
     }
   }
 
@@ -660,14 +692,16 @@ export class AudioManager implements CourseAudioApi {
 
   private updateVoiceOptions(voice: ManagedVoice, options: AudioPlayOptions): void {
     voice.element.loop = options.loop ?? voice.definition.defaultLoop
-    voice.lifetime = options.lifetime ?? voice.lifetime
-    voice.sceneId = options.sceneId ?? voice.sceneId ?? this.currentSceneId
+    const surfaceId = voice.external ? this.sceneIdForNode?.(voice.external.nodeId) : undefined
+    voice.lifetime = options.lifetime ?? (voice.definition.channel === 'music' || surfaceId === null ? 'course' : 'scene')
+    voice.sceneId = options.sceneId ?? surfaceId ?? this.currentSceneId
     voice.volume = clampUnit(options.volume, voice.definition.defaultVolume)
     this.applyVoiceVolume(voice)
   }
 
   private attemptPlay(voice: ManagedVoice, requestedFadeInMs = 0): boolean {
-    if (voice.stopping || !this.voices.includes(voice)) return false
+    if (voice.stopping || !this.voices.includes(voice) || this.playbackPaused || this.isPlaybackActive?.() === false) return false
+    const requestId = ++voice.requestId
     const duration = fadeDuration(requestedFadeInMs)
     this.cancelVoiceFade(voice)
     voice.pendingFadeInMs = duration
@@ -685,11 +719,11 @@ export class AudioManager implements CourseAudioApi {
     try {
       result = voice.element.play()
     } catch (error) {
-      this.handlePlayRejection(voice, error)
+      this.handlePlayRejection(voice, error, requestId)
       return false
     }
     if (result && typeof result.catch === 'function') {
-      void result.catch((error: unknown) => this.handlePlayRejection(voice, error))
+      void result.catch((error: unknown) => this.handlePlayRejection(voice, error, requestId))
     }
     if (voice.playing && voice.pendingFadeInMs > 0) {
       this.consumePendingFadeIn(voice)
@@ -697,8 +731,8 @@ export class AudioManager implements CourseAudioApi {
     return true
   }
 
-  private handlePlayRejection(voice: ManagedVoice, error: unknown): void {
-    if (voice.stopping || !this.voices.includes(voice)) return
+  private handlePlayRejection(voice: ManagedVoice, error: unknown, requestId: number): void {
+    if (voice.stopping || !this.voices.includes(voice) || voice.requestId !== requestId || this.playbackPaused || this.isPlaybackActive?.() === false) return
     this.cancelVoiceFade(voice)
     this.events.emit<AudioBlockedEvent>('audio:blocked', {
       ...this.playbackEvent(voice),
@@ -715,6 +749,7 @@ export class AudioManager implements CourseAudioApi {
   private bindVoiceEvents(voice: ManagedVoice): () => void {
     const onPlay = () => {
       if (voice.stopping) return
+      if (this.playbackPaused || this.isPlaybackActive?.() === false) { voice.element.pause(); return }
       if (voice.definition.channel === 'music' && this.backgroundPauseTokens.size > 0) {
         this.backgroundPausedVoices.add(voice); voice.element.pause(); return
       }
@@ -748,6 +783,7 @@ export class AudioManager implements CourseAudioApi {
   }
 
   private pauseVoice(voice: ManagedVoice, requestedFadeOutMs = 0): void {
+    voice.requestId++
     voice.pendingUnlock = false
     voice.pendingFadeInMs = 0
     const duration = fadeDuration(requestedFadeOutMs)
@@ -770,6 +806,7 @@ export class AudioManager implements CourseAudioApi {
 
   private stopVoice(voice: ManagedVoice, requestedFadeOutMs = 0): void {
     if (voice.stopping || !this.voices.includes(voice)) return
+    voice.requestId++
     voice.pendingUnlock = false
     voice.pendingFadeInMs = 0
     const duration = fadeDuration(requestedFadeOutMs)
@@ -801,6 +838,7 @@ export class AudioManager implements CourseAudioApi {
   }
 
   private removeVoice(voice: ManagedVoice): void {
+    voice.requestId++
     const index = this.voices.indexOf(voice)
     if (index >= 0) this.voices.splice(index, 1)
     this.backgroundPausedVoices.delete(voice)
@@ -975,6 +1013,7 @@ export class AudioManager implements CourseAudioApi {
   }
 
   private resumeBackgroundPausedMusic(): void {
+    if (this.playbackPaused || this.isPlaybackActive?.() === false) return
     const voices = [...this.backgroundPausedVoices]
     this.backgroundPausedVoices.clear()
     voices.forEach((voice) => {

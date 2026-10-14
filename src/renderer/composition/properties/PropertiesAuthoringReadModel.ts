@@ -1,5 +1,5 @@
 import type { ComponentInstance, ComponentSurface, CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
-import { owningContainer } from '../../../shared/contracts/component-platform/project'
+import { componentIsLocked, owningContainer } from '../../../shared/contracts/component-platform/project'
 import type { DocumentResources } from '../../../shared/workbench/document'
 import type { EditorState } from '../../store/editorStore'
 import { selectEditingScope } from '../../store/editorStore'
@@ -45,6 +45,7 @@ export function selectPropertiesAuthoringReadModel(state: EditorState): Properti
   const selectedViews = selectedInstances.flatMap(instance => {
     try {
       const item = componentPropertiesView(instance, project!.definitions[instance.definitionId])
+      item.locked = componentIsLocked(project!, instance.id)
       // Multi-selection statistics use world corners; single-item editors retain parent-local frame fields.
       if (selectedInstances.length <= 1 || !instance.frame) return [item]
       const corners = frameCorners(instance.frame, componentParentMatrix(project!, instance.id))

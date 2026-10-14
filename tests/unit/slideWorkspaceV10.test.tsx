@@ -237,7 +237,7 @@ it('keeps original Slide interactions on the V10 writer', async () => {
   const ports: SlideWorkspacePorts = {
     read: () => { const v = h.bridge.read(); return { project: v.editingProject, documentId: v.activeDocumentId, surfaceId: v.surfaceId,
       selectedInstanceIds: v.selectedInstanceIds, activation: v.activation, activeStateId: v.activeStateId, assetUrls: {},
-      canvasMode: mode, contentEdit: owned.slideContentEdit, drawTool: owned.slideDrawTool } },
+      epoch: v.snapshot?.epoch, canvasMode: mode, contentEdit: owned.slideContentEdit, drawTool: owned.slideDrawTool } },
     registerObservation: (id, binding) => { expect(id).toBe('slide'); observation.current = binding; return () => { observation.current = null; releaseObservation() } },
     navigationChanged,
     capture: () => kernel.captureTarget(), commit: (edits, target, group) => kernel.editCaptured(kernel.capture(edits, target), group),
@@ -361,7 +361,7 @@ it('waits for the property draft ACK before selecting the neighbor from the same
   const ports: SlideWorkspacePorts = {
     read: () => { const v = h.bridge.read(); return { project: v.editingProject, documentId: v.activeDocumentId, surfaceId: v.surfaceId,
       selectedInstanceIds: v.selectedInstanceIds, activation: v.activation, activeStateId: v.activeStateId, assetUrls: {},
-      canvasMode: 'edit', contentEdit: owned.slideContentEdit, drawTool: owned.slideDrawTool } },
+      epoch: v.snapshot?.epoch, canvasMode: 'edit', contentEdit: owned.slideContentEdit, drawTool: owned.slideDrawTool } },
     capture: () => kernel.captureTarget(), commit: (edits, target, group) => kernel.editCaptured(kernel.capture(edits, target), group),
     edit: (edits, group) => kernel.edit(edits, group),
     select: ids => { events.push('select'); kernel.selectInstances(ids) }, selectSurface: id => kernel.selectSurface(id),

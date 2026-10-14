@@ -4,7 +4,7 @@ import { z } from 'zod'
 import type { DocumentRegistry } from '../../../core/documents/DocumentRegistry'
 import { documentSnapshotFacts, type DocumentToolGateway } from '../../../core/tools/DocumentToolGateway'
 import { applicationEventFacts, committedFact, contentApplyFact, currentSave, modelToolResult,
-  operationFact, saveFact, serviceToolOutcome, toolFailed } from '../../../core/tools/modelToolResult'
+  operationFact, saveFact, serviceToolOutcome, toolFailed, webSearchSources } from '../../../core/tools/modelToolResult'
 import { AgentFileMissingParent, agentFileMutationNames, agentFileTools, isAgentFileTool, type AgentFileContext, type AgentFileMutationName,
   type AgentFileOutcome, type AgentFileToolName } from '../../../core/tools/AgentFileTools'
 import { createCourseFromHtmlInputSchema, createCourseFromHtmlTool } from '../../../core/tools/HtmlImportTools'
@@ -118,7 +118,9 @@ const workspaceName = (rootPath: string) => path.basename(rootPath) || rootPath
 export class ExternalMcpService implements ResidentMcpHandler {
   readonly server = new ResidentMcpServer(this)
   private readonly sessions = new Map<string, Session>()
+  private readonly toolQueues = new Map<string, Promise<void>>()
   private state: ExternalMcpState = 'disabled'
+  private closing = false
   private message?: string
   private lifecycle: Promise<unknown> = Promise.resolve()
   private initialWorkspaceId?: string
@@ -192,11 +194,11 @@ export class ExternalMcpService implements ResidentMcpHandler {
   }
   /** Close/trash stops only the affected document; the session's other documents keep their handles. */
   async stopForDocument(documentId: string): Promise<void> {
-    await Promise.all(this.writableSessionsForDocument(documentId).map(async id => {
-      const session = this.sessions.get(id)!
+    const affected = new Set(this.options.gateway.runIdsForDocument(documentId))
+    await Promise.all([...this.sessions.values()].filter(session => !session.stopped && affected.has(session.runId)).map(async session => {
       await this.options.gateway.stopRunDocument(session.runId, documentId)
       session.listChanged = true
-      session.notices.push('用户在果铃中关闭或移走了你正在修改的一份文档；该文档的句柄已失效，其他文档可继续编辑。需要该文档时请按路径重新打开。')
+      session.notices.push('用户在果铃中关闭或移走了你已打开的一份文档；该文档的句柄已失效，其他文档可继续使用。需要该文档时请按路径重新打开。')
     }))
   }
   /** Called inside ConversationStore's delete transaction: never read that store here. Sessions log into a new conversation next time. */
@@ -205,7 +207,10 @@ export class ExternalMcpService implements ResidentMcpHandler {
       session.conversation = undefined; session.conversationId = undefined
     }
   }
-  close(): Promise<void> { return this.serial(async () => {
+  close(): Promise<void> {
+    // Stop intake synchronously, before close enters the same lifecycle queue used by initialize.
+    this.closing = true; this.state = 'disabled'; this.sessionGeneration++
+    return this.serial(async () => {
     this.state = 'disabled'; await this.server.stop(); await this.closeSessions()
     // Transport disposal is not completion of the received tool calls or their event/journal ACKs.
     await Promise.allSettled([...this.requests])
@@ -252,7 +257,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     if (recent) return recent.workspaceId
     throw new McpProtocolError(-32000, '果铃还没有打开任何工作空间。请先在果铃中打开工作空间，再重新连接。')
   }
-  /** Serialize only authority changes; nonconflicting tool calls remain concurrent. */
+  /** Authority transitions are ordered independently of the tool planning/commit queue. */
   private bind(session: Session, workspaceId: string, permission?: ExecutionPermissionMode): Promise<void> {
     const pending = session.authority.then(() => this.rebind(session, workspaceId, permission ?? session.permission))
     session.authority = pending.catch(() => undefined)
@@ -287,13 +292,14 @@ export class ExternalMcpService implements ResidentMcpHandler {
   }
 
   initialize(client: ResidentMcpClientInfo): Promise<{ sessionId: string; instructions: string }> {
+    if (this.closing || this.state !== 'running') return Promise.reject(new McpProtocolError(-32001, '外部连接尚未启动或已停止'))
     const pending = this.serial(() => this.openSession(client, this.sessionGeneration))
     this.requests.add(pending)
     void pending.then(() => this.requests.delete(pending), () => this.requests.delete(pending))
     return pending
   }
   private async openSession(client: ResidentMcpClientInfo, generation: number): Promise<{ sessionId: string; instructions: string }> {
-    if (this.state !== 'running') throw new McpProtocolError(-32001, '外部连接尚未启动或已停止')
+    if (this.closing || this.state !== 'running') throw new McpProtocolError(-32001, '外部连接尚未启动或已停止')
     const settings = await this.options.settings.read()
     const session: Session = { sessionId: randomUUID(), clientName: client.title ?? client.name, permission: settings.permission,
       connectedAt: this.now(), pending: 0, stopped: false, workspaceId: '', workspaceName: '', workspaceRoot: '', runId: '', taskId: randomUUID(),
@@ -336,7 +342,11 @@ export class ExternalMcpService implements ResidentMcpHandler {
     }
     if (call.method !== 'tools/call') throw new McpProtocolError(-32601, '不支持此 MCP 方法')
     session.pending++; session.lastCallAt = this.now()
-    const pending = this.callTool(session, call)
+    // Keep each session's planning through commit together, so two calls do not plan the same document revision.
+    const pending = (this.toolQueues.get(session.sessionId) ?? Promise.resolve()).catch(() => undefined).then(() => this.callTool(session, call))
+    const tail = pending.then(() => undefined, () => undefined)
+    this.toolQueues.set(session.sessionId, tail)
+    void tail.finally(() => { if (this.toolQueues.get(session.sessionId) === tail) this.toolQueues.delete(session.sessionId) })
     this.requests.add(pending)
     let result: unknown
     try { result = await pending } finally { session.pending--; this.requests.delete(pending) }
@@ -610,7 +620,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const outcome = serviceToolOutcome(tool.name, result)
     const pending = outcome?.status === 'pending'
     await this.emit(scope, conversationId, ticket, 'tool', { toolName: tool.name, label: tool.label, status: pending ? 'pending' : toolFailed(tool.name, result) ? 'failed' : 'completed',
-      input: JSON.stringify(input), output: JSON.stringify(result),
+      input: JSON.stringify(input), output: JSON.stringify(result), webSources: webSearchSources(tool.name, result),
       ...(pending ? { text: outcome.message } : result.kind === 'error' ? { error: result.message } : toolFailed(tool.name, result) && outcome ? { error: outcome.message } : {}),
       ...applicationEventFacts(tool.name, result),
       ...(saved ? { saveStatus: currentSave(saved) ? 'saved' : 'failed' } : {}) })

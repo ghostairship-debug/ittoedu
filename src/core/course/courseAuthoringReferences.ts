@@ -1,5 +1,6 @@
 import type { ComponentFlowPlacement, ComponentInstance, ComponentTarget, CourseProjectLogic, CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import type { InteractionAction, InteractionCondition, InteractionRule, InteractionTrigger } from '../../shared/interactionTypes'
+import { componentAudioSounds } from '../../shared/componentAudioSounds'
 
 /** Current facts captured by the input adapter, never a public model-authored registry. */
 export type CourseAuthoringReference =
@@ -39,7 +40,7 @@ export function courseSoundReference(project: CourseProjectV10, value: string, r
   const reference = references?.get(value)
   if (!reference) return value
   if (reference.kind !== 'sound') return mismatch(value, '声音')
-  if (!project.media?.audio.sounds[reference.soundId]) throw new Error('引用的声音已不存在')
+  if (!componentAudioSounds(project)[reference.soundId]) throw new Error('引用的声音已不存在')
   return reference.soundId
 }
 function scopedReference(value: string, kind: 'action' | 'rule', owner: ComponentTarget, references?: CourseAuthoringReferences): string {

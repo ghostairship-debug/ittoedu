@@ -47,6 +47,6 @@ export type ShapeStyle = z.infer<typeof shapeStyleSchema>
 export function defaultShapeData(shapeType: ShapeData['shapeType'] = 'rectangle'): ShapeData {
   return { shapeType, style: {
     fillColor: '#ffffff', fillOpacity: 1, borderColor: '#222222', borderOpacity: 1,
-    borderWidth: 2, lineStyle: 'solid', cornerRadius: 12, startArrow: 'none', endArrow: 'none',
+    borderWidth: 2, lineStyle: 'solid', cornerRadius: 12, startArrow: 'none', endArrow: shapeType === 'elbow-arrow' ? 'triangle' : 'none',
   } }
 }

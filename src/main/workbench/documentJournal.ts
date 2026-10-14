@@ -7,6 +7,11 @@ import { isDeepStrictEqual } from 'node:util'
 import { DocumentSaveFailure, type DocumentSaveIdentity, type DocumentSaveProof } from '../../shared/workbench/documentSave'
 import { JournalBindingIndex, journalIdentity, type JournalBindingMetadata } from './JournalBindingIndex'
 import { documentRelativePathSchema } from '../../shared/document/resources'
+import { markdownResourceReferences } from '../../shared/document/markdownResourceReferences'
+import { readHtmlClosure } from './htmlImport/readHtmlClosure'
+import { createMarkdownDriver } from '../../core/drivers/MarkdownDriver'
+import { createTextDriver } from '../../core/drivers/TextDriver'
+import { createCourseV10Driver } from '../../core/drivers/CourseV10Driver'
 import type { DocumentBinding, DocumentKind, DocumentModel, DocumentPersistence, DocumentResources, DurableDocumentState } from '../../shared/workbench/document'
 
 const MAGIC = Buffer.from('G20JNL01')
@@ -52,7 +57,7 @@ function fileKey(filename: string): string {
 
 /** A retained intent is not necessarily pending: clean saves may keep the same binding. */
 function pendingSave(state: Pick<DurableDocumentState, 'epoch' | 'revision' | 'savedRevision' | 'binding'>,
-  kind: DocumentKind, intent: SaveIntent | null): intent is SaveIntent {
+  kind: DocumentKind, intent: SaveIntent | null): boolean {
   if (!intent || intent.epoch !== state.epoch || intent.kind !== kind || state.revision < intent.revision
     || state.savedRevision !== null && state.savedRevision > intent.revision
     || !isDeepStrictEqual(state.binding, intent.sourceBinding)) return false
@@ -189,34 +194,7 @@ export async function resourcePath(root: string, relative: string, options: { re
 }
 
 export async function markdownReferences(source: string): Promise<string[]> {
-  const references = new Set<string>()
-  const add = (href: string) => {
-    if (/^(https?:|data:|mailto:|#)/i.test(href)) return
-    const decoded = decodeURIComponent(href.split(/[?#]/)[0]!)
-    if (!decoded) return
-    references.add(safeRelative(decoded.replace(/^\.\//, '')))
-  }
-  const { Lexer } = await import('marked')
-  const visit = (tokens: unknown[]) => { for (const item of tokens) {
-    if (!item || typeof item !== 'object') continue
-    const token = item as Record<string, unknown>
-    if ((token.type === 'image' || token.type === 'link') && typeof token.href === 'string') add(token.href)
-    if (token.type === 'html' && typeof token.text === 'string') {
-      for (const match of token.text.matchAll(/\b(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) add(match[1] ?? match[2] ?? match[3] ?? '')
-    }
-    if (token.type === 'code' && token.lang === 'cw-object-v1' && typeof token.text === 'string') {
-      try {
-        const object = JSON.parse(token.text) as { resources?: { assets?: { source: { kind: string; path?: string } }[]; components?: { source: { kind: string; path?: string } }[] } }
-        for (const resource of [...(object.resources?.assets ?? []), ...(object.resources?.components ?? [])]) {
-          if (resource.source.kind !== 'relative' || !resource.source.path) throw new Error('Markdown 资源必须使用完整相对路径')
-          add(resource.source.path)
-        }
-      } catch (error) { if (!(error instanceof SyntaxError)) throw error }
-    }
-    for (const child of Object.values(token)) if (Array.isArray(child)) visit(child)
-  } }
-  visit(Lexer.lex(source))
-  return [...references].sort()
+  return markdownResourceReferences(source, safeRelative)
 }
 
 type ReadResource = { kind: 'file'; bytes: Uint8Array; version: string } | { kind: 'directory'; files: Record<string, Uint8Array>; version: string }
@@ -247,8 +225,8 @@ async function resourceVersion(root: string, relative: string): Promise<string> 
 }
 
 /** Retain actual local resource bytes when opening Markdown, including a later Save As. */
-export async function readDocumentMarkdownResources(filename: string): Promise<DocumentResources> {
-  const source = await fs.readFile(filename, 'utf8')
+export async function readDocumentMarkdownResources(filename: string, currentSource?: string): Promise<DocumentResources> {
+  const source = currentSource ?? await fs.readFile(filename, 'utf8')
   const root = await fs.realpath(path.dirname(path.resolve(filename)))
   const resources: DocumentResources = { assets: Object.create(null), components: Object.create(null) }
   for (const relative of await markdownReferences(source)) {
@@ -258,7 +236,49 @@ export async function readDocumentMarkdownResources(filename: string): Promise<D
       else resources.components[relative] = resource.files
     } catch (error) { if (!missing(error)) throw error }
   }
+  coalesceSourceResources(resources)
   return resources
+}
+
+/** A path inside a collected package has one bytes owner, even when also linked as an image. */
+function coalesceSourceResources(resources: DocumentResources): void {
+  for (const [relative, bytes] of Object.entries(resources.assets)) for (const [directory, files] of Object.entries(resources.components)) {
+    if (!relative.startsWith(`${directory}/`)) continue
+    files[relative.slice(directory.length + 1)] = bytes
+    delete resources.assets[relative]
+    break
+  }
+}
+
+/** Freeze the current source closure for publication; History keeps its own retained bytes. */
+export async function captureDocumentSaveModel(model: DocumentModel, binding: DocumentBinding): Promise<DocumentModel> {
+  if (model.kind !== 'text' && model.kind !== 'markdown') return model
+  if (model.kind === 'text') {
+    if (binding.kind !== 'file' || !/\.html?$/i.test(binding.path)) return model
+    const closure = await readHtmlClosure({ htmlPath: binding.path, sourceHtml: model.source })
+    return { ...model, resources: { assets: Object.fromEntries(closure.siblingFiles), components: {} } }
+  }
+  const disk = binding.kind === 'file' ? await readDocumentMarkdownResources(binding.path, model.source) : { assets: {}, components: {} }
+  const resources: DocumentResources = { assets: {}, components: {} }
+  const refs = await markdownReferences(model.source)
+  for (const relative of refs) {
+    const bytes = model.resources.assets[relative] ?? disk.assets[relative]
+    if (bytes) resources.assets[relative] = bytes
+    for (const directory of new Set([...Object.keys(disk.components), ...Object.keys(model.resources.components)])) {
+      if (relative !== directory && !relative.startsWith(`${directory}/`)) continue
+      resources.components[directory] = { ...disk.components[directory], ...model.resources.components[directory] }
+      // Newly pasted assets may be inside an existing component directory.
+      for (const [asset, value] of Object.entries(model.resources.assets)) if (asset.startsWith(`${directory}/`)) resources.components[directory][asset.slice(directory.length + 1)] = value
+    }
+  }
+  coalesceSourceResources(resources)
+  return { ...model, resources }
+}
+
+async function readSavedModel(filename: string, kind: DocumentKind): Promise<DocumentModel> {
+  const driver = kind === 'markdown' ? createMarkdownDriver() : kind === 'text' ? createTextDriver() : createCourseV10Driver()
+  const model = await driver.load(new Uint8Array(await fs.readFile(filename)))
+  return captureDocumentSaveModel(model, { kind: 'file', path: filename, version: null, bindingVersion: 1 })
 }
 
 /** Opening and saving use this same opaque version, including Markdown's local attachments. */
@@ -312,7 +332,7 @@ async function saveFile(input: Parameters<DocumentPersistence['save']>[0],
   const temporary = path.join(root, `.${path.basename(filename)}.${randomUUID()}.tmp`)
   let publishing = false, published = false, retainCandidate = false
   try {
-    if (input.model.kind === 'markdown') {
+    if (input.model.kind === 'markdown' || input.model.kind === 'text' && /\.html?$/i.test(filename)) {
       if (!Buffer.from(input.bytes).equals(Buffer.from(input.model.source, 'utf8'))) throw new Error('保存正文与固定文档版本不一致')
       const files = markdownFiles(input.model)
       const directories = Object.keys(input.model.resources.components)
@@ -376,7 +396,7 @@ async function saveFile(input: Parameters<DocumentPersistence['save']>[0],
         await fs.rename(bundle.temporary, bundle.target)
         await syncDirectory(path.dirname(bundle.target))
       }
-      for (const relative of await markdownReferences(input.model.source)) {
+      for (const relative of input.model.kind === 'markdown' ? await markdownReferences(input.model.source) : Object.keys(input.model.resources.assets)) {
         try { await resourceVersion(root, relative) }
         catch (error) {
           const managed = files.has(relative) || directories.some(directory => relative === directory || relative.startsWith(`${directory}/`))
@@ -404,6 +424,7 @@ async function saveFile(input: Parameters<DocumentPersistence['save']>[0],
     published = true
     await syncDirectory(root)
     const version = await readDocumentFileVersion(filename, input.model.kind)
+    if (version !== expectedVersion) throw new DocumentJournalError('file-conflict', '保存发布后磁盘制品已改变，当前稿与原保存记录已保留，请比较磁盘版本')
     return { kind: 'file', path: filename, version, bindingVersion: binding.bindingVersion }
   } catch (error) {
     // Definite syscall rejection leaves the destination untouched; an interrupted
@@ -431,11 +452,13 @@ export interface DocumentJournal extends DocumentPersistence {
   /** Diagnostic read: never truncates a torn tail or updates a save binding. */
   inspect(documentId: string): Promise<DurableDocumentState | null>
   discard(documentId: string): Promise<void>
+  preserveUnavailable(documentId: string): Promise<void>
   lookupSave(documentId: string, identity: DocumentSaveIdentity): Promise<DocumentSaveProof | null>
 }
 
 /** Main-process persistence only. The DocumentSession remains the sole content/history writer. */
-export function createDocumentJournal(options: { directory: string }): DocumentJournal {
+export function createDocumentJournal(options: { directory: string; isLive?(documentId: string): boolean;
+  onBindingRecovered?(state: DurableDocumentState, before: DocumentBinding): Promise<void> }): DocumentJournal {
   const directory = path.resolve(options.directory)
   const bindings = new JournalBindingIndex()
   const unavailable = new Map<string, { documentId?: string; path?: string; message: string }>()
@@ -506,8 +529,13 @@ export function createDocumentJournal(options: { directory: string }): DocumentJ
     await bindings.update(target, state, recordOffset).catch(() => undefined)
   }
   const reconcileSave = async (target: string, state: DurableDocumentState): Promise<DurableDocumentState> => {
+    if (options.isLive?.(state.documentId)) return state
     const intent = await readIntent(state.documentId)
-    if (!pendingSave(state, state.model.kind, intent)) return state
+    if (!intent) return state
+    if (!pendingSave(state, state.model.kind, intent)) {
+      if (state.savedRevision === intent.revision && isDeepStrictEqual(state.binding, { ...intent.targetBinding, version: intent.expectedVersion })) await options.onBindingRecovered?.(state, intent.sourceBinding)
+      return state
+    }
     const targetPath = intent.targetBinding.path
     try {
       if ((await fs.lstat(targetPath)).isSymbolicLink()) return state
@@ -515,10 +543,14 @@ export function createDocumentJournal(options: { directory: string }): DocumentJ
     } catch (error) { if (missing(error)) return state; throw error }
     const version = await readDocumentFileVersion(targetPath, intent.kind)
     if (version !== intent.expectedVersion) return state
+    if (intent.fileIdentity && await publicationIdentity(targetPath) !== intent.fileIdentity) return state
+    const diskModel = await readSavedModel(targetPath, intent.kind)
+    if (await readDocumentFileVersion(targetPath, intent.kind) !== version || intent.fileIdentity && await publicationIdentity(targetPath) !== intent.fileIdentity) return state
     const repaired: DurableDocumentState = { ...state, sequence: state.sequence + 1,
-      savedRevision: intent.revision,
+      savedRevision: intent.revision, savedModel: diskModel,
       binding: { ...intent.targetBinding, version } }
     await appendWithinQueue(target, repaired)
+    await options.onBindingRecovered?.(repaired, intent.sourceBinding)
     return repaired
   }
   const recordSaveIntent = (input: Parameters<DocumentPersistence['save']>[0], targetBinding: FileBinding, expectedVersion: string, fileIdentity: string | null): Promise<void> => {
@@ -572,6 +604,7 @@ export function createDocumentJournal(options: { directory: string }): DocumentJ
     return found
   }
   return {
+    prepareSaveModel: input => captureDocumentSaveModel(input.model, input.sourceBinding),
     append(state) {
       checkState(state, state.documentId)
       const frozen = deserialize(serialize(state)) as DurableDocumentState // Freeze before yielding to the queue.
@@ -593,6 +626,19 @@ export function createDocumentJournal(options: { directory: string }): DocumentJ
         await syncDirectory(directory)
       })
     },
+    preserveUnavailable(documentId) {
+      const target = filename(documentId)
+      return serial(fileKey(target), async () => {
+        const retained = path.join(directory, 'unavailable', `${path.basename(target)}-${randomUUID()}`)
+        await fs.mkdir(retained, { recursive: true })
+        for (const source of [target, intentFilename(documentId), `${target}.binding.json`]) {
+          try { await fs.rename(source, path.join(retained, path.basename(source))) }
+          catch (error) { if (!missing(error)) throw error }
+        }
+        await bindings.discard(target); unavailable.delete(target)
+        await syncDirectory(directory)
+      })
+    },
     async lookupSave(documentId, identity) {
       return serial(fileKey(filename(documentId)), async () => {
         const intent = await readIntent(documentId)
@@ -602,8 +648,10 @@ export function createDocumentJournal(options: { directory: string }): DocumentJ
           if (await publicationIdentity(intent.targetBinding.path) !== intent.fileIdentity) return null
           const version = await readDocumentFileVersion(intent.targetBinding.path, intent.kind)
           if (version !== intent.expectedVersion) return null
+          const savedModel = await readSavedModel(intent.targetBinding.path, intent.kind)
+          if (await readDocumentFileVersion(intent.targetBinding.path, intent.kind) !== version) return null
           return { identity, documentId, epoch: intent.epoch, savedRevision: intent.revision,
-            sourceBinding: intent.sourceBinding, binding: { ...intent.targetBinding, version } }
+            sourceBinding: intent.sourceBinding, binding: { ...intent.targetBinding, version }, savedModel }
         } catch (error) { if (missing(error)) return null; throw error }
       })
     },

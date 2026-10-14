@@ -67,7 +67,7 @@ it('edits current subtree styles and exact Web author text through one writer, p
   const reopened = driver.load(new Uint8Array(await fs.readFile(filename))), reopenedProject = currentCompositionProject(reopened)
   expect(reopenedProject).toEqual(currentCompositionProject(session.read().model)); expect(reopened.resources).toEqual(source.resources)
   for (const id of ['heading', 'picture', 'interaction', 'chart', 'right', 'shared-picture', 'native-picture']) expect(reopenedProject.instances[id]).toEqual(source.project.instances[id])
-  const data = reopenedProject.instances.paragraph.data as { html: string; css: string; authoringRecords: unknown }
+  const data = reopenedProject.instances.paragraph.data as { html: string; css: string }
   expect(data.html).toBe((source.project.instances.paragraph.data as typeof data).html); expect(data.css).toBe((source.project.instances.paragraph.data as typeof data).css)
   // The saved author record is consumed by the real DOM adapter on a cold mount.
   const bundle = buildSync({ stdin: { contents: "export {createDomAuthoring} from './src/components/web/authoringDom'", resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'iife', globalName: 'CurrentAuthoring', platform: 'browser' }).outputFiles[0].text
@@ -76,9 +76,9 @@ it('edits current subtree styles and exact Web author text through one writer, p
     const page = await browser.newPage(); await page.setContent('<div id="host"></div>'); await page.addScriptTag({ content: bundle })
     expect(await page.evaluate(value => {
       const root = document.getElementById('host')!; root.innerHTML = value.html
-      const consumer = (window as any).CurrentAuthoring.createDomAuthoring(root, { records: () => value.authoringRecords })
+      const consumer = (window as any).CurrentAuthoring.createDomAuthoring(root, { records: () => value.records })
       const text = root.querySelector('p')!.textContent; consumer.dispose(); return text
-    }, data)).toBe(newText)
+    }, { ...data, records: reopenedProject.instances.paragraph.authoring!.records! })).toBe(newText)
   } finally { await browser.close() }
 }, 30_000)
 
@@ -96,7 +96,7 @@ it('isolates identical author keys by document/run and refuses read-only, stale,
   const readOnly = await gateway.issueTarget('run-a', a.documentId, sourceA.textTarget, { readOnly: true })
   expect(await gateway.execute('run-a', 'readonly', { name: 'text.replace', input: { target: readOnly, content: '只读错误修改' } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
   const fresh = affected(written)
-  expect(await a.execute(operation(a.read(), [{ type: 'data.set', instanceId: 'paragraph', path: sourceA.textTarget.dataPath, value: '教师正文' }]))).toMatchObject({ status: 'applied' })
+  expect(await a.execute(operation(a.read(), [{ type: 'authoring.set', instanceId: 'paragraph', path: sourceA.textTarget.dataPath, value: '教师正文' }]))).toMatchObject({ status: 'applied' })
   const manual = a.read()
   const stale = await gateway.execute('run-a', 'stale', { name: 'text.replace', input: { target: targetA, content: '旧句柄错误覆盖' } }); expect(stale, JSON.stringify(stale)).toMatchObject({ kind: 'error', code: 'target-conflict' })
   expect(a.read()).toEqual(manual)
@@ -120,7 +120,7 @@ it('enforces final Session CAS when a human edits the bound text after AI planni
   const text = await gateway.issueTarget('cas', session.documentId, source.textTarget), before = session.read(), execute = session.execute.bind(session)
   const spy = vi.spyOn(session, 'execute').mockImplementationOnce(async request => {
     expect(request).toMatchObject({ actor: 'agent', baseRevision: before.revision, mutation: { type: 'command', command: { type: 'component-platform.apply' } } })
-    expect(await execute(operation(before, [{ type: 'data.set', instanceId: 'paragraph', path: source.textTarget.dataPath, value: '教师刚刚修改的正文' }]))).toMatchObject({ status: 'applied' })
+    expect(await execute(operation(before, [{ type: 'authoring.set', instanceId: 'paragraph', path: source.textTarget.dataPath, value: '教师刚刚修改的正文' }]))).toMatchObject({ status: 'applied' })
     return execute(request)
   })
   expect(await gateway.execute('cas', 'racing', { name: 'text.replace', input: { target: text, content: '过期 AI 正文' } })).toMatchObject({ kind: 'document-operation', result: { status: 'conflict', code: 'stale-revision' } })

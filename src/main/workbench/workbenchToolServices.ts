@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { app } from 'electron'
+import { resolveRendererEntryUrl } from '../rendererEntry'
 import type { BrowserWindow } from 'electron'
 import type { HostToolServices } from '../../core/tools/HostToolServices'
 import { artifactDeliverySource } from '../../core/tools/HostArtifactTools'
@@ -45,7 +46,8 @@ import { OpenAIChatProvider } from './providers/OpenAIChatProvider'
 import { ChatGPTResponsesProvider, OpenAIResponsesProvider } from './providers/ChatGPTResponsesProvider'
 import { AnthropicMessagesProvider } from './providers/AnthropicMessagesProvider'
 import { routeModelProviders } from './providers/ModelProviderRouter'
-import { DeepSeekSearchProvider, nativeSearchSelection, type NativeSearchSelection } from './network/DeepSeekSearchProvider'
+import { freezeSearchSelection } from './network/SearchRouter'
+import { createSearchRouter } from './network/searchService'
 import { ChatGPTImageProvider } from './images/ChatGPTImageProvider'
 import { OpenAIImagesApiProvider } from './images/OpenAIImagesApiProvider'
 import { imageRoute } from './images/imageRoute'
@@ -60,6 +62,7 @@ import { PptxCourseImportProducer } from './pptxImport/PptxCourseImportProducer'
 import { mediaFileInput } from './admittedMediaResource'
 
 let installed = false
+let skillCatalogService: ScopedSkillService | undefined
 let imageService: ImageGenerationService | undefined
 let imageRoles: ReturnType<typeof frozenImageRoles> | undefined
 let browserActionApprovals: BrowserActionApprovals | undefined
@@ -105,10 +108,16 @@ export function workbenchImageSelection(runId: string, operation: 'generate' | '
 }
 /** Browser scope is frozen with the document run; outside-workspace uploads have no implicit grant. */
 export function workbenchSkillRootsForGrant(grant: ToolRunGrant): readonly SkillRoot[] {
+  return workbenchSkillRoots(grant.fileAccess?.workspaceRoot)
+}
+function workbenchSkillRoots(workspaceRoot?: string): readonly SkillRoot[] {
   const userSkillDirectory = path.resolve(process.env.COURSEWARE_SKILLS_DESTINATION || path.join(app.getPath('home'), '.agents', 'skills'))
   return [{ source: 'user', directory: userSkillDirectory, authorizedRoot: userSkillDirectory },
-    ...(grant.fileAccess?.workspaceRoot ? [{ source: 'workspace' as const, directory: path.join(grant.fileAccess.workspaceRoot, '.agents', 'skills'),
-      authorizedRoot: grant.fileAccess.workspaceRoot }] : [])]
+    ...(workspaceRoot ? [{ source: 'workspace' as const, directory: path.join(workspaceRoot, '.agents', 'skills'), authorizedRoot: workspaceRoot }] : [])]
+}
+export async function workbenchSkillCatalog(workspaceRoot?: string) {
+  if (!skillCatalogService) throw new Error('Skill目录服务尚未就绪')
+  return skillCatalogService.catalogForRoots(workbenchSkillRoots(workspaceRoot))
 }
 export function managedBrowserGrantForRun(grant: Parameters<NonNullable<HostToolServices['beginRun']>>[0]): ManagedBrowserGrant {
   const permission = grant.actor === 'agent' ? grant.fileAccess?.permission : 'read-only'
@@ -174,7 +183,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       (imageRoute(request) === 'chatgpt-oauth' ? oauthImages : apiImages).generate(request, references, options) },
     resolveReference: (runId, documentId, resource) => host.tools.readImageResource(runId, documentId, resource),
   })
-  const computeDevURL = process.env.VITE_DEV_SERVER_URL
+  const computeDevURL = app.isPackaged || !process.env.VITE_DEV_SERVER_URL ? undefined : resolveRendererEntryUrl()
   computeBackend = new PyodideComputeBackend({ preloadPath: path.join(__dirname, '..', '..', 'preload', 'compute.js'),
     ...(computeDevURL ? { rendererURL: new URL('compute.html', computeDevURL).href }
       : { rendererFile: path.join(app.getAppPath(), 'dist-renderer', 'compute.html') }),
@@ -196,11 +205,11 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   // verify an actual authorized copy write before enabling product-paid delegation.
   const delegationWriteVerified = process.env.GUOLING_CODEX_DELEGATION_WRITE_VERIFIED === '1'
   const jobs = new HostJobService({ images, compute, delegation })
-  const frozenSearch = new Map<string, NativeSearchSelection | null>()
-  const webOptions: WebResearchOptions = { searchProvider: new DeepSeekSearchProvider({
-    selection: runId => frozenSearch.get(runId) ?? null, credential: apiCredential }) }
+  const search = createSearchRouter({ provider: readonlyProvider, credential: apiCredential, observeCapability: (selection, status, actualModel) => executionSettingsStore().then(store => store.recordNativeSearchCapability(selection, status, actualModel)) })
+  const webOptions: WebResearchOptions = { searchProvider: search }
   const web = new WebResearchService(webOptions)
-  const openImages = createWorkbenchOpenImageService(app.getVersion())
+  const openImages = createWorkbenchOpenImageService(app.getVersion(), { pageSource: ({ runId, source, signal }) =>
+    web.open({ runId, ...( /^https?:\/\//i.test(source) ? { url: source } : { sourceId: source }), signal }) })
   const assetLibrary = new AssetLibraryService({ catalog: componentCatalogManager })
   // Agent and human share the task's main-owned embedded page.
   const approvals = new BrowserActionApprovals()
@@ -243,6 +252,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     if (!deliverySignals.has(runId) || deliverySignals.get(runId)!.signal.aborted) throw new Error('Skill 读取任务已停止')
     return frozenSkillRoots.get(runId) ?? []
   })
+  skillCatalogService = skills
   const currentExportPort = (): DocumentExportPort => {
     const window = context.getMainWindow()
     if (!window || window.isDestroyed()) throw new Error('当前没有可用的导出窗口')
@@ -387,7 +397,13 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       return inputs
     } },
     computeInputs: { freeze: async (runId, sources) => {
-      const inputs = await Promise.all(sources.map(source => host.agentFiles.readAuthorizedFile(fileContext(runId), source)))
+      const inputs = await Promise.all(sources.map(async source => {
+        fileContext(runId).assertActive?.()
+        if (!materialIds.get(runId)?.has(source)) return host.agentFiles.readAuthorizedFile(fileContext(runId), source)
+        const original = await (await attachmentsDesktopService()).attachments.readOriginal(source)
+        fileContext(runId).assertActive?.()
+        return { name: original.snapshot.name, bytes: original.bytes }
+      }))
       if (new Set(inputs.map(input => input.name)).size !== inputs.length) throw new Error('计算输入文件重名；请先选择不同文件名')
       return inputs.map(({ name, bytes }) => ({ name, bytes }))
     } },
@@ -416,7 +432,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
         }
         const result = await dispatchMaterialTool(attachments, ids, name, input, deliverySignals.get(runId)?.signal)
         if ('admittedSourceIds' in result) for (const id of result.admittedSourceIds ?? []) ids.add(id)
-        return { kind: 'read', data: result.data }
+        return { kind: 'read', data: { ...result.data, ...('admittedSourceIds' in result ? { admittedSourceIds: result.admittedSourceIds } : {}) } }
       },
       readResource: async ({ runId, resourceId }) => {
         const ids = materialIds.get(runId)
@@ -454,7 +470,13 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       cancel: (runId, jobId) => delegation.cancel(runId, jobId),
       cancelRun: runId => delegation.cancelRun(runId),
     },
-    web: { search: input => web.search(input), open: async input => {
+    web: { describe: runId => {
+      const frozen = search.selection(runId), mode = frozen?.settings.mode ?? 'off'
+      const backend = mode === 'off' ? 'off' : mode === 'deepseek' ? 'deepseek-official' : mode === 'openai' || mode === 'auto' && frozen?.openai
+        ? 'openai-native' : frozen?.settings.independent === 'searxng' ? 'searxng' : 'exa-mcp'
+      const configured = !!frozen && (backend === 'off' ? false : backend === 'openai-native' ? !!frozen.openai : backend === 'deepseek-official' ? !!frozen.deepseek : backend === 'searxng' ? !!frozen.settings.searxngURL : true)
+      return { mode, backend, configured, detail: frozen?.diagnostic ?? (backend === 'exa-mcp' ? '免 Key 托管 Exa MCP，有限额；实际可用性以调用回执为准' : configured ? '本次运行已冻结选择；配置不等于实网调用成功' : '所选后端尚未配置或已关闭；web.open 可独立读取 URL') }
+    }, search: input => web.search(input), open: async input => {
       const result = await web.open(input)
       if (result.status === 'material') {
         const ids = materialIds.get(input.runId)
@@ -479,7 +501,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       if (grant.disclosedSettings && (await (await executionSettingsStore()).read()).profile.revision !== grant.disclosedSettings.profileRevision)
         throw new Error('模型或服务配置在发送时已变化；本次未请求模型，请核对后重新发送。')
       await roles.beginRun(grant.runId, grant.disclosedSettings)
-      frozenSearch.set(grant.runId, nativeSearchSelection(await (await executionSettingsStore()).read()))
+      search.beginRun(grant.runId, freezeSearchSelection(await (await executionSettingsStore()).read(), grant.searchSelection))
       frozenSkillRoots.set(grant.runId, workbenchSkillRootsForGrant(grant))
       const controller = new AbortController()
       deliverySignals.set(grant.runId, controller)
@@ -497,7 +519,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
         runGrants.delete(grant.runId); materialIds.delete(grant.runId)
         approvals.revokeRun(grant.runId)
         frozenSkillRoots.delete(grant.runId)
-        frozenSearch.delete(grant.runId)
+        search.endRun(grant.runId)
         await Promise.allSettled([web.stopRun(grant.runId), mcp.endRun(grant.runId), media.stopRun(grant.runId)])
         web.endRun(grant.runId); media.endRun(grant.runId); openImages.endRun(grant.runId)
         throw error
@@ -509,7 +531,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       deliverySignals.get(runId)?.abort(); deliverySignals.delete(runId); observationImages.clearRun(runId); skills.release(runId)
       openImages.stopRun(runId)
       frozenSkillRoots.delete(runId)
-      frozenSearch.delete(runId)
+      search.endRun(runId)
       runGrants.delete(runId); materialIds.delete(runId); host.agentFiles.releaseRun(runId)
       await host.artifactDeliveries.stopRun(runId)
       await Promise.allSettled([web.stopRun(runId), mcp.stopRun(runId), media.stopRun(runId), delegation.cancelRun(runId), ...(compute ? [compute.cancelRun(runId)] : [])])

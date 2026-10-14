@@ -46,7 +46,7 @@ export interface ComponentLibraryApi {
   cancelReplacement(): void
   confirmCatalogUpdate(): void
   cancelCatalogUpdate(): void
-  extractSelection(title: string): Promise<void>
+  extractSelection(title: string, kind?: ComponentLibraryEntry['kind'], surfaceIds?: readonly string[]): Promise<void>
   deleteCatalogPackage(entry: AvailableComponentCatalogPackage): Promise<void>
 }
 const EMPTY: ComponentCatalogSnapshot = { sources: [], packages: [], issues: [] }
@@ -64,7 +64,7 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
     for (const definition of selectProjectLibraryDefinitions(view.project.definitions)) {
       const sample = Object.values(view.project.instances).find(instance => instance.definitionId === definition.id)
       if (!sample) continue
-      try { entries.push(extractComponentLibraryEntry(view.project, resources, { id: definition.id, title: definition.title ?? definition.id, rootIds: [sample.id] }).entry) }
+      try { entries.push(extractComponentLibraryEntry(view.project, resources, { id: definition.library?.packageId ?? definition.id, title: definition.title ?? definition.id, rootIds: [sample.id] }).entry) }
       catch (error) { issues.push(`${definition.title ?? definition.id}：${error instanceof Error ? error.message : String(error)}`) }
     }
     return { entries, issues }
@@ -142,7 +142,7 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
     }, '组件替换失败，原版本保留。')
   }, [replacementRequest])
   const requestCatalogUpdate = useCallback((entry: AvailableComponentCatalogPackage) => {
-    const target = captureComponentPackageReplacementTarget(current.current.kernel, entry.packageId)
+    const target = captureComponentPackageReplacementTarget(current.current.kernel, entry.packageId,true)
     if (target) setUpdate({ mode: 'update', entries: [entry], target })
     else current.current.reportError('工程中没有此组件定义，无法更新。')
   }, [])
@@ -158,10 +158,13 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
       if (!result.ok) throw new Error(result.reason)
     }, '组件更新失败。')
   }, [catalogUpdateRequest])
-  const extractSelection = useCallback(async (title: string) => {
+  const extractSelection = useCallback(async (title: string, kind: ComponentLibraryEntry['kind'] = 'objects', surfaceIds?: readonly string[]) => {
     const kernel = current.current.kernel, target: CapturedCourseTarget = kernel.captureTarget()
-    if (!title.trim() || !target.instanceIds.length) throw new Error('请输入名称并选择需要提炼的对象。')
-    const { entry, diagnostics } = extractComponentLibraryEntry(target.project, target.resources, { id: `library_${crypto.randomUUID()}`, title: title.trim(), rootIds: [...target.instanceIds] })
+    if (!title.trim() || kind === 'objects' && !target.instanceIds.length) throw new Error('请输入名称并选择需要提炼的对象。')
+    const pages = kind === 'page' ? target.surfaceId ? [target.surfaceId] : [] : [...surfaceIds ?? []]
+    if (kind !== 'objects' && !pages.length) throw new Error('请选择需要提炼的页面。')
+    const { entry, diagnostics } = extractComponentLibraryEntry(kind === 'objects' ? target.editingProject : target.project, target.resources,
+      { id: `library_${crypto.randomUUID()}`, title: title.trim(), kind, ...(kind === 'objects' ? { rootIds: [...target.instanceIds] } : { surfaceIds: pages }) })
     if (!current.current.installLibraryEntry) throw new Error('组件库保存入口尚未连接，工程原件保留。')
     setCatalog(await current.current.installLibraryEntry(exportComponentLibraryArchive(entry)))
     current.current.commitStatus(`已将“${entry.title}”保存到我的资产库`)

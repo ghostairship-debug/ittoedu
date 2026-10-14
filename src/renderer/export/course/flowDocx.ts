@@ -151,7 +151,7 @@ function styledMath(latex: string, display: boolean, style?: { color?: string; f
 
 function documentRuns(content: FlowTextContent, baseStyle: TextRunStyle = {}): string {
   return content.inlines.map(inline => {
-    let result = inline.type === 'math' ? styledMath(inline.latex, false, inline.style) : inline.text.split('\n').map(text => run(text, { ...baseStyle, ...(inline.code ? { fontFamily: 'Consolas' } : {}), ...inline.style })).join('<w:r><w:br/></w:r>')
+    let result = inline.type === 'math' ? styledMath(inline.latex, false, inline.style) : (inline.type === 'component' ? inline.accessibleText : inline.text).split('\n').map(text => run(text, { ...baseStyle, ...(inline.type === 'text' && inline.code ? { fontFamily: 'Consolas' } : {}), ...inline.style })).join('<w:r><w:br/></w:r>')
     if (inline.link) result = `<w:fldSimple w:instr="HYPERLINK &quot;${xml(inline.link.href.replace(/"/g, '%22'))}&quot;">${result}</w:fldSimple>`
     return result
   }).join('')

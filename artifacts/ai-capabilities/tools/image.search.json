@@ -1,29 +1,60 @@
 {
-  "description": "在开放授权图库（Wikimedia Commons、Openverse，免费、无需账号）检索照片类图片，返回候选短句柄、标题、作者、授权、来源站点和尺寸。只需说明要什么图；授权筛选、下载、存储与署名由软件完成。默认只含 CC0、公有领域和 CC BY；仅当教师经 ask_user 明确同意使用 CC BY-SA（相同方式共享）后才设 allowShareAlike。英文关键词通常结果更多；limit 为每个图库的候选数。示意图优先直接画 SVG。",
+  "description": "query 在已配置图库检索图片、插画和已有图示；source 使用 web.search 来源页 URL 或 web.open 的 sourceId，读取该页图片事实并按现许可政策生成候选。两种输入选一种。返回候选短句柄、来源页、标题、作者、已有授权和尺寸，图注及图片创建日期有则提供；网页发布日期不是拍摄日期。未知或不符政策的许可保留来源与排除原因，不下载。默认使用 CC0、公有领域、CC BY及已配置图库自身许可；仅用户已明确同意 CC BY-SA 后才设 allowShareAlike。limit 为每图库/来源页本次候选数，page 续页；不代表全互联网覆盖。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "additionalProperties": false,
-    "properties": {
-      "allowShareAlike": {
-        "type": "boolean"
+    "anyOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "allowShareAlike": {
+            "type": "boolean"
+          },
+          "limit": {
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "page": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "query": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
       },
-      "limit": {
-        "maximum": 20,
-        "minimum": 1,
-        "type": "integer"
-      },
-      "page": {
-        "maximum": 9007199254740991,
-        "minimum": 1,
-        "type": "integer"
-      },
-      "query": {
-        "minLength": 1,
-        "type": "string"
+      {
+        "additionalProperties": false,
+        "properties": {
+          "allowShareAlike": {
+            "type": "boolean"
+          },
+          "limit": {
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "page": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "source": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "type": "object"
       }
-    },
-    "required": [
-      "query"
     ],
     "type": "object"
   },

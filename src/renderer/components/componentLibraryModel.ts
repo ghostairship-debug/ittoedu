@@ -12,7 +12,7 @@ const internalImplementationKeys = new Set(builtinComponentSourceKeys)
 export function selectProjectLibraryDefinitions(definitions: Readonly<Record<string, ComponentDefinition>>): ComponentDefinition[] {
   return Object.values(definitions).filter(definition => {
     const key = componentDefinitionBuiltinKey(definition)
-    return !key || !internalImplementationKeys.has(key)
+    return definition.implementation.kind !== 'builtin' || !key || !internalImplementationKeys.has(key)
   }).sort((left, right) => (left.title ?? left.id).localeCompare(right.title ?? right.id, 'zh-CN'))
 }
 
@@ -107,7 +107,7 @@ export function selectAvailableBuiltInCatalogPackages(
   components: Readonly<Record<string, ComponentDefinition>>,
 ): AvailableComponentCatalogPackage[] {
   return selectCurrentCatalogPackages(entries.filter((entry) => entry.sourceTrust === 'built-in'))
-    .filter((entry) => componentCatalogInstallStatus(entry, components[entry.packageId]) === 'available')
+    .filter((entry) => componentCatalogInstallStatus(entry, projectLibraryDefinition(components,entry.packageId)) === 'available')
 }
 
 export interface ComponentLibraryFilters {
@@ -128,7 +128,7 @@ export function planCatalogBatchJoin(
   components: Readonly<Record<string, ComponentDefinition>>,
 ): CatalogBatchJoinPlan {
   const pending = entries.filter((entry) =>
-    componentCatalogInstallStatus(entry, components[entry.packageId]) === 'available',
+    componentCatalogInstallStatus(entry, projectLibraryDefinition(components,entry.packageId)) === 'available',
   )
   return {
     entries: pending,
@@ -190,6 +190,11 @@ export function filterHtmlComponents(
 /** Catalog byte identity is metadata; author availability follows the formal definition version. */
 export function componentCatalogInstallStatus(entry: Pick<AvailableComponentCatalogPackage, 'version'>, definition?: ComponentDefinition): 'available' | 'embedded' | 'update-available' | 'embedded-newer' {
   if (!definition) return 'available'
-  const difference = compareSemanticVersions(entry.version, definition.version ?? '1.0.0')
+  const difference = compareSemanticVersions(entry.version, definition.library?.version ?? definition.version ?? '1.0.0')
   return difference > 0 ? 'update-available' : difference < 0 ? 'embedded-newer' : 'embedded'
+}
+export function projectLibraryDefinition(definitions:Readonly<Record<string,ComponentDefinition>>,packageId:string):ComponentDefinition|undefined {
+  const candidates=Object.values(definitions).filter(value=>value.library?.packageId===packageId)
+  return candidates.sort((a,b)=>compareSemanticVersions(b.library?.version ?? b.version ?? '1.0.0',a.library?.version ?? a.version ?? '1.0.0'))[0]
+    ?? (Object.hasOwn(definitions,packageId) && (!definitions[packageId].library || definitions[packageId].library?.packageId===packageId) ? definitions[packageId]:undefined)
 }

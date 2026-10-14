@@ -45,7 +45,8 @@ it('anchors V10 floating content to its nested paragraph and retains viewport an
   expect(picture.getElementsByTagNameNS('*', 'inline')[0]!.getElementsByTagNameNS('*', 'extent')[0]!.getAttribute('cx')).toBe(String(50 * 9525))
   const rotated = Array.from(doc.getElementsByTagNameNS('*', 'anchor')).find(a => a.getElementsByTagNameNS('*', 'docPr')[0]?.getAttribute('name') === 'rotated')!
   expect(rotated.getElementsByTagNameNS('*', 'xfrm')[0]!.getAttribute('rot')).toBe('5400000')
-  expect(rotated.getElementsByTagNameNS('*', 'positionH')[0]!.textContent).toBe(String(235 * 9525))
+  // A square source in the default contain frame draws 50×50, centered before rotation.
+  expect(rotated.getElementsByTagNameNS('*', 'positionH')[0]!.textContent).toBe(String(250 * 9525))
   expect(rotated.getElementsByTagNameNS('*', 'positionV')[0]!.textContent).toBe(String(315 * 9525))
   expect(doc.getElementsByTagNameNS('*', 'footerReference')).toHaveLength(1)
   const footer = parse(files['word/footer1.xml']!)

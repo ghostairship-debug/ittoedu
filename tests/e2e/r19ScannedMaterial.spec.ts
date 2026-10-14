@@ -41,7 +41,7 @@ test('r19 scanned PDF: real page extraction, selected PNG and readable provenanc
   await expect(article.getByRole('checkbox', { name: '采用片段 1', exact: true })).toBeChecked()
   const proof = await page.evaluate(async ({ lesson, workspace }) => {
    const target = { lessonId: lesson.identity.lessonId, rootPath: lesson.identity.normalizedDirectory }
-   const records = await window.desktopAPI!.lessonMaterials!.list(target), record = records[0]!
+   const { records } = await window.desktopAPI!.lessonMaterials!.list(target), record = records[0]!
    const read = await window.desktopAPI!.lessonMaterials!.read(target, { id: record.id, extractionVersion: record.extractionVersion, fragmentIds: [record.fragments[0]!.id] })
    const conversations = (await window.desktopAPI!.execution!.workspace(workspace)).conversations
    return { lesson, record, read: { ...read, assets: read.assets.map(asset => ({ ...asset, bytes: Array.from(asset.bytes) })) }, runs: conversations.flatMap(value => value.runIndex.builtinRunIds) }

@@ -1,5 +1,5 @@
 import { PLAYBACK_VIEW_CHROME_GUTTER, PLAYBACK_VIEW_OVERFLOW_EPSILON, PLAYBACK_VIEW_MAX_ZOOM, playbackControllerInsets, type PlaybackChromeGeometry } from '../shared/playbackViewGeometry'
-import { DEFAULT_SLIDE_CANVAS, SLIDE_CANVAS_MAX, SLIDE_CANVAS_MIN, type SlideCanvasSize } from '../shared/slideCanvas'
+import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../shared/slideCanvas'
 import { fitPage, NO_PAGE_INSETS, PAGE_FRAME_BACKDROP, PAGE_FRAME_FULLSCREEN_BACKDROP, pageFrameStyle, parsePageInsets, type PageFrameInsets } from '../shared/pageFrame'
 
 /** Session-only observation of already laid out content. No navigation or document writes. */
@@ -18,6 +18,8 @@ export interface PlaybackViewHost {
   kind: 'slide' | 'flow' | 'spatial'
   root: HTMLElement
   content: HTMLElement
+  /** Editor tool rows reduce the reading viewport, but all surface papers share the same workspace fit. */
+  fitViewport?(): { width: number; height: number }
   onObservationChange?(): void
 }
 export interface PlaybackViewPort {
@@ -81,9 +83,7 @@ function hostStage(host: PlaybackViewHost): SlideCanvasSize {
   const width = Number(host.root.dataset.canvasWidth ?? host.root.dataset.spatialViewportWidth)
   const height = Number(host.root.dataset.canvasHeight ?? host.root.dataset.spatialViewportHeight)
   if (
-    Number.isInteger(width) && Number.isInteger(height)
-    && width >= SLIDE_CANVAS_MIN && width <= SLIDE_CANVAS_MAX
-    && height >= SLIDE_CANVAS_MIN && height <= SLIDE_CANVAS_MAX
+    Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
   ) return { width, height }
   return { width: DEFAULT_SLIDE_CANVAS.width, height: DEFAULT_SLIDE_CANVAS.height }
 }
@@ -100,6 +100,7 @@ export class PlaybackViewSession implements PlaybackViewPort {
   #cleanup: (() => void)[] = []
   #panel: HTMLElement | null = null
   #panelButton: HTMLButtonElement | null = null
+  #publishedObservation = ''
   #anchor: ViewPoint | undefined
   #insets: PageFrameInsets = NO_PAGE_INSETS
   #backdrop = PAGE_FRAME_BACKDROP
@@ -108,6 +109,8 @@ export class PlaybackViewSession implements PlaybackViewPort {
   get chrome(): PlaybackChromeGeometry { return structuredClone(this.#chrome) }
   /** The element the page is seen through; the teacher controller stays inside its visible part. */
   get viewportElement(): HTMLElement | null { return this.#viewport }
+  /** Logical-layout fit is separate from the teacher's temporary observation zoom. */
+  fitScale(id: string): number { return Number(this.#hosts.get(id)?.root.dataset.stageFitScale) || 1 }
   subscribe(listener: () => void): () => void { this.#listeners.add(listener); return () => this.#listeners.delete(listener) }
   register(host: PlaybackViewHost): void {
     const previous = this.#hosts.get(host.id)
@@ -122,6 +125,8 @@ export class PlaybackViewSession implements PlaybackViewPort {
     this.#active = id
     this.#state = { ...this.#state, zoom: 1, pan: { x: 0, y: 0 }, generation: this.#state.generation + 1 }
     this.#closePanel(false)
+    const host = this.#hosts.get(id)
+    if (host) this.#fit(host)
     this.refreshBounds()
   }
   mount(container: HTMLElement): HTMLElement {
@@ -167,9 +172,14 @@ export class PlaybackViewSession implements PlaybackViewPort {
     this.#closePanel(true)
     const viewport = this.#viewport
     if (!viewport) return
-    this.#state = { ...this.#state, viewport: { width: viewport.clientWidth || 1280, height: viewport.clientHeight || 720 },
-      generation: this.#state.generation + 1 }
-    for (const host of this.#hosts.values()) this.#fit(host)
+    const width = viewport.clientWidth || 1280, height = viewport.clientHeight || 720
+    if (width !== this.#state.viewport.width || height !== this.#state.viewport.height) {
+      this.#state = { ...this.#state, viewport: { width, height }, generation: this.#state.generation + 1 }
+    }
+    // A hidden retained page is fitted when it next becomes active. Flow content
+    // may have changed height even when its viewport dimensions did not change.
+    const host = this.#active ? this.#hosts.get(this.#active) : undefined
+    if (host) this.#fit(host)
     this.refreshBounds()
   }
   #fullscreen(): boolean {
@@ -179,9 +189,13 @@ export class PlaybackViewSession implements PlaybackViewPort {
   #pageInsets(): PageFrameInsets { return this.#fullscreen() ? NO_PAGE_INSETS : this.#insets }
   #fit(host: PlaybackViewHost): void {
     if (host.kind === 'flow') {
-      Object.assign(host.root.style, { position: 'absolute', transformOrigin: '0 0', transform: 'scale(1)', width: '100%', height: '100%',
+      const fit = fitPage(host.fitViewport?.() ?? this.#state.viewport, hostStage(host), this.#pageInsets())
+      // The paper keeps its authored line wrapping, while its scroll viewport is expressed in the same logical
+      // units. The root and controller siblings stay in screen pixels; only reading content inherits this fit.
+      Object.assign(host.root.style, { position: 'absolute', transformOrigin: '0 0', transform: 'none', width: '100%', height: '100%',
         minWidth: '0', minHeight: '0', left: '0px', top: '0px', overflow: 'visible' })
-      host.root.dataset.stageFitScale = '1'
+      Object.assign(host.content.style, { width: `${this.#state.viewport.width / fit.scale}px`, height: `${this.#state.viewport.height / fit.scale}px`, right: 'auto', bottom: 'auto' })
+      host.root.dataset.stageFitScale = String(fit.scale)
       return
     }
     const canvas = hostStage(host)
@@ -196,7 +210,7 @@ export class PlaybackViewSession implements PlaybackViewPort {
   }
   refreshBounds(): void {
     // Layout/host changes update the DOM matrix before inversely measuring its bounds.
-    this.#paint()
+    this.#paint(false)
     const { width, height } = this.#state.viewport
     // These bars describe the current baseline viewport, never Flow document length or infinite world extent.
     let left = 0, top = 0, right = width, bottom = height
@@ -223,11 +237,14 @@ export class PlaybackViewSession implements PlaybackViewPort {
         bottom = Math.max(bottom, y + rect.height / this.#state.zoom)
       }
     }
-    this.#state = { ...this.#state, bounds: { x: left, y: top, width: right - left, height: bottom - top }, generation: this.#state.generation + 1 }
+    const bounds = { x: left, y: top, width: right - left, height: bottom - top }, previous = this.#state.bounds
+    if (bounds.x !== previous.x || bounds.y !== previous.y || bounds.width !== previous.width || bounds.height !== previous.height)
+      this.#state = { ...this.#state, bounds, generation: this.#state.generation + 1 }
     this.panTo(this.#state.pan)
   }
   zoomTo(zoom: number, anchor = { x: this.#state.viewport.width / 2, y: this.#state.viewport.height / 2 }): void {
     if (!Number.isFinite(zoom)) return
+    if (clamp(zoom, .25, PLAYBACK_VIEW_MAX_ZOOM) === this.#state.zoom) return
     this.#anchor = anchor
     this.#state = playbackZoomAt(this.#state, zoom, anchor)
     this.#paint()
@@ -251,7 +268,7 @@ export class PlaybackViewSession implements PlaybackViewPort {
     this.#state = { ...this.#state, zoom: 1, pan: { x: 0, y: 0 }, generation: this.#state.generation + 1 }
     this.#paint()
   }
-  #paint(): void {
+  #paint(notify = true): void {
     this.#deriveChrome()
     const range = playbackPanRange(this.#state)
     this.#state.pan = { x: clamp(this.#state.pan.x, range.x.min, range.x.max), y: clamp(this.#state.pan.y, range.y.min, range.y.max) }
@@ -261,9 +278,16 @@ export class PlaybackViewSession implements PlaybackViewPort {
       const left = parseFloat(host.root.style.left) || 0
       const top = parseFloat(host.root.style.top) || 0
       // Base root fit remains fixed, so controller siblings never inherit observation.
-      host.content.style.transform = `translate(${(state.pan.x + (state.zoom - 1) * left) / scale}px, ${(state.pan.y + (state.zoom - 1) * top) / scale}px) scale(${state.zoom})`
+      host.content.style.transform = host.kind === 'flow'
+        ? `translate(${state.pan.x}px, ${state.pan.y}px) scale(${scale * state.zoom})`
+        : `translate(${(state.pan.x + (state.zoom - 1) * left) / scale}px, ${(state.pan.y + (state.zoom - 1) * top) / scale}px) scale(${state.zoom})`
     }
+    const observation = JSON.stringify([this.#active, state.zoom, state.pan, state.viewport, state.bounds, this.#chrome,
+      [...this.#hosts.values()].map(host => [host.id, host.root.dataset.stageFitScale, host.root.style.left, host.root.style.top])])
+    if (!notify || observation === this.#publishedObservation) return
+    this.#publishedObservation = observation
     for (const host of this.#hosts.values()) host.onObservationChange?.()
+    this.#viewport?.dispatchEvent(new CustomEvent('playback-view-change', { bubbles: true }))
     for (const listener of this.#listeners) listener()
   }
   #deriveChrome(): void {
@@ -271,16 +295,17 @@ export class PlaybackViewSession implements PlaybackViewPort {
     const x = range.x.max > range.x.min, y = range.y.max > range.y.min
     const native = { right: 0, bottom: 0 }
     const host = this.#active ? this.#hosts.get(this.#active) : undefined
+    const fit = host ? this.fitScale(host.id) : 1
     const scroll = host?.kind === 'flow' ? host.content.querySelector<HTMLElement>('[data-flow-paper-scroll]') : null
     if (scroll) {
       // Use layout scrollbar thickness, independent of pan. Otherwise reaching
       // an edge changes its exclusion strip and makes the pan endpoint oscillate.
-      native.right = Math.max(0, scroll.offsetWidth - scroll.clientWidth) * this.#state.zoom
-      native.bottom = Math.max(0, scroll.offsetHeight - scroll.clientHeight) * this.#state.zoom
+      native.right = Math.max(0, scroll.offsetWidth - scroll.clientWidth) * fit * this.#state.zoom
+      native.bottom = Math.max(0, scroll.offsetHeight - scroll.clientHeight) * fit * this.#state.zoom
     }
     this.#chrome = { x, y, native, controllerInsets: playbackControllerInsets({
-      right: scroll ? Math.max(0, scroll.offsetWidth - scroll.clientWidth) : 0,
-      bottom: scroll ? Math.max(0, scroll.offsetHeight - scroll.clientHeight) : 0,
+      right: scroll ? Math.max(0, scroll.offsetWidth - scroll.clientWidth) * fit : 0,
+      bottom: scroll ? Math.max(0, scroll.offsetHeight - scroll.clientHeight) * fit : 0,
     }), insets: {
       right: native.right + (y ? PLAYBACK_VIEW_CHROME_GUTTER : 0),
       bottom: native.bottom + (x ? PLAYBACK_VIEW_CHROME_GUTTER : 0),

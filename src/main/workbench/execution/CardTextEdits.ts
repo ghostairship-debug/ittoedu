@@ -67,6 +67,9 @@ export class CardTextEdits<T> {
       if (this.range) this.content = c.slice(after, this.range.from, this.range.to)
     }
     if (inverse) return
+    // A new committed own edit has a current grant (human overlap requires explicit currentDraft confirmation).
+    // Its inverse begins at the current human text; an invalid old inverse cannot restore earlier AI text.
+    if (own) this.edits = this.edits.filter(edit => edit.valid)
     const touches = (e: Span) => !(d.to <= e.from && (d.from < e.from || !own && d.from === d.to && d.from === e.from) || d.from >= e.to && d.from > e.from)
     const overlap = this.edits.filter(touches)
     if (!own) {

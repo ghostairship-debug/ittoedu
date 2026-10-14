@@ -1,4 +1,4 @@
-import type { DocumentBinding } from './document'
+import type { DocumentBinding, DocumentModel } from './document'
 
 /** Main-issued correlation; neither model arguments nor renderer drafts supply it. */
 export interface DocumentSaveIdentity { runId: string; operationId: string; requestDigest: string }
@@ -38,4 +38,5 @@ export interface DocumentSaveProof {
   savedRevision: number
   sourceBinding: DocumentBinding
   binding: SavedDocumentBinding
+  savedModel?: DocumentModel
 }

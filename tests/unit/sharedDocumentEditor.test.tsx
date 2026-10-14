@@ -1,9 +1,9 @@
 import * as editorSession from '@/renderer/document/editorSession'
 import { FONT_FAMILY_OPTIONS } from '@/shared/fonts/fontFamilyCatalog'
 import { describe, expect, it, vi } from 'vitest'
-import { StrictMode } from 'react'
+import { createRef, StrictMode } from 'react'
 import { render, cleanup, act, fireEvent, within } from '@testing-library/react'
-import { SharedDocumentEditor } from '@/renderer/document/SharedDocumentEditor'
+import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '@/renderer/document/SharedDocumentEditor'
 import { serializeDocumentMarkdown } from '@/shared/document/markdown'
 import { TextSelection } from 'prosemirror-state'
 import { Slice } from 'prosemirror-model'
@@ -26,6 +26,19 @@ function mount() {
   return { ...editor, change, undo, redo, diagnostic, cleanup: () => { editor.destroy(); element.remove() } }
 }
 describe('sharedDocumentEditor', () => {
+  it('discards only the local file draft while retaining original unsupported source verbatim', async () => {
+    const source = '<div>完整原始课文</div>\n'
+    const original = { content: { blocks: [] }, resources: emptyDocumentResources() }
+    const handle = createRef<SharedDocumentEditorHandle>(), onDraft = vi.fn()
+    const view = render(<SharedDocumentEditor ref={handle} document={original} sourceDraft={source} revision="original" target="file" initialMode="source" onChange={() => true} onDraft={onDraft} onUndo={() => {}} onRedo={() => {}} />)
+    try {
+      await act(async () => { await handle.current!.discardDraft() })
+      expect(onDraft.mock.calls.at(-1)?.[0]).toBe(source)
+      expect((await handle.current!.drainSource()).source).toBe(source)
+      expect((await handle.current!.drainSource()).ready).toBe(true)
+      expect(view.getByRole('textbox', { name: '正文源文编辑' })).toBeInTheDocument()
+    } finally { view.unmount() }
+  })
   it('uses one full toolbar for inline range and caret formatting while retaining Flow selection tools', () => {
     const factory = vi.spyOn(editorSession, 'createLayoutEditor')
     const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 100, 600, 400))

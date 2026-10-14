@@ -3,8 +3,11 @@ import {
   transformVector, translationMatrix, type AffineMatrix, type GeometryPoint,
 } from '../../../../core/components/geometry'
 
+import type { ComponentCameraMotion, ComponentCameraPose } from '../../../../shared/contracts/component-platform/navigationMotion'
+import { componentCameraMotionSchema } from '../../../../shared/contracts/component-platform/navigationMotion'
+
 /** A view pose. It does not change object frames or runtime instance identity. */
-export interface ComponentSpatialCamera { x: number; y: number; zoom: number; rotation?: number }
+export type ComponentSpatialCamera = ComponentCameraPose
 export interface ComponentSpatialViewport { x: number; y: number; width: number; height: number }
 
 function checked(camera: ComponentSpatialCamera): ComponentSpatialCamera {
@@ -41,7 +44,7 @@ export interface ComponentSpatialCameraPort {
   set(pose: ComponentSpatialCamera): void
   subscribe(listener: (pose: ComponentSpatialCamera) => void): () => void
   /** A cancelled request never snaps to its old target. Latest request replaces it. */
-  present(pose: ComponentSpatialCamera, options?: { signal?: AbortSignal; durationMs?: number }): Promise<boolean>
+  present(pose: ComponentSpatialCamera, options?: ComponentCameraMotion & { signal?: AbortSignal }): Promise<boolean>
   dispose(): void
 }
 
@@ -70,12 +73,27 @@ export function createComponentSpatialCameraPort(initial: ComponentSpatialCamera
     set(pose) { cancelPresentation?.(); notify(pose) },
     subscribe(listener) { if (disposed) return () => {}; listeners.add(listener); return () => { listeners.delete(listener) } },
     present(pose, options = {}) {
-      cancelPresentation?.()
       if (disposed || options.signal?.aborted) return Promise.resolve(false)
+      const { signal: _signal, ...motion } = options
+      componentCameraMotionSchema.parse(motion)
       const to = checked(pose), from = { ...current }
-      const duration = Math.max(0, options.durationMs ?? 0)
-      if (!Number.isFinite(duration)) throw new RangeError('镜头过渡时间必须有限')
-      if (duration === 0) { notify(to); return Promise.resolve(true) }
+      const stops = [{ offset: 0, pose: from, easing: options.easing }, ...(options.keyframes ?? []), { offset: 1, pose: to }]
+      const samplers: Animation[] = []
+      let curves: ((progress: number) => number)[]
+      try {
+        curves = stops.slice(0, -1).map(stop => {
+          const easing = stop.easing ?? options.easing
+          if (!easing) return (t: number) => t * t * (3 - 2 * t)
+          if (easing === 'linear') return (t: number) => t
+          // Browser timing evaluates arbitrary CSS curves without owning or writing a pose.
+          const effect = new KeyframeEffect(null, [], { duration: 1, easing, fill: 'both' })
+          const sampler = new Animation(effect); samplers.push(sampler)
+          return (t: number) => { sampler.currentTime = t; return effect.getComputedTiming().progress ?? t }
+        })
+      } catch (error) { samplers.forEach(sampler => sampler.cancel()); throw error }
+      cancelPresentation?.()
+      const duration = options.durationMs ?? 0
+      if (duration === 0) { samplers.forEach(sampler => sampler.cancel()); notify(to); return Promise.resolve(true) }
       return new Promise<boolean>(resolve => {
         const start = scheduler.now()
         let handle: number | undefined
@@ -84,6 +102,7 @@ export function createComponentSpatialCameraPort(initial: ComponentSpatialCamera
           if (done) return
           done = true
           if (handle !== undefined) scheduler.cancel(handle)
+          samplers.forEach(sampler => sampler.cancel())
           options.signal?.removeEventListener('abort', abort)
           if (cancelPresentation === abort) cancelPresentation = undefined
           resolve(success)
@@ -91,15 +110,18 @@ export function createComponentSpatialCameraPort(initial: ComponentSpatialCamera
         const abort = () => finish(false)
         cancelPresentation = abort
         options.signal?.addEventListener('abort', abort, { once: true })
-        // Travel by the shortest angular route; pose rotation remains degrees.
-        const angle = (((to.rotation ?? 0) - (from.rotation ?? 0) + 180) % 360 + 360) % 360 - 180
         const tick = (time: number) => {
           if (done || disposed || options.signal?.aborted) { finish(false); return }
           const t = Math.min(1, Math.max(0, (time - start) / duration))
-          const eased = t * t * (3 - 2 * t)
-          notify({ x: from.x + (to.x - from.x) * eased, y: from.y + (to.y - from.y) * eased,
-            zoom: Math.exp(Math.log(from.zoom) + (Math.log(to.zoom) - Math.log(from.zoom)) * eased),
-            rotation: (from.rotation ?? 0) + angle * eased })
+          let index = stops.findIndex((stop, index) => index > 0 && t <= stop.offset) - 1
+          if (index < 0) index = stops.length - 2
+          const segmentStart = stops[index]!, end = stops[index + 1]!
+          const eased = curves[index]!((t - segmentStart.offset) / (end.offset - segmentStart.offset))
+          const left = segmentStart.pose, right = end.pose
+          const angle = (((right.rotation ?? 0) - (left.rotation ?? 0) + 180) % 360 + 360) % 360 - 180
+          notify({ x: left.x + (right.x - left.x) * eased, y: left.y + (right.y - left.y) * eased,
+            zoom: Math.exp(Math.log(left.zoom) + (Math.log(right.zoom) - Math.log(left.zoom)) * eased),
+            rotation: (left.rotation ?? 0) + angle * eased })
           if (done) return
           if (t === 1) { notify(to); finish(true) }
           else handle = scheduler.request(tick)

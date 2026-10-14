@@ -6,7 +6,7 @@ import { createChartData, CHART_DEFINITION, chartDataSchema } from '../../../com
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import type { EditorStoreKernel } from '../editorStoreKernel'
 import { fitSpatialComponentWorld } from '../../componentPlatform/surfaces/spatial/cameraCommands'
-import { addSpatialCameraFrameEdit, deleteSpatialCameraFrameEdit, renameSpatialCameraFrameEdit, reorderSpatialCameraFramesEdit, setSpatialCameraHomeEdit,
+import { addSpatialCameraFrameEdit, deleteSpatialCameraFrameEdit, renameSpatialCameraFrameEdit, reorderSpatialCameraFramesEdit, setSpatialCameraHomeEdit, setSpatialDefaultPathEdit,
   updateSpatialCameraFrameEdit, updateSpatialCameraFrameTargetEdit, addSpatialGraphItemEdit, updateSpatialGraphItemEdit, deleteSpatialGraphItemEdit } from '../../../core/course/courseSpatialEdits'
 import { spatialFramePose } from '../../../player/surfaces/spatial/componentPlatform/graph'
 import { spatialWorldTargets } from '../../componentPlatform/surfaces/spatial/targets'
@@ -26,7 +26,7 @@ export interface SpatialSurfaceViewState {
 export interface SpatialOwnedState { spatialViewStates: Record<string, Record<string, SpatialSurfaceViewState>> }
 export function createInitialSpatialOwnedState(): SpatialOwnedState { return { spatialViewStates: {} } }
 export function initialSpatialSurfaceView(home: ComponentSpatialPose = { x: 0, y: 0, zoom: 1 }): SpatialSurfaceViewState {
-  return { camera: { ...home }, activeCameraFrameId: null, showCameraFrames: false, playbackPathId: null, playbackStepIndex: null, scope: 'world', graphSelection: null }
+  return { camera: { ...home }, activeCameraFrameId: null, showCameraFrames: true, playbackPathId: null, playbackStepIndex: null, scope: 'world', graphSelection: null }
 }
 
 /** View state only. Document, selection and history stay in Kernel/Bridge/Session. */
@@ -119,6 +119,10 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
     setSpatialPlaybackStepIndex(playbackStepIndex: number | null, id = surfaceId(), documentId?: string) { patchView(id, { playbackStepIndex }, documentId) },
     setSpatialShowCameraFrames(show: boolean, id = surfaceId()) { patchView(id, { showCameraFrames: show }) },
     setSpatialPlaybackPathId(pathId: string | null, id = surfaceId()) { patchView(id, { playbackPathId: pathId, playbackStepIndex: null }) },
+    setSpatialDefaultPathId(id: string, pathId: string | null, captured?: CapturedCourseTarget) {
+      const frozen = target(captured)
+      return apply([setSpatialDefaultPathEdit(frozen.project, id, pathId)], frozen, pathId ? '默认播放路径已保存' : '默认播放路线已设为按镜头顺序')
+    },
     setSpatialEditingScope(scope: SpatialSurfaceViewState['scope'], id = surfaceId()) { patchView(id, { scope }); kernel.selectInstances([], id) },
     setSpatialGraphSelection(selection: SpatialGraphSelection, id = surfaceId()) {
       patchView(id, { graphSelection: selection }); if (selection) { kernel.selectInstances([], id); ports.openPropertiesTab?.() }
@@ -128,13 +132,18 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
       const frame = frameId === null ? undefined : spatial?.frames.find(value => value.id === frameId)
       if (frameId && !frame) throw new Error('镜头已不存在')
       kernel.selectSurface(id, frozen.documentId)
-      const viewport = read(id, frozen.documentId).viewport ?? surface?.designSize ?? { width: 1280, height: 720 }
+      const viewport = surface?.designSize ?? { width: 1280, height: 720 }
       const pose = frame ? spatialFramePose(frame, viewport, spatialWorldTargets(frozen.project, id)) : spatial?.home ?? { x: 0, y: 0, zoom: 1 }
       patchView(id, { activeCameraFrameId: frameId, camera: { ...pose }, playbackStepIndex: null, graphSelection: null }, frozen.documentId)
     },
     activateCameraFrame(frameId: string) { actions.activateSpatialCameraFrame(surfaceId(), frameId) },
     addSpatialCameraFrameFromSession(id = surfaceId(), captured?: CapturedCourseTarget) {
-      const frozen = target(captured); return apply([addSpatialCameraFrameEdit(frozen.project, id, read(id, frozen.documentId).camera)], frozen, '已添加镜头')
+      const frozen = target(captured), edit = addSpatialCameraFrameEdit(frozen.project, id, read(id, frozen.documentId).camera)
+      const frameId = edit.type === 'spatial.set' ? edit.spatial?.frames.at(-1)?.id : undefined
+      return apply([edit], frozen, '已添加镜头').then(result => {
+        patchView(id, { showCameraFrames: true, activeCameraFrameId: frameId ?? null }, frozen.documentId)
+        return result
+      })
     },
     renameSpatialCameraFrame(id: string, frameId: string, title: string, captured?: CapturedCourseTarget) {
       const frozen = target(captured); return apply([renameSpatialCameraFrameEdit(frozen.project, id, frameId, title)], frozen, '镜头名称已更新')
@@ -145,7 +154,7 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
     deleteSpatialCameraFrame(id: string, frameId: string, captured?: CapturedCourseTarget) {
       const frozen = target(captured)
       return apply([deleteSpatialCameraFrameEdit(frozen.project, id, frameId)], frozen, '已删除镜头').then(result => {
-        if (read(id, frozen.documentId).activeCameraFrameId === frameId) patchView(id, { activeCameraFrameId: null }, frozen.documentId)
+        if (read(id, frozen.documentId).activeCameraFrameId === frameId) patchView(id, { activeCameraFrameId: null, playbackStepIndex: null }, frozen.documentId)
         return result
       })
     },
@@ -176,7 +185,14 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
     },
     deleteSpatialPath(id: string, pathId: string, captured?: CapturedCourseTarget) {
       const frozen = target(captured)
-      return apply([deleteSpatialGraphItemEdit(frozen.project, id, 'paths', pathId)], frozen, '已删除路径')
+      const wasDefault = frozen.project.surfaces.find(surface => surface.id === id)?.spatial?.defaultPathId === pathId
+      return apply([deleteSpatialGraphItemEdit(frozen.project, id, 'paths', pathId)], frozen,
+        wasDefault ? '已删除路径，默认播放路线已回到按镜头顺序' : '已删除路径').then(result => {
+        const view = read(id, frozen.documentId)
+        patchView(id, { ...(view.playbackPathId === pathId ? { playbackPathId: null, playbackStepIndex: null } : {}),
+          ...(view.graphSelection?.kind === 'path' && view.graphSelection.id === pathId ? { graphSelection: null } : {}) }, frozen.documentId)
+        return result
+      })
     },
     addSpatialRelation(id: string, input: Omit<NonNullable<ComponentSpatialAuthoring['relations']>[number], 'id'>, captured?: CapturedCourseTarget) {
       const frozen = target(captured)

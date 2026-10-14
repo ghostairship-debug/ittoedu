@@ -9,12 +9,16 @@ export type ExecutionBlobRef = z.infer<typeof executionBlobRefSchema>
 export const executionDetailKeys = ['input', 'output', 'diff', 'error'] as const
 const eventData = {
   text: z.string().optional(), status: z.string().min(1).optional(), label: z.string().optional(),
+  phase: z.enum(['waiting-response', 'generating', 'tool', 'retry', 'user', 'context', 'ended']).optional(),
+  requestId: id.optional(), lastReceivedAt: z.number().finite().nonnegative().optional(),
+  receivedSource: z.enum(['data', 'heartbeat']).optional(), remainingGoal: z.array(z.string()).optional(),
   input: z.string().optional(), output: z.string().optional(), diff: z.string().optional(), error: z.string().optional(),
   documentName: z.string().optional(), targetLabel: z.string().optional(),
   applicationStatus: z.enum(['applied', 'unchanged', 'conflict', 'denied', 'cancelled', 'failed']).optional(),
   saveStatus: z.enum(['saving', 'saved', 'failed']).optional(),
   toolName: id.optional(), operationId: id.optional(), documentId: id.optional(), revision: count.optional(),
   jobId: id.optional(), resourceIds: z.array(id).optional(),
+  webSources: z.array(z.object({ title: z.string(), url: z.string().min(1) }).strict()).optional(),
   // Built-in ask_user only: the question the option card shows, then what the user actually answered.
   question: userQuestionViewSchema.optional(), answer: userAnswerSchema.optional(),
   // A modification waiting for the user's approval, then the user's actual decision.
@@ -45,6 +49,8 @@ export type ExecutionContent = { kind: 'text'; text: string } | { kind: 'blob'; 
 export interface ExecutionItem {
   taskId: string; runId: string; itemId: string; parentItemId?: string
   source: ExecutionEvent['source']; type: ExecutionEvent['type']; time: number; sequence: number
+  /** Derived from the first event; later snapshots must not move a conversation boundary. */
+  firstTime?: number; firstSequence?: number
   data: Omit<ExecutionEvent['data'], 'text' | 'textRef'>
   content: ExecutionContent[]
 }
@@ -74,6 +80,8 @@ export function foldExecutionEvents(previous: ExecutionProjection, events: reado
     const item: ExecutionItem = {
       taskId: event.taskId, runId: event.runId, itemId: event.itemId, ...(event.parentItemId === undefined ? {} : { parentItemId: event.parentItemId }),
       source: event.source, type: event.type, time: event.time, sequence: event.sequence,
+      firstTime: current?.firstTime ?? current?.time ?? event.time,
+      firstSequence: current?.firstSequence ?? current?.sequence ?? event.sequence,
       // Final snapshots replace the visible text, while immutable tool parameters and
       // independently reported application/save facts survive status-only updates.
       data: { ...current?.data, ...data },

@@ -14,7 +14,7 @@ afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals() })
 const workspace: WorkspaceRecord = { workspaceId: 'workspace', rootPath: 'C:/workspace', managed: false,
   authorization: 'user-selected', revision: 1, createdAt: 1, updatedAt: 1 }
 const instance = { kind: 'course-instance' as const, surfaceId: 'surface-a', instanceId: 'text-a', stateId: null,
-  dataPath: ['authoringRecords', 'author-a', 'overrides', 'text'], from: 2, to: 6 }
+  fieldScope: 'authoring' as const, dataPath: ['records', 'author-a', 'overrides', 'text'], from: 2, to: 6 }
 const reference: ExecutionDocumentReference = { documentId: 'doc', epoch: 'epoch', revision: 3,
   writable: [instance], selection: [instance] }
 const settings: ExecutionSettingsView = { secureStorageAvailable: true, modelFavorites: [],
@@ -75,8 +75,9 @@ it('sends a normal continuation of a partial task with its frozen V10 selection 
   fireEvent.click(screen.getByRole('button', { name: '发送' }))
   await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1))
   expect(vi.mocked(api.send).mock.calls[0]![0]).toMatchObject({ documents: [reference] })
-  expect(captureDocuments).not.toHaveBeenCalled()
-  expect(prepareSend).toHaveBeenCalledWith(['doc'])
+  expect(captureDocuments).toHaveBeenCalledWith(true, false)
+  expect(captureDocuments).not.toHaveBeenCalledWith(true, true)
+  expect(prepareSend).toHaveBeenCalledWith([expect.objectContaining({ ...reference, pinned: true, referenceId: 'ref' })])
 })
 
 it('continues a connection failure with the original V10 selection instead of treating restored scope as a new draft', async () => {
@@ -92,7 +93,7 @@ it('keeps a filtered unsupported recovery grant empty on send rather than granti
   await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue('继续修改所选正文'))
   fireEvent.click(screen.getByRole('button', { name: '发送' }))
   await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1))
-  expect(vi.mocked(api.send).mock.calls[0]![0].documents).toEqual([{ ...reference, writable: [] }])
+  expect(vi.mocked(api.send).mock.calls[0]![0].documents).toMatchObject([{ ...reference, writable: [] }])
 })
 
 it('preserves surface grants and empty grants at each permission level', () => {

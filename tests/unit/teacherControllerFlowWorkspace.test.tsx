@@ -49,7 +49,7 @@ it('selects, drags and resizes Flow through the shared affine handles while enab
     world: { beforeProjectionMutation() {}, afterProjectionMutation() {} },
     setPlaying: vi.fn((value: boolean) => { playing = value; navigation.changed() }),
     onElement: (_id: string, element: HTMLElement | null) => {
-      if (element) void Promise.resolve(createTeacherControllerRuntimeImplementation(navigation).mount({ root: element, instance: project.instances.teacher, scope })).then(value => { mounted = value })
+      if (element) void Promise.resolve(createTeacherControllerRuntimeImplementation(navigation.forInstance('teacher')).mount({ root: element, instance: project.instances.teacher, scope })).then(value => { mounted = value })
       else void mounted?.dispose()
     } }
   const props = { documentId: 'doc', project, surfaceId: 'flow', canvasMode: 'edit' as const, editingScope: 'scene' as const, onCanvasModeChange() {}, onSelectImageAsset: async () => null }
@@ -81,10 +81,10 @@ it('selects, drags and resizes Flow through the shared affine handles while enab
   expect(resized.transform[0] * resized.width).toBeCloseTo(720)
   expect(resized.transform[4]).toBe(0); expect(resized.transform[5]).toBe(638)
   expect(write.mock.calls[1][0].target).toBe(target)
-  act(() => navigation.setCollapsed(true))
-  expect(navigation.read().collapsed).toBe(false)
+  act(() => navigation.forInstance('teacher').setCollapsed(true))
+  expect(navigation.forInstance('teacher').read().collapsed).toBe(false)
   expect(ui.container.querySelector('nav.guoling-controller')).not.toHaveClass('collapsed')
-  act(() => navigation.setCollapsed(false))
+  act(() => navigation.forInstance('teacher').setCollapsed(false))
   const next = ui.container.querySelector<HTMLButtonElement>('[data-control="next-scene"]')!
   expect(next).toBeDisabled(); fireEvent.click(next); expect(nextSurface).not.toHaveBeenCalled()
   ui.rerender(<FlowLocationWorkspace {...props} canvasMode="run" />)

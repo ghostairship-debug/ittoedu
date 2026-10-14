@@ -1,11 +1,18 @@
 import type { ModelChatMessage } from '../../../shared/workbench/modelProvider'
+import { createHash } from 'node:crypto'
 import type { ToolResult } from '../../../shared/workbench/tools'
 import { contentApplyFact, exportFact, operationFact, saveFact } from '../../../core/tools/modelToolResult'
+import { htmlActionToolCatalog, isHtmlActionTool } from '../../../core/tools/HtmlActionTools'
 import { modelToolWireName } from '../providers/OpenAIChatProvider'
 
-// Only these named envelopes need business receipt interpretation. Reuse the
-// provider spelling function rather than guessing that every underscore is a dot.
-const receiptWireNames = new Map(['project.apply', 'project.save', 'file.save', 'document.export', 'task.delivery'].map(name => [modelToolWireName(name), name]))
+// Only these named envelopes need business receipt interpretation. Stored native
+// history retains the previous opaque spelling; recognize it here without
+// renaming calls or making old/approximate aliases executable.
+const receiptWireNames = new Map(['project.apply', 'project.save', 'file.save', 'document.export', 'task.delivery',
+  ...htmlActionToolCatalog.map(tool => tool.name)].flatMap(name => [
+  [modelToolWireName(name), name],
+  [`tool_${createHash('sha256').update(name).digest('hex').slice(0, 48)}`, name],
+]))
 
 const imagePart = (part: unknown): part is { type: 'image_url'; image_url: { url: string } } => !!part && typeof part === 'object'
   && (part as { type?: unknown }).type === 'image_url' && typeof (part as { image_url?: { url?: unknown } }).image_url?.url === 'string'
@@ -53,6 +60,11 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
   const assistantTurns = messages.flatMap((message, index) => index >= initialCount && message.role === 'assistant'
     && Array.isArray(message.tool_calls) && message.tool_calls.length ? [index] : [])
   const recentStart = retainToolTurns > 0 ? assistantTurns.at(-retainToolTurns) ?? initialCount : messages.length
+  // Observation images and steering are real user inputs too. Keep the whole
+  // producing round, including calls whose outputs precede/follow that input.
+  const lastUser = messages.map(message => message.role).lastIndexOf('user')
+  const precedingAssistant = messages.findLastIndex((message, index) => index < lastUser && message.role === 'assistant')
+  const protectedStart = lastUser < 0 ? messages.length : Math.max(initialCount, precedingAssistant < 0 ? lastUser : precedingAssistant)
   const archiveThreshold = Number.isSafeInteger(textLimit) && textLimit! > 0 ? textLimit! : 8000
   const callNames = new Map<string, string>(), messageTools = new Map<number, string>()
   messages.forEach((message, index) => {
@@ -64,6 +76,26 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
     }
     if (message.role === 'tool' && typeof message.tool_call_id === 'string' && callNames.has(message.tool_call_id))
       messageTools.set(index, callNames.get(message.tool_call_id)!)
+  })
+  const htmlResults = new Set<number>()
+  const htmlSnapshots = new Map<number, { result: Record<string, unknown>; data: Record<string, unknown>; identity: string; generation: number }>()
+  const latestHtmlGeneration = new Map<string, number>()
+  messages.forEach((message, index) => {
+    if (message.role !== 'tool' || typeof message.content !== 'string' || !isHtmlActionTool(messageTools.get(index) ?? '')) return
+    htmlResults.add(index)
+    try {
+      const result = JSON.parse(message.content), data = result?.data, identity = data?.identity
+      // Only the service's complete successful observation can retire an older
+      // generation. Error/unknown and errors-only receipts stay untouched.
+      if (result?.kind !== 'read' || !data || !identity || data.status !== undefined || result.status !== undefined
+        || !Number.isSafeInteger(data.generation) || data.generation < 1 || !Array.isArray(data.structure) || !Array.isArray(data.elements)) return
+      const strings = ['runId', 'documentId', 'epoch', 'leaseId', 'loadId', 'url']
+      if (!strings.every(key => typeof identity[key] === 'string') || !Number.isSafeInteger(identity.revision)
+        || !Number.isSafeInteger(identity.bindingVersion)) return
+      const key = JSON.stringify([...strings.map(field => identity[field]), identity.revision, identity.bindingVersion])
+      htmlSnapshots.set(index, { result, data, identity: key, generation: data.generation })
+      latestHtmlGeneration.set(key, Math.max(latestHtmlGeneration.get(key) ?? 0, data.generation))
+    } catch { /* Unrecognized HTML receipts remain complete, not inferred successful. */ }
   })
   let imagesArchived = 0, encodedImageBytesRemoved = 0, toolBytesRemoved = 0
   const projected = messages.map((message, index): ModelChatMessage => {
@@ -80,6 +112,21 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
       })
       return { ...message, content }
     }
+    if (htmlResults.has(index)) {
+      const snapshot = htmlSnapshots.get(index)
+      if (!snapshot || index >= recentStart || index >= protectedStart
+        || snapshot.generation >= latestHtmlGeneration.get(snapshot.identity)!) return message
+      const { structure: _structure, elements: _elements, ...facts } = snapshot.data
+      const content = JSON.stringify({ archivedContext: sourceId, tool: messageTools.get(index),
+        receipt: { ...snapshot.result, data: facts }, characters: (message.content as string).length,
+        notice: '旧 HTML 观察已被同一预览的新 generation 替代；此回执仅记录当时页面和动作结果，旧元素句柄已退役。完整结构与原回执可用 context.read 按来源回读，当前操作使用最新观察。' })
+      const removed = Buffer.byteLength(message.content as string, 'utf8') - Buffer.byteLength(content, 'utf8')
+      if (removed <= 0) return message
+      toolBytesRemoved += removed
+      return { ...message, content }
+    }
+    // Do not let bounded/generic excerpts alter the current function-call chain.
+    if (index >= protectedStart && message.role === 'tool') return message
     if (index < recentStart && message.role === 'tool' && typeof message.content === 'string' && message.content.length > archiveThreshold) {
       let receipt: unknown
       try {
@@ -104,17 +151,13 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
       return { ...message, content }
     }
     if (index < recentStart && message.role === 'assistant') {
-      const tool_calls = Array.isArray(message.tool_calls) ? message.tool_calls.map(call => {
-        if (!call || typeof call !== 'object' || Array.isArray(call) || !call.function || typeof call.function !== 'object'
-          || Array.isArray(call.function) || typeof call.function.arguments !== 'string' || call.function.arguments.length <= archiveThreshold) return call
-        const argumentsText = JSON.stringify({ archivedArguments: sourceId, toolCallId: call.id, characters: call.function.arguments.length })
-        toolBytesRemoved += Buffer.byteLength(call.function.arguments, 'utf8') - Buffer.byteLength(argumentsText, 'utf8')
-        return { ...call, function: { ...call.function, arguments: argumentsText } }
-      }) : undefined
+      // Native call history must describe actual tool inputs. An archive wrapper
+      // in function.arguments teaches the model to submit that wrapper as a new
+      // business call. Archive prose/results only; originals remain Run-owned.
       const content = typeof message.content === 'string' && message.content.length > archiveThreshold
         ? `历史过程文本（${message.content.length}字符）已保留于 ${sourceId}；context.read 可重读，当前以正式回执和目标为准。` : message.content
       if (typeof message.content === 'string' && typeof content === 'string') toolBytesRemoved += Buffer.byteLength(message.content) - Buffer.byteLength(content)
-      return { ...message, content, ...(tool_calls ? { tool_calls } : {}) }
+      return { ...message, content }
     }
     return message
   })

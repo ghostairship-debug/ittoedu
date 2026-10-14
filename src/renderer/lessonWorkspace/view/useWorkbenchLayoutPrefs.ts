@@ -9,11 +9,12 @@ export interface WorkbenchLayoutPrefs {
   explorerOpen: boolean
   conversationsOpen: boolean
   sessionsHeight: number
+  sessionsRatio: number
 }
 export const STORAGE_KEY = 'guoling-workbench-layout-v2'
 export const DEFAULT_PREFS: WorkbenchLayoutPrefs = {
   navWidth: 216, chatWidth: 350, navCollapsed: false, contentClosed: false,
-  chatClosed: false, explorerOpen: true, conversationsOpen: true, sessionsHeight: 260,
+  chatClosed: false, explorerOpen: true, conversationsOpen: true, sessionsHeight: 260, sessionsRatio: 0.5,
 }
 export const LAYOUT_LIMITS = { nav: { min: 180, max: 440 }, chat: { min: 280, max: 640 }, sessions: { min: 160, max: 500 }, content: 320 } as const
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, Math.round(value)))
@@ -23,6 +24,7 @@ export function parseLayoutPrefs(raw: string | null): WorkbenchLayoutPrefs {
     if (!input || typeof input !== 'object' || Array.isArray(input)) return { ...DEFAULT_PREFS }
     const record = input as Record<string, unknown>
     const prefs = { ...DEFAULT_PREFS }
+    if (typeof record.sessionsRatio === 'number' && Number.isFinite(record.sessionsRatio)) prefs.sessionsRatio = Math.max(0.15, Math.min(0.85, record.sessionsRatio))
     for (const key of ['navCollapsed', 'contentClosed', 'chatClosed', 'explorerOpen', 'conversationsOpen'] as const) {
       if (typeof record[key] === 'boolean') prefs[key] = record[key]
     }
@@ -33,7 +35,7 @@ export function parseLayoutPrefs(raw: string | null): WorkbenchLayoutPrefs {
   } catch { return { ...DEFAULT_PREFS } }
 }
 export function resolveWorkbenchWidths(prefs: WorkbenchLayoutPrefs, available: number, focus = false) {
-  let nav = prefs.navCollapsed || (!prefs.explorerOpen && !prefs.conversationsOpen) || focus ? 0 : prefs.navWidth
+  let nav = prefs.navCollapsed || focus ? 0 : prefs.navWidth
   let chat = prefs.chatClosed ? 0 : prefs.chatWidth
   const content = focus || !prefs.contentClosed
   const gaps = (nav && (content || chat) ? 5 : 0) + (chat && content ? 5 : 0)
@@ -65,6 +67,10 @@ export function useWorkbenchLayoutPrefs() {
     setNavWidth: (width: number) => set('navWidth', clamp(width, LAYOUT_LIMITS.nav.min, LAYOUT_LIMITS.nav.max)),
     setChatWidth: (width: number) => set('chatWidth', clamp(width, LAYOUT_LIMITS.chat.min, LAYOUT_LIMITS.chat.max)),
     setSessionsHeight: (height: number) => set('sessionsHeight', clamp(height, LAYOUT_LIMITS.sessions.min, LAYOUT_LIMITS.sessions.max)),
+    setSessionsRatio: (ratio: number) => set('sessionsRatio', Math.max(0.15, Math.min(0.85, ratio))),
+    applyPreset: (preset: 'standard' | 'content' | 'content-ai') => setPrefs(prev => ({ ...prev,
+      navCollapsed: preset !== 'standard', contentClosed: false, chatClosed: preset === 'content',
+      explorerOpen: true, conversationsOpen: true })),
     toggleNav: () => toggle('navCollapsed'),
     setNavCollapsed: (closed: boolean) => set('navCollapsed', closed),
     toggleContentClosed: () => toggle('contentClosed'),

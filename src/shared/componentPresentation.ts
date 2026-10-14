@@ -43,7 +43,7 @@ export function resolveComponentOuterPresentation(project: CourseProjectV10, ins
     ? resolveSectionPresentation({ collapsedByDefault: data.collapsedByDefault === true }, input.purpose) : null
   const flow = input.placement === 'flow'
   const unframedExtent = flow && !frame && instance.childIds?.length ? flowObjectExtent(project, instance.id) : null
-  const layoutInput = componentLayoutInput(instance, { kind: flow ? 'flow' : 'free-frame', inlineSize: input.inlineSize, definition, viewport: unframedExtent ?? undefined })
+  const layoutInput = componentLayoutInput(instance, { project, kind: flow ? 'flow' : 'free-frame', inlineSize: input.inlineSize, definition, viewport: unframedExtent ?? undefined })
   const naturalFlow = flow && layoutInput.mode === 'flow-content'
   const media = ['guoling.image', 'guoling.video', 'guoling.audio'].includes(key ?? '')
   const localAssembly = flow && layoutInput.mode === 'flow-viewport' && !documentBlock
@@ -63,11 +63,14 @@ export function resolveComponentOuterPresentation(project: CourseProjectV10, ins
       maxWidth: wrapped ? presentation.wrappedOuterInlineSize : presentation.maxInlineSize, float: wrapped ? wrap : 'none',
       margin: wrap === 'left' ? '8px 20px 8px 0' : wrap === 'right' ? '8px 0 8px 20px' : `16px calc((100% - ${presentation.inlineSize}) / 2)` })
   }
-  const stageStyle: Record<string, string> = { position: flow ? 'relative' : 'absolute', inset: flow ? '' : '0px', width: '100%',
+  // Free frame paint owns its border/padding. A static stage participates in
+  // that content box while the absolute children still anchor to the outer frame.
+  const freeContentBox = !flow && Boolean(frame)
+  const stageStyle: Record<string, string> = { position: flow ? 'relative' : freeContentBox ? 'static' : 'absolute', inset: flow || freeContentBox ? '' : '0px', width: '100%',
     height: flow ? extent ? `${extent.height * scale}px` : naturalFlow || documentBlock ? 'auto' : `${frame?.height ?? 0}px` : '100%' }
   const geometry: Record<string, string> = extent ? { position: 'absolute', left: '0px', top: '0px',
     transform: `scale(${scale}) translate(${-extent.x}px,${-extent.y}px)`, transformOrigin: '0 0' }
-    : { position: flow ? 'relative' : 'absolute', left: '0px', top: '0px', transform: '', transformOrigin: '' }
+    : { position: flow || freeContentBox ? 'relative' : 'absolute', left: '0px', top: '0px', transform: '', transformOrigin: '' }
   const contentStyle = { inset: '', ...geometry, width: extent ? `${frame?.width ?? extent.width}px` : '100%',
     height: extent ? `${frame?.height ?? extent.height}px` : naturalFlow ? 'var(--component-flow-height, auto)' : flow ? frame ? `${frame.height}px` : 'auto' : '100%' }
   const childrenStyle = { inset: '', ...geometry, position: childrenPlacement === 'flow' ? 'relative' : 'absolute',

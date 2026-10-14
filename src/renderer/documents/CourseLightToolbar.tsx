@@ -1,20 +1,19 @@
-import { MoreHorizontal } from 'lucide-react'
+import { MoreHorizontal, Save, SaveAll, Undo2, Redo2, Plus, SlidersHorizontal, MonitorPlay } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { usePropertiesContext } from '../ui/properties/PropertiesContextAdapter'
 import { ExportMenu, type ExportFormat } from '../ui/ExportMenu'
+import { CourseImportMenu } from '../ui/CourseImportMenu'
 import type { SingleHtmlExportMode } from '../export/course/coursePackagePreflight'
-import { useCourseEditorChrome } from './CourseEditorChromeContext'
+import { CourseNavigationToolbarHost, useCourseEditorChrome, type CourseEditorMode } from './CourseEditorChromeContext'
 import { useProEditorRailState } from '../ui/proEditorRailController'
 import { ElementCardIndicator, type ElementCardNavigation } from '../workbench/elementCards/ElementCardIndicator'
 import { FlowInsertMenu } from '../ui/flow/FlowInsertMenu'
-import { SlideLightPageActions } from '../editing/quickbar/SlideLightActions'
-import type { SlideLightPageView } from '../composition/selection/slideLightEditingPort'
-import type { SlideLightCommand } from '../editing/commands/slideLightCommands'
 import type { FlowInsertCommand } from '../ui/flow/flowInsertCommands'
 import './courseEditorChrome.css'
 
 export interface CourseLightToolbarProps {
-  slideLightPage?: { readonly view: SlideLightPageView; readonly run: (command: SlideLightCommand) => Promise<void> } | null
+  /** The same tools appear in both work positions; only their navigation slot differs. */
+  toolbarMode?: CourseEditorMode
   documentId: string | null
   isCurrentDocument(id: string): boolean
   canUndo: boolean
@@ -31,6 +30,8 @@ export interface CourseLightToolbarProps {
   onAddVideo(): void
   onAddAudio(): void
   onImportHtml?(): void
+  onImportFlow?(): void
+  onImportPptx?(): void
   /** Shapes and formulas inserted from the workbench (M21); omitted where they cannot go. */
   onAddShape?(shapeType: LightShapeType): void
   onAddFormula?(): void
@@ -48,11 +49,12 @@ export interface CourseLightToolbarProps {
   onExport?(format: ExportFormat, singleHtmlMode?: SingleHtmlExportMode): void
   onExportSettings?(): void
   onToggleProperties?(): void
+  onOpenPageProperties?(): void
   /** Finds the elements of AI cards that are working or waiting (M15); shows the top bar's indicator. */
   elementCards?: ElementCardNavigation
 }
 
-const COMPACT_WIDTH = 560
+const COMPACT_WIDTH = 500
 
 export type LightShapeType = 'rectangle' | 'rounded-rectangle' | 'ellipse' | 'triangle' | 'line' | 'arrow-right'
 /** The shapes a teacher reaches for most; the editor's element library has the rest. */
@@ -73,17 +75,18 @@ function useDismiss(open: boolean, ref: RefObject<HTMLElement | null>, close: ()
 }
 
 /**
- * The light course toolbar is one fixed row: 保存 · 另存为 · 撤销 · 重做 · 插入 … 状态 · 整课预览 · 导出 · ⋯ · 在编辑器中打开.
- * It never adds or removes controls when the selection changes (selection tools live in the floating quick bar); on
- * a narrow workbench the optional commands move into "⋯". "在编辑器中打开" is the only way into the full editor.
+ * Width changes determine density and wrapping; selection tools never add or remove a toolbar row.
+ * Both modes host the same surface navigation controls. Explicit entry is the only route into the full editor.
  */
 export function CourseLightToolbar(props: CourseLightToolbarProps) {
+  const toolbarMode = props.toolbarMode ?? 'light'
+  const insertMenuId = `course-${toolbarMode}-insert-menu`
   const chrome = useCourseEditorChrome()
   const { activePanel } = useProEditorRailState()
   const context = usePropertiesContext({ onReplaceImage: props.onReplaceImage })
   const [insertOpen, setInsertOpen] = useState(false), [moreOpen, setMoreOpen] = useState(false)
   const insertRef = useRef<HTMLDivElement>(null), moreRef = useRef<HTMLDivElement>(null), toolbarRef = useRef<HTMLDivElement>(null)
-  // A narrow workbench moves optional commands into "⋯" instead of wrapping the row; only width changes this.
+  // Only very narrow widths put optional commands into more; ordinary widths retain them visibly.
   const [compact, setCompact] = useState(false)
   useEffect(() => {
     const element = toolbarRef.current
@@ -117,25 +120,25 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
   const fitWorld = context.kind === 'spatial-page' || context.kind === 'spatial-graph' ? context.commands.fitWorldContent : null
   const overflow: ReactNode[] = [
     ...(compact ? [
-      <button key="save-as" type="button" role="menuitem" onClick={() => more(props.saveAs)}>另存为</button>,
-      <button key="redo" type="button" role="menuitem" disabled={!props.canRedo || !editing} onClick={() => more(props.redo)}>重做</button>,
+      <button key="save-as" type="button" role="menuitem" disabled={props.busy} onClick={() => more(props.saveAs)}>另存为</button>,
+      <button key="redo" type="button" role="menuitem" disabled={props.busy || !props.canRedo || !editing} onClick={() => more(props.redo)}>重做</button>,
       ...(props.onPreview ? [<button key="preview" type="button" role="menuitem" disabled={props.busy} onClick={() => { if (props.onPreview) more(props.onPreview) }}>整课预览</button>] : []),
     ] : []),
-    <button key="agent" type="button" role="menuitem" disabled={!props.canUndoLatestAgent || !undoLatestAgent || !editing} onClick={() => { if (undoLatestAgent) more(undoLatestAgent) }}>撤销最近 AI 修改</button>,
+    <button key="agent" type="button" role="menuitem" disabled={props.busy || !props.canUndoLatestAgent || !undoLatestAgent || !editing} onClick={() => { if (undoLatestAgent) more(undoLatestAgent) }}>撤销最近 AI 修改</button>,
     ...(fitWorld ? [
       <button key="fit-visible" type="button" role="menuitem" onClick={() => more(() => fitWorld('visible'))}>适配可见内容</button>,
       <button key="fit-all" type="button" role="menuitem" onClick={() => more(() => fitWorld('all'))}>适配全部内容</button>,
     ] : []),
   ]
-  return <div ref={toolbarRef} className="course-light-tools" aria-label="常用工具">
+  return <div ref={toolbarRef} className="course-light-tools" data-compact={compact} data-toolbar-mode={toolbarMode} aria-label="常用工具">
     <div className="course-light-tools__row">
-      <button type="button" onClick={() => invoke(props.save)}>保存</button>
-      {!compact && <button type="button" onClick={() => invoke(props.saveAs)}>另存为</button>}
-      <button type="button" disabled={!props.canUndo || !editing} onClick={() => invoke(props.undo)}>撤销</button>
-      {!compact && <button type="button" disabled={!props.canRedo || !editing} onClick={() => invoke(props.redo)}>重做</button>}
+      <button type="button" aria-label="保存" title="保存（Ctrl+S）" disabled={props.busy} onClick={() => invoke(props.save)}><Save size={17} /></button>
+      {!compact && <button type="button" aria-label="另存为" title="另存为" disabled={props.busy} onClick={() => invoke(props.saveAs)}><SaveAll size={17} /></button>}
+      <button type="button" aria-label="撤销" title="撤销（Ctrl+Z）" disabled={props.busy || !props.canUndo || !editing} onClick={() => invoke(props.undo)}><Undo2 size={17} /></button>
+      {!compact && <button type="button" aria-label="重做" title="重做（Ctrl+Y）" disabled={props.busy || !props.canRedo || !editing} onClick={() => invoke(props.redo)}><Redo2 size={17} /></button>}
       <div className="course-light-tools__insert" ref={insertRef}>
-        <button type="button" aria-expanded={insertOpen} aria-controls="course-light-insert-menu" disabled={!editing} title={editing ? undefined : '运行状态下不能插入内容'} onClick={() => setInsertOpen(open => !open)}>插入</button>
-        {insertOpen && editing && <div id="course-light-insert-menu" className="course-light-tools__insert-menu" aria-label="插入内容">
+        <button type="button" aria-label="插入" aria-expanded={insertOpen} aria-controls={insertMenuId} disabled={props.busy || !editing} title={editing ? '插入' : '运行状态下不能插入内容'} onClick={() => setInsertOpen(open => !open)}><Plus size={18} /></button>
+        {insertOpen && editing && <div id={insertMenuId} className="course-light-tools__insert-menu" aria-label="插入内容">
           {flowInsertMenu ? <FlowInsertMenu disabled={Boolean(flowInsertMenu.disabledReason)} onInsert={command => insert(() => flowInsertMenu.onInsert(command))} /> : <>
           <button type="button" aria-label="添加文字" disabled={Boolean(unavailable)} title={unavailable ?? undefined} onClick={() => insert(props.onAddText)}>
             <span>文字</span><small>{props.insertSurface === 'flow' ? '当前文档页的段落' : props.insertSurface === 'spatial' ? '世界文本' : '自由文本'}</small>
@@ -167,20 +170,24 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
       </div>
       <div className="course-light-tools__document-actions">
         {editing && props.onToggleProperties && <button type="button" aria-expanded={activePanel === 'properties'} aria-controls="embedded-editor-properties"
-          onClick={() => invoke(props.onToggleProperties!)}>属性</button>}
-        {editing && props.slideLightPage && <SlideLightPageActions commands={props.slideLightPage.view.commands}
-          backgroundColor={props.slideLightPage.view.backgroundColor} onRun={props.slideLightPage.run} onError={props.reportError} />}
+          aria-label="属性" title="属性" onClick={() => invoke(props.onToggleProperties!)}><SlidersHorizontal size={17} /></button>}
+        {editing && props.onOpenPageProperties && <button type="button" aria-label="页面属性" title="页面属性"
+          onClick={() => invoke(props.onOpenPageProperties!)}>页面属性</button>}
         {props.elementCards && <ElementCardIndicator documentId={props.documentId} navigation={props.elementCards} />}
         {chrome.workbench && <span className="course-light-tools__status">{chrome.workbench.documentStatus}</span>}
-        {!compact && props.onPreview && <button type="button" disabled={props.busy} onClick={() => { if (props.onPreview) invoke(props.onPreview) }}>整课预览</button>}
-        {props.onExport && <ExportMenu variant="light" busy={props.busy ?? false} hasFlowSurface={props.hasFlowSurface ?? false}
+        <CourseNavigationToolbarHost mode={toolbarMode} />
+        {!compact && props.onPreview && <button type="button" aria-label="整课预览" title="整课预览" disabled={props.busy} onClick={() => { if (props.onPreview) invoke(props.onPreview) }}><MonitorPlay size={18} /></button>}
+        <div className="course-transfer-actions" role="group" aria-label="导入与导出">
+        <CourseImportMenu busy={props.busy} onFlow={props.onImportFlow} onPptx={props.onImportPptx} onHtml={props.onImportHtml} />
+        {props.onExport && <ExportMenu variant={toolbarMode === 'deep' ? 'toolbar' : 'light'} busy={props.busy ?? false} hasFlowSurface={props.hasFlowSurface ?? false}
           onExportSettings={props.onExportSettings ? () => invoke(props.onExportSettings!) : undefined}
           onExport={(format, mode) => invoke(() => { if (mode) props.onExport?.(format, mode); else props.onExport?.(format) })} />}
+        </div>
         <div className="course-light-tools__more" ref={moreRef}>
           <button type="button" aria-label="更多工具" title="更多工具" aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen(open => !open)}><MoreHorizontal size={15} /></button>
           {moreOpen && <div className="course-light-tools__more-menu" role="menu" aria-label="更多工具">{overflow}</div>}
         </div>
-        {chrome.workbench && <button type="button" className="workbench-editor-focus" title="打开图层、完整属性、交互、组件和开发工具" onClick={() => chrome.setMode('deep')}>在编辑器中打开</button>}
+        {chrome.workbench && toolbarMode === 'light' && <button type="button" aria-label="在编辑器中打开" className="workbench-editor-focus" title="在编辑器中打开：图层、完整属性、交互、组件和开发工具" onClick={() => chrome.setMode('deep')}>在编辑器中打开</button>}
       </div>
     </div>
   </div>

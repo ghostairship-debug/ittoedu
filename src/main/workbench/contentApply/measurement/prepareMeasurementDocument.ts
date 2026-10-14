@@ -1,5 +1,6 @@
 import { parse, serialize, serializeOuter, type DefaultTreeAdapterTypes } from 'parse5'
 import { htmlDocumentKind } from '../../../../shared/html/documentKind'
+import { measuredFragmentDocumentCss } from '../../../../components/web/measuredFragmentBox'
 
 type HtmlElement = DefaultTreeAdapterTypes.Element
 type HtmlNode = DefaultTreeAdapterTypes.ChildNode
@@ -16,7 +17,8 @@ export interface PreparedMeasurementDocument {
 /** A local semantic scope keeps author CSS/ancestor selectors; only outer placement moves to its frame. */
 export function retainedMeasurementScopeHtml(input: { html: string; themeCss?: string }, sourcePath: readonly number[]): string {
   if (!sourcePath.length) return input.html
-  const document = parse(input.html)
+  const document = parse(input.html, { sourceCodeLocationInfo: true })
+  const documentKind = htmlDocumentKind(document)
   const html = document.childNodes.find(isElement)!
   const body = html.childNodes.find((node): node is HtmlElement => isElement(node) && node.tagName === 'body')!
   const head = html.childNodes.find((node): node is HtmlElement => isElement(node) && node.tagName === 'head')!
@@ -50,10 +52,13 @@ export function retainedMeasurementScopeHtml(input: { html: string; themeCss?: s
   if (input.themeCss) appendStyle(input.themeCss, true)
   // The author's subtree and stylesheet rules remain live. These software-owned
   // declarations normalize only the source scope's external coordinate owner.
-  appendStyle(`html,body{margin:0!important;padding:0!important;border:0!important;background:transparent!important;min-width:0!important;min-height:0!important;width:100%!important;height:100%!important}
+  appendStyle(`${measuredFragmentDocumentCss()}
 [data-guoling-source-ancestor]{display:contents!important;transform:none!important;translate:none!important;rotate:none!important;scale:none!important;zoom:1!important;opacity:1!important;filter:none!important}
 [data-guoling-source-scope]{position:relative!important;inset:auto!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;margin:0!important;transform:none!important;translate:none!important;rotate:none!important;scale:none!important;zoom:1!important;width:100%!important;height:100%!important;min-width:0!important;max-width:none!important;min-height:0!important;max-height:none!important;box-sizing:border-box!important;float:none!important}`)
-  return serialize(document)
+  // The html/head/body nodes introduced by parsing a fragment are software
+  // wrappers, not an authored quirks document. Keep its CSS and ancestor scope
+  // without changing the source kind used by the existing carrier selection.
+  return documentKind === 'fragment' ? serialize(head) + serialize(body) : serialize(document)
 }
 
 /** Resource preparation remains the existing resource owner's job; only supplied URL bindings are used. */

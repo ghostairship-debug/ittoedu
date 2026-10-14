@@ -3,38 +3,17 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { extractHtml } from './extractHtml'
+import type { WebPageImage } from './webPageImages'
 import { fetchPublicResource, parsePublicUrl, PublicHttpError, type PublicHttpResponse } from './publicHttp'
 import type { AttachmentService } from '../attachments/AttachmentService'
 import type { AttachmentSnapshot } from '../../../shared/workbench/attachments'
 
-export interface WebSearchHit {
-  title: string
-  url: string
-  /** Provider snippet only. It is never labelled as opened page content. */
-  snippet: string
-  publishedAt?: string
-}
-
-export interface SearchProviderPage {
-  provider: string
-  results: readonly WebSearchHit[]
-  nextCursor?: string
-  providerRequestId?: string
-  /** Provider-reported charge only; absent remains unknown. */
-  charge?: { amount: number; currency: string }
-  /** Provider execution view: which authorized connection/model actually ran, with provider-reported usage. */
-  execution?: { connectionId: string; model: string; billingKind?: string; inputTokens?: number; outputTokens?: number }
-}
-
-/** Credentials and billing live in the existing Connection owner, not tool output. */
+import { WebSearchProviderError } from './SearchProviderError'
+import type { SearchProviderPage, WebSearchResult } from '../../../shared/workbench/webSearch'
+export type { WebSearchHit, SearchProviderPage, WebSearchResult, SearchAttempt } from '../../../shared/workbench/webSearch'
 export interface SearchProviderPort {
   search(input: { runId?: string; query: string; limit: number; cursor?: string; signal: AbortSignal }): Promise<SearchProviderPage>
 }
-
-export type WebSearchResult =
-  | { status: 'results'; query: string; searchedAt: string; provider: string; results: readonly WebSearchHit[]; nextCursor?: string;
-      providerRequestId?: string; charge?: SearchProviderPage['charge']; execution?: SearchProviderPage['execution'] }
-  | { status: 'not-configured' | 'rejected' | 'failed'; reason: string }
 
 export interface WebSource {
   sourceId: string
@@ -49,7 +28,7 @@ export interface WebSource {
 }
 
 export type WebOpenResult =
-  | { status: 'opened'; source: WebSource; text: string; offset: number; nextOffset?: number; truncated: boolean }
+  | { status: 'opened'; source: WebSource; text: string; offset: number; nextOffset?: number; truncated: boolean; images?: readonly WebPageImage[] }
   | WebMaterialResult
   | { status: 'access-required' | 'needs-material-reader' | 'failed' | 'rejected'; reason: string; url?: string;
       response?: { title: string; text: string; contentType: string; httpStatus: number } }
@@ -63,7 +42,7 @@ export interface WebMaterialResult {
   observation: 'index-only'
   next: 'material.list / material.read / material.find / material.extract'
 }
-interface StoredSource { source: WebSource; filename: string }
+interface StoredSource { source: WebSource; filename: string; images?: readonly WebPageImage[] }
 interface RunState { stopped: boolean; controllers: Set<AbortController>; sources: Map<string, StoredSource>;
   materials: Map<string, WebMaterialResult>; directory?: Promise<string> }
 
@@ -133,14 +112,18 @@ export class WebResearchService {
     const provider = this.options.searchProvider
     if (!provider) return { status: 'not-configured', reason: '未配置已授权且可用的联网搜索连接' }
     try {
-      const page = await this.call(run, input.signal, signal => provider.search({ runId: input.runId, query: input.query.trim(), limit,
-        ...(input.cursor ? { cursor: input.cursor } : {}), signal }))
+      const page = await this.call(run, input.signal, async signal => {
+        const page = await provider.search({ runId: input.runId, query: input.query.trim(), limit,
+        ...(input.cursor ? { cursor: input.cursor } : {}), signal })
+        if (run.stopped || signal.aborted) throw new WebSearchProviderError('rejected', '任务已停止', page.attempts)
+        return page
+      })
       const results = page.results.slice(0, limit).flatMap(result => {
         try {
           const url = parsePublicUrl(result.url).href
-          if (!result.title?.trim()) return []
+          const title = result.title?.trim() || new URL(url).hostname
           const snippet = result.snippet ?? ''
-          return [{ title: result.title, url, snippet,
+          return [{ title, url, snippet,
             ...(result.publishedAt && !Number.isNaN(Date.parse(result.publishedAt)) ? { publishedAt: result.publishedAt } : {}) }]
         } catch { return [] }
       })
@@ -148,11 +131,14 @@ export class WebResearchService {
         results, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
         ...(page.providerRequestId ? { providerRequestId: page.providerRequestId } : {}),
         ...(page.execution ? { execution: page.execution } : {}),
-        ...(page.charge ? { charge: page.charge } : {}) }
+        ...(page.charge ? { charge: page.charge } : {}),
+        ...(page.attempts ? { attempts: page.attempts } : {}), ...(page.summary ? { summary: page.summary } : {}),
+        ...(page.citations ? { citations: page.citations } : {}), ...(page.diagnostics ? { diagnostics: page.diagnostics } : {}) }
     } catch (cause) {
       const known = cause instanceof Error && 'status' in cause ? (cause as { status?: string }).status : undefined
       const status: 'not-configured' | 'rejected' | 'failed' = known === 'not-configured' || known === 'rejected' ? known : 'failed'
-      return { status, reason: cause instanceof Error ? cause.message : '联网搜索未完成；不会自动重发' }
+      return { status, reason: cause instanceof Error ? cause.message : '联网搜索未完成；不会自动重发',
+        ...(cause instanceof Error && 'attempts' in cause ? { attempts: (cause as { attempts: readonly import('../../../shared/workbench/webSearch').SearchAttempt[] }).attempts } : {}) }
     }
   }
 
@@ -209,7 +195,8 @@ export class WebResearchService {
           reason: '站点返回 Client Challenge，未取得请求的正文；保留实际响应供诊断，不自动重试', url,
           response: { title: extracted.title, text: extracted.text, contentType: response.contentType, httpStatus: response.status } }
         if (extracted.accessRequired) return { status: 'access-required', reason: '该页面需要登录或访问授权，未取得正文', url }
-        if (!extracted.text.trim()) return { status: 'failed', reason: '网页未返回可读取正文', url }
+        const images = 'images' in extracted ? extracted.images : undefined
+        if (!extracted.text.trim() && !images?.length) return { status: 'failed', reason: '网页未返回可读取正文或图片', url }
         const version = createHash('sha256').update(extracted.text).digest('hex')
         if (input.version && version !== input.version) return { status: 'rejected', reason: '网页正文与此前引用版本不一致', url }
         const source: WebSource = { sourceId: randomUUID(), url, title: extracted.title || new URL(url).hostname,
@@ -226,7 +213,7 @@ export class WebResearchService {
           await fs.rm(filename, { force: true })
           return { status: 'rejected', reason: '任务已停止' }
         }
-        stored = { source, filename }
+        stored = { source, filename, ...(images?.length ? { images } : {}) }
         run.sources.set(source.sourceId, stored)
       } catch (cause) {
         if (run.stopped || input.signal?.aborted || cause instanceof PublicHttpError && cause.code === 'cancelled')
@@ -240,6 +227,7 @@ export class WebResearchService {
     if (run.stopped || input.signal?.aborted) return { status: 'rejected', reason: '任务已停止' }
     const text = body.slice(offset, offset + limit), nextOffset = offset + text.length
     return { status: 'opened', source: stored.source, text, offset, truncated: nextOffset < body.length,
+      ...(stored.images?.length ? { images: structuredClone(stored.images) } : {}),
       ...(nextOffset < body.length ? { nextOffset } : {}) }
   }
 }

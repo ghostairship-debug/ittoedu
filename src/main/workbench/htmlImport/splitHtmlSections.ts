@@ -31,6 +31,20 @@ export function splitHtmlSections(source: string, mode: 'auto' | 'sections' | 'w
       && !belongsToSection(token.span.start) && source.slice(token.span.start, token.span.end).trim() !== ''
       && !(main && token.span.start >= main.startTag.start && token.span.end <= main.endTag!.end && token.span.start < main.content.start))
   if (unassigned) return unsplit('存在不可归属于特定 <section> 的页面内容')
+  const sectionOf = (start: number) => index.sections.find(section => start >= section.full.start && start < section.full.end)?.order
+  const ids = new Map<string, number | undefined>()
+  for (const element of index.elements) {
+    const id = element.id
+    if (id) ids.set(id, sectionOf(element.full.start))
+  }
+  const crossesPage = scan.tokens.some(element => {
+    const href = element.attributes?.find(attribute => attribute.name === 'href')?.decodedValue
+    if (!href?.startsWith('#') || href.length === 1) return false
+    let target = href.slice(1)
+    try { target = decodeURIComponent(target) } catch { /* retain the browser's literal fragment */ }
+    return ids.has(target) && ids.get(target) !== sectionOf(element.span.start)
+  })
+  if (crossesPage) return whole('跨 section 的文档内链接需要同一文档，已保留整份 HTML')
   const prefix = source.slice(0, body.content.start)
   const suffix = source.slice(body.content.end)
   const sections = index.sections.map(section => {

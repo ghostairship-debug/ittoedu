@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http'
 import { afterEach, expect, it } from 'vitest'
 import {
@@ -30,7 +31,7 @@ async function collect(provider: OpenAIResponsesProvider, input: ModelRequest) {
 it('API Responses retains connection credentials and native reasoning/tool continuation through real HTTP SSE', async () => {
   const bodies: ModelJsonObject[] = [], native: ModelJsonObject[] = [
     { id: 'reason', type: 'reasoning', encrypted_content: 'opaque-ciphertext', summary: [{ type: 'summary_text', text: '检查标题' }] },
-    { id: 'call-item', type: 'function_call', call_id: 'call-1', name: 'text_replace', arguments: '{"text":"你好😀"}', status: 'completed' },
+    { id: 'call-item', type: 'function_call', call_id: 'call-1', name: modelToolWireName('text.replace'), arguments: '{"text":"你好😀"}', status: 'completed' },
   ]
   const origin = await serve(async (req, res) => {
     expect(req.url).toBe('/v1/responses')
@@ -40,10 +41,10 @@ it('API Responses retains connection credentials and native reasoning/tool conti
     res.writeHead(200, { 'Content-Type': 'text/event-stream' })
     if (bodies.length === 1) {
       expect(wire).toMatchObject({ model: 'gpt-6-sol', reasoning: { effort: 'high' }, instructions: '保留指令😀', stream: true, store: false, include: ['reasoning.encrypted_content'] })
-      expect(wire.tools).toEqual([{ type: 'function', name: 'text_replace', description: 'replace', parameters: request().tools![0]!.inputSchema, strict: false }])
+      expect(wire.tools).toEqual([{ type: 'function', name: modelToolWireName('text.replace'), description: 'replace', parameters: request().tools![0]!.inputSchema, strict: false }])
       res.end(frame({ type: 'response.created', response: { id: 'first', model: 'server-model' } })
         + frame({ type: 'response.reasoning_summary_text.delta', delta: '检查标题' })
-        + frame({ type: 'response.output_item.added', output_index: 1, item: { type: 'function_call', call_id: 'call-1', name: 'text_replace' } })
+        + frame({ type: 'response.output_item.added', output_index: 1, item: { type: 'function_call', call_id: 'call-1', name: modelToolWireName('text.replace') } })
         + frame({ type: 'response.function_call_arguments.delta', output_index: 1, delta: '{"text":' })
         + frame({ type: 'response.function_call_arguments.delta', output_index: 1, delta: '"你好😀"}' })
         + native.map((item, output_index) => frame({ type: 'response.output_item.done', item, output_index })).join('')
@@ -103,7 +104,7 @@ it('API Responses reports native failure without exposing payloads or retrying t
   })
   const provider = new OpenAIResponsesProvider({ credentialResolver: async () => 'own-key' })
   const events = await collect(provider, request(`${origin}/v1`))
-  expect(events.at(-1)).toMatchObject({ type: 'response.failed', failure: { kind: 'server', outcome: 'rejected', code: 'responses-provider-response-failed' } })
+  expect(events.at(-1)).toMatchObject({ type: 'response.failed', failure: { kind: 'server', outcome: 'rejected', code: 'provider-unknown-sse' } })
   expect(calls).toBe(1)
   expect(JSON.stringify(events)).not.toContain('private key')
 })

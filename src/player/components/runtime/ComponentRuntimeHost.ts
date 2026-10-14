@@ -1,14 +1,20 @@
+import { hasWebContentData } from '../../../components/web/sourcePreparation'
 import type {
   ComponentDefinition, ComponentImplementation, ComponentInstance, ComponentRuntimeImplementation,
   ComponentRuntimeScope, ComponentRuntimeTarget, JsonValue, MountedComponent,
   ComponentRuntimeContext, ComponentLayoutPort,
 } from '../../../shared/contracts/component-platform'
+import type { WebModuleGraph } from '../../../components/web/moduleGraph'
 
 export type ComponentRuntimePorts = Pick<ComponentRuntimeScope, 'target' | 'events' | 'state'>
 
 /** A transient loaded module, not a second author definition or source store. */
 export interface PreparedComponentRuntime {
   implementation: ComponentRuntimeImplementation
+  /** Web's prepared executable closure, separate from its complete author modules. */
+  webModuleGraph?: WebModuleGraph
+  /** Observed after the real Source import; never inferred from professional author identity. */
+  isWebDocument?(): boolean
   /** Exact loaded code/CSS/modules; preparation inputs remain independently tracked. */
   artifactIdentity?: string
   release?(): void | Promise<void>
@@ -17,15 +23,18 @@ export interface PreparedComponentRuntime {
 export interface ComponentRuntimeHostOptions {
   /** Builtins resolve directly; source modules use the supplied L04 content-realm loader. */
   resolveImplementation(
-    implementation: ComponentImplementation, definition: ComponentDefinition, signal: AbortSignal,
+    implementation: ComponentImplementation, definition: ComponentDefinition, signal: AbortSignal, instance: ComponentInstance,
   ): ComponentRuntimeImplementation | PreparedComponentRuntime
     | Promise<ComponentRuntimeImplementation | PreparedComponentRuntime>
   ports(runScopeId: string, instanceId: string): ComponentRuntimePorts
   authoring?(runScopeId: string, instanceId: string, generation: number): ComponentRuntimeContext['authoring']
   layout?(runScopeId: string, instance: ComponentInstance, generation: number): ComponentLayoutPort | undefined
   resources?: ComponentRuntimeContext['resources']
+  inline?(scope: ComponentRuntimeScope): ComponentRuntimeContext['inline']
   media?(scope: ComponentRuntimeScope): ComponentRuntimeContext['media']
   interactions?(context: ComponentRuntimeContext): ComponentRuntimeContext['interactions']
+  /** Dormant instances stay alive, while the World owns whether they may affect the current scene. */
+  canInteract?(runScopeId: string, instanceId: string): boolean
   reportError?(error: unknown, phase: 'prepare' | 'update' | 'dispose', runScopeId: string, instanceId: string): void
 }
 
@@ -54,8 +63,12 @@ interface RuntimeRecord extends ComponentRuntimeHandle {
   request: ComponentRuntimeRequest
   signature: string
   generationSignature: string
+  webDocument?: boolean
   updates: Promise<void>
+  activityRunning: boolean
+  appliedActivityRunning: boolean
   cancel(): void
+  removeCleanup(dispose: () => void): void
   release(): Promise<void>
 }
 
@@ -73,13 +86,13 @@ interface RuntimeSlot {
   retiring: Promise<void>
 }
 
-function webSource(request: ComponentRuntimeRequest): unknown {
+function webSource(request: ComponentRuntimeRequest, preparing = true, sourceWeb = false): unknown {
   const implementation = request.instance.implementationOverride ?? request.definition.implementation
   const data = request.instance.data
   // HTML and local modules jointly own their iframe generation. Source replacement
   // retires old globals, timers and pending module evaluation through the existing realm lifecycle.
-  return implementation.kind === 'builtin' && ['guoling.web', 'guoling.html-program'].includes(implementation.key)
-    && data && typeof data === 'object' && !Array.isArray(data) ? [data.html, data.modules, data.moduleGraph] : undefined
+  return hasWebContentData(data) && (implementation.kind === 'source' ? preparing || sourceWeb : ['guoling.web', 'guoling.html-program'].includes(implementation.key))
+      ? preparing || implementation.kind === 'source' ? [data.html, data.modules, data.moduleGraph] : [data.html, data.moduleGraph] : undefined
 }
 
 function implementationSignature(request: ComponentRuntimeRequest): string {
@@ -100,9 +113,9 @@ function environmentIdentity(request: ComponentRuntimeRequest): string {
   ])
 }
 
-function generationSignature(request: ComponentRuntimeRequest, prepared: PreparedComponentRuntime): string {
+function generationSignature(request: ComponentRuntimeRequest, prepared: PreparedComponentRuntime, sourceWeb = false): string {
   return prepared.artifactIdentity === undefined ? implementationSignature(request)
-    : JSON.stringify([environmentIdentity(request), prepared.artifactIdentity, webSource(request)])
+    : JSON.stringify([environmentIdentity(request), prepared.artifactIdentity, webSource(request, false, sourceWeb)])
 }
 
 function contentSignature(instance: ComponentInstance): string {
@@ -211,7 +224,7 @@ export class ComponentRuntimeHost {
       const implementation = request.instance.implementationOverride ?? request.definition.implementation
       const loaded = await this.options.resolveImplementation(
         implementation,
-        request.definition, controller.signal,
+        request.definition, controller.signal, request.instance,
       )
       const prepared: PreparedComponentRuntime = 'mount' in loaded ? { implementation: loaded } : loaded
       let released: Promise<void> | undefined
@@ -223,7 +236,12 @@ export class ComponentRuntimeHost {
         return null
       }
       const previous = slot.active
-      const readySignature = generationSignature(pending.request, prepared)
+      // Same-source data updates can arrive during preparation. Keep their
+      // latest author values and add only the independently prepared graph.
+      const runtimeRequest = (request: ComponentRuntimeRequest): ComponentRuntimeRequest => prepared.webModuleGraph
+        ? { ...request, instance: { ...request.instance,
+          data: { ...request.instance.data as object, moduleGraph: prepared.webModuleGraph } as unknown as JsonValue } } : request
+      const readySignature = generationSignature(runtimeRequest(pending.request), prepared, previous?.webDocument ?? prepared.isWebDocument?.())
       if (previous?.scope.isActive() && previous.generationSignature === readySignature && previous.request.root === pending.request.root) {
         // Detached preparation acquired no mounted lease. Release it and retain the active generation.
         await releasePrepared()
@@ -232,7 +250,10 @@ export class ComponentRuntimeHost {
         slot.preparing = undefined
         // Hidden data remains pending: do not advance record.request until it can be projected.
         if (pending.request.canProject?.() === false) return previous
-        previous.updates = previous.updates.catch(() => {}).then(() => this.update(previous, pending.request))
+        previous.updates = previous.updates.catch(() => {}).then(() => {
+          const request = pending.request
+          return this.update(previous, request, runtimeRequest(request).instance)
+        })
         await previous.updates
         return previous.scope.isActive() ? previous : null
       }
@@ -254,7 +275,10 @@ export class ComponentRuntimeHost {
         return null
       }
 
-      record = this.record(pending.request, pending.signature, readySignature, controller, releasePrepared)
+      const mountRequest = pending.request, readyRequest = runtimeRequest(mountRequest)
+      // Record the author input actually supplied to mount. Later same-source
+      // input remains distinguishable after an asynchronous mount completes.
+      record = this.record(mountRequest, pending.signature, readySignature, controller, releasePrepared)
       pending.record = record
       if (record.root) pending.request.root!.append(record.root)
       const authoring = this.options.authoring?.(record.scope.runScopeId, record.scope.instanceId, record.scope.generation)
@@ -268,9 +292,10 @@ export class ComponentRuntimeHost {
         projectLayout(layout.read())
         scope.cleanup(layout.subscribe(projectLayout))
       }
-      const baseContext: ComponentRuntimeContext = { instance: record.request.instance, scope: record.scope, root: record.root,
+      const baseContext: ComponentRuntimeContext = { instance: readyRequest.instance, scope: record.scope, root: record.root,
         resources: resources && bindings ? { url: name => resources.url(Object.hasOwn(bindings, name) ? bindings[name] : name) } : resources,
         media: this.options.media?.(record.scope),
+        inline: this.options.inline?.(record.scope),
         layout: layout && {
           read: () => layout.read(),
           subscribe: listener => {
@@ -285,7 +310,10 @@ export class ComponentRuntimeHost {
         },
         authoring: authoring && { register: (spot: Parameters<typeof authoring.register>[0], callbacks?: Parameters<typeof authoring.register>[1]) => {
           if (!record!.scope.isActive()) return () => {}
-          const off = authoring.register(spot, callbacks); record!.scope.cleanup(off); return off
+          const off = authoring.register(spot, callbacks)
+          let registered = true
+          const dispose = () => { if (!registered) return; registered = false; record!.removeCleanup(dispose); off() }
+          record!.scope.cleanup(dispose); return dispose
         } } }
       const context: ComponentRuntimeContext = { ...baseContext, interactions: this.options.interactions?.(baseContext) }
       record.mount = Promise.resolve().then(() => controller.signal.aborted || pending.request.canProject?.() === false ? null : prepared.implementation.mount(context))
@@ -302,9 +330,23 @@ export class ComponentRuntimeHost {
       if (!record.mounted || typeof record.mounted.update !== 'function' || typeof record.mounted.dispose !== 'function') {
         throw new Error('组件 mount() 必须返回含 update() 和 dispose() 的生命周期对象')
       }
+      // The Source chooses its document only after its one real import. Keep that
+      // observation with this generation so ordinary Source data remains incremental.
+      record.webDocument = prepared.isWebDocument?.() ?? false
+      record.generationSignature = generationSignature(readyRequest, prepared, record.webDocument)
+      // Activity can change while mount is awaiting. Apply its latest value to
+      // this same instance before accepting subsequent author-data updates.
+      record.updates = record.updates.catch(() => {}).then(() => this.applyActivity(record!))
+      await record.updates
+      if (controller.signal.aborted || slot.preparing !== pending) {
+        await record.release()
+        return null
+      }
       // Same-source changes during asynchronous mounting reuse this mounted generation.
       while (record.request !== pending.request && pending.request.canProject?.() !== false) {
-        await this.update(record, pending.request)
+        const request = pending.request
+        record.updates = record.updates.catch(() => {}).then(() => this.update(record!, request, runtimeRequest(request).instance))
+        await record.updates
         if (controller.signal.aborted || slot.preparing !== pending) {
           await record.release()
           return null
@@ -325,11 +367,28 @@ export class ComponentRuntimeHost {
     }
   }
 
-  private async update(record: RuntimeRecord, request: ComponentRuntimeRequest): Promise<void> {
+  private async applyActivity(record: RuntimeRecord): Promise<void> {
+    while (record.scope.isActive() && record.mounted && record.activityRunning !== record.appliedActivityRunning) {
+      const running = record.activityRunning
+      try {
+        const hook = running ? record.mounted.resume : record.mounted.suspend
+        await hook?.call(record.mounted)
+      } catch (error) {
+        this.report(error, 'update', record.request)
+        return
+      }
+      if (!record.scope.isActive()) return
+      record.appliedActivityRunning = running
+      // An asynchronous hook may have outlasted another visibility change.
+      // Converge on the latest state without remounting or losing program state.
+    }
+  }
+
+  private async update(record: RuntimeRecord, request: ComponentRuntimeRequest, preparedInstance = request.instance): Promise<void> {
     if (!record.scope.isActive() || !record.mounted || request.canProject?.() === false) return
     try {
       if (contentSignature(record.request.instance) !== contentSignature(request.instance)) {
-        await record.mounted.update(request.instance)
+        await record.mounted.update(preparedInstance)
       }
       if (!record.scope.isActive()) return
       if (JSON.stringify(record.request.instance.frame) !== JSON.stringify(request.instance.frame)) {
@@ -351,6 +410,7 @@ export class ComponentRuntimeHost {
     let cancelled = false
     let release: Promise<void> | undefined
     const alive = () => !controller.signal.aborted
+    const canAct = () => alive() && this.options.canInteract?.(request.runScopeId, request.instance.id) !== false
     const disposeCleanup = (dispose: () => void): void => {
       try { dispose() } catch (error) { this.report(error, 'dispose', request) }
     }
@@ -395,10 +455,11 @@ export class ComponentRuntimeHost {
         const scoped: ComponentRuntimeTarget = {
           instanceId: target.instanceId,
           get element() { return alive() ? target.element : undefined },
+          get elements() { return alive() ? target.elements : undefined },
           read: () => alive() ? target.read() : null,
-          emit: (name, value) => { if (alive()) target.emit(name, value) },
+          emit: (name, value) => { if (canAct()) target.emit(name, value) },
           ...(target.motion ? { motion: { replace: (channel: string, program: import('../../../shared/contracts/component-platform/motion').ComponentMotionProgram) => {
-            if (!alive()) return { finished: Promise.resolve({ status: 'cancelled' as const }), cancel() {} }
+            if (!canAct()) return { finished: Promise.resolve({ status: 'cancelled' as const }), cancel() {} }
             const task = target.motion!.replace(`source:${scope.instanceId}:${scope.generation}:${channel}`, program)
             cleanup(task.cancel)
             void task.finished.finally(() => { cleanups.delete(task.cancel) })
@@ -406,26 +467,26 @@ export class ComponentRuntimeHost {
           } } } : {}),
           ...(target.presentation ? { presentation: {
             feedback: (text?: string) => {
-              if (!alive()) return { setText: () => Promise.resolve(false), dispose() {} }
+              if (!canAct()) return { setText: () => Promise.resolve(false), dispose() {} }
               const handle = target.presentation!.feedback(text); cleanup(handle.dispose)
-              return { setText: (value: string) => alive() ? handle.setText(value) : Promise.resolve(false), dispose: handle.dispose }
+              return { setText: (value: string) => canAct() ? handle.setText(value) : Promise.resolve(false), dispose: handle.dispose }
             },
             visibility: (visible?: boolean) => {
-              if (!alive()) return { setVisible: () => Promise.resolve(false), dispose() {} }
+              if (!canAct()) return { setVisible: () => Promise.resolve(false), dispose() {} }
               const handle = target.presentation!.visibility(visible); cleanup(handle.dispose)
-              return { setVisible: (value: boolean) => alive() ? handle.setVisible(value) : Promise.resolve(false), dispose: handle.dispose }
+              return { setVisible: (value: boolean) => canAct() ? handle.setVisible(value) : Promise.resolve(false), dispose: handle.dispose }
             },
           } } : {}),
         }
         return scoped
       },
       events: {
-        emit: (name, value) => { if (alive()) ports.events.emit(name, value) },
+        emit: (name, value) => { if (canAct()) ports.events.emit(name, value) },
         subscribe: (name, listener) => subscribe<JsonValue>(next => ports.events.subscribe(name, next), listener),
       },
       state: {
         get: name => alive() ? ports.state.get(name) : undefined,
-        set: (name, value) => { if (alive()) ports.state.set(name, value) },
+        set: (name, value) => { if (canAct()) ports.state.set(name, value) },
         subscribe: (name, listener) => subscribe<JsonValue | undefined>(next => ports.state.subscribe(name, next), listener),
       },
     }
@@ -436,14 +497,27 @@ export class ComponentRuntimeHost {
       root.style.height = '100%'
     }
     const record: RuntimeRecord = {
-      scope, root, request, signature, generationSignature, updates: Promise.resolve(), cancel,
+      scope, root, request, signature, generationSignature, updates: Promise.resolve(), cancel, removeCleanup: dispose => { cleanups.delete(dispose) },
+      activityRunning: true, appliedActivityRunning: true,
       release: () => release ??= (async () => {
         cancel()
-        try { const mounted = await record.mount?.catch(() => null); await mounted?.dispose() }
+        try {
+          const mounted = await record.mount?.catch(() => null)
+          // Cancellation can remove the timer an author's update/hook awaits.
+          // Observe its rejection without making retirement wait for that work.
+          void record.updates.catch(() => {})
+          await mounted?.dispose()
+        }
         catch (error) { this.report(error, 'dispose', request) }
         finally { root?.remove(); await releaseModule() }
       })(),
     }
+    scope.events.subscribe('__runtime.activity', value => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)
+        || typeof value.active !== 'boolean' || typeof value.visible !== 'boolean' || typeof value.playing !== 'boolean') return
+      record.activityRunning = value.active && value.visible && value.playing
+      if (record.mounted) record.updates = record.updates.catch(() => {}).then(() => this.applyActivity(record))
+    })
     return record
   }
 

@@ -49,7 +49,9 @@ export function createComponentSpatialAdapter(options: {
         const outer = document.createElement('div'), content = document.createElement('div'), children = document.createElement('div')
         outer.dataset.componentInstanceId = id
         content.dataset.componentRuntimeRoot = id
-        Object.assign(content.style, { position: 'absolute', inset: '0px' })
+        // The formal border box owns placement. Its padding content box owns
+        // runtime layout; child world coordinates retain their separate layer.
+        Object.assign(content.style, { position: 'relative', width: '100%', height: '100%', minWidth: '0px' })
         Object.assign(children.style, { position: 'absolute', left: '0px', top: '0px', width: '0px', height: '0px' })
         outer.append(content, children)
         node = { outer, content, children }; nodes.set(id, node)

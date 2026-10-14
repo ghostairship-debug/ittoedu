@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseDocumentMarkdown, serializeDocumentMarkdown } from '../../src/shared/document/markdown'
 import { plainDocumentText } from '../../src/shared/document/content'
 import { sharedDocumentFixture } from '../fixtures/shared-document/content'
+import { resolveFileDocumentImage } from '../../src/shared/document/fileImageReference'
 const options = () => { let n = 0; return { createId: (kind: string) => `${kind}-${++n}` } }
 describe('cw-markdown-v1', () => {
   it('round-trips full content, all styles, identities, objects and resource mappings', () => {
@@ -49,6 +50,16 @@ describe('cw-markdown-v1', () => {
     expect(parseDocumentMarkdown('![电路](assets/circuit.png)', options()).status).toBe('invalid')
     const result = parseDocumentMarkdown('![电路](assets/circuit.png)', { ...options(), resolveImage: href => ({ assetId: 'a-circuit', source: { kind: 'relative', path: href } }) })
     expect(result.status, JSON.stringify(result.diagnostics)).toBe('valid')
+  })
+  it('keeps file image identities distinct and bounded for spaces and long Chinese filenames', () => {
+    const names = ['a b.png', 'a-20b.png', `${'图'.repeat(27)}.png`, `${'画'.repeat(27)}.png`]
+    const result = parseDocumentMarkdown(names.map(name => `![图](<${name}>)`).join('\n\n'), { ...options(), target: 'file', resolveImage: resolveFileDocumentImage })
+    expect(result.status, JSON.stringify(result.diagnostics)).toBe('valid')
+    if (result.status !== 'valid') return
+    expect(result.document.resources.assets.map(asset => asset.source)).toEqual(names.map(path => ({ kind: 'relative', path })))
+    const ids = result.document.resources.assets.map(asset => asset.assetId)
+    expect(new Set(ids).size).toBe(names.length)
+    expect(ids.every(id => id.length <= 240)).toBe(true)
   })
   it('preserves code containing brackets, multiline code atoms, and table math separators', () => {
     const original = sharedDocumentFixture()

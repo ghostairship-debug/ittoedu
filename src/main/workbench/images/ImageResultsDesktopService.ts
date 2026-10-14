@@ -7,8 +7,9 @@ import type { ImageGenerationService } from './ImageGenerationService'
 import type { ImageJobSnapshot, ImageModelSelection } from '../../../shared/workbench/images'
 import { imageResultsRequestSchema, type ImageResultEvent, type ImageResultOwner, type ImageResultView } from '../../../shared/workbench/imageResultsDesktop'
 import type { DocumentOperationResult } from '../../../shared/workbench/document'
-import type { ModelToolCall } from '../../../shared/workbench/tools'
+import type { ModelToolCall, ToolResult } from '../../../shared/workbench/tools'
 import { documentDigest } from '../../../core/documents/documentDigest'
+import { committedFact } from '../../../core/tools/modelToolResult'
 
 type Request = ReturnType<typeof imageResultsRequestSchema.parse>
 type ActionRequest = Extract<Request, { type: 'apply' | 'edit' }>
@@ -18,13 +19,13 @@ export interface ImageResultsDesktopOptions {
   directory: string
   images: ImageGenerationService
   documents: DocumentHostService
-  execution: Pick<ExecutionDesktopService, 'conversations' | 'runs' | 'appendExternalEvent'>
+  execution: Pick<ExecutionDesktopService, 'conversations' | 'runs' | 'events' | 'appendExternalEvent'>
   selection(runId: string, operation: 'generate' | 'edit'): ImageModelSelection | Promise<ImageModelSelection>
   onError?(error: unknown): void
 }
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT'
-const labels = { preparing: '正在准备图片', running: '正在生成图片', ready: '已生成，尚未应用', unapplied: '任务停止后取得图片，尚未应用', stopped: '已停止', unknown: '结果未知，不自动重试', failed: '图片请求失败' }
+const labels = { preparing: '正在准备图片', running: '正在生成图片', ready: '图片已生成', unapplied: '任务停止后取得图片，尚未应用', stopped: '已停止', unknown: '结果未知，不自动重试', failed: '图片请求失败' }
 
 /** UI authority is checked against durable conversation ownership, never against a caller-provided path. */
 export class ImageResultsDesktopService {
@@ -173,6 +174,32 @@ export class ImageResultsDesktopService {
     this.ownerCache.set(job.jobId, owner)
     const applications = (await this.actions()).filter(action => action.input.type === 'apply' && action.input.jobId === job.jobId && action.input.conversationId === owner.conversationId && action.result)
       .map(action => ({ actionId: action.input.actionId, documentId: (action.input as Extract<ActionRequest, { type: 'apply' }>).target.documentId, result: action.result! }))
+    // Automatic composition is already durable in the normal execution receipt;
+    // reading it does not create another application/action store.
+    const run = source === 'builtin' ? await this.options.execution.runs.read(job.runId) : undefined
+    for (const tool of run?.tools ?? []) {
+      if (!['image.generate', 'image.edit', 'image.status'].includes(tool.call.name) || tool.result?.kind !== 'read'
+        || (tool.result.data as { job?: unknown } | null)?.job !== job.jobId) continue
+      const receipt = committedFact(tool.call.name, tool.result)
+      if (receipt && !applications.some(value => value.result.operationId === receipt.operationId))
+        applications.push({ actionId: receipt.operationId, documentId: receipt.documentId, result: receipt })
+    }
+    if (source === 'external-mcp') {
+      const projection = await this.options.execution.events.snapshot(owner.conversationId)
+      for (const item of projection.items) {
+        if (item.source !== 'external-mcp' || item.runId !== job.runId || item.type !== 'tool'
+          || !['image.generate', 'image.edit', 'image.status'].includes(item.data.toolName ?? '')) continue
+        const output = item.data.output ?? (item.data.outputRef
+          ? Buffer.from(await this.options.execution.events.readBlob(owner.conversationId, item.data.outputRef)).toString('utf8') : undefined)
+        if (!output) continue
+        let result: ToolResult
+        try { result = JSON.parse(output) as ToolResult } catch { continue }
+        if (result?.kind !== 'read' || (result.data as { job?: unknown } | null)?.job !== job.jobId) continue
+        const receipt = committedFact(item.data.toolName!, result)
+        if (receipt && !applications.some(value => value.result.operationId === receipt.operationId))
+          applications.push({ actionId: receipt.operationId, documentId: receipt.documentId, result: receipt })
+      }
+    }
     return { workspaceId: owner.workspaceId, conversationId: owner.conversationId, runId: job.runId, job, source, applications, userRequested: job.runId.startsWith('image-result:') }
   }
   async list(owner: Pick<ImageResultOwner, 'workspaceId' | 'conversationId'>): Promise<ImageResultView[]> {

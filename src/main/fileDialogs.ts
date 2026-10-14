@@ -651,14 +651,20 @@ export function selectComponentFiles(
   })
 }
 
+function suggestedExportPath(suggestedName: string, extension: string, projectPath?: string): string {
+  const filename = sanitizeSuggestedName(suggestedName, extension)
+  return projectPath ? path.join(path.dirname(projectPath), filename) : filename
+}
+
 export async function writeHtmlFile(
   window: BrowserWindow,
   suggestedName: string,
   html: string,
+  projectPath?: string,
 ): Promise<{ path: string } | null> {
   const result = await dialog.showSaveDialog(window, {
     title: '导出单 HTML',
-    defaultPath: sanitizeSuggestedName(suggestedName, '.html'),
+    defaultPath: suggestedExportPath(suggestedName, '.html', projectPath),
     filters: [{ name: 'HTML 文件', extensions: ['html'] }],
     properties: ['showOverwriteConfirmation', 'dontAddToRecent'],
   })
@@ -683,6 +689,7 @@ export async function writeWebPackageFile(
   window: BrowserWindow,
   suggestedName: string,
   bytes: Uint8Array,
+  projectPath?: string,
 ): Promise<{ path: string } | null> {
   if (bytes.byteLength === 0) {
     throw new DesktopOperationError(
@@ -703,7 +710,7 @@ export async function writeWebPackageFile(
 
   const result = await dialog.showSaveDialog(window, {
     title: '导出网页包',
-    defaultPath: sanitizeSuggestedName(suggestedName, '.zip'),
+    defaultPath: suggestedExportPath(suggestedName, '.zip', projectPath),
     filters: [{ name: '网页包', extensions: ['zip'] }],
     properties: ['showOverwriteConfirmation', 'dontAddToRecent'],
   })
@@ -750,6 +757,7 @@ export async function writeBinaryExportFile(
   suggestedName: string,
   extension: 'pptx' | 'pdf' | 'json' | 'docx' | 'h5component',
   bytes: Uint8Array,
+  projectPath?: string,
 ): Promise<{ path: string } | null> {
   if (bytes.byteLength === 0) {
     throw new DesktopOperationError(
@@ -768,7 +776,7 @@ export async function writeBinaryExportFile(
   } as const
   const result = await dialog.showSaveDialog(window, {
     title: `导出${labels[extension]}`,
-    defaultPath: sanitizeSuggestedName(suggestedName, `.${extension}`),
+    defaultPath: suggestedExportPath(suggestedName, `.${extension}`, projectPath),
     filters: [{ name: labels[extension], extensions: [extension] }],
     properties: ['showOverwriteConfirmation', 'dontAddToRecent'],
   })

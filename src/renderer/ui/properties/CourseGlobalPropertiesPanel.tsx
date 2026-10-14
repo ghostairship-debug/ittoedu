@@ -97,6 +97,7 @@ export interface CourseGlobalEmptyView {
 export interface TeacherControllerSceneView {
   readonly id: string
   readonly name: string
+  readonly spatial?: { readonly frames: ReadonlyArray<{ readonly id: string; readonly name: string }> }
   readonly presentation?: {
     readonly states?: ReadonlyArray<{ readonly id: string; readonly name: string }>
   }
@@ -145,7 +146,7 @@ export interface CourseGlobalPropertiesContext {
     readonly ensureTeacherController: () => void
     readonly manageTeacherControllerComponent?: (itemId: string, operation: 'restore') => void
     readonly editControllerSource?: () => void
-    readonly updateDesignTokens: (tokens: ProjectDesignTokens) => void
+  readonly updateDesignTokens: (tokens: ProjectDesignTokens) => void | Promise<void>
     readonly setVisibleAtLocation: (nodeId: string, visible: boolean) => void
     readonly setLocationVisibility: (nodeId: string, visibility: LocationVisibility) => void
     readonly updateLayerSettings: (nodeId: string, patch: { layer: RuntimeLayer }) => void
@@ -307,7 +308,7 @@ const TEACHER_CONTROLLER_ACTION_OPTIONS: Array<{
   { value: 'scene.replay', label: '重播当前场景' },
   { value: 'course.restart', label: '重新开始课程' },
   { value: 'scene.open-picker', label: '打开场景目录' },
-  { value: 'scene.go', label: '跳转到指定场景（高级）' },
+  { value: 'scene.go', label: '跳转到镜头' },
   { value: 'audio.toggle-mute', label: '切换静音' },
   { value: 'player.fullscreen.toggle', label: '切换全屏' },
 ]
@@ -389,7 +390,7 @@ function TeacherControllerProperties({
               {sceneAction ? (
                 <>
                   <SelectField<string>
-                    label="目标场景"
+                    label="目标页面"
                     value={sceneAction.sceneId}
                     options={scenes.map((scene) => ({
                       value: scene.id,
@@ -400,11 +401,11 @@ function TeacherControllerProperties({
                     })}
                   />
                   <SelectField<string>
-                    label="进入状态"
+                    label={targetScene?.spatial ? '进入镜头' : '进入位置'}
                     value={sceneAction.targetStateId ?? ''}
                     options={[
-                      { value: '', label: '场景初始状态' },
-                      ...(targetScene?.presentation?.states ?? []).map((state) => ({
+                      { value: '', label: '播放起点' },
+                      ...(targetScene?.spatial?.frames ?? targetScene?.presentation?.states ?? []).map((state) => ({
                         value: state.id,
                         label: state.name,
                       })),

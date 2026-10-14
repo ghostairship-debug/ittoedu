@@ -193,6 +193,8 @@ export function addPptxChartNode(
     legendFontFace: fontFace,
     legendFontSize: fontSize,
     showValue: style.showDataLabels,
+    showPercent: circular && style.showDataLabels,
+    dataLabelFormatCode: 'General',
     dataLabelColor: textColor,
     dataLabelFontFace: fontFace,
     dataLabelFontSize: fontSize,

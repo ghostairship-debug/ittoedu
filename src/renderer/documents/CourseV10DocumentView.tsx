@@ -1,10 +1,13 @@
+import { allDocumentTextSlots, inlineComponentIds, documentInlineChildIds } from '../../shared/document/textInteraction'
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { isComponentVisibleAtSurface, type ComponentInstance, type CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import { componentPaintStyle } from '../../player/components/componentPlacementStyle'
 import { resolveComponentOuterPresentation } from '../../shared/componentPresentation'
+import { ImageSafeAreaGuides } from '../ui/workspaces/ImageSafeAreaGuides'
 
 export interface CourseV10DocumentViewProps {
   project: CourseProjectV10
+  authorProject?: CourseProjectV10
   surfaceId: string | null
   selectedInstanceId: string | null
   selectedInstanceIds?: readonly string[]
@@ -15,7 +18,7 @@ export interface CourseV10DocumentViewProps {
 }
 
 /** Author geometry and ownership projection only; professional DOM belongs to component runtime. */
-export function InstanceView({ instance, project, surfaceId, selectedInstanceId, selectedInstanceIds, player, onSelect, onElement, onTargetElement, placement = 'free' }: {
+export function InstanceView({ instance, project, authorProject = project, surfaceId, selectedInstanceId, selectedInstanceIds, player, onSelect, onElement, onTargetElement, placement = 'free' }: {
   instance: ComponentInstance
   surfaceId?: string | null
   placement?: 'free' | 'flow'
@@ -39,7 +42,9 @@ export function InstanceView({ instance, project, surfaceId, selectedInstanceId,
   }, [placement])
   const authoredStyle = componentPaintStyle(instance, definition) as CSSProperties
   if (definition?.role === 'behavior') return null
-  const children = instance.childIds?.map(id => project.instances[id] && <InstanceView key={id} instance={project.instances[id]} project={project}
+  const inlineIds = new Set(allDocumentTextSlots(instance.data).flatMap(slot => inlineComponentIds(slot.content)))
+  for (const id of documentInlineChildIds(authorProject, instance.id)) if (!project.instances[id]?.frame && !project.instances[id]?.flowPlacement) inlineIds.add(id)
+  const children = instance.childIds?.filter(id => !inlineIds.has(id)).map(id => project.instances[id] && <InstanceView key={id} instance={project.instances[id]} project={project} authorProject={authorProject}
     surfaceId={surfaceId} selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} player={player} onSelect={onSelect}
     onElement={onElement} onTargetElement={onTargetElement} placement={presentation.childrenPlacement} />)
   const content = presentation.section
@@ -51,14 +56,14 @@ export function InstanceView({ instance, project, surfaceId, selectedInstanceId,
     data-component-instance={instance.id} data-component-placement={placement} onPointerDown={event => { if (!player && !instance.locked) { event.stopPropagation(); onSelect(instance.id) } }}>
     {presentation.section
       ? <details open={presentation.section.open} style={presentation.stageStyle as CSSProperties}>{content}{childContent}</details>
-      : <div style={presentation.stageStyle as CSSProperties}>{content}{childContent}</div>}
+      : <div style={presentation.stageStyle as CSSProperties}>{content}{childContent}{!player && <ImageSafeAreaGuides instance={instance} project={project} />}</div>}
   </div>
 }
 
 export function CourseV10DocumentView(props: CourseV10DocumentViewProps) {
   const surface = props.project.surfaces.find(value => value.id === props.surfaceId) ?? props.project.surfaces[0]
   if (!surface) return <p>请新建一个内容表面。</p>
-  const instances = (children: string[], placement: 'free' | 'flow' = 'free') => children.map(id => props.project.instances[id] && <InstanceView key={id} instance={props.project.instances[id]} project={props.project}
+  const instances = (children: string[], placement: 'free' | 'flow' = 'free') => children.map(id => props.project.instances[id] && <InstanceView key={id} instance={props.project.instances[id]} project={props.project} authorProject={props.authorProject}
     placement={placement}
     surfaceId={surface.id} selectedInstanceId={props.selectedInstanceId} selectedInstanceIds={props.selectedInstanceIds} player={props.player} onSelect={props.onSelect} onElement={props.onElement} onTargetElement={props.onTargetElement} />)
   return <div style={{ overflow: 'auto', minHeight: 400, background: '#e8edf3', padding: 24 }}>

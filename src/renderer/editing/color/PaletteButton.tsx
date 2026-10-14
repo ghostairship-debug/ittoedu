@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Baseline, Highlighter } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { ColorSwatchPanel, type ColorSwatchVariant } from './ColorSwatchPanel'
 
@@ -32,7 +33,7 @@ export function PaletteButton({ label, text, value, variant = 'color', onPick }:
   }, [open])
   return <>
     <button ref={button} type="button" aria-label={label} title={label} aria-expanded={open} aria-haspopup="dialog"
-      onMouseDown={event => event.preventDefault()} onClick={() => { if (open) setPosition(null); else place() }}>{text}</button>
+      onMouseDown={event => event.preventDefault()} onClick={() => { if (open) setPosition(null); else place() }}>{variant === 'highlight' ? <Highlighter size={16} /> : <Baseline size={16} />}</button>
     {position && createPortal(<div ref={panel} className="palette-button__panel" role="dialog" aria-label={label} style={{ left: position.left, top: position.top }}>
       <ColorSwatchPanel label={label} value={value} variant={variant} onPick={color => { setPosition(null); onPick(color) }} />
     </div>, document.body)}

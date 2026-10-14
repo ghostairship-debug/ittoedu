@@ -1,5 +1,5 @@
-import { spawn } from 'node:child_process'
-import { existsSync, lstatSync, realpathSync, rmSync } from 'node:fs'
+import { spawn, execFileSync } from 'node:child_process'
+import { existsSync, lstatSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writePixabayDefaultKey } from './build-pixabay-default-key.mjs'
@@ -36,7 +36,13 @@ child.on('error', (error) => {
 child.on('exit', async (code) => {
   process.exitCode = code ?? 1
   if (code === 0) {
-    try { await writePixabayDefaultKey(output) }
+    try {
+      await writePixabayDefaultKey(output)
+      const builtAt = new Date().toISOString()
+      let revision = 'unversioned'
+      try { revision = execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: workspace, windowsHide: true, encoding: 'utf8' }).trim() } catch { /* Building a source archive is supported. */ }
+      writeFileSync(path.join(output, 'main', 'build-info.json'), JSON.stringify({ buildId: `${builtAt.replace(/[:.]/g, '-')}-${revision}`, builtAt, revision }))
+    }
     catch { console.error('Pixabay default key build failed'); process.exitCode = 1 }
   }
 })

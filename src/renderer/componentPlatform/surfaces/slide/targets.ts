@@ -1,6 +1,8 @@
-import { frameContainsPoint, frameCorners, IDENTITY_MATRIX, multiplyMatrices, type AffineMatrix, type GeometryPoint } from '../../../../core/components/geometry'
+import { frameContainsPoint, frameCorners, frameToSpaceMatrix, IDENTITY_MATRIX, multiplyMatrices, transformPoint, type AffineMatrix, type GeometryPoint } from '../../../../core/components/geometry'
+import { lineStrokeHit, resolveNativeLinePoints } from '../../../../shared/nativeLineGeometry'
+import { shapeDataSchema } from '../../../../components/shape/data'
 import type { ComponentFrame } from '../../../../shared/contracts/component-platform/frame'
-import { owningContainer, type ComponentContainer, type CourseProjectV10 } from '../../../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, owningContainer, type ComponentContainer, type CourseProjectV10 } from '../../../../shared/contracts/component-platform/project'
 
 export interface FreeObjectTarget {
   instanceId: string
@@ -9,6 +11,7 @@ export interface FreeObjectTarget {
   parent: ComponentContainer
   ancestors: string[]
   preserveAspectRatio: boolean
+  stroke?: { points: GeometryPoint[]; width: number }
 }
 export interface FreeBounds { left: number; top: number; right: number; bottom: number; width: number; height: number }
 
@@ -19,10 +22,13 @@ export function freeSurfaceTargets(project: CourseProjectV10, surfaceId: string)
     for (const id of ids) {
       const instance = project.instances[id]
       if (!instance) continue
-      const implementation = project.definitions[instance.definitionId]?.implementation
+      const key = componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
       const imageData = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data : null
+      const shape = key === 'guoling.shape' ? shapeDataSchema.safeParse(instance.data) : null
       if (instance.frame) result.push({ instanceId: id, frame: instance.frame, parentToSurface: matrix, parent,
-        ancestors, preserveAspectRatio: implementation?.kind === 'builtin' && implementation.key === 'guoling.image' && imageData?.preserveAspectRatio !== false })
+        ancestors, preserveAspectRatio: key === 'guoling.image' && imageData?.preserveAspectRatio !== false,
+        ...(shape?.success && (shape.data.shapeType === 'line' || shape.data.shapeType === 'elbow-arrow') ? {
+          stroke: { points: resolveNativeLinePoints(shape.data.lineGeometry, instance.frame.width, instance.frame.height, shape.data.shapeType), width: shape.data.style.borderWidth } } : {}) })
       visit(instance.childIds ?? [], { kind: 'instance', instanceId: id },
         instance.frame ? multiplyMatrices(matrix, instance.frame.transform) : matrix, [...ancestors, id])
     }
@@ -53,9 +59,22 @@ export function selectedFreeTargets(targets: readonly FreeObjectTarget[], ids: r
 }
 
 /** Default hit selects a card/group; deep hit is an explicit internal-edit gesture. */
-export function hitFreeObject(targets: readonly FreeObjectTarget[], point: GeometryPoint, deep = false): FreeObjectTarget | null {
+export function hitFreeObject(targets: readonly FreeObjectTarget[], point: GeometryPoint, deep = false, surfaceToPointer: AffineMatrix = IDENTITY_MATRIX): FreeObjectTarget | null {
   for (const target of [...targets].reverse()) {
-    if (!frameContainsPoint(target.frame, point, target.parentToSurface)) continue
+    const matrix = frameToSpaceMatrix(target.frame, target.parentToSurface)
+    if (matrix[0] * matrix[3] - matrix[1] * matrix[2] === 0) continue
+    if (target.stroke) {
+      const screen = multiplyMatrices(surfaceToPointer, matrix), at = transformPoint(surfaceToPointer, point)
+      const points = target.stroke.points
+      const hit = points.slice(1).some((end, index) => {
+        const start = points[index]!, dx = end.x - start.x, dy = end.y - start.y, length = Math.hypot(dx, dy)
+        if (!length) return false
+        const nx = -dy / length, ny = dx / length
+        const width = target.stroke!.width * Math.hypot(screen[0] * nx + screen[2] * ny, screen[1] * nx + screen[3] * ny)
+        return lineStrokeHit(at, [transformPoint(screen, start), transformPoint(screen, end)], width, 1)
+      })
+      if (!hit) continue
+    } else if (!frameContainsPoint(target.frame, point, target.parentToSurface)) continue
     if (deep || !target.ancestors.length) return target
     return targets.find(value => value.instanceId === target.ancestors[0]) ?? target
   }

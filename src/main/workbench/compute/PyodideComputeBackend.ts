@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { createRequire } from 'node:module'
 import { BrowserWindow, net, session } from 'electron'
 import type { ComputeBackend, ComputeBackendRequest, ComputeProcess, ComputeProcessResult, ComputeWorkerInput, ComputeWorkerReply } from './ComputeBackend'
 
@@ -18,6 +19,7 @@ export class PyodideComputeBackend implements ComputeBackend {
   private readonly workers = new Map<string, { cancel(): Promise<boolean> }>()
   private disposed = false
   private readonly entry: URL
+  private readonly devEnvironmentPath?: string
   constructor(private readonly options: PyodideComputeBackendOptions) {
     if (!options.rendererURL && !options.rendererFile) throw new Error('本地计算入口缺失')
     // A web origin prevents Worker fetch from inheriting Chromium's file-origin
@@ -25,6 +27,14 @@ export class PyodideComputeBackend implements ComputeBackend {
     this.entry = options.rendererURL ? new URL(options.rendererURL) : new URL('https://guoling-compute.invalid/compute.html')
     if (options.rendererURL && (this.entry.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(this.entry.hostname)))
       throw new Error('开发计算入口必须为本机 HTTP')
+    if (options.rendererURL) {
+      // Vite can project @vite/env through its physical /@fs/ URL, including
+      // dependency junctions. Only this installed built-in module is admitted.
+      try {
+        const directory = path.dirname(createRequire(__filename).resolve('vite/package.json'))
+        this.devEnvironmentPath = new URL(`/@fs/${path.join(directory, 'dist/client/env.mjs').replaceAll('\\', '/')}`, this.entry).pathname
+      } catch { /* Packaged production has no Vite dependency or dev route. */ }
+    }
   }
   async availability(): Promise<{ available: boolean; reason?: string }> {
     if (this.disposed) return { available: false, reason: '本地计算服务已关闭' }
@@ -93,7 +103,7 @@ export class PyodideComputeBackend implements ComputeBackend {
         else if (rendererRoot) allowed = !!localResource(url)
         else if (url.protocol === 'http:' && url.origin === this.entry.origin) {
           allowed = url.pathname.startsWith('/vendor/compute-runtime/') || url.pathname.startsWith('/src/renderer/compute/')
-            || url.pathname === '/@vite/client' || url.pathname.startsWith('/node_modules/.vite/')
+            || url.pathname === '/@vite/client' || url.pathname === '/@vite/env' || url.pathname === this.devEnvironmentPath || url.pathname.startsWith('/node_modules/.vite/')
             || url.pathname.startsWith('/node_modules/vite/dist/client/')
         }
       } catch { /* Malformed and all other URLs remain blocked. */ }

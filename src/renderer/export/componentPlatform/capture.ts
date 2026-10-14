@@ -12,7 +12,7 @@ export async function createComponentDeliveryCapture(payload: PublishedCourseV3,
       if (disposed) throw new Error('输出捕获已结束')
       const surface = payload.surfaces.find(value => value.id === surfaceId)
       if (!surface) throw new Error(`捕获表面已不存在：${surfaceId}`)
-      return screenshot({ kind: 'published', published: payload, surfaceId, instanceId, spatialFrameId,
+      return screenshot({ kind: 'published', published: payload, surfaceId, instanceId, spatialFrameId, staticExport: true,
         stateId: surface.presentation?.initialStateId ?? null })
     })
     queue = work.then(() => {}, () => {})

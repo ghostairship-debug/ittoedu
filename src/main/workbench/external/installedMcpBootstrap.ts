@@ -5,6 +5,7 @@ import path from 'node:path'
 import { externalMcpPortSchema } from '../../../shared/workbench/external'
 import { executionPermissionModeSchema, type ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
 import { waitForMcpConnection, type McpConnectionReady } from '../../../shared/workbench/mcpConnection'
+import { writeMcpLaunchReply } from '../../headlessMcpLaunch'
 
 export interface InstalledMcpBootstrapOptions {
   executable: string
@@ -32,7 +33,9 @@ export async function bootstrapInstalledMcp(options: InstalledMcpBootstrapOption
   delete environment.ELECTRON_RUN_AS_NODE
   // No IPC channel: a successful bootstrap returns and its parent may exit.
   // The resident Main, not this one-use helper, owns the product lifetime.
-  const child = spawn(executable, args, { cwd: workspace, env: environment, detached: true, stdio: 'ignore' })
+  // NSIS Portable's outer executable owns its extraction directory until the resident child exits.
+  const residentExecutable = process.platform === 'win32' && process.env.PORTABLE_EXECUTABLE_FILE || executable
+  const child = spawn(residentExecutable, args, { cwd: workspace, env: environment, detached: true, stdio: 'ignore' })
   let exited: { code: number | null; signal: NodeJS.Signals | null } | undefined
   let launchError: Error | undefined
   child.once('error', error => { launchError = error; exited = { code: 1, signal: null } })
@@ -58,34 +61,50 @@ export async function bootstrapInstalledMcp(options: InstalledMcpBootstrapOption
 }
 
 /** Product CLI uses the task location; no teacher-supplied credential or ID. */
-export async function runProductMcpBootstrap(argv: readonly string[], input: { executable: string; cwd: string }): Promise<McpConnectionReady> {
+export async function runProductMcpBootstrap(argv: readonly string[], input: { executable: string; cwd: string }): Promise<McpConnectionReady | undefined> {
   const values = new Map<string, string>()
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index]!
     if (argument === '--mcp-connect') continue
     if (!argument.startsWith('--')) continue // executable path in packaged argv
     const name = argument.split('=', 1)[0]!
-    if (!['--workspace', '--task-path', '--port', '--permission', '--user-data-dir'].includes(name)) throw new Error(`连接入口不支持参数 ${name}`)
+    if (!['--workspace', '--task-path', '--port', '--permission', '--user-data-dir', '--mcp-ready-file'].includes(name)) throw new Error(`连接入口不支持参数 ${name}`)
     const value = argument.includes('=') ? argument.slice(argument.indexOf('=') + 1) : argv[++index]
     if (!value || value.startsWith('--')) throw new Error(`${name} 需要参数`)
     if (values.has(name)) throw new Error(`${name} 只能指定一次`)
     values.set(name, value)
   }
-  const taskPath = values.get('--task-path')
-  let workspace = path.resolve(input.cwd, values.get('--workspace') ?? '.')
-  if (taskPath) {
-    if (values.has('--workspace')) throw new Error('请指定作品位置或工作空间中的一个')
-    const task = path.resolve(input.cwd, taskPath)
-    let isDirectory = false
-    try { isDirectory = (await stat(task)).isDirectory() }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-    workspace = isDirectory ? task : path.dirname(task)
+  const readyFile = values.get('--mcp-ready-file')
+  if (readyFile && !path.isAbsolute(readyFile)) throw new Error('--mcp-ready-file 必须是绝对路径')
+  try {
+    const taskPath = values.get('--task-path')
+    let workspace = path.resolve(input.cwd, values.get('--workspace') ?? '.')
+    if (taskPath) {
+      if (values.has('--workspace')) throw new Error('请指定作品位置或工作空间中的一个')
+      const task = path.resolve(input.cwd, taskPath)
+      let isDirectory = false
+      try { isDirectory = (await stat(task)).isDirectory() }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+      workspace = isDirectory ? task : path.dirname(task)
+    }
+    const port = values.get('--port')
+    if (port !== undefined && !/^\d+$/.test(port)) throw new Error('--port 必须是整数')
+    const reply = await bootstrapInstalledMcp({ executable: input.executable, workspace,
+      ...(values.has('--user-data-dir') ? { profile: path.resolve(input.cwd, values.get('--user-data-dir')!) } : {}),
+      ...(port !== undefined ? { port: externalMcpPortSchema.parse(Number(port)) } : {}),
+      ...(values.has('--permission') ? { permission: executionPermissionModeSchema.parse(values.get('--permission')) } : {}),
+    })
+    // NSIS Portable does not relay its extracted child's stdout. Reuse the same
+    // one-use handoff as the resident launch; the owner facts remain unchanged.
+    if (readyFile) {
+      await writeMcpLaunchReply(readyFile, reply)
+      return undefined
+    }
+    return reply
+  } catch (error) {
+    if (readyFile) {
+      await writeMcpLaunchReply(readyFile, { status: 'failed', message: error instanceof Error ? error.message : String(error) }).catch(() => undefined)
+    }
+    throw error
   }
-  const port = values.get('--port')
-  if (port !== undefined && !/^\d+$/.test(port)) throw new Error('--port 必须是整数')
-  return bootstrapInstalledMcp({ executable: input.executable, workspace,
-    ...(values.has('--user-data-dir') ? { profile: path.resolve(input.cwd, values.get('--user-data-dir')!) } : {}),
-    ...(port !== undefined ? { port: externalMcpPortSchema.parse(Number(port)) } : {}),
-    ...(values.has('--permission') ? { permission: executionPermissionModeSchema.parse(values.get('--permission')) } : {}),
-  })
 }

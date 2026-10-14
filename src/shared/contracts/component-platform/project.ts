@@ -4,6 +4,7 @@ import type { CourseStateDeclaration, CourseStateCondition } from '../course-sta
 import type { ProjectDesignTokens, CourseTheme } from '../design-v1/types'
 import type { ProjectPlaybackSettings } from '../playback-v1/types'
 import type { AssetSource, ProjectMediaSettings } from '../media-v1/types'
+import type { ComponentAuthorRecord } from './runtime'
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 export type JsonObject = { [key: string]: JsonValue }
@@ -31,6 +32,7 @@ export interface ComponentDefinition {
   professionalBuiltinKey?: string
   version?: string
   title?: string
+  library?:{packageId:string;version?:string}
 }
 
 /** Authoring identity only. Runtime always resolves the effective implementation. */
@@ -40,12 +42,19 @@ export function componentDefinitionBuiltinKey(definition: ComponentDefinition | 
 
 export type ComponentTarget =
   | { kind: 'instance'; instanceId: string }
+  | { kind: 'text-range'; instanceId: string; dataPath: string[]; rangeId: string }
   | { kind: 'surface'; surfaceId: string }
   | { kind: 'project' }
 
 export interface BehaviorAttachment {
   instanceId: string
   target: ComponentTarget
+}
+
+/** Persistent author changes belong to the instance, independently of its business data or renderer. */
+export interface ComponentAuthoring {
+  records?: Record<string, ComponentAuthorRecord>
+  resourceBindings?: Record<string, string>
 }
 
 export interface ComponentInstance<Data = JsonValue> {
@@ -55,10 +64,13 @@ export interface ComponentInstance<Data = JsonValue> {
   visible?: boolean
   visibility?: { mode: 'all' | 'include' | 'exclude'; surfaceIds: string[] }
   locked?: boolean
+  /** Explicit viewport projection for global controls, independent of navigation privileges. */
+  viewportPinned?: boolean
   playbackInitialVisibility?: 'inherit' | 'hidden'
   flowPlacement?: ComponentFlowPlacement
   flowLayout?: ComponentFlowBodyLayout
   data: Data
+  authoring?: ComponentAuthoring
   style?: JsonObject
   frame?: ComponentFrame
   /** The sole ownership and ordering relation; parent indexes are derived. */
@@ -84,12 +96,12 @@ export interface ComponentFlowPlacement {
   paragraphAnchor?: { blockId: string; offsetY: number; xRatio: number }
 }
 export interface ComponentFlowAuthoring {
-  layout: { widthMode?: 'fluid' | 'reading'; readingWidth: number; wideContentWidth: number; paperBackgroundColor?: string }
+  layout: { toc?: 'auto' | 'hidden'; widthMode?: 'fluid' | 'reading'; readingWidth: number; wideContentWidth: number; paperBackgroundColor?: string }
 }
 export interface ComponentPresentationState {
   id: string
   title: string
-  overrides: Record<string, { data?: JsonValue; style?: JsonObject; frame?: ComponentFrame | null; visible?: boolean; playbackInitialVisibility?: 'inherit' | 'hidden' }>
+  overrides: Record<string, { data?: JsonValue; authoring?: ComponentAuthoring; style?: JsonObject; frame?: ComponentFrame | null; visible?: boolean; playbackInitialVisibility?: 'inherit' | 'hidden' }>
   /** Display order only; the surface childIds remains the ownership relation. */
   order?: string[]
   background?: ComponentBackground
@@ -121,6 +133,8 @@ export interface ComponentSurface {
 /** Pose x/y are the viewport center in world coordinates; rotation is degrees. */
 export interface ComponentSpatialPose { x: number; y: number; zoom: number; rotation?: number }
 export interface ComponentSpatialAuthoring {
+  /** Missing/null means authored frames order; reads never materialize a default. */
+  defaultPathId?: string | null
   home: ComponentSpatialPose
   frames: { id: string; title?: string; pose: ComponentSpatialPose; targetInstanceId?: string }[]
   paths?: { id: string; title?: string; frameIds: string[]; instanceIds?: string[];

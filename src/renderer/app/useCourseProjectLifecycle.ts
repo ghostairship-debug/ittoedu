@@ -63,12 +63,12 @@ export interface CourseProjectContent {
 export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
   documents?: {
     ready(): Promise<void>
-    snapshot(): DocumentSnapshot | null
+    snapshot(documentId?: string): DocumentSnapshot | null
     create(surface: 'slide' | 'flow' | 'spatial', canvas?: SlideCanvasSize): Promise<void>
     /** A new untitled course with given content, e.g. made from a PPT (M21). */
     createFrom?(content: CourseProjectContent): Promise<void>
     open(path: string): Promise<void>
-    save(saveAs?: boolean): Promise<DocumentSnapshot | null>
+    save(saveAs?: boolean, documentId?: string): Promise<DocumentSnapshot | null>
     drain(): Promise<DocumentSnapshot>
     /** Settles already admitted operations while raw recovery input stays local. */
     settle?(): Promise<DocumentSnapshot>
@@ -203,15 +203,23 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
   const openRecentProject = useCallback((path: string, options?: CourseProjectReplacementOptions) => replace(() => service().open(path), options), [replace])
   const saveProject = useCallback(async (saveAs = false, options?: CourseProjectOperationOptions): Promise<boolean> => {
     if (saving.current || options?.isCurrent?.() === false) return false
+    // The action queue may wait while the user selects another course. Retain
+    // the clicked session, but allow its drafts and newer edits to enter Save.
+    const target = service().snapshot()
+    if (!target) return false
     saving.current = true
     try {
       const result = await ref.current.runBusy(async () => {
         await service().ready()
+        const original = service().snapshot(target.documentId)
+        if (!original || original.epoch !== target.epoch) throw new Error('原课件会话已关闭，已取消保存')
         if (ref.current.beforeSave && !(await ref.current.beforeSave())) return false
         if (options?.isCurrent?.() === false) return false
-        const snapshot = service().snapshot(), previousPath = ref.current.projectPath()
-        const saved = await service().save(saveAs)
-        if (!saved || !snapshot || saved.documentId !== snapshot.documentId || options?.isCurrent?.() === false) return false
+        const snapshot = service().snapshot(target.documentId)
+        if (!snapshot || snapshot.epoch !== target.epoch) throw new Error('原课件会话已关闭，已取消保存')
+        const previousPath = snapshot.binding.kind === 'file' ? snapshot.binding.path : null
+        const saved = await service().save(saveAs, target.documentId)
+        if (!saved || saved.documentId !== target.documentId || options?.isCurrent?.() === false) return false
         if (saved.binding.kind !== 'file') return false
         const current = service().snapshot()
         if (current?.documentId !== saved.documentId || current.epoch !== snapshot.epoch || saved.epoch !== snapshot.epoch) return false

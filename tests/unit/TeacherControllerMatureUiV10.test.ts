@@ -11,7 +11,7 @@ async function fixture(interactive: boolean | undefined, defaultCollapsed: boole
     interactive, zoom: 1, muted: false, fullscreen: false }
   const notify = () => { for (const listener of listeners) listener() }
   const port: TeacherControllerPort = {
-    read: () => snapshot, subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener) } }, canExecute: () => true,
+    read: () => snapshot, readLocation: () => snapshot.locationId, subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener) } }, canExecute: () => true,
     execute: vi.fn(async action => { if (action.type === 'scene.go') snapshot.locationId = action.sceneId; notify(); return true }),
     setCollapsed: vi.fn(value => { snapshot.collapsed = value; notify() }), moveBy: vi.fn(),
     setZoom: vi.fn(value => { snapshot.zoom = value; notify() }), resetView: vi.fn(),

@@ -15,6 +15,7 @@ import { registerHtmlPreviewFrameEntry } from '../../security'
 import { HTML_PREVIEW_AGENT_PATH, htmlPreviewFileUrl, isContainedPath, parseHtmlPreviewProtocolUrl } from './htmlPreviewProtocol'
 import { htmlPreviewResponse } from './htmlPreviewResponse'
 import type { HtmlResourceSource } from '../htmlImport/types'
+import { BundledFontRealmResources, type BundledFontRealmFile } from './bundledFontRealmResources'
 import {
   collectHtmlPreviewResourceSources, htmlPreviewContentType, normalizeCssPreviewMediaReferences,
   normalizeHtmlPreviewMediaReferences, resolveHtmlPreviewResource,
@@ -72,6 +73,7 @@ export interface HtmlPreviewServiceOptions {
   /** Exact application-bundled B4 agent file, never a renderer-controlled path. */
   agentBundlePath?: string
   editPort?: HtmlPreviewEditPort
+  bundledFontResources?: BundledFontRealmResources
 }
 
 interface ActiveLease {
@@ -98,6 +100,7 @@ interface ActiveBootstrapLease {
   mediaOrigins: string[]
   resourceSources: HtmlResourceSource[]
   unregisterFrame(): void
+  fonts: Map<string, BundledFontRealmFile>
 }
 
 function sameOwner(a: PreviewNetworkDocumentOwner, b: PreviewNetworkDocumentOwner | null): boolean {
@@ -140,8 +143,12 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     | { kind: 'source'; promise: Promise<HtmlSourceEditOutcome> }
   )>()
   private disposed = false
+  private readonly fonts: BundledFontRealmResources
 
   constructor(private readonly options: HtmlPreviewServiceOptions) {
+    const application = path.resolve(__dirname, '../../../..')
+    this.fonts = options.bundledFontResources ?? new BundledFontRealmResources({ rendererDirectory: path.join(application, 'dist-renderer'),
+      dependencyDirectory: path.join(application, 'node_modules'), developmentOrigin: process.env.VITE_DEV_SERVER_URL || undefined })
     this.policy = options.networkPolicy ?? mainPreviewNetworkPolicy
     this.registerFrame = options.registerFrameEntry ?? registerHtmlPreviewFrameEntry
     this.editPort = options.editPort ?? null
@@ -202,6 +209,7 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     if (this.bootstrapLeases.has(input.leaseId) || this.leases.has(input.leaseId)) throw new Error('Component bootstrap lease already exists')
     const token = randomBytes(32).toString('hex')
     const result = { leaseId: input.leaseId, url: htmlPreviewFileUrl(token, 'component.html') }
+    const fontProjection = this.fonts.project(input.html, name => htmlPreviewFileUrl(token, name))
     const connectOrigins = [...input.connectOrigins ?? []], mediaUrls = [...input.remoteAssetUrls ?? []]
     const resourceSources = (input.resourceSources ?? []).map(source => ({ ...source }))
     const resourceUrls = [...new Set([...mediaUrls, ...resourceSources.map(source => source.url)])]
@@ -210,7 +218,7 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     try { unregisterFrame = this.registerFrame(result.url, current.frame.webContentsId) }
     catch (error) { this.policy.releasePreviewLease(result.leaseId, owner); throw error }
     const lease: ActiveBootstrapLease = { public: result, token,
-      entryHtml: normalizeHtmlPreviewMediaReferences(input.html, resourceUrls), webContentsId: current.frame.webContentsId,
+      entryHtml: normalizeHtmlPreviewMediaReferences(fontProjection.html, resourceUrls), fonts: fontProjection.files, webContentsId: current.frame.webContentsId,
       owner: { ...owner }, connectOrigins, resourceSources,
       mediaOrigins: [...new Set(mediaUrls.map(value => new URL(value).origin))], unregisterFrame }
     this.bootstrapLeases.set(result.leaseId, lease); this.byToken.set(token, lease)
@@ -405,7 +413,16 @@ export class HtmlPreviewService implements HtmlPreviewHost {
       if (!current || current.frame.webContentsId !== lease.webContentsId || !sameOwner(lease.owner, current.owner)) {
         this.removeBootstrap(lease); return notFound(method)
       }
-      if (target.kind !== 'file' || target.relativePath !== 'component.html' || target.hasQuery) return notFound(method)
+      if (target.kind !== 'file' || target.hasQuery) return notFound(method)
+      const font = lease.fonts.get(target.relativePath)
+      if (font) {
+        const bytes = await this.fonts.read(font), current = this.currentOwner()
+        if (!bytes || this.byToken.get(target.token) !== lease || !current || !sameOwner(lease.owner, current.owner)) return notFound(method)
+        const response = htmlPreviewResponse(bytes, { contentType: 'font/woff2', method })
+        response.headers.set('Access-Control-Allow-Origin', '*')
+        return response
+      }
+      if (target.relativePath !== 'component.html') return notFound(method)
       return htmlPreviewResponse(lease.entryHtml, { contentType: 'text/html; charset=utf-8', method,
         mediaOrigins: lease.mediaOrigins, connectOrigins: lease.connectOrigins, resourceSources: lease.resourceSources })
     }

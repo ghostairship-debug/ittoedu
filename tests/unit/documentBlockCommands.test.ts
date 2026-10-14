@@ -25,7 +25,7 @@ it('inserts a table through the common menu and preserves rich cell content in s
 it('shares section and callout creation while keeping unsupported conversions unavailable', () => {
   const section = createDocumentBlock('section', () => 'section', { text: '本节' })
   const callout = createDocumentBlock('callout', () => 'callout', { text: '说明', title: '注意' })
-  expect(section).toMatchObject({ type: 'section', title: { inlines: [{ text: '本节' }] }, collapsedByDefault: false, blocks: [] })
+  expect(section).toMatchObject({ type: 'section', title: { inlines: [{ text: '本节' }] }, collapsedByDefault: false, blocks: [{type:'paragraph',content:{inlines:[]}}] })
   expect(callout).toMatchObject({ type: 'callout', title: { inlines: [{ text: '注意' }] }, body: { inlines: [{ text: '说明' }] } })
   const menu = documentBlockMenu({ content: { blocks: [section] }, blockId: section.id, apply() {} })
   expect(menu.filter(command => command.group === '插入').map(command => command.id)).toEqual([...DOCUMENT_BLOCK_KINDS.map(({ kind }) => `insert-${kind}`), 'insert-above'])

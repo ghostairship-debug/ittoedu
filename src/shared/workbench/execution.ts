@@ -3,7 +3,7 @@ import type { ModelToolCall, ToolResult, ToolTarget } from './tools'
 import type { InputContext, PayloadManifest } from './attachments'
 import type { DisclosedExecutionSettings, ExecutionMaterials, WebTaskAuthorization } from './executionDesktop'
 import type { ExecutionPermissionMode } from './executionPermission'
-import type { ConversationHome } from './conversations'
+import type { ConversationHome, ExecutionAdvancementMode } from './conversations'
 import type { EditTarget } from './editSession'
 import type { SavedCourseIdentity } from './documentSave'
 
@@ -19,6 +19,8 @@ export interface ExecutionStart {
   conversationId: string
   taskId: string
   instruction: string
+  /** Conversation preference copied when this task was accepted; later changes are ordered steering. */
+  advancementMode?: ExecutionAdvancementMode
   selection: ModelSelection
   /** Optional visual fallback fixed when this task was accepted. */
   visionSelection?: ModelSelection
@@ -116,6 +118,8 @@ export interface ExecutionRunRecord {
   updatedAt: number
   messages: ModelChatMessage[]
   initialMessageCount: number
+  /** Stable original-message position. The initial payload manifest describes the actual sent projection. */
+  initialUserMessageIndex?: number
   initialPayload?: PayloadManifest
   /** File bindings observed by Main at run preparation; used only to locate ancestor resources. */
   documentPaths?: Record<string, string>
@@ -124,7 +128,7 @@ export interface ExecutionRunRecord {
   requests: ExecutionModelRecord[]
   tools: ExecutionToolRecord[]
   /** Durable user adjustments; the original provider, grant and input remain frozen. */
-  steering?: { submissionId: string; text: string; acceptedAt: number; messageIndex?: number; appliedAt?: number }[]
+  steering?: { submissionId: string; text: string; advancementMode?: ExecutionAdvancementMode; acceptedAt: number; messageIndex?: number; appliedAt?: number }[]
   failure?: { code: string; message: string; outcome?: ModelFailure['outcome'] }
   /** Fact summary contains only actual tool returns; it cannot grant permissions. */
   compacted?: { atRequest: number; facts: string; fromMessage?: number
@@ -135,9 +139,17 @@ export interface ExecutionRunRecord {
     /** Messages before this index were re-projected with bounded text excerpts. */
     boundedThroughMessage?: number
     /** The per-message text threshold used for that bounded projection. */
-    boundedTextLimit?: number }
+    boundedTextLimit?: number
+    /** Cross-turn summary coverage uses frozen history source identities, never the mutable sent positions. */
+    history?: { sourceIds: string[]; summary: string } }
   /** Optional additive checkpoint field; older runs remain readable without migration. */
   workingNote?: WorkingNote
+  /** Explicit remaining-section update, including an empty list. Absence may use the prior task note. */
+  workingNoteRemainingUpdated?: boolean
+  /** Advisory semantic goal continuation. It confers no document, export, file or history authority. */
+  goalContinuationRunId?: string
+  /** Advisory unresolved goal, separate from tool settlement and transport completion. */
+  remainingGoal?: string[]
   continuedFrom?: string
   /** Explicit user continuation only. Conversation memory/queued messages do not inherit delivery obligations. */
   taskContinuedFrom?: string
@@ -148,4 +160,9 @@ export interface ExecutionRunRecord {
   imageContextSources?: Record<number, string[]>
   /** Historical auxiliary vision receipts. Later success settles only the same original source. */
   visualAnalyses?: Array<{ source: string; sourceMessage: string; status: 'analyzed' | 'vision-unavailable'; reason?: string }>
+}
+
+/** The latest accepted preference, derived from the original freeze and its ordered adjustments. */
+export function executionAdvancementMode(record: Pick<ExecutionRunRecord, 'input' | 'steering'>): ExecutionAdvancementMode | undefined {
+  return record.steering?.filter(value => value.advancementMode).at(-1)?.advancementMode ?? record.input.advancementMode
 }

@@ -3,10 +3,11 @@ import type {
   ModelJsonObject, ModelNativeToolCall, ModelProvider, ModelRequest, ModelUsage,
 } from '../../../shared/workbench/modelProvider'
 import { effectiveModelProtocol } from '../../../shared/workbench/modelRouting'
+import { normalizeModelOutputParameters } from '../../../shared/workbench/modelOutputParameters'
 import { modelToolWireName, waitForModelOperation } from './OpenAIChatProvider'
 import { serverSentEvents } from './serverSentEvents'
 import { modelFetch, responseIdleTimeoutCode } from './modelFetch'
-import { httpFailureKind } from './providerHttpFailure'
+import { httpFailure, providerStreamFailure } from './providerHttpFailure'
 
 export interface AnthropicMessagesProviderOptions {
   credentialResolver(connection: Readonly<ModelConnectionSnapshot>): Promise<string>
@@ -41,7 +42,8 @@ function contentBlocks(content: ModelJson | undefined): ModelJsonObject[] {
   })
 }
 function prepare(request: Payload) {
-  const { connection, model, parameters = {} } = request.selection
+  const { connection, model } = request.selection
+  const parameters = normalizeModelOutputParameters('anthropic-messages', request.selection.parameters)
   if (effectiveModelProtocol(request.selection) !== 'anthropic-messages' || connection.auth.kind !== 'api-key'
     || !text(model) || !text(connection.id) || !text(connection.accountId) || !text(connection.auth.credentialRef)
     || !counter(connection.revision)) throw new Error('invalid-connection')
@@ -125,7 +127,7 @@ function retryAfter(value: string | null, now: number): number | undefined {
   const ms = /^\d+(?:\.\d+)?$/.test(value.trim()) ? Number(value) * 1000 : Date.parse(value) - now
   return Number.isFinite(ms) ? Math.max(0, Math.ceil(ms)) : undefined
 }
-interface StreamBlock { value: ModelJsonObject; closed: boolean; argumentsText?: string }
+interface StreamBlock { value: ModelJsonObject; closed: boolean; argumentsText?: string; toolIndex?: number }
 
 /** One native Messages request. Engine owns retries, continuation and tool execution. */
 export class AnthropicMessagesProvider implements ModelProvider {
@@ -163,10 +165,9 @@ export class AnthropicMessagesProvider implements ModelProvider {
       credential = ''
       if (!response.ok) {
         const rejected = response.status >= 400 && response.status < 500 && response.status !== 408
-        const kind = await httpFailureKind(response)
+        const failure = await httpFailure(response)
         const retryAfterMs = retryAfter(response.headers.get('retry-after'), (this.options.now ?? Date.now)())
-        yield event({ type: 'response.failed', failure: { outcome: rejected ? 'rejected' : 'unknown', kind,
-          code: `http-${response.status}`, message: `模型服务返回 HTTP ${response.status}；是否重试由执行器依据错误类型决定。`, httpStatus,
+        yield event({ type: 'response.failed', failure: { outcome: rejected ? 'rejected' : 'unknown', ...failure, httpStatus,
           ...(providerRequestId ? { providerRequestId } : {}), ...(retryAfterMs !== undefined ? { retryAfterMs } : {}) } }); return
       }
       if (!response.body || !response.headers.get('content-type')?.toLowerCase().includes('text/event-stream')) throw new ProtocolError('expected-event-stream')
@@ -180,7 +181,11 @@ export class AnthropicMessagesProvider implements ModelProvider {
         try { const parsed: unknown = JSON.parse(data); if (!object(parsed)) throw new Error(); item = parsed }
         catch { throw new ProtocolError('invalid-json-event') }
         if (item.type === 'ping') continue
-        if (item.type === 'error') throw new ProtocolError('anthropic-stream-error')
+        if (item.type === 'error') {
+          const failure = providerStreamFailure(item.error)
+          if (failure) { yield event({ type: 'response.failed', failure: { outcome: 'unknown', ...failure, httpStatus } }); return }
+          throw new ProtocolError('anthropic-stream-error')
+        }
         if (item.type === 'message_start') {
           if (native || !object(item.message) || !text(item.message.id) || item.message.role !== 'assistant') throw new ProtocolError('invalid-message-start')
           native = structuredClone(item.message)
@@ -194,12 +199,13 @@ export class AnthropicMessagesProvider implements ModelProvider {
         else if (item.type === 'content_block_start') {
           if (!counter(item.index) || blocks.has(item.index) || !object(item.content_block) || !text(item.content_block.type)) throw new ProtocolError('invalid-content-block')
           const block = structuredClone(item.content_block)
-          blocks.set(item.index, { value: block, closed: false })
+          const toolIndex = block.type === 'tool_use' ? [...blocks.values()].filter(item => item.value.type === 'tool_use').length : undefined
+          blocks.set(item.index, { value: block, closed: false, toolIndex })
           if (block.type === 'text' && typeof block.text === 'string' && block.text) { output += block.text; yield event({ type: 'text.delta', text: block.text }) }
           if (block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking) { reasoning += block.thinking; yield event({ type: 'reasoning.delta', text: block.thinking }) }
           if (block.type === 'tool_use') {
-            if (!text(block.id) || !text(block.name) || !object(block.input) || !prepared.names.has(block.name)) throw new ProtocolError('invalid-tool-call')
-            yield event({ type: 'tool.delta', index: item.index, id: block.id, name: prepared.names.get(block.name), argumentsDelta: '' })
+            if (!text(block.id) || !text(block.name) || !object(block.input)) throw new ProtocolError('invalid-tool-call')
+            yield event({ type: 'tool.delta', index: toolIndex!, id: block.id, name: prepared.names.get(block.name) ?? block.name, argumentsDelta: '' })
           }
         } else if (item.type === 'content_block_delta') {
           const block = counter(item.index) ? blocks.get(item.index) : undefined
@@ -215,7 +221,7 @@ export class AnthropicMessagesProvider implements ModelProvider {
             block.value.signature = String(block.value.signature ?? '') + delta.signature
           } else if (delta.type === 'input_json_delta' && block.value.type === 'tool_use' && typeof delta.partial_json === 'string') {
             block.argumentsText = (block.argumentsText ?? '') + delta.partial_json
-            yield event({ type: 'tool.delta', index: item.index, id: block.value.id, name: prepared.names.get(String(block.value.name)), argumentsDelta: delta.partial_json })
+            yield event({ type: 'tool.delta', index: block.toolIndex!, id: block.value.id, name: prepared.names.get(String(block.value.name)) ?? String(block.value.name), argumentsDelta: delta.partial_json })
           } else if (delta.type === 'citations_delta' && block.value.type === 'text' && object(delta.citation)) {
             const citations = Array.isArray(block.value.citations) ? block.value.citations : []
             citations.push(structuredClone(delta.citation)); block.value.citations = citations
@@ -225,9 +231,8 @@ export class AnthropicMessagesProvider implements ModelProvider {
           if (!block || block.closed) throw new ProtocolError('invalid-content-stop')
           if (block.argumentsText !== undefined) {
             let parsed: unknown
-            try { parsed = JSON.parse(block.argumentsText) } catch { throw new ProtocolError('invalid-tool-input') }
-            if (!object(parsed)) throw new ProtocolError('invalid-tool-input')
-            block.value.input = parsed
+            try { parsed = JSON.parse(block.argumentsText) } catch { /* Engine owns each call's parameter diagnosis. */ }
+            if (object(parsed)) block.value.input = parsed
           }
           block.closed = true
         } else if (item.type === 'message_delta') {
@@ -249,15 +254,16 @@ export class AnthropicMessagesProvider implements ModelProvider {
       if (!done || !native || !responseId || !finish || [...blocks.values()].some(block => !block.closed)) throw new ProtocolError('incomplete-stream')
       const content = [...blocks].sort(([a], [b]) => a - b).map(([, block]) => block.value)
       const calls = content.filter(block => block.type === 'tool_use')
-      if (new Set(calls.map(call => call.id)).size !== calls.length || calls.length && finish !== 'tool_use' || !calls.length && finish === 'tool_use') throw new ProtocolError('inconsistent-tool-finish')
+      if (new Set(calls.map(call => call.id)).size !== calls.length || calls.length && !['tool_use', 'max_tokens', 'model_context_window_exceeded'].includes(finish) || !calls.length && finish === 'tool_use') throw new ProtocolError('inconsistent-tool-finish')
+      const argumentsOf = (call: ModelJsonObject) => [...blocks.values()].find(block => block.value === call)?.argumentsText ?? JSON.stringify(call.input)
       const finishReason = finish === 'tool_use' ? 'tool_calls' : ['end_turn', 'stop_sequence'].includes(finish) ? 'stop'
         : ['max_tokens', 'model_context_window_exceeded'].includes(finish) ? 'length' : finish === 'refusal' ? 'content_filter' : finish
       const assistant: ModelAssistantMessage = { role: 'assistant', content: output || null, nativeAnthropic: { content: structuredClone(content) } }
       if (reasoning) assistant.reasoning_content = reasoning
       if (calls.length) assistant.tool_calls = calls.map(call => ({ id: String(call.id), type: 'function',
-        function: { name: String(call.name), arguments: JSON.stringify(call.input) } } satisfies ModelNativeToolCall))
+        function: { name: String(call.name), arguments: argumentsOf(call) } } satisfies ModelNativeToolCall))
       yield event({ type: 'response.completed', responseId, ...(actualModel ? { actualModel } : {}), assistant,
-        toolCalls: calls.map(call => ({ id: String(call.id), name: prepared.names.get(String(call.name))!, argumentsText: JSON.stringify(call.input) })),
+        toolCalls: calls.map(call => ({ id: String(call.id), name: prepared.names.get(String(call.name)) ?? String(call.name), argumentsText: argumentsOf(call) })),
         finishReason, ...(usage ? { usage } : {}), nativeResponse: { ...native, content, ...(usage ? { usage: usage.raw } : {}) } })
     } catch (error) {
       const idleCode = controller.signal.aborted ? undefined : responseIdleTimeoutCode(error)

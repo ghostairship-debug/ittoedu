@@ -126,4 +126,10 @@ it('M21 the selection owner answers a right-click with the same commands as its 
   const labels = within(screen.getByRole('menu', { name: '对象操作' })).getAllByRole('menuitem').map(element => element.getAttribute('aria-label'))
   expect(labels[0]).toBe('复制')
   expect(labels).not.toContain('编辑文字')
+  // Ctrl+A changes the live selection; the old shape menu must disappear
+  // before its Delete command can consume that new selection.
+  await act(async () => { store().selectNodes([first, shape]) })
+  expect(screen.queryByRole('menu', { name: '对象操作' })).toBeNull()
+  expect(item()).toBeDefined()
+  expect(store().courseView.project?.instances[shape]).toBeDefined()
 })

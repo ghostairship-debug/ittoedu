@@ -8,6 +8,7 @@ import type { SpatialViewportRequest } from '../shared/workbench/spatialViewport
 const IPC_CHANNELS = {
   componentCompilation: 'component:compile',
   htmlImport: 'html-import:operate',
+  flowImport: 'flow-import:read',
   imageResults: 'image-results:operate',
   imageResultsChanged: 'image-results:changed',
   externalMcp: 'external-mcp:operate',
@@ -21,6 +22,7 @@ const IPC_CHANNELS = {
   executionSettings: 'execution-settings:operate',
   pixabaySettings: 'pixabay-settings:operate',
   workspaceFiles: 'workspace-files:operate',
+  skillCatalog: 'skills:catalog',
   mediaFiles: 'media-files:operate',
   workspaceFilesChanged: 'workspace-files:changed',
   documents: 'documents:operate',
@@ -168,6 +170,7 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 
 const desktopAPI = Object.freeze<DesktopAPI>({
   htmlImport: { import: input => invoke(IPC_CHANNELS.htmlImport, input) },
+  flowImport: { read: input => invoke(IPC_CHANNELS.flowImport, input ?? {}) },
   externalMcp: {
     status: () => invoke(IPC_CHANNELS.externalMcp, { type: 'status' }),
     configure: patch => invoke(IPC_CHANNELS.externalMcp, { type: 'configure', patch }),
@@ -220,6 +223,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     conversation: (workspaceId, conversationId) => invoke(IPC_CHANNELS.execution, { type: 'conversation', workspaceId, conversationId }),
     draft: input => invoke(IPC_CHANNELS.execution, { type: 'draft', ...input }),
     renameConversation: input => invoke(IPC_CHANNELS.execution, { type: 'rename-conversation', ...input }),
+    setAdvancementMode: input => invoke(IPC_CHANNELS.execution, { type: 'set-advancement-mode', ...input }),
     deleteConversation: input => invoke(IPC_CHANNELS.execution, { type: 'delete-conversation', ...input }),
     prepareDocuments: input => invoke(IPC_CHANNELS.execution, { type: 'prepare-documents', ...input }),
     send: input => invoke(IPC_CHANNELS.execution, { type: 'send', ...input }),
@@ -263,6 +267,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     saveKey: key => invoke(IPC_CHANNELS.pixabaySettings, { type: 'save-key', key }),
   },
   executionSettings: {
+    testSearch: query => invoke(IPC_CHANNELS.executionSettings, { type: 'test-search', query }),
     startOAuthLogin: (id, revision) => invoke(IPC_CHANNELS.executionSettings, { type: 'oauth-login-start', id, revision }),
     oauthLoginStatus: loginId => invoke(IPC_CHANNELS.executionSettings, { type: 'oauth-login-status', loginId }),
     cancelOAuthLogin: loginId => invoke(IPC_CHANNELS.executionSettings, { type: 'oauth-login-cancel', loginId }),
@@ -278,6 +283,8 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   documents: {
     list: () => invoke(IPC_CHANNELS.documents, { type: 'list' }),
     bootstrapCourse: () => invoke(IPC_CHANNELS.documents, { type: 'bootstrap-course' }),
+    rename: (documentId, epoch, name) => invoke(IPC_CHANNELS.documents, { type: 'rename', documentId, epoch, name }),
+    reveal: documentId => invoke(IPC_CHANNELS.documents, { type: 'reveal', documentId }),
     create: (model, suggestedName) => invoke(IPC_CHANNELS.documents, { type: 'create', model, suggestedName }),
     open: path => invoke(IPC_CHANNELS.documents, { type: 'open', path }),
     read: documentId => invoke(IPC_CHANNELS.documents, { type: 'read', documentId }),
@@ -324,6 +331,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     preserveDraft: (ref, source, expectedVersion, attachments) => invoke(IPC_CHANNELS.lessonDocument, { operation: 'preserve', ref, source, expectedVersion, attachments }),
   },
   workspaceFiles: input => invoke(IPC_CHANNELS.workspaceFiles, input),
+  skillCatalog: input => invoke(IPC_CHANNELS.skillCatalog, input),
   mediaFiles: input => invoke(IPC_CHANNELS.mediaFiles, input),
   onWorkspaceFilesChanged: listener => {
     const receive = (_event: Electron.IpcRendererEvent, event: import('../shared/workbench/workspaceFiles').WorkspaceFilesChange) => listener(event)

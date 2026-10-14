@@ -70,7 +70,7 @@ test('material workspace: project folder, multi-select import and explicit fragm
 
     await expect(page.getByRole('article').filter({ has: page.getByRole('heading', { name: '教材甲.txt', exact: true }) }).getByRole('checkbox', { name: '用于本课例创作（整份材料）' })).toBeChecked()
     await expect(page.getByRole('article').filter({ has: page.getByRole('heading', { name: '教案乙.md', exact: true }) }).getByRole('checkbox', { name: '采用片段 1' })).toBeChecked()
-    const records = await page.evaluate(async lesson => window.desktopAPI!.lessonMaterials!.list({ lessonId: lesson.identity.lessonId, rootPath: lesson.identity.normalizedDirectory }), lesson)
+    const { records } = await page.evaluate(async lesson => window.desktopAPI!.lessonMaterials!.list({ lessonId: lesson.identity.lessonId, rootPath: lesson.identity.normalizedDirectory }), lesson)
     expect(records.map(record => record.title).sort()).toEqual(['教材甲.txt', '教案乙.md'].sort())
     for (const record of records) expect(readFileSync(join(lesson.identity.normalizedDirectory, record.sourcePath)).length).toBeGreaterThan(0)
   } finally {

@@ -1,26 +1,42 @@
 import { parse, type DefaultTreeAdapterTypes } from 'parse5'
 import type { WebModuleGraph, WebRuntimeData } from './moduleGraph'
-import { webResourceReferenceMarker } from './resources'
+import { webModuleGraphForDocument, publishedWebInitializationBinding, publishedWebInitializationExport, publishedWebImportOptionsOperation, publishedWebRuntimeImportPreparation, webModuleResolverSource, type WebModuleResolutionContext } from './moduleGraph'
+import { webResourceReferenceMarker, resolveWebJavaScriptResources, projectWebModuleUrls, refreshWebResourceReferences } from './resources'
 import { domTextOverrideRealmSource, type DomTextOverrideController } from '../../player/lightEdit/domTextOverrides'
 import type { LightEditTextOverride } from '../../shared/contracts/runtime/lightEdit'
+import { splitInstalledBundledFontFaceCss } from '../../shared/fonts/installedBundledFontFaceCss'
+import { createPreparedJavaScriptImportOptionsValidator, preparedJavaScriptNativeImportBody } from '../../shared/browser/validatePreparedJavaScriptImportOptions'
+import { projectPublishedNativeImportOptions } from '../../core/publish/componentPlatform/compiledScript'
 
 export interface AuthoredDocumentPrograms {
   graph?: WebModuleGraph
   prefix: string
   property: string
+  moduleProperty?: string
   classic: Record<string, string>
   resources: Record<string, string>
   resourceBindings?: Readonly<Record<string, string>>
   textOverrides?: readonly LightEditTextOverride[]
+  published?: { code: string; helper: string; contexts?: Readonly<Record<string, WebModuleResolutionContext>> }
+  transportFragment?: boolean
+}
+
+/** Explicit function inputs keep the serialized parser bootstrap self-contained. */
+export function authoredDocumentProgramsSource(input: AuthoredDocumentPrograms): string {
+  return `(${installAuthoredDocumentPrograms.toString()})(${JSON.stringify(input)},${input.published ? `{options:(${createPreparedJavaScriptImportOptionsValidator.toString()}),resolver:(${webModuleResolverSource()}),nativeImport:function(url,options){${preparedJavaScriptNativeImportBody}}}` : 'undefined'})`
 }
 
 /** Runs synchronously in the child's parser, before any authored script. */
-export function installAuthoredDocumentPrograms(input: AuthoredDocumentPrograms) {
+export function installAuthoredDocumentPrograms(input: AuthoredDocumentPrograms, ports?: {
+  options: typeof createPreparedJavaScriptImportOptionsValidator
+  resolver: (native: { URL: typeof URL; decodeURI: typeof decodeURI }) => (specifier: string, importer: string, dynamic?: boolean, context?: WebModuleResolutionContext) => string | undefined
+  nativeImport(url: string, options: unknown): Promise<unknown>
+}) {
+  const native = window, originalDocument = document, NativePromise = native.Promise, NativeTypeError = native.TypeError
+  const createUrl = native.URL.createObjectURL.bind(native.URL), revokeUrl = native.URL.revokeObjectURL.bind(native.URL), NativeBlob = native.Blob
   const urls: string[] = []
-  const resource = (source: string) => source.replace(/cw-resource:[a-zA-Z0-9_.-]+/g,
-    reference => input.resources[input.resourceBindings?.[reference] ?? reference] ?? reference)
   const blob = (source: string) => {
-    const url = URL.createObjectURL(new Blob([resource(source)], { type: 'text/javascript' }))
+    const url = createUrl(new NativeBlob([source], { type: 'text/javascript' }))
     urls.push(url); return url
   }
   const imports: Record<string, string> = {}
@@ -35,13 +51,48 @@ export function installAuthoredDocumentPrograms(input: AuthoredDocumentPrograms)
     map.textContent = JSON.stringify({ imports }); document.head.append(map)
   }
   const classic = Object.fromEntries(Object.entries(input.classic).map(([index, source]) => [index, blob(source)]))
-  Object.defineProperty(window, input.property, { configurable: true, value: classic })
+  const moduleUrls = Object.fromEntries(Object.keys(input.graph?.modules ?? {}).map(path => [path, imports[input.prefix + path]]))
+  let ended = false, diagnostic: ((message: string) => void) | undefined
+  const pendingDiagnostics: string[] = []
+  const report = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error)
+    if (diagnostic) diagnostic(message); else pendingDiagnostics.push(message)
+  }
+  let validator: ReturnType<typeof createPreparedJavaScriptImportOptionsValidator> | undefined, publishedUrl: string | undefined
+  if (input.published && ports) {
+    validator = ports.options(native, () => !ended && native.document === originalDocument, ports.nativeImport)
+    const resolver = ports.resolver({ URL: native.URL, decodeURI: native.decodeURI })
+    const runtime = { ...validator, report, resolve: (specifier: string, key: string) => {
+      const context = input.published!.contexts?.[key]
+      return context ? resolver(specifier, context.importer, false, context) : undefined
+    }, reject: () => {
+      const error = new NativeTypeError('动态 import() 运行时请求尚未闭合；原源码保留')
+      report(error); return NativePromise.reject(error)
+    } }
+    Object.defineProperty(native, input.published.helper, { configurable: true, value: runtime })
+    publishedUrl = blob(input.published.code)
+    imports[input.prefix + '__published__'] = publishedUrl
+    const map = document.createElement('script'); map.type = 'importmap'
+    map.textContent = JSON.stringify({ imports: { [input.prefix + '__published__']: publishedUrl } }); document.head.append(map)
+  }
+  if (input.moduleProperty) Object.defineProperty(window, input.moduleProperty, { configurable: true, value: moduleUrls })
+  Object.defineProperty(window, input.property, { configurable: true, value: { ...classic, moduleUrls, publishedUrl } })
   const release = () => {
-    for (const url of urls.splice(0)) URL.revokeObjectURL(url)
+    ended = true; validator?.dispose()
+    for (const url of urls.splice(0)) revokeUrl(url)
+    if (input.published) Reflect.deleteProperty(native, input.published.helper)
+    if (input.moduleProperty && (window as unknown as Record<string, unknown>)[input.moduleProperty] === moduleUrls) Reflect.deleteProperty(window, input.moduleProperty)
     Reflect.deleteProperty(window, input.property); window.removeEventListener('pagehide', release)
   }
   window.addEventListener('pagehide', release, { once: true })
-  return { release }
+  return { release, transportFragment: input.transportFragment,
+    setActivity(value: { active: boolean; visible: boolean; playing: boolean }) {
+      if (!ended) window.dispatchEvent(new CustomEvent('__runtime.activity', { detail: { ...value } }))
+    }, onDiagnostic(listener: (message: string) => void) {
+    diagnostic = listener
+    for (const message of pendingDiagnostics.splice(0)) listener(message)
+    return () => { if (diagnostic === listener) diagnostic = undefined }
+  } }
 }
 
 /** Source edits only wrap existing programs. The browser still parses and loads the document. */
@@ -55,13 +106,24 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
   /** Internal projection of child documents inside a fragment carrier. */
   nestedOnly?: boolean
   documentPath?: string
+  transportFragment?: boolean
 }): string {
   const source = data.html, parsed = parse(source, { sourceCodeLocationInfo: true })
   const documentPath = options.documentPath ?? ''
   const prefix = `guoling-module:${encodeURIComponent(options.instanceId)}/${options.nonce}/${documentPath ? `${documentPath}/` : ''}`
   const property = `__guoling_parser_${options.nonce.replace(/-/g, '_')}`
-  const programs: AuthoredDocumentPrograms = { graph: data.moduleGraph, prefix, property, classic: {},
-    resources: options.resources, resourceBindings: data.resourceBindings, textOverrides: data.textOverrides }
+  const programs: AuthoredDocumentPrograms = { graph: webModuleGraphForDocument(data.moduleGraph, documentPath), prefix, property, classic: {},
+    moduleProperty: `__guoling_module_urls_${encodeURIComponent(options.instanceId)}`,
+    resources: options.resources, resourceBindings: data.resourceBindings, textOverrides: data.textOverrides, transportFragment: options.transportFragment }
+  const bundle = documentPath ? data.publishedDocumentBundles?.[documentPath] : data.publishedModuleBundle
+  const binding = bundle && publishedWebInitializationBinding(bundle)
+  if (bundle && binding) {
+    let helper = `__guoling_native_imports_${options.nonce.replace(/[^a-zA-Z0-9_$]/g, '_')}`
+    while ((data.html + bundle).includes(helper)) helper += '_'
+    const runtime = publishedWebRuntimeImportPreparation(data, documentPath)
+    const projected = projectPublishedNativeImportOptions(bundle, publishedWebImportOptionsOperation(data, documentPath), helper)
+    programs.published = { helper, contexts: runtime?.contexts, code: `${projected}\n${runtime ? `${binding}.configureRuntimeImport(${helper});` : ''}\n${binding}.ready.catch(${helper}.report);` }
+  }
   const edits: Array<{ start: number; end: number; value: string }> = []
   let index = 0, iframeIndex = 0
   const quote = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
@@ -72,8 +134,8 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
       if (srcdoc && location) {
         const childPath = documentPath ? `${documentPath}/${current}` : String(current)
         const child = authoredDocumentBootstrap({ ...data, html: srcdoc.value, css: undefined }, {
-          ...options, nestedOnly: false, documentPath: childPath, themeCss: undefined, resourceCss: undefined,
-          bridge: programs => `(${installAuthoredDocumentPrograms.toString()})(${JSON.stringify(programs)})`,
+          ...options, nestedOnly: false, documentPath: childPath, resourceCss: undefined,
+          bridge: authoredDocumentProgramsSource,
         })
         edits.push({ start: location.startOffset, end: location.endOffset, value: `srcdoc="${quote(child)}"` })
       }
@@ -88,12 +150,15 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
         const start = location.startTag.endOffset, end = location.endTag?.startOffset ?? location.endOffset
         if (entry && attrs.type?.trim().toLowerCase() === 'module') {
           if (location.attrs?.src) edits.push({ start: location.attrs.src.startOffset, end: location.attrs.src.endOffset, value: '' })
-          edits.push({ start, end, value: `import ${JSON.stringify(prefix + entry)};` })
-        } else if (classic && (Object.hasOwn(attrs, 'data-cw-defer') || Object.hasOwn(attrs, 'data-cw-async'))) {
+          const activation = programs.published
+            ? `import {${publishedWebInitializationExport} as program} from ${JSON.stringify(prefix + '__published__')};program.entries.find(entry=>entry.index===${current})?.start(()=>{${programs.published.helper}.assertActive();return true});`
+            : `import ${JSON.stringify(prefix + entry)};`
+          edits.push({ start, end, value: activation })
+        } else if (classic && (Object.hasOwn(attrs, 'data-cw-defer') || Object.hasOwn(attrs, 'data-cw-async') || Object.hasOwn(attrs, 'data-guoling-classic-source'))) {
           // Resource closure retained external classic source inline. Recreate a
           // parser-inserted external script so native defer/async and DCL apply.
-          programs.classic[String(current)] = source.slice(start, end)
-          const retained = node.attrs.filter(attribute => !['src', 'data-cw-defer', 'data-cw-async'].includes(attribute.name))
+          programs.classic[String(current)] = Object.hasOwn(attrs, 'data-guoling-classic-source') ? JSON.parse(attrs['data-guoling-classic-source']) : source.slice(start, end)
+          const retained = node.attrs.filter(attribute => !['src', 'data-cw-defer', 'data-cw-async', 'data-guoling-classic-source'].includes(attribute.name))
             .map(attribute => ` ${attribute.name}="${quote(attribute.value)}"`).join('')
           const opening = `<script${retained}${Object.hasOwn(attrs, 'data-cw-defer') && !Object.hasOwn(attrs, 'defer') ? ' defer' : ''}${Object.hasOwn(attrs, 'data-cw-async') && !Object.hasOwn(attrs, 'async') ? ' async' : ''} src="`
           const writer = `document.write(${JSON.stringify(opening)}+window[${JSON.stringify(property)}][${JSON.stringify(String(current))}]+${JSON.stringify('"></script>')})`
@@ -104,6 +169,14 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
     if ('childNodes' in node) node.childNodes.forEach(visit)
   }
   visit(parsed)
+  const resolve = (reference: string) => options.resources[data.resourceBindings?.[reference] ?? reference]
+  for (const [index, source] of Object.entries(programs.classic)) programs.classic[index] = resolveWebJavaScriptResources(source, resolve)
+  if (programs.graph) programs.graph = { ...programs.graph, modules: Object.fromEntries(Object.entries(programs.graph.modules).map(([path, module]) => {
+    let code = module.code
+    for (const reference of [...module.imports].sort((a, b) => b.start - a.start)) code = code.slice(0, reference.start) + JSON.stringify(prefix + reference.path) + code.slice(reference.end)
+    return [path, { code: projectWebModuleUrls(resolveWebJavaScriptResources(code, resolve, true), `globalThis[${JSON.stringify(programs.moduleProperty)}]`), imports: [] }]
+  })) }
+  if (programs.published) programs.published.code = projectWebModuleUrls(resolveWebJavaScriptResources(programs.published.code, resolve, true), `globalThis[${JSON.stringify(programs.moduleProperty)}]`)
   const doctype = parsed.childNodes.find(node => node.nodeName === '#documentType')
   const html = parsed.childNodes.find((node): node is DefaultTreeAdapterTypes.Element => 'tagName' in node && node.tagName === 'html')
   const head = html?.childNodes.find((node): node is DefaultTreeAdapterTypes.Element => 'tagName' in node && node.tagName === 'head')
@@ -113,13 +186,59 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
     ?? html?.sourceCodeLocation?.startTag?.endOffset
     ?? doctype?.sourceCodeLocation?.endOffset ?? 0
   const marker = webResourceReferenceMarker({ $text: options.resourceCss ?? data.css ?? '' }, data.resourceBindings ?? {}, id => options.resources[id])
-  const style = [options.themeCss ? `<style data-component-initial-theme>${options.themeCss.replace(/<\/style/gi, '<\\/style')}</style>` : '', data.css ? `<style${marker ? ` data-component-resource-bindings="${quote(marker)}"` : ''}>${data.css.replace(/<\/style/gi, '<\\/style')}</style>` : ''].join('')
-  const textBootstrap = `${domTextOverrideRealmSource()}(${installParsedPageTextOverrides.toString()})(${JSON.stringify(programs.textOverrides ?? [])},${JSON.stringify(property)},createPageTextOverrides);`
+  const fonts = splitInstalledBundledFontFaceCss(options.themeCss ?? '')
+  const style = [fonts.faces ? `<style data-component-bundled-faces>${fonts.faces.replace(/<\/style/gi, '<\\/style')}</style>` : '',
+    fonts.theme ? `<style data-component-initial-theme>${fonts.theme.replace(/<\/style/gi, '<\\/style')}</style>` : '', data.css ? `<style${marker ? ` data-component-resource-bindings="${quote(marker)}"` : ''}>${data.css.replace(/<\/style/gi, '<\\/style')}</style>` : ''].join('')
+  const textBootstrap = `${domTextOverrideRealmSource()}(${installParsedPageTextOverrides.toString()})(${JSON.stringify(programs.textOverrides ?? [])},${JSON.stringify(property)},createPageTextOverrides);(${installOwnedDocumentBridge.toString()})(${JSON.stringify(property)},${Boolean(documentPath)},${refreshWebResourceReferences.toString()});`
   const bootstrap = `<meta charset="utf-8"><script>${(textBootstrap + options.bridge(programs)).replace(/<\/script/gi, '<\\/script')}</script>${style}`
   if (!options.nestedOnly) edits.push({ start: insertion, end: insertion, value: bootstrap })
   let result = source
   for (const edit of edits.sort((a, b) => b.start - a.start)) result = result.slice(0, edit.start) + edit.value + result.slice(edit.end)
   return result
+}
+
+/** Messages remain between owned srcdoc realms; authors keep their parser and state. */
+export function installOwnedDocumentBridge(token: string, nested: boolean, refresh: typeof refreshWebResourceReferences) {
+  let activity: { active: boolean; visible: boolean; playing: boolean } | undefined
+  const activitySnapshot = () => activity && { ...activity }
+  Object.defineProperty(window, '__guolingRuntimeActivity', { configurable: true, get: activitySnapshot })
+  const postActivity = (frame: HTMLIFrameElement) => {
+    if (activity) frame.contentWindow?.postMessage({ type: 'guoling.runtime.activity', token, value: activitySnapshot() }, '*')
+  }
+  const activityEvent = (event: Event) => {
+    const value = (event as CustomEvent).detail
+    if (!value || typeof value.active !== 'boolean' || typeof value.visible !== 'boolean' || typeof value.playing !== 'boolean') return
+    activity = { active: value.active, visible: value.visible, playing: value.playing }
+    for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]')) postActivity(frame)
+  }
+  const loaded = (event: Event) => {
+    if (event.target instanceof HTMLIFrameElement && event.target.hasAttribute('srcdoc')) postActivity(event.target)
+  }
+  const receive = (event: MessageEvent) => {
+    const data = event.data
+    if (event.source === parent && data?.type === 'guoling.runtime.activity' && data.token === token) {
+      window.dispatchEvent(new CustomEvent('__runtime.activity', { detail: data.value }))
+    } else if (event.source === parent && data?.type === 'guoling.resources.refresh' && data.token === token && data.resources) {
+      refresh(document, data.resources)
+      for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]')) frame.contentWindow?.postMessage(data, '*')
+    } else if (nested && data?.type === 'guoling.owned-document.click' && data.token === token
+      && [...document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]')].some(frame => frame.contentWindow === event.source)) parent.postMessage(data, '*')
+  }
+  const click = () => parent.postMessage({ type: 'guoling.owned-document.click', token }, '*')
+  const release = () => {
+    window.removeEventListener('message', receive)
+    window.removeEventListener('__runtime.activity', activityEvent)
+    window.removeEventListener('load', loaded, true)
+    if (Object.getOwnPropertyDescriptor(window, '__guolingRuntimeActivity')?.get === activitySnapshot)
+      Reflect.deleteProperty(window, '__guolingRuntimeActivity')
+    document.removeEventListener('click', click, true)
+    window.removeEventListener('pagehide', release)
+  }
+  window.addEventListener('message', receive)
+  window.addEventListener('__runtime.activity', activityEvent)
+  window.addEventListener('load', loaded, true)
+  if (nested) document.addEventListener('click', click, true)
+  window.addEventListener('pagehide', release, { once: true })
 }
 
 /** Each owned parser document uses its own observer and receives only its parent's rule updates. */

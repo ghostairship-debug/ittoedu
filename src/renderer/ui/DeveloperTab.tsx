@@ -219,7 +219,7 @@ export function componentObjectJsonEdits(project: CourseProjectV10, target: Comp
     { type: 'style.set', instanceId: current.id, path: [], value: next.style ?? {} },
     ...(next.frame ? [{ type: 'frame.set' as const, instanceId: current.id, frame: next.frame }] : []),
     { type: 'instance.patch', instanceId: current.id, patch: { name: next.name ?? current.name ?? '', visible: next.visible ?? true,
-      locked: next.locked ?? false, playbackInitialVisibility: next.playbackInitialVisibility ?? 'inherit' } },
+      locked: next.locked ?? false, playbackInitialVisibility: next.playbackInitialVisibility ?? 'inherit', visibility: next.visibility ?? null } },
     { type: 'implementation.set', instanceId: current.id, implementation: next.implementationOverride ?? null },
     { type: 'attachments.set', instanceId: current.id, attachments: next.attachments ?? [] },
     { type: 'instance.flowPlacement.set', instanceId: current.id, flowPlacement: next.flowPlacement ?? null },

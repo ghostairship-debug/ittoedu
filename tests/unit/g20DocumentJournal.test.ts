@@ -5,7 +5,10 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createDocumentJournal, readDocumentFileVersion, readDocumentMarkdownResources } from '../../src/main/workbench/documentJournal'
+import { createDocumentJournal, markdownReferences, readDocumentFileVersion, readDocumentMarkdownResources } from '../../src/main/workbench/documentJournal'
+import { DocumentSession } from '../../src/core/documents/DocumentSession'
+import { createMarkdownDriver } from '../../src/core/drivers/MarkdownDriver'
+import { parseDocumentMarkdown } from '../../src/shared/document/markdown'
 import type { DocumentModel, DurableDocumentState } from '../../src/shared/workbench/document'
 
 const roots: string[] = []
@@ -24,6 +27,8 @@ async function fixture() {
 }
 const bytes = (value: string) => new TextEncoder().encode(value)
 const model = (source = '正文'): DocumentModel => ({ kind: 'markdown', source, resources: { assets: {}, components: {} } })
+const componentReference = '\n```cw-object-v1\n' + JSON.stringify({ kind: 'flow-block', block: { id: 'code', type: 'code', code: '' },
+  resources: { assets: [], components: [{ packageId: 'demo', version: '1', source: { kind: 'relative', path: 'packages/demo' } }] } }) + '\n```\n'
 function state(documentId = 'document-a', sequence = 0): DurableDocumentState {
   return { schemaVersion: 1, documentId, epoch: 'epoch-a', sequence, revision: sequence, savedRevision: null,
     binding: { kind: 'untitled', suggestedName: '未命名.md' }, model: model(), past: [], future: [], operations: [], stoppedRuns: [] }
@@ -119,7 +124,7 @@ describe('G20 durable document journal', () => {
   it('keeps Markdown resource closure complete, protects shared attachments, and leaves the old file intact on save failure', async () => {
     const { root, journal } = await fixture()
     const filename = path.join(root, 'lesson.md')
-    const source = '![图片](assets/image.bin)\n[组件](packages/demo)'
+    const source = '![图片](assets/image.bin)' + componentReference
     const draft = model(source)
     draft.resources.assets['assets/image.bin'] = new Uint8Array([0, 255, 1])
     draft.resources.components['packages/demo'] = { 'index.js': bytes('export default {}'), 'media/part.bin': bytes('component media') }
@@ -167,7 +172,7 @@ describe('G20 durable document journal', () => {
     await fs.mkdir(path.join(original, 'assets'), { recursive: true })
     await fs.mkdir(path.join(original, 'packages/demo/media'), { recursive: true })
     await fs.mkdir(destination)
-    const source = '# 标题\r\n\r\n![图片](assets/photo.bin)\r\n[组件](packages/demo)\r\n[旧失效链接](missing.txt)\r\n\r\n```cw-object-v1\r\n{ 未完成 JSON\r\n```\r\n'
+    const source = '# 标题\r\n\r\n![图片](assets/photo.bin)\r\n[旧失效链接](missing.txt)\r\n\r\n```cw-object-v1\r\n{ 未完成 JSON\r\n```\r\n' + componentReference
     const filename = path.join(original, 'lesson.md')
     await fs.writeFile(filename, source)
     await fs.writeFile(path.join(original, 'assets/photo.bin'), new Uint8Array([0, 255, 2]))
@@ -189,6 +194,69 @@ describe('G20 durable document journal', () => {
     expect(await readDocumentMarkdownResources(copy)).toEqual(resources)
     await expect(fs.access(path.join(destination, 'missing.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
+})
+
+it('CA-126 rejects externally replaced publication bytes without acknowledging or replaying the save', async () => {
+  const { root, directory, journal } = await fixture(), filename = path.join(root, 'lesson.md')
+  await fs.writeFile(filename, 'original')
+  const binding = { kind: 'file' as const, path: filename, version: await readDocumentFileVersion(filename, 'markdown'), bindingVersion: 1 }
+  const session = await DocumentSession.create({ documentId: 'publication-conflict', epoch: 'epoch', model: model('original'), binding, saved: true }, createMarkdownDriver(), journal)
+  await session.execute({ documentId: session.documentId, epoch: 'epoch', baseRevision: 0, operationId: 'edit', actor: 'human',
+    mutation: { type: 'command', command: { type: 'markdown.replace', source: 'my draft' } } })
+  const identity = { runId: 'run', operationId: 'save-original-intent', requestDigest: 'request' }
+  const rename = fs.rename.bind(fs)
+  const publication = vi.spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+    await rename(source, target)
+    if (String(target) === filename) await fs.writeFile(filename, 'external writer after publication')
+  })
+  await expect(session.save(undefined, undefined, identity)).rejects.toMatchObject({ publication: 'unknown', code: 'file-conflict' })
+  publication.mockRestore()
+  expect(session.read()).toMatchObject({ revision: 1, dirty: true, binding, model: { source: 'my draft' } })
+  expect(await journal.lookupSave(session.documentId, identity)).toBeNull()
+  expect(await createDocumentJournal({ directory }).recover(session.documentId)).toMatchObject({ savedRevision: 0, revision: 1, binding, model: { source: 'my draft' } })
+  expect((await fs.readdir(directory)).some(name => name.endsWith('.save-intent.json'))).toBe(true)
+  await expect(session.save()).rejects.toMatchObject({ publication: 'not-published', code: 'file-conflict' })
+  expect(await fs.readFile(filename, 'utf8')).toBe('external writer after publication')
+})
+
+it('CA-066/104 saves and reopens navigation, literal object paths and local malformed objects without losing usable resources', async () => {
+  const { root, journal } = await fixture(), original = path.join(root, 'original'), destination = path.join(root, 'copy')
+  await fs.mkdir(path.join(original, 'resources'), { recursive: true }); await fs.mkdir(destination)
+  for (const name of ['old.png', 'plot#1.png', 'plot%20one.png', 'raw%.png']) await fs.writeFile(path.join(original, 'resources', name), name)
+  const object = { kind: 'flow-block', block: { id: 'kept-code', type: 'code', code: '' }, resources: { assets: [
+    { assetId: 'hash', source: { kind: 'relative', path: 'resources/plot#1.png' } },
+    { assetId: 'percent', source: { kind: 'relative', path: 'resources/plot%20one.png' } },
+  ], components: [] } }
+  const malformed = { resources: { assets: [{ assetId: 'hero' }, null, { source: { kind: 'relative', path: '../unsafe.bin' } }], components: {} } }
+  const source = '[上级](../资料.md) [资源目录](resources) [百分号](raw%)\n<a href="../notes.md">导航</a>\n'
+    + '![旧图](resources/old.png) ![百分号图](resources/raw%.png)\n```cw-object-v1\n' + JSON.stringify(object)
+    + '\n```\n```cw-object-v1\n' + JSON.stringify(malformed) + '\n```\n后续正文\n'
+  const filename = path.join(original, 'lesson.md'); await fs.writeFile(filename, source)
+  expect(await markdownReferences(source)).toEqual(['resources/old.png', 'resources/plot#1.png', 'resources/plot%20one.png', 'resources/raw%.png'])
+  let nextId = 0
+  const parsed = parseDocumentMarkdown(source, { target: 'file', createId: kind => `${kind}-local-${++nextId}`, recoverUnsupportedBlocks: true,
+    resolveImage: href => ({ assetId: `image-${++nextId}`, source: { kind: 'relative', path: href } }) })
+  expect(parsed.status, JSON.stringify(parsed.diagnostics)).toBe('valid')
+  expect(parsed.source).toBe(source)
+  expect(parsed.diagnostics.length).toBeGreaterThan(0)
+  const resources = await readDocumentMarkdownResources(filename)
+  expect(Object.keys(resources.components)).toEqual([])
+  expect(Object.keys(resources.assets).sort()).toEqual(await markdownReferences(source))
+  const nextSource = source + '\n![新增](resources/new.png)\n', draft: DocumentModel = { kind: 'markdown', source: nextSource, resources }
+  draft.resources.assets['resources/new.png'] = bytes('new image')
+  await remember(journal, 'navigation', 1, nextSource)
+  await journal.save({ documentId: 'navigation', revision: 1, model: draft, bytes: bytes(nextSource),
+    binding: { kind: 'file', path: filename, version: await readDocumentFileVersion(filename, 'markdown'), bindingVersion: 1 } })
+  const copy = path.join(destination, 'copy.md')
+  await journal.save({ documentId: 'navigation', revision: 1, model: draft, bytes: bytes(nextSource),
+    binding: { kind: 'file', path: copy, version: null, bindingVersion: 2 } })
+  expect(await fs.readFile(copy, 'utf8')).toBe(nextSource)
+  const reopened = await readDocumentMarkdownResources(copy)
+  expect(Object.keys(reopened.assets).sort()).toEqual(Object.keys(draft.resources.assets).sort())
+  expect(reopened.components).toEqual(draft.resources.components)
+  for (const relative of Object.keys(reopened.assets)) expect(Buffer.from(reopened.assets[relative]!)).toEqual(Buffer.from(draft.resources.assets[relative]!))
+  expect(await fs.readFile(path.join(destination, 'resources/plot#1.png'), 'utf8')).toBe('plot#1.png')
+  expect(await fs.readFile(path.join(destination, 'resources/plot%20one.png'), 'utf8')).toBe('plot%20one.png')
 })
 
 it('reads recovery records without loading the whole journal and preserves history, receipts and stopped runs', async () => {

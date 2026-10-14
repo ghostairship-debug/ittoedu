@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ownRecordSchema, ownJsonValueSchema } from '../ownRecordSchema'
 import { chartNativeContentObjectSchema } from '../contracts/native-v1/schema'
 import type { NativeChartContent, TextRunStyle } from '../contracts/native-v1/types'
 import { tableCellSpan, tableMergeIssues, tableMergeRegionSchema, type TableMergeRegion } from '../tableMerge'
@@ -9,16 +10,18 @@ import { normalizeDocumentColor } from './color'
 // The 048 root switch will consume these definitions; no legacy Flow writer uses them.
 export interface InlineLink { href: string; title?: string }
 export type MathStyle = { fontSize?: number; color?: string }
-export type FlowInline =
+export type FlowInline = { rangeIds?: string[] } & (
   | { type: 'text'; text: string; style?: TextRunStyle; code?: boolean; link?: InlineLink }
   | { type: 'math'; formulaId: string; latex: string; accessibleText: string; style?: MathStyle; link?: InlineLink }
+  | { type: 'component'; instanceId: string; accessibleText: string; style?: TextRunStyle; link?: InlineLink }
+)
 export interface FlowTextContent { inlines: FlowInline[] }
-type ParagraphStyle = { textAlign?: 'left' | 'center' | 'right'; lineSpacing?: number }
+type ParagraphStyle = { textAlign?: 'left' | 'center' | 'right'; lineSpacing?: number; textDefaults?: TextRunStyle }
 export type DocumentBlock = { id: string } & (
   | ({ type: 'paragraph'; content: FlowTextContent } & ParagraphStyle)
   | ({ type: 'heading'; content: FlowTextContent; level: 1 | 2 | 3 | 4 | 5 | 6 } & ParagraphStyle)
   | ({ type: 'quote'; content: FlowTextContent; citation?: FlowTextContent } & ParagraphStyle)
-  | { type: 'list'; ordered: boolean; items: { id: string; content: FlowTextContent }[] }
+  | { type: 'list'; ordered: boolean; start?: number; items: { id: string; content: FlowTextContent }[] }
   | { type: 'divider' }
   /**
    * `source` is a written `assets/...` reference kept as written; software binds `assetId` to the asset
@@ -41,7 +44,7 @@ export type DocumentBlock = { id: string } & (
   | { type: 'course-component'; name: string; title?: string; height?: number; wrap?: 'none' | 'left' | 'right' }
 )
 
-export const documentIdSchema = z.string().min(1).max(240).refine(s => s === s.trim(), '身份不得含首尾空白')
+export const documentIdSchema = z.string().min(1)
 const color = z.string().transform((value, context) => {
   const normalized = normalizeDocumentColor(value)
   if (normalized !== undefined) return normalized
@@ -59,10 +62,12 @@ export const inlineLinkSchema = z.object({ href: z.string().min(1), title: z.str
 const latexSchema = z.string().min(1).max(16384).superRefine((value, ctx) => {
   try { parseDocumentMath(value) } catch (error) { ctx.addIssue({ code: 'custom', message: error instanceof Error ? error.message : '无效公式' }) }
 })
+const rangeFields = { rangeIds: z.array(documentIdSchema).optional() }
 const mathFields = { formulaId: documentIdSchema, latex: latexSchema, accessibleText: z.string().trim().min(1).max(4000), style: documentMathStyleSchema.optional() }
 export const documentInlineSchema: z.ZodType<FlowInline> = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('text'), text: z.string(), style: documentTextStyleSchema.optional(), code: z.boolean().optional(), link: inlineLinkSchema.optional() }).strict(),
-  z.object({ type: z.literal('math'), ...mathFields, link: inlineLinkSchema.optional() }).strict(),
+  z.object({ type: z.literal('text'), ...rangeFields, text: z.string(), style: documentTextStyleSchema.optional(), code: z.boolean().optional(), link: inlineLinkSchema.optional() }).strict(),
+  z.object({ type: z.literal('math'), ...rangeFields, ...mathFields, link: inlineLinkSchema.optional() }).strict(),
+  z.object({ type: z.literal('component'), ...rangeFields, instanceId: documentIdSchema, accessibleText: z.string(), style: documentTextStyleSchema.optional(), link: inlineLinkSchema.optional() }).strict(),
 ])
 export const documentTextContentSchema = z.object({ inlines: z.array(documentInlineSchema) }).strict()
 const base = { id: documentIdSchema }
@@ -85,11 +90,11 @@ const media = z.object({ ...base, type: z.literal('media'), assetId: documentIdS
     ctx.addIssue({ code: 'custom', path: ['crop'], message: '图片每个方向的裁剪总量必须小于 99%' })
   }
 })
-const paragraph = { content: documentTextContentSchema, textAlign: z.enum(['left', 'center', 'right']).optional(), lineSpacing: z.number().finite().min(0).max(200).optional() }
+const paragraph = { content: documentTextContentSchema, textAlign: z.enum(['left', 'center', 'right']).optional(), lineSpacing: z.number().finite().min(0).max(200).optional(), textDefaults: documentTextStyleSchema.optional() }
 const table = z.object({
   ...base, type: z.literal('table'), caption: documentTextContentSchema.optional(), headerEnabled: z.boolean().optional(),
   columns: z.array(z.object({ id: documentIdSchema, header: documentTextContentSchema }).strict()).min(1).max(256),
-  rows: z.array(z.object({ id: documentIdSchema, cells: z.record(z.string(), documentTextContentSchema) }).strict()).max(100000),
+  rows: z.array(z.object({ id: documentIdSchema, cells: ownRecordSchema(z.string(), documentTextContentSchema) }).strict()).max(100000),
   merges: z.array(tableMergeRegionSchema).max(10000).optional(),
 }).strict().superRefine((block, ctx) => {
   for (const message of tableMergeIssues(block)) ctx.addIssue({ code: 'custom', path: ['merges'], message })
@@ -99,7 +104,7 @@ const table = z.object({
   block.rows.forEach((r, index) => {
     if (Object.keys(r.cells).length !== columns.size || Object.keys(r.cells).some(c => !columns.has(c))) ctx.addIssue({ code: 'custom', path: ['rows', index, 'cells'], message: '每行必须包含全部列且无额外列' })
     for (const [column, cell] of Object.entries(r.cells)) {
-      if (cell.inlines.some(i => i.type === 'math' || i.text.length > 0) && tableCellSpan(block, r.id, column).covered) ctx.addIssue({ code: 'custom', path: ['rows', index, 'cells', column], message: '合并覆盖格必须为空' })
+      if (cell.inlines.some(i => i.type !== 'text' || i.text.length > 0) && tableCellSpan(block, r.id, column).covered) ctx.addIssue({ code: 'custom', path: ['rows', index, 'cells', column], message: '合并覆盖格必须为空' })
     }
   })
 })
@@ -107,7 +112,7 @@ export const documentBlockSchema: z.ZodType<DocumentBlock> = z.lazy(() => z.disc
   z.object({ ...base, type: z.literal('paragraph'), ...paragraph }).strict(),
   z.object({ ...base, type: z.literal('heading'), level: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6)]), ...paragraph }).strict(),
   z.object({ ...base, type: z.literal('quote'), ...paragraph, citation: documentTextContentSchema.optional() }).strict(),
-  z.object({ ...base, type: z.literal('list'), ordered: z.boolean(), items: z.array(z.object({ id: documentIdSchema, content: documentTextContentSchema }).strict()).min(1).max(10000) }).strict(),
+  z.object({ ...base, type: z.literal('list'), ordered: z.boolean(), start: z.number().int().optional(), items: z.array(z.object({ id: documentIdSchema, content: documentTextContentSchema }).strict()).min(1).max(10000) }).strict(),
   z.object({ ...base, type: z.literal('divider') }).strict(),
   media,
   table,
@@ -116,7 +121,7 @@ export const documentBlockSchema: z.ZodType<DocumentBlock> = z.lazy(() => z.disc
   z.object({ ...base, type: z.literal('code'), code: z.string().max(5000000), language: z.string().trim().min(1).max(100).optional() }).strict(),
   z.object({ ...base, type: z.literal('callout'), tone: z.enum(['note', 'example', 'warning', 'conclusion']), title: documentTextContentSchema.optional(), body: documentTextContentSchema }).strict(),
   z.object({ ...base, type: z.literal('section'), title: documentTextContentSchema, collapsedByDefault: z.boolean(), blocks: z.array(documentBlockSchema).max(100000) }).strict(),
-  z.object({ ...base, type: z.literal('component'), component: z.object({ packageId: documentIdSchema, version: z.string().trim().min(1).max(100) }).strict(), props: z.record(z.string(), z.json()), staticFallbackAssetId: documentIdSchema, wrap: z.enum(['none', 'left', 'right']).optional() }).strict(),
+  z.object({ ...base, type: z.literal('component'), component: z.object({ packageId: documentIdSchema, version: z.string().trim().min(1).max(100) }).strict(), props: ownRecordSchema(z.string(), ownJsonValueSchema), staticFallbackAssetId: documentIdSchema, wrap: z.enum(['none', 'left', 'right']).optional() }).strict(),
   // Match the formal V10 identity contract, without a filename or display-name restriction.
   z.object({ id: z.string().min(1), type: z.literal('course-instance'), title: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal('course-component'),
@@ -147,8 +152,8 @@ export interface DocumentVisibleTextSlot {
 export function documentVisibleTextSlots(block: DocumentBlock): DocumentVisibleTextSlot[] {
   if (block.type !== 'table') return documentTextSlots(block)
   return [...(block.caption ? [{ key: 'caption', content: block.caption }] : []),
-    ...block.columns.map(column => ({ key: `column:${column.id}`, content: column.header,
-      tableCell: { rowId: null, columnId: column.id, rowSpan: 1, columnSpan: 1 } })),
+    ...(block.headerEnabled===false ? []:block.columns.map(column => ({ key: `column:${column.id}`, content: column.header,
+      tableCell: { rowId: null, columnId: column.id, rowSpan: 1, columnSpan: 1 } }))),
     ...block.rows.flatMap(row => block.columns.flatMap(column => {
       const span = tableCellSpan(block, row.id, column.id)
       return span.covered ? [] : [{ key: `cell:${JSON.stringify([row.id, column.id])}`, content: row.cells[column.id],
@@ -174,11 +179,11 @@ export const documentContentSchema = z.object({ blocks: z.array(documentBlockSch
 })
 export type DocumentContent = z.infer<typeof documentContentSchema>
 export const plainDocumentText = (content: FlowTextContent): string => content.inlines.map(i => i.type === 'text' ? i.text : i.accessibleText).join('')
-export const documentTextLength = (content: FlowTextContent): number => content.inlines.reduce((n, i) => n + (i.type === 'math' ? 1 : Array.from(i.text).length), 0)
+export const documentTextLength = (content: FlowTextContent): number => content.inlines.reduce((n, i) => n + (i.type !== 'text' ? 1 : Array.from(i.text).length), 0)
 
 export function normalizeDocumentText(content: FlowTextContent): FlowTextContent {
   const result: FlowInline[] = []
-  const key = (i: FlowInline) => JSON.stringify(i.type === 'text' ? { code: i.code ?? false, link: i.link, style: Object.fromEntries(Object.entries(i.style ?? {}).sort(([a], [b]) => a.localeCompare(b))) } : {})
+  const key = (i: FlowInline) => JSON.stringify(i.type === 'text' ? { code: i.code ?? false, link: i.link, rangeIds: i.rangeIds, style: Object.fromEntries(Object.entries(i.style ?? {}).sort(([a], [b]) => a.localeCompare(b))) } : {})
   for (const inline of content.inlines) {
     if (inline.type === 'text' && inline.text === '') continue
     const last = result.at(-1)
@@ -197,11 +202,11 @@ export function sliceDocumentText(
   const to = Math.max(from, Math.min(documentTextLength(content), end))
   let cursor = 0
   return normalizeDocumentText({ inlines: content.inlines.flatMap(inline => {
-    const size = inline.type === 'math' ? 1 : Array.from(inline.text).length
+    const size = inline.type !== 'text' ? 1 : Array.from(inline.text).length
     const left = Math.max(0, from - cursor), right = Math.min(size, to - cursor)
     cursor += size
     if (right <= left) return []
-    return [inline.type === 'math' ? structuredClone(inline) : { ...structuredClone(inline), text: Array.from(inline.text).slice(left, right).join('') }]
+    return [inline.type !== 'text' ? structuredClone(inline) : { ...structuredClone(inline), text: Array.from(inline.text).slice(left, right).join('') }]
   }) })
 }
 

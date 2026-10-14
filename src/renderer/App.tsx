@@ -1,7 +1,11 @@
 import { captureCourseDocumentReference, workbenchSelection } from './workbench/SelectionContextController'
 import { CourseAdvancedChrome, CourseEditorFrame, useCourseEditorChrome } from './documents/CourseEditorChromeContext'
 import { CourseLightToolbar } from './documents/CourseLightToolbar'
+import { openCoursePageProperties } from './composition/properties/openCoursePageProperties'
 import { HtmlImportDialog, type HtmlImportDestination } from './documents/HtmlImportDialog'
+import { planFlowImport } from './project/flowImportTransaction'
+import { createBlankCourseProjectV10 } from '../core/course/createCourseProjectV10'
+import { applyComponentOperation, captureComponentOperation } from '../core/drivers/courseV10Operations'
 import { elementCards } from './workbench/elementCards/elementCardController'
 import { CourseEditorActionsContext, type CourseEditorActions } from './documents/CourseEditorActionsContext'
 import { AlertCircle, FileClock, LoaderCircle, X } from 'lucide-react'
@@ -26,6 +30,7 @@ import { selectCurrentCatalogPackages } from './components/componentLibraryModel
 import { useCourseDelivery } from './app/useCourseDelivery'
 import { courseDeliverySnapshot } from './app/courseDeliverySnapshot'
 import { resolveCourseProjectDeliveryFindingRoute } from './diagnostics/projectHealthNavigation'
+import { CoursePreviewNotices } from './app/CoursePreviewNotices'
 import { useCourseProjectLifecycle } from './app/useCourseProjectLifecycle'
 import { useFlowDocumentRecovery } from './app/useFlowDocumentRecovery'
 import { captureFlowMenuTarget, resolveFlowMenuInsertionOptions, insertFlowMenu as commitFlowMenu, type CapturedFlowMenuTarget, type FlowInsertCommand } from './ui/flow/flowInsertCommands'
@@ -362,11 +367,14 @@ export default function App() {
           preserveFlow: preserveFlowInputs, suspendFlow: flowRecovery.suspendForClose, resumeFlow: flowRecovery.resumeAfterCloseCancelled,
         })
       },
-      snapshot: () => useEditorStore.getState().courseView.snapshot,
+      snapshot: documentId => {
+        const view = useEditorStore.getState().courseView
+        return documentId ? view.documents.find(snapshot => snapshot.documentId === documentId) ?? null : view.snapshot
+      },
       create: (surface, canvas) => useEditorStore.getState().createCourseDocument(surface, canvas),
       createFrom: content => useEditorStore.getState().createCourseDocumentFrom(content.project, content.resources),
       open: path => useEditorStore.getState().openCourseDocument(path),
-      save: saveAs => useEditorStore.getState().saveCourseDocument(saveAs, saveDirectory.current ?? undefined),
+      save: (saveAs, documentId) => useEditorStore.getState().saveCourseDocument(saveAs, saveDirectory.current ?? undefined, documentId),
       drain: () => drainCourseDocument(),
       settle: async () => {
         const state = useEditorStore.getState(), id = state.courseView.activeDocumentId
@@ -446,9 +454,45 @@ export default function App() {
   }
 
   const htmlImportInFlight = useRef(false)
+  const [flowImportIssues, setFlowImportIssues] = useState<{ name: string; issues: string[] } | null>(null)
+  const openFlowImport = async (directory?: SaveDirectoryContext, sourceEntryId?: string) => {
+    try {
+      const service = desktopApi().flowImport
+      if (!service) throw new Error('文档导入服务不可用，请重新打开应用')
+      const bridge = useEditorStore.getState().courseBridge
+      const target = activeWorkspaceDocument?.kind === 'course' ? bridge.captureTarget() : null
+      const originalDocument = bridge.read().activeDocumentId
+      const imported = await service.read({ directory, sourceEntryId })
+      if (!imported) return
+      if (bridge.read().activeDocumentId !== originalDocument || target && bridge.read().snapshot?.epoch !== target.epoch) throw new Error('导入期间工程已切换；原文件仍保留，请在目标工程重新导入。')
+      if (target) {
+        const current = bridge.captureTarget(target.documentId)
+        const planned = planFlowImport(current.project, imported)
+        await bridge.editCaptured(bridge.capture(planned.edits, { ...current, surfaceId: null, activeStateId: null }), 'flow-import')
+        bridge.selectSurface(target.documentId, planned.surfaceId)
+      } else {
+        const project = createBlankCourseProjectV10(imported.name.replace(/\.[^.]+$/, ''))
+        const planned = planFlowImport(project, imported)
+        planned.edits.push({ type: 'surface.remove', surfaceId: project.surfaces[0].id })
+        const next = applyComponentOperation(project, captureComponentOperation(project, planned.edits))
+        const created = await courseProjectLifecycle.newProjectFrom(async () => ({ project: next,
+          resources: { assets: Object.fromEntries(imported.assets.map(entry => [entry.asset.id, entry.bytes])), components: {} } }), { origin: 'lesson' })
+        if (!created) return
+      }
+      lessonShell.current?.showProject()
+      setStatus(`已将 ${imported.name} 导入为可编辑 Flow；原文件保留。`)
+      if (imported.issues.length) setFlowImportIssues({ name: imported.name, issues: imported.issues })
+    } catch (failure) { setError(readableError(failure, '文档导入未完成；原文件仍保留')) }
+  }
   const openHtmlImport = async (directory?: SaveDirectoryContext, sourceEntryId?: string) => {
     try {
       if (!desktopApi().htmlImport) throw new Error('HTML 导入服务不可用')
+      // An empty/plain-document work area must not import into an unrelated background course.
+      // The existing lifecycle preserves every prior document and creates the canonical target.
+      if (activeWorkspaceKind.current !== 'course' || !useEditorStore.getState().courseView.activeDocumentId) {
+        if (!await courseProjectLifecycle.newProject({ origin: 'lesson' })) return
+        lessonShell.current?.showProject()
+      }
       const documentId = useEditorStore.getState().courseView.activeDocumentId
       if (!documentId) throw new Error('请先打开一份 果铃工程')
       const snapshot = await useEditorStore.getState().drainCourseDocument()
@@ -588,7 +632,7 @@ export default function App() {
   }
   useCourseCanvasPaste({
     kernel: courseKernel,
-    isReadOnly: () => courseDelivery.previewOpen || useEditorStore.getState().canvasMode === 'run',
+    isReadOnly: () => activeWorkspaceKind.current !== 'course' || courseDelivery.previewOpen || useEditorStore.getState().canvasMode === 'run',
     ownsPaste: () => {
       const state = useEditorStore.getState()
       return !state.courseView.project || Boolean(state.flowDocumentDraft?.composing)
@@ -642,8 +686,10 @@ export default function App() {
 
   const [pendingFlowComponent, setPendingFlowComponent] = useState<{ command: FlowInsertCommand; capture: CapturedFlowMenuTarget } | null>(null)
   const insertFlowMenu = (command: FlowInsertCommand, payload?: FlowDeepInsertPayload, captured?: CapturedFlowMenuTarget, entry?: ComponentLibraryEntry) => {
+    let target: CapturedFlowMenuTarget
+    try { target = captured ?? captureFlowMenuTarget(courseKernel) }
+    catch (error) { setError(readableError(error, `${command.label}插入失败。`)); return }
     void run(async () => {
-      const target = captured ?? captureFlowMenuTarget(courseKernel)
       const options = resolveFlowMenuInsertionOptions(target, command)
       if (command.kind === 'component') {
         if (!entry && !payload?.packageId) { setPendingFlowComponent({ command, capture: target }); return }
@@ -674,7 +720,7 @@ export default function App() {
   }
 
   useEditorKeyboardRouter({
-    isReadOnly: () => courseDelivery.previewOpen || useEditorStore.getState().canvasMode === 'run',
+    isReadOnly: () => activeWorkspaceKind.current !== 'course' || courseDelivery.previewOpen || useEditorStore.getState().canvasMode === 'run',
     captureDeleteSnapshot(target) {
       const state = useEditorStore.getState(), view = state.courseView
       const kind = view.project?.surfaces.find(surface => surface.id === view.surfaceId)?.kind
@@ -742,14 +788,71 @@ export default function App() {
   const elementCardNavigation = useMemo(() => createComponentElementCardNavigation({ kernel: courseKernel, reportError: setError,
     activateDocument: id => useEditorStore.getState().activateCourseDocument(id), drainDocument: id => drainCourseDocument(id),
   }), [courseKernel, setError])
-  const slideLightPageTarget = slideLight.capturePage()
-  const slideLightPageView = slideLightPageTarget ? slideLight.viewPage(slideLightPageTarget) : null
   const courseEditorActions = useMemo<CourseEditorActions>(() => ({
     replaceImage: () => { void mediaImportRef.current.selectAndImportImage('replace') },
     replaceVideo: () => { void mediaImportRef.current.replaceSelectedVideo() },
     transformImage: operations => transformCourseImageAtTarget(courseKernel, courseKernel.captureTarget(), operations),
     slideLight,
   }), [courseKernel, slideLight])
+
+  const courseCommonTools = (toolbarMode: 'light' | 'deep') => <CourseLightToolbar
+    toolbarMode={toolbarMode}
+    documentId={courseConnection.activeDocumentId}
+    isCurrentDocument={id => useEditorStore.getState().courseView.activeDocumentId === id}
+    canUndo={canUndoCourse} canRedo={canRedoCourse}
+    canUndoLatestAgent={courseConnection.snapshot?.undoHead?.actor === 'agent'}
+    undo={() => useEditorStore.getState().undo()} redo={() => useEditorStore.getState().redo()}
+    undoLatestAgent={() => { void useEditorStore.getState().undoLatestAgentCourseDocument().catch(error => setError(error instanceof Error ? error.message : '撤销最近 AI 修改失败')) }}
+    save={() => { void courseProjectLifecycle.saveProject(false) }}
+    saveAs={() => { void courseProjectLifecycle.saveProject(true) }}
+    onReplaceImage={() => { void mediaImport.selectAndImportImage('replace') }}
+    onAddText={() => { void (async () => {
+      const before = useEditorStore.getState(), target = before.courseKernel.captureTarget()
+      await before.addTextNode()
+      await drainCourseDocument(target.documentId)
+      const after = useEditorStore.getState(), view = after.courseView
+      if (view.activeDocumentId !== target.documentId || view.surfaceId !== target.surfaceId) return
+      const id = view.selectedInstanceId
+      if (!id || target.instanceIds.includes(id)) return
+      const instance = view.project?.instances[id]
+      const definition = instance && view.project?.definitions[instance.definitionId]
+      if (definition?.implementation.kind !== 'builtin' || definition.implementation.key !== 'guoling.text') return
+      if (insertSurface === 'flow' && target.surfaceId) {
+        requestFlowBlockFocus({ documentId: target.documentId, surfaceId: target.surfaceId, blockId: id, revision: view.project!.revision })
+      } else after.beginTextEdit(id, 'canvas')
+    })().catch(error => setError(readableError(error, '文字插入尚未确认。'))) }}
+    onImportHtml={() => { void openHtmlImport() }}
+    onImportFlow={() => { void openFlowImport() }} onImportPptx={() => openDesignTool('pptx')}
+    onAddImage={() => { void mediaImport.selectAndImportImage('add') }}
+    onAddVideo={() => { void mediaImport.selectAndImportVideo('add') }}
+    onAddAudio={() => {
+      if (insertSurface === 'flow') { void mediaImport.selectAndInsertFlowAudio(); return }
+      if (insertSurface === 'slide') {
+        const target = slideLight.capturePage()
+        if (!target) { setError('当前演示页尚未就绪，请稍后重试'); return }
+        void slideLight.placeAudio(target).catch(error => setError(error instanceof Error ? error.message : '放置音频失败'))
+        return
+      }
+      void mediaImport.selectAndImportAudio()
+    }}
+    onAddShape={shapeType => useEditorStore.getState().addShapeNode(shapeType)}
+    onAddFormula={() => useEditorStore.getState().addFormulaNode()}
+    flowInsertMenu={{ onInsert: command => insertFlowMenu(command) }}
+    insertSurface={insertSurface} editingScope={editingScope} spatialScope={spatialInsertScope}
+    mode={courseCanvasMode}
+    busy={busy} hasFlowSurface={hasFlowSurface}
+    onPreview={courseDelivery.openPreview} onExport={courseDelivery.exportCourse} onExportSettings={courseDelivery.openExportSettings}
+    onToggleProperties={() => { useEditorStore.getState().setActiveTab('properties'); proEditorRailController.toggle('properties') }}
+    onOpenPageProperties={insertSurface ? () => { void openCoursePageProperties({ kernel: useEditorStore.getState().courseKernel,
+      drain: id => drainCourseDocument(id), open: surfaceId => {
+        const current = useEditorStore.getState()
+        current.setEditingScope('scene')
+        if (current.courseView.project?.surfaces.find(surface => surface.id === surfaceId)?.kind === 'spatial') current.setSpatialGraphSelection(null, surfaceId)
+        current.setActiveTab('properties'); proEditorRailController.open('properties')
+      },
+    }).catch(error => setError(readableError(error, '打开页面属性失败。'))) } : undefined}
+    elementCards={elementCardNavigation}
+    reportError={setError} />
 
   return (
     <ProjectColorPaletteContext.Provider value={projectColors}>
@@ -762,66 +865,19 @@ export default function App() {
           return useEditorStore.getState().closeCourseDocument(id)
         } }}
       prepareCourseDocuments={async ids => { await useEditorStore.getState().drainAllCourseDocuments(ids) }}
-      captureCourseDocument={async writable => {
+      captureCourseDocument={async (writable, prepare = true) => {
         const state = useEditorStore.getState(), { activeDocumentId, surfaceId } = state.courseView
         if (!activeDocumentId) throw new Error('当前没有打开的课件。')
         return [await captureCourseDocumentReference({ documentId: activeDocumentId, surfaceId }, writable,
-          id => state.drainCourseDocument(id))]
+          id => prepare ? state.drainCourseDocument(id) : rawDocuments!.read(id))]
       }}
       onOpenProject={path => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson' })} onNewProject={() => courseProjectLifecycle.newProject({ origin: 'lesson' })} onNewProjectFromPptx={newProjectFromPptx} onDirtyChange={setLessonDirty} onActiveDocumentChange={setActiveWorkspaceDocument}
-      onImportHtml={(directory, sourceEntryId) => { void openHtmlImport(directory, sourceEntryId) }}
+      onImportHtml={(directory, sourceEntryId) => { void openHtmlImport(directory, sourceEntryId) }} onImportFlow={(directory, sourceEntryId) => { void openFlowImport(directory, sourceEntryId) }}
       toolbarExtras={flowRecovery.retained.length > 0 && <button type="button" title="查看保留的正文原稿" onClick={() => setRetainedFlowOpen(true)}><FileClock size={14} />保留原稿 ({flowRecovery.retained.length})</button>}
 >
-    <BundledFontBoundary><CourseEditorFrame lightTools={<CourseLightToolbar
-      slideLightPage={slideLightPageView ? { view: slideLightPageView, run: command => slideLight.runPage(slideLightPageView.target, command) } : null}
-      documentId={courseConnection.activeDocumentId}
-      isCurrentDocument={id => useEditorStore.getState().courseView.activeDocumentId === id}
-      canUndo={canUndoCourse} canRedo={canRedoCourse}
-      canUndoLatestAgent={courseConnection.snapshot?.undoHead?.actor === 'agent'}
-      undo={() => useEditorStore.getState().undo()} redo={() => useEditorStore.getState().redo()}
-      undoLatestAgent={() => { void useEditorStore.getState().undoLatestAgentCourseDocument().catch(error => setError(error instanceof Error ? error.message : '撤销最近 AI 修改失败')) }}
-      save={() => { void courseProjectLifecycle.saveProject(false) }}
-      saveAs={() => { void courseProjectLifecycle.saveProject(true) }}
-      onReplaceImage={() => { void mediaImport.selectAndImportImage('replace') }}
-      onAddText={() => { void (async () => {
-        const before = useEditorStore.getState(), target = before.courseKernel.captureTarget()
-        await before.addTextNode()
-        await drainCourseDocument(target.documentId)
-        const after = useEditorStore.getState(), view = after.courseView
-        if (view.activeDocumentId !== target.documentId || view.surfaceId !== target.surfaceId) return
-        const id = view.selectedInstanceId
-        if (!id || target.instanceIds.includes(id)) return
-        const instance = view.project?.instances[id]
-        const definition = instance && view.project?.definitions[instance.definitionId]
-        if (definition?.implementation.kind !== 'builtin' || definition.implementation.key !== 'guoling.text') return
-        if (insertSurface === 'flow' && target.surfaceId) {
-          requestFlowBlockFocus({ documentId: target.documentId, surfaceId: target.surfaceId, blockId: id, revision: view.project!.revision })
-        } else after.beginTextEdit(id, 'canvas')
-      })().catch(error => setError(readableError(error, '文字插入尚未确认。'))) }}
-      onImportHtml={() => { void openHtmlImport() }}
-      onAddImage={() => { void mediaImport.selectAndImportImage('add') }}
-      onAddVideo={() => { void mediaImport.selectAndImportVideo('add') }}
-      onAddAudio={() => {
-        if (insertSurface === 'flow') { void mediaImport.selectAndInsertFlowAudio(); return }
-        if (insertSurface === 'slide') {
-          const target = slideLight.capturePage()
-          if (!target) { setError('当前演示页尚未就绪，请稍后重试'); return }
-          void slideLight.placeAudio(target).catch(error => setError(error instanceof Error ? error.message : '放置音频失败'))
-          return
-        }
-        void mediaImport.selectAndImportAudio()
-      }}
-      onAddShape={shapeType => useEditorStore.getState().addShapeNode(shapeType)}
-      onAddFormula={() => useEditorStore.getState().addFormulaNode()}
-      flowInsertMenu={{ onInsert: command => insertFlowMenu(command) }}
-      insertSurface={insertSurface} editingScope={editingScope} spatialScope={spatialInsertScope}
-      mode={courseCanvasMode}
-      busy={busy} hasFlowSurface={hasFlowSurface}
-      onPreview={courseDelivery.openPreview} onExport={courseDelivery.exportCourse} onExportSettings={courseDelivery.openExportSettings}
-      onToggleProperties={() => { useEditorStore.getState().setActiveTab('properties'); proEditorRailController.toggle('properties') }}
-      elementCards={elementCardNavigation}
-      reportError={setError} />}>
+    <BundledFontBoundary><CourseEditorFrame lightTools={courseCommonTools('light')}>
       <CourseAdvancedChrome><TopToolbar
+        commonTools={courseCommonTools('deep')}
         busy={busy}
         onNew={courseProjectLifecycle.newProject}
         onNewSpatial={courseProjectLifecycle.newSpatialProject}
@@ -835,6 +891,7 @@ export default function App() {
         onOpenRecipes={() => openDesignTool('recipe')}
         onOpenProductivity={() => openDesignTool('productivity')}
         onImportPptx={() => openDesignTool('pptx')}
+        onImportFlow={() => { void openFlowImport() }} onImportHtml={() => { void openHtmlImport() }}
         onOpenMaterials={() => setMaterialsOpen(true)}
         onPreview={courseDelivery.openPreview}
         onExport={courseDelivery.exportCourse}
@@ -1090,6 +1147,7 @@ export default function App() {
                   关闭预览
                 </button>
               </div>
+              <CoursePreviewNotices messages={courseDelivery.previewDiagnostics} />
             </header>
             <div className="course-preview-viewport">
               <div
@@ -1130,6 +1188,11 @@ export default function App() {
       error={htmlImportDialog.error}
       onCancel={() => setHtmlImportDialog(null)}
       onImport={target => { void confirmHtmlImport(target) }} />}
+    {flowImportIssues && <div className="lesson-modal-backdrop" role="presentation"><section className="lesson-modal" role="dialog" aria-modal="true" aria-label="导入说明">
+      <h3>{flowImportIssues.name} 已导入</h3><p>可编辑内容已保存到当前工程草稿。以下内容需要核对，原文件仍保留。</p>
+      <ul>{flowImportIssues.issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>
+      <button type="button" onClick={() => setFlowImportIssues(null)}>继续编辑</button>
+    </section></div>}
     </LessonWorkspaceHost>
     </CourseEditorActionsContext.Provider>
     </ProjectColorPaletteContext.Provider>

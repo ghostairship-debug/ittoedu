@@ -16,6 +16,8 @@ function Quote-NativeArgument([string]$Value) {
   return '"' + [regex]::Replace($escaped, '(\\+)$', '$1$1') + '"'
 }
 
+$handoff = $null
+$process = $null
 try {
   if (-not $Executable) {
     $name = 'guoling-workbench.exe'
@@ -47,6 +49,13 @@ try {
   $Executable = (Resolve-Path -LiteralPath $Executable).ProviderPath
   $arguments = @('--mcp-connect', ('--task-path=' + $TaskPath))
   if ($Profile) { $arguments += '--user-data-dir=' + $Profile }
+  # The NSIS Portable wrapper does not pass its extracted child's stdout back
+  # to this process. Use the product's guarded, one-use ready handoff for both
+  # Portable and unpacked products, without a second service or resident owner.
+  $handoff = Join-Path ([IO.Path]::GetTempPath()) ('guoling-mcp-connect-' + [Guid]::NewGuid().ToString('N'))
+  [void][IO.Directory]::CreateDirectory($handoff)
+  $readyFile = Join-Path $handoff 'ready.json'
+  $arguments += '--mcp-ready-file=' + $readyFile
   $start = New-Object Diagnostics.ProcessStartInfo
   $start.FileName = $Executable
   $start.Arguments = ($arguments | ForEach-Object { Quote-NativeArgument $_ }) -join ' '
@@ -62,30 +71,27 @@ try {
   $process = New-Object Diagnostics.Process
   $process.StartInfo = $start
   [void]$process.Start()
-  # Main writes one complete JSON line. A resident child can keep inherited pipe
-  # handles open after the connector exits, so EOF is not the ready boundary.
-  $stdout = $process.StandardOutput.ReadLineAsync()
-  $stderr = $process.StandardError.ReadLineAsync()
-  $process.WaitForExit()
-  if ($process.ExitCode -ne 0) {
-    $diagnostic = ''
-    if ($stderr.Status -eq [Threading.Tasks.TaskStatus]::RanToCompletion) {
-      $diagnostic = $stderr.Result
+  # Drain diagnostics without treating stdout/EOF or a successful short-lived
+  # connector exit as the owner's ready boundary. No raw receipt is logged.
+  $stdoutDrain = $process.StandardOutput.ReadToEndAsync()
+  $stderrDrain = $process.StandardError.ReadToEndAsync()
+  while (-not (Test-Path -LiteralPath $readyFile -PathType Leaf)) {
+    $process.Refresh()
+    if ($process.HasExited) {
+      # The atomic reply may have been published after the loop's first check
+      # and before the short-lived connector exited. Consume that exact file.
+      if (Test-Path -LiteralPath $readyFile -PathType Leaf) { break }
+      throw ('Guoling connection failed (exit ' + $process.ExitCode + '); no owner ready receipt.')
     }
-    throw ('Guoling connection failed (exit ' + $process.ExitCode + '): ' + $diagnostic)
+    Start-Sleep -Milliseconds 50
   }
-  $readyLine = $stdout.Result
-  # Windows may prefix the connector's JSON with a console newline. JSON permits
-  # this whitespace; stop at the first content line, without waiting for EOF.
-  while ($null -ne $readyLine -and [string]::IsNullOrWhiteSpace($readyLine)) {
-    $readyLine = $process.StandardOutput.ReadLine()
-  }
-  if ($null -eq $readyLine) { throw 'Guoling did not return a ready connection. EOF before JSON.' }
+  $readyLine = [IO.File]::ReadAllText($readyFile, [Text.Encoding]::UTF8)
   $output = $readyLine.Trim()
   $lineShape = 'lineChars=' + $readyLine.Length + '; trimmedChars=' + $output.Length +
     '; empty=' + [string]::IsNullOrWhiteSpace($readyLine)
   try { $connection = $output | ConvertFrom-Json }
   catch { throw ('Guoling ready receipt is not JSON. ' + $lineShape) }
+  if ($connection.status -eq 'failed') { throw ('Guoling connection failed: ' + [string]$connection.message) }
   if ($connection.status -ne 'ready') {
     $parsedType = if ($null -eq $connection) { 'null' } else { $connection.GetType().FullName }
     $statusShape = if ($connection.status -in @('ready', 'failed')) { $connection.status }
@@ -100,4 +106,12 @@ try {
 } catch {
   [Console]::Error.WriteLine($_.Exception.Message)
   exit 1
+} finally {
+  if ($null -ne $process) { $process.Dispose() }
+  if ($handoff) {
+    # Only this script's exact two handoff files and empty directory are removed.
+    Remove-Item -LiteralPath (Join-Path $handoff 'ready.json') -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $handoff 'ready.tmp') -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $handoff -Force -ErrorAction SilentlyContinue
+  }
 }

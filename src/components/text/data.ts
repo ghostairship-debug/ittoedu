@@ -1,3 +1,4 @@
+import { replaceDocumentText } from '../../shared/document/textInteraction'
 import { z } from 'zod'
 import { documentInlineSchema, documentTextContentSchema, documentTextStyleSchema, normalizeDocumentText, type FlowInline, type FlowTextContent } from '../../shared/document/content'
 import { describeDocumentMath, parseDocumentMath } from '../../shared/document/math'
@@ -70,7 +71,7 @@ function split(content: FlowTextContent, offset: number): [FlowInline[], FlowInl
   let cursor = 0
   for (const original of content.inlines) {
     const inline = structuredClone(original)
-    const length = inline.type === 'math' ? 1 : Array.from(inline.text).length
+    const length = inline.type !== 'text' ? 1 : Array.from(inline.text).length
     if (cursor + length <= offset) before.push(inline)
     else if (cursor >= offset) after.push(inline)
     else if (inline.type === 'text') {
@@ -86,8 +87,7 @@ function split(content: FlowTextContent, offset: number): [FlowInline[], FlowInl
 /** Code point offsets; inline math counts as one atom. Unselected style and formula identity survive. */
 export function replaceTextComponentRange(data: TextComponentData, from: number, to: number, replacement: FlowTextContent): TextComponentData {
   if (to < from) throw new RangeError('文字范围顺序错误')
-  const [before] = split(data.content, from), [, after] = split(data.content, to)
-  return textComponentDataSchema.parse({ ...data, content: normalizeDocumentText({ inlines: [...before, ...replacement.inlines, ...after] }) })
+  return textComponentDataSchema.parse({ ...data, content: replaceDocumentText(data.content, from, to, replacement) })
 }
 export function formatTextComponentRange(data: TextComponentData, from: number, to: number, style: InlineStyle): TextComponentData {
   if (to < from) throw new RangeError('文字范围顺序错误')

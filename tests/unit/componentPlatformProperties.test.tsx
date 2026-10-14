@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { BufferedInput, PropertyDraftBoundary, flushPropertiesDrafts } from '../../src/renderer/ui/properties/PropertyControls'
@@ -9,6 +9,7 @@ import { projectWithBackgroundPreview } from '../../src/renderer/authoring/backg
 import { createTextData, createFormulaData, FORMULA_DEFINITION, TEXT_DEFINITION } from '../../src/components/text'
 import { applyComponentOperation, captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { flowTextStyleEdits } from '../../src/renderer/componentPlatform/surfaces/flow/documentSelection'
+import { projectFlowBlock } from '../../src/renderer/componentPlatform/surfaces/flow/documentProjection'
 import { createImageData, IMAGE_DEFINITION } from '../../src/components/image'
 import { defaultShapeData, SHAPE_DEFINITION } from '../../src/components/shape'
 import { resolveComponentPresentation, type CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
@@ -30,6 +31,12 @@ import { createTableData } from '../../src/components/table/data'
 import { TableComponentEditor } from '../../src/components/table/editor'
 import { projectWithSlideContentDraft } from '../../src/renderer/store/slices/slideAuthoringSlice'
 import { DOCUMENT_BLOCK_DEFINITION, documentBlockData } from '../../src/components/document-block'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
+import { CourseLightToolbar } from '../../src/renderer/documents/CourseLightToolbar'
+import { CourseEditorChromeContext } from '../../src/renderer/documents/CourseEditorChromeContext'
+import { openCoursePageProperties } from '../../src/renderer/composition/properties/openCoursePageProperties'
+import { usePropertiesContext } from '../../src/renderer/ui/properties/PropertiesContextAdapter'
+import { createV10StoreHost, deferred } from '../helpers/courseV10StoreHost'
 const dispose: Array<() => Promise<void>> = []
 afterEach(async () => { cleanup(); for (const action of dispose.splice(0).reverse()) await action() })
 const frame = { width: 220, height: 90, transform: [1.5, .4, .7, 1.2, 35, 42] as [number,number,number,number,number,number] }
@@ -132,6 +139,124 @@ it('uses the actual Flow page controls and preserves custom reading widths throu
   expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow).toEqual(project.surfaces[0].flow)
   await act(async()=>useEditorStore.getState().courseBridge.redo(first.documentId))
   expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow).toEqual(changed.surfaces[0].flow)
+})
+it('opens Flow page settings from an object and persists numeric paper width through History and archive reload',async()=>{
+  const directory=await mkdtemp(path.join(tmpdir(),'guoling-flow-page-width-'));dispose.push(()=>rm(directory,{recursive:true,force:true}))
+  const service=new DocumentHostService(path.join(directory,'recovery')),project=fixture()
+  project.surfaces=[{id:'flow',kind:'flow',title:'宽度讲义',childIds:['group','neighbor'],flow:{layout:{widthMode:'reading',readingWidth:900,wideContentWidth:1100}}}]
+  const first=await service.internalAPI.create({kind:'course-v10',project,resources:{assets:{},components:{}}},'讲义')
+  const unavailable=async():Promise<never>=>{throw new Error('fixture no dialog')}
+  const api:DocumentHostAPI={...service.internalAPI,bootstrapCourse:()=>service.bootstrapCourse(),saveWithDialog:unavailable,close:unavailable,closeWithDialog:unavailable,discardRecovery:unavailable,subscribe:listener=>service.subscribeEvents(listener)}
+  await useEditorStore.getState().connectCourseDocuments(api);dispose.push(async()=>useEditorStore.getState().courseBridge.dispose())
+  await useEditorStore.getState().courseBridge.activate(first.documentId)
+  useEditorStore.getState().setEditingScope('scene');useEditorStore.getState().selectNodes(['neighbor'])
+  render(<CourseEditorChromeContext.Provider value={{documentId:first.documentId,mode:'light',setMode(){}}}>
+    <CourseLightToolbar documentId={first.documentId} isCurrentDocument={id=>useEditorStore.getState().courseView.activeDocumentId===id}
+      canUndo={false} canRedo={false} undo={()=>{}} redo={()=>{}} save={()=>{}} saveAs={()=>{}} onReplaceImage={()=>{}}
+      onAddText={()=>{}} onAddImage={()=>{}} onAddVideo={()=>{}} onAddAudio={()=>{}} insertSurface="flow" editingScope="scene" spatialScope={null} mode="edit"
+      reportError={message=>{throw new Error(message)}} onOpenPageProperties={()=>{void openCoursePageProperties({kernel:useEditorStore.getState().courseKernel,
+        drain:id=>useEditorStore.getState().drainCourseDocument(id),open:()=>useEditorStore.getState().setActiveTab('properties')})}} />
+    <PropertiesTab onReplaceImage={()=>{}} />
+  </CourseEditorChromeContext.Provider>)
+  expect(screen.queryByTestId('flow-page-properties')).toBeNull()
+  fireEvent.click(screen.getByRole('button',{name:'页面属性'}))
+  await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'纸面宽度'})).toHaveValue('900'))
+  expect(useEditorStore.getState().courseView.selectedInstanceIds).toEqual([])
+  const width=screen.getByRole('spinbutton',{name:'纸面宽度'})
+  fireEvent.change(width,{target:{value:'1024'}});fireEvent.keyDown(width,{key:'Enter'})
+  await waitFor(()=>expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow!.layout.readingWidth).toBe(1024))
+  expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow!.layout.wideContentWidth).toBe(1100)
+  expect(useEditorStore.getState().courseKernel.readDocument().instances).toEqual(project.instances)
+  expect((await service.internalAPI.read(first.documentId)).undoDepth).toBe(1)
+  await act(async()=>useEditorStore.getState().courseBridge.undo(first.documentId))
+  expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow!.layout.readingWidth).toBe(900)
+  await act(async()=>useEditorStore.getState().courseBridge.redo(first.documentId))
+  fireEvent.change(screen.getByLabelText('讲义宽度'),{target:{value:'fluid'}})
+  await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'纸面宽度'})).toHaveValue('1100'))
+  const wide=screen.getByRole('spinbutton',{name:'纸面宽度'})
+  fireEvent.change(wide,{target:{value:'1200'}});fireEvent.keyDown(wide,{key:'Enter'})
+  await waitFor(()=>expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow!.layout.wideContentWidth).toBe(1200))
+  expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow!.layout.readingWidth).toBe(1024)
+  const saved=path.join(directory,'width.glx');await service.internalAPI.save(first.documentId,saved)
+  const cold=await new CourseV10Driver().load(await readFile(saved))
+  if(cold.kind!=='course-v10')throw new Error('Expected course archive')
+  expect(cold.project.surfaces[0].flow!.layout).toMatchObject({widthMode:'fluid',readingWidth:1024,wideContentWidth:1200})
+})
+it('keeps a later page selection when opening Flow settings is still committing input',async()=>{
+  const project=fixture();project.surfaces=[{id:'flow',kind:'flow',title:'原讲义',childIds:['group','neighbor']},{id:'other',kind:'flow',title:'另一讲义',childIds:[]}]
+  const host=await createV10StoreHost(project),gate=deferred(),opened=vi.fn();dispose.push(async()=>host.bridge.dispose())
+  host.kernel.selectInstances(['neighbor'],'flow')
+  const pending=openCoursePageProperties({kernel:host.kernel,drain:async id=>{await gate.promise;return host.api.read(id)},open:opened})
+  host.kernel.selectSurface('other');gate.resolve();await pending
+  expect(host.kernel.readView().surfaceId).toBe('other');expect(opened).not.toHaveBeenCalled()
+  expect((await host.api.read(host.first.documentId)).undoDepth).toBe(0)
+})
+it.each(['slide','flow','spatial'] as const)('opens %s page properties from a selected object and returns to normal object editing',async kind=>{
+  const directory=await mkdtemp(path.join(tmpdir(),'guoling-page-properties-'));dispose.push(()=>rm(directory,{recursive:true,force:true}))
+  const service=new DocumentHostService(path.join(directory,'recovery')),project=fixture()
+  project.surfaces=[{id:'page',kind,title:'当前页面',childIds:['group','neighbor'],
+    ...(kind==='flow'?{flow:{layout:{widthMode:'reading' as const,readingWidth:900,wideContentWidth:1100}}}:{}),
+    ...(kind==='spatial'?{spatial:{home:{x:10,y:20,zoom:1},frames:[],paths:[{id:'path-one',title:'原路径',instanceIds:['neighbor'],frameIds:[]}]}}:{})}]
+  const first=await service.internalAPI.create({kind:'course-v10',project,resources:{assets:{},components:{}}},'页面属性')
+  const unavailable=async():Promise<never>=>{throw new Error('fixture no dialog')}
+  const api:DocumentHostAPI={...service.internalAPI,bootstrapCourse:()=>service.bootstrapCourse(),saveWithDialog:unavailable,close:unavailable,closeWithDialog:unavailable,discardRecovery:unavailable,subscribe:listener=>service.subscribeEvents(listener)}
+  await useEditorStore.getState().connectCourseDocuments(api);dispose.push(async()=>useEditorStore.getState().courseBridge.dispose())
+  await useEditorStore.getState().courseBridge.activate(first.documentId)
+  useEditorStore.getState().setEditingScope('global')
+  if(kind==='spatial')useEditorStore.getState().setSpatialGraphSelection({kind:'path',id:'path-one'},'page')
+  useEditorStore.getState().selectNodes(['neighbor'])
+  const initial=structuredClone(useEditorStore.getState().courseKernel.readDocument())
+  function ContextKind(){const context=usePropertiesContext({onReplaceImage(){}});return <output data-testid="page-properties-kind">{context.kind}</output>}
+  render(<CourseEditorChromeContext.Provider value={{documentId:first.documentId,mode:'light',setMode(){}}}>
+    <CourseLightToolbar documentId={first.documentId} isCurrentDocument={id=>useEditorStore.getState().courseView.activeDocumentId===id}
+      canUndo={false} canRedo={false} undo={()=>{}} redo={()=>{}} save={()=>{}} saveAs={()=>{}} onReplaceImage={()=>{}}
+      onAddText={()=>{}} onAddImage={()=>{}} onAddVideo={()=>{}} onAddAudio={()=>{}} insertSurface={kind} editingScope="global" spatialScope={kind==='spatial'?'global':null} mode="edit"
+      reportError={message=>{throw new Error(message)}} onOpenPageProperties={()=>{void openCoursePageProperties({kernel:useEditorStore.getState().courseKernel,
+        drain:id=>useEditorStore.getState().drainCourseDocument(id),open:surfaceId=>{
+          const current=useEditorStore.getState();current.setEditingScope('scene')
+          if(current.courseView.project?.surfaces.find(surface=>surface.id===surfaceId)?.kind==='spatial')current.setSpatialGraphSelection(null,surfaceId)
+          current.setActiveTab('properties')
+        }})}} />
+    <ContextKind/><PropertiesTab onReplaceImage={()=>{}} />
+  </CourseEditorChromeContext.Provider>)
+  expect(screen.getByTestId('page-properties-kind')).toHaveTextContent(kind==='flow'?'flow-block':'slide-native')
+  fireEvent.click(screen.getByRole('button',{name:'页面属性'}))
+  await waitFor(()=>expect(screen.getByTestId('page-properties-kind')).toHaveTextContent(kind==='slide'?'empty-scene':`${kind}-page`))
+  expect(useEditorStore.getState().courseView.selectedInstanceIds).toEqual([])
+  expect(useEditorStore.getState().courseKernel.readDocument()).toEqual(initial)
+  expect((await service.internalAPI.read(first.documentId)).undoDepth).toBe(0)
+  if(kind==='spatial')expect(useEditorStore.getState().readSpatialView('page',first.documentId).graphSelection).toBeNull()
+  await act(async()=>useEditorStore.getState().selectNodes(['neighbor']))
+  await waitFor(()=>expect(screen.getByTestId('page-properties-kind')).toHaveTextContent(kind==='flow'?'flow-block':'slide-native'))
+  if(kind==='flow'){
+    const size=screen.getByLabelText('字号');fireEvent.change(size,{target:{value:'40'}});fireEvent.keyDown(size,{key:'Enter'})
+    await waitFor(()=>{const block=projectFlowBlock(useEditorStore.getState().courseKernel.readDocument(),'neighbor');expect(block.type).toBe('paragraph');if(block.type==='paragraph')expect(block.content.inlines[0].style?.fontSize).toBe(40)})
+  }else{
+    const name=screen.getByLabelText('名称');fireEvent.change(name,{target:{value:'重新选择后编辑'}});fireEvent.keyDown(name,{key:'Enter'})
+    await waitFor(()=>expect(useEditorStore.getState().courseKernel.readDocument().instances.neighbor.name).toBe('重新选择后编辑'))
+  }
+  await act(async()=>useEditorStore.getState().drainCourseDocument(first.documentId))
+  const confirmed=await service.internalAPI.read(first.documentId)
+  if(confirmed.model.kind!=='course-v10')throw new Error('Expected course model')
+  const neighbor=kind==='flow'?confirmed.model.project.instances.neighbor:{...initial.instances.neighbor,name:'重新选择后编辑'}
+  expect(confirmed.model.project).toEqual({...initial,revision:initial.revision+1,instances:{...initial.instances,neighbor}})
+  if(kind==='flow'){
+    expect(neighbor.id).toBe('neighbor');expect(neighbor.definitionId).toBe(initial.instances.neighbor.definitionId);expect(neighbor.frame).toEqual(initial.instances.neighbor.frame)
+    const block=projectFlowBlock(confirmed.model.project,'neighbor');expect(block.type).toBe('paragraph');if(block.type==='paragraph')expect(block.content.inlines).toMatchObject([{text:'邻居',style:{fontSize:40}}])
+  }
+  expect(confirmed.revision).toBe(first.revision+1);expect(confirmed.undoDepth).toBe(1)
+})
+it('does not open a replacement session of the same Flow document after an older settings request',async()=>{
+  const project=fixture();project.surfaces=[{id:'flow',kind:'flow',title:'讲义',childIds:['group','neighbor']}]
+  const host=await createV10StoreHost(project),gate=deferred(),opened=vi.fn();dispose.push(async()=>host.bridge.dispose())
+  const documentId=host.first.documentId,originalEpoch=host.first.read().epoch,recovery=structuredClone(host.durable.get(documentId)!)
+  host.kernel.selectInstances(['neighbor'],'flow')
+  const pending=openCoursePageProperties({kernel:host.kernel,drain:async id=>{await gate.promise;return host.api.read(id)},open:opened})
+  await host.registry.close(documentId,{discardDirty:true});const replacement=await host.registry.restore(recovery)
+  await host.bridge.connect({...host.api,bootstrapCourse:()=>host.api.read(documentId)})
+  host.kernel.selectInstances(['neighbor'],'flow');gate.resolve();await pending
+  expect(replacement.read().epoch).not.toBe(originalEpoch)
+  expect(opened).not.toHaveBeenCalled();expect(host.kernel.readView().selectedInstanceIds).toEqual(['neighbor'])
 })
 it('uses the actual Flow destination control and preserves identity and world frame across a nested reading section',async()=>{
   const directory=await mkdtemp(path.join(tmpdir(),'guoling-flow-destination-'));dispose.push(()=>rm(directory,{recursive:true,force:true}))

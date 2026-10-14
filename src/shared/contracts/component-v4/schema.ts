@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ownRecordSchema } from '../../ownRecordSchema'
 import {
   COMPONENT_RENDER_MODES,
   COMPONENT_SCOPES,
@@ -72,8 +73,8 @@ const manifestBaseSchema = z.object({
     height: z.number().finite().min(16),
   }),
   preserveAspectRatio: z.boolean(),
-  assets: z.record(z.string(), z.string()),
-  defaultProps: z.record(z.string(), z.unknown()),
+  assets: ownRecordSchema(z.string(), z.string()),
+  defaultProps: ownRecordSchema(z.string(), z.unknown()),
 })
 
 const editorPropertyBaseSchema = z.object({
@@ -129,7 +130,7 @@ const componentVariantSchema = z.object({
   id: localIdSchema,
   label: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
-  props: z.record(z.string(), z.unknown()),
+  props: ownRecordSchema(z.string(), z.unknown()),
 })
 
 const componentPresetSchema = z.object({
@@ -137,7 +138,7 @@ const componentPresetSchema = z.object({
   label: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
   variantId: localIdSchema.optional(),
-  props: z.record(z.string(), z.unknown()),
+  props: ownRecordSchema(z.string(), z.unknown()),
   previewPageId: localIdSchema.optional(),
 })
 

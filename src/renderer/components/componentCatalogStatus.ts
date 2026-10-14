@@ -15,7 +15,7 @@ interface ParsedSemanticVersion {
 }
 
 function parseSemanticVersion(version: string): ParsedSemanticVersion | null {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(version)
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(version)
   if (!match) return null
   return {
     core: [BigInt(match[1]!), BigInt(match[2]!), BigInt(match[3]!)],

@@ -52,9 +52,49 @@ export function courseComponentNameKey(name: string): string {
 /** Every `url(...)` in a style text, with its written reference. */
 export function cssUrlReferences(css: string): { start: number; end: number; reference: string }[] {
   const result: { start: number; end: number; reference: string }[] = []
-  const pattern = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"\s]*))\s*\)/gi
-  for (const match of css.matchAll(pattern)) {
-    result.push({ start: match.index!, end: match.index! + match[0].length, reference: match[1] ?? match[2] ?? match[3] ?? '' })
+  for (let at = 0; at < css.length;) {
+    if (css.startsWith('/*', at)) { const end = css.indexOf('*/', at + 2); at = end < 0 ? css.length : end + 2; continue }
+    if (css[at] === '"' || css[at] === "'") { const quote = css[at++]!; while (at < css.length && css[at] !== quote) at += css[at] === '\\' ? 2 : 1; at++; continue }
+    const opening = /^url\s*\(/i.exec(css.slice(at))
+    if (!opening || /[\w-]/.test(css[at - 1] ?? '')) { at++; continue }
+    const start = at; at += opening[0].length
+    while (/\s/.test(css[at] ?? '') && at < css.length) at++
+    const quote = css[at] === '"' || css[at] === "'" ? css[at++]! : undefined
+    const valueStart = at
+    while (at < css.length && (quote ? css[at] !== quote : css[at] !== ')')) at += css[at] === '\\' ? 2 : 1
+    const reference = decodeCssReference(css.slice(valueStart, at).trim())
+    if (quote) at++
+    while (/\s/.test(css[at] ?? '') && at < css.length) at++
+    if (css[at] === ')') { at++; result.push({ start, end: at, reference }) }
+  }
+  return result
+}
+
+export function decodeCssReference(value: string): string {
+  return value.replace(/\\([\da-f]{1,6})(?:\r\n|[\t\n\f\r ])?|\\([^\r\n\f])/gi,
+    (_, hex: string | undefined, character: string) => hex ? String.fromCodePoint(Math.min(parseInt(hex, 16) || 0xfffd, 0x10ffff)) : character)
+}
+
+export function cssImportReferences(css: string): { start: number; end: number; reference: string; conditions: string }[] {
+  const urls = cssUrlReferences(css), result: { start: number; end: number; reference: string; conditions: string }[] = []
+  for (let at = 0; at < css.length;) {
+    if (css.startsWith('/*', at)) { const end = css.indexOf('*/', at + 2); at = end < 0 ? css.length : end + 2; continue }
+    if (css[at] === '"' || css[at] === "'") { const quote = css[at++]!; while (at < css.length && css[at] !== quote) at += css[at] === '\\' ? 2 : 1; at++; continue }
+    const opening = /^@import\s+/i.exec(css.slice(at))
+    if (!opening) { at++; continue }
+    const start = at; at += opening[0].length
+    let reference: string | undefined
+    const url = urls.find(url => url.start === at)
+    if (url) { reference = url.reference; at = url.end }
+    else if (css[at] === '"' || css[at] === "'") {
+      const quote = css[at++]!, valueStart = at
+      while (at < css.length && css[at] !== quote) at += css[at] === '\\' ? 2 : 1
+      reference = decodeCssReference(css.slice(valueStart, at)); at++
+    }
+    const conditionsStart = at
+    while (at < css.length && css[at] !== ';') at++
+    if (reference !== undefined) result.push({ start, end: Math.min(css.length, at + 1), reference, conditions: css.slice(conditionsStart, at).trim() })
+    at++
   }
   return result
 }
@@ -65,7 +105,7 @@ export function resolveCssAssetReferences(
   assets: Readonly<Record<string, { assetId: string }>> | undefined,
   resolveAsset: (assetId: string) => string | undefined,
 ): string {
-  if (!assets || !css.includes('url(')) return css
+  if (!assets) return css
   let output = ''
   let cursor = 0
   for (const reference of cssUrlReferences(css)) {

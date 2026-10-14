@@ -15,6 +15,7 @@ import { flowRichTextSegments } from '../../shared/flowRichTextSegments'
 import { flowImageDimensions } from './imageDimensions'
 import { resolveFlowDocxPageBox } from './flowPageBox'
 import { rotationToDrawingMlDegree } from './drawingMlRotation'
+import { outputXmlText, hasUnsupportedXmlText } from './xmlText'
 import type { BuildFlowPrintPlanOptions, FlowPrintNode, FlowPrintPlan } from './course/flowPrintPlan'
 import type {
   BuildFlowDocxProjectionOptions,
@@ -76,17 +77,13 @@ interface BuildContext {
   images: ImagePart[]
   nextRelationshipId: number
   nextDrawingId: number
+  numberedLists: Array<{ id: number; start: number }>
   resolveAsset: (assetId: string) => FlowDocxAsset | undefined
   anchoredMap: Map<string, FlowDocxProjectedItem[]>
 }
 
 function xml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;')
+  return outputXmlText(value)
 }
 
 function wordFontFamily(value: string): string {
@@ -112,6 +109,15 @@ function wordTextAlphaWarnings(nodes: readonly FlowPrintNode[]): string[] {
     if (transparent) warnings.push(`${'blockId' in node ? `${node.blockId}: ` : ''}DOCX 原生文字、公式与高亮不支持透明色，保留 RGB 颜色与可编辑内容；原透明度保留在工程。`)
   }
   return warnings
+}
+
+function wordXmlTextWarnings(nodes: readonly FlowPrintNode[]): string[] {
+  return nodes.filter(hasUnsupportedXmlText).map(node => `${'blockId' in node ? `${node.blockId}: ` : ''}DOCX XML 无法表示的文字字符已局部替换为 U+FFFD；作者原文保留在工程。`)
+}
+
+function numberingXml(context: BuildContext): string {
+  return NUMBERING.replace(/<w:num w:numId="2">[\s\S]*?<\/w:num>/, context.numberedLists.map(({ id, start }) =>
+    `<w:num w:numId="${id}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="${start}"/></w:lvlOverride></w:num>`).join(''))
 }
 
 /** Authored text styles are CSS pixels; OOXML sizes and offsets are half-points. */
@@ -162,7 +168,7 @@ function styledMath(latex: string, display: boolean, style?: { color?: string; f
 
 function documentRuns(content: FlowTextContent, baseStyle: TextRunStyle = {}): string {
   return content.inlines.map(inline => {
-    let result = inline.type === 'math' ? styledMath(inline.latex, false, inline.style) : inline.text.split('\n').map(text => run(text, { ...baseStyle, ...(inline.code ? { fontFamily: 'Consolas' } : {}), ...inline.style })).join('<w:r><w:br/></w:r>')
+    let result = inline.type === 'math' ? styledMath(inline.latex, false, inline.style) : (inline.type === 'component' ? inline.accessibleText : inline.text).split('\n').map(text => run(text, { ...baseStyle, ...(inline.type === 'text' && inline.code ? { fontFamily: 'Consolas' } : {}), ...inline.style })).join('<w:r><w:br/></w:r>')
     if (inline.link) result = `<w:fldSimple w:instr="HYPERLINK &quot;${xml(inline.link.href.replace(/"/g, '%22'))}&quot;">${result}</w:fldSimple>`
     return result
   }).join('')
@@ -237,12 +243,12 @@ function croppedImageAspect(bytes: Uint8Array, mimeType: string, crop: FlowImage
   return sourceRect.width / sourceRect.height
 }
 
-function inlineImageDrawing(label: string, image: ImagePart, drawingId: number, aspect = 16 / 9, maxHeight = Infinity, crop?: FlowImageCrop & { width?: number; height?: number }): string {
+function inlineImageDrawing(label: string, image: ImagePart, drawingId: number, aspect = 16 / 9, maxHeight = Infinity, crop?: FlowImageCrop & { width?: number; height?: number; sourceRect?: { x: number; y: number; width: number; height: number } }): string {
   const width = Math.min(560, maxHeight * aspect, crop?.width ?? Infinity, (crop?.height ?? Infinity) * aspect)
   const height = Math.round(width / aspect)
   const cx = Math.round(width * 9_525)
   const cy = Math.round(height * 9_525)
-  const source = crop?.crop ? flowMediaCropGeometry({ width: 1, height: 1 }, crop).sourceRect : null
+  const source = crop?.sourceRect ?? (crop?.crop ? flowMediaCropGeometry({ width: 1, height: 1 }, crop).sourceRect : null)
   const srcRectXml = source ? `<a:srcRect l="${Math.round(source.x * 100_000)}" t="${Math.round(source.y * 100_000)}" r="${Math.round((1 - source.x - source.width) * 100_000)}" b="${Math.round((1 - source.y - source.height) * 100_000)}"/>` : ''
   return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${drawingId}" name="${xml(label)}" descr="${xml(label)}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${drawingId}" name="${xml(image.path)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${image.relationshipId}"/>${srcRectXml}<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`
 }
@@ -302,6 +308,9 @@ function textBoxGraphicXml(
     borderColor?: string
     borderWidth?: number
     borderStyle?: 'solid' | 'dashed' | 'dotted'
+    backgroundOpacity?: number
+    borderOpacity?: number
+    padding?: number
     /** Already serialized professional paragraphs, tables and OMML. */
     bodyXml?: string
   } = {},
@@ -312,7 +321,8 @@ function textBoxGraphicXml(
   const rotAttr = rot > 0 ? ` rot="${rot}"` : ''
 
   const fillHex = options.backgroundColor ? wordColor(options.backgroundColor) : null
-  const fillXml = fillHex ? `<a:solidFill><a:srgbClr val="${fillHex}"/></a:solidFill>` : '<a:noFill/>'
+  const fillAlpha = (options.backgroundOpacity ?? 1) * (options.backgroundColor ? parseDocumentColor(options.backgroundColor)?.alpha ?? 1 : 1)
+  const fillXml = fillHex && fillAlpha > 0 ? `<a:solidFill><a:srgbClr val="${fillHex}"><a:alpha val="${Math.round(fillAlpha * 100000)}"/></a:srgbClr></a:solidFill>` : '<a:noFill/>'
 
   const borderHex = options.borderColor ? wordColor(options.borderColor) : null
   const borderW = options.borderWidth !== undefined && options.borderWidth > 0
@@ -322,8 +332,9 @@ function textBoxGraphicXml(
   if (options.borderStyle === 'dashed') dashXml = '<a:prstDash val="dash"/>'
   else if (options.borderStyle === 'dotted') dashXml = '<a:prstDash val="dot"/>'
 
-  const borderXml = borderW > 0 && borderHex
-    ? `<a:ln w="${borderW}"><a:solidFill><a:srgbClr val="${borderHex}"/></a:solidFill>${dashXml}</a:ln>`
+  const borderAlpha = (options.borderOpacity ?? 1) * (options.borderColor ? parseDocumentColor(options.borderColor)?.alpha ?? 1 : 1)
+  const borderXml = borderW > 0 && borderHex && borderAlpha > 0
+    ? `<a:ln w="${borderW}"><a:solidFill><a:srgbClr val="${borderHex}"><a:alpha val="${Math.round(borderAlpha * 100000)}"/></a:srgbClr></a:solidFill>${dashXml}</a:ln>`
     : '<a:ln><a:noFill/></a:ln>'
 
   const vAnchor = options.verticalAlign === 'middle' ? 'ctr' : options.verticalAlign === 'bottom' ? 'b' : 't'
@@ -350,15 +361,17 @@ function textBoxGraphicXml(
     return `<w:p>${jcXml ? `<w:pPr>${jcXml}</w:pPr>` : ''}${runsXml}</w:p>`
   }).join('')
 
+  const inset = Math.round((options.padding ?? 0) * 9525)
   const bodyPr = options.bodyXml !== undefined
-    ? `<wps:bodyPr vert="horz" lIns="0" tIns="0" rIns="0" bIns="0" anchor="${vAnchor}"><a:spAutoFit/></wps:bodyPr>`
+    ? `<wps:bodyPr vert="horz" lIns="${inset}" tIns="${inset}" rIns="${inset}" bIns="${inset}" anchor="${vAnchor}"><a:spAutoFit/></wps:bodyPr>`
     : `<wps:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" anchor="${vAnchor}"/>`
   return `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:cNvSpPr txBox="1"/><wps:spPr><a:xfrm${rotAttr}><a:off x="0" y="0"/><a:ext cx="${cxEMU}" cy="${cyEMU}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${fillXml}${borderXml}</wps:spPr><wps:txbx><w:txbxContent>${paragraphsXml}</w:txbxContent></wps:txbx>${bodyPr}</wps:wsp></a:graphicData></a:graphic>`
 }
 
 /** Keep Word-native professional content editable inside a floating text box. */
-export function wordContentGraphicXml(frame: { width: number; height: number }, bodyXml: string, rotation = 0): string {
-  return textBoxGraphicXml({ outputFrame: frame, rotation }, '', { bodyXml })
+export function wordContentGraphicXml(frame: { width: number; height: number }, bodyXml: string, rotation = 0,
+  appearance: { backgroundColor?: string; backgroundOpacity?: number; borderColor?: string; borderOpacity?: number; borderWidth?: number; padding?: number; verticalAlign?: 'top' | 'middle' | 'bottom' } = {}): string {
+  return textBoxGraphicXml({ outputFrame: frame, rotation }, '', { bodyXml, ...appearance })
 }
 
 function shapeGraphicXml(
@@ -556,22 +569,25 @@ function renderPrintNode(
       return paragraph(node.content, { style: `Heading${node.level}`, keepNext: true, leadingContent, presentation: node.paragraph })
     case 'paragraph':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: 'Native paragraph' })
-      return paragraph(node.content, { leadingContent, presentation: node.paragraph })
+      return paragraph(node.content, { leadingContent, presentation: node.paragraph, style: node.outputStyle, keepNext: node.keepNext })
     case 'quote':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: 'Native quote paragraphs' })
       return `${paragraph(node.content, { style: 'Quote', italic: true, leadingContent, presentation: node.paragraph })}${
         node.citation ? paragraph({ inlines: [{ type: 'text', text: '— ' }, ...node.citation.inlines] }, { style: 'Quote', presentation: node.paragraph }) : ''
       }`
-    case 'list':
+    case 'list': {
       context.report.push({
         blockId: node.blockId,
         disposition: 'preserved',
         detail: node.ordered ? 'Numbered list' : 'Bullet list',
       })
+      const numberingId = node.ordered ? context.numberedLists.length + 2 : 1
+      if (node.ordered) context.numberedLists.push({ id: numberingId, start: node.start ?? 1 })
       return node.items.map((item, index) => paragraph(item.content, {
-        numbering: { id: node.ordered ? 2 : 1 },
+        numbering: { id: numberingId },
         leadingContent: index === 0 ? leadingContent : undefined,
       })).join('')
+    }
     case 'chart': {
       const asset = context.chartImages.get(node.blockId)
       if (!asset || asset.mimeType !== 'image/png') throw new Error(`正文图表 ${node.blockId} 缺少静态图面，已停止 DOCX 导出`)
@@ -604,7 +620,8 @@ function renderPrintNode(
       if (node.mediaKind === 'image' && node.assetId) {
         const asset = context.resolveAsset(node.assetId)
         const extension = asset ? imageExtension(asset.mimeType) : null
-        if (asset && extension) {
+        const dimensions = asset && extension ? flowImageDimensions(asset.bytes, asset.mimeType) : undefined
+        if (asset && extension && dimensions) {
           const relationshipId = `rId${context.nextRelationshipId++}`
           const path = `media/image${context.images.length + 1}.${extension}`
           const image: ImagePart = { relationshipId, path, mimeType: asset.mimeType, bytes: asset.bytes }
@@ -614,8 +631,7 @@ function renderPrintNode(
             disposition: 'preserved',
             detail: 'Embedded OOXML image relationship',
           })
-          const dimensions = flowImageDimensions(asset.bytes, asset.mimeType)
-          const aspect = node.crop ? croppedImageAspect(asset.bytes, asset.mimeType, node)
+          const aspect = node.sourceRect && node.width && node.height ? node.width / node.height : node.crop ? croppedImageAspect(asset.bytes, asset.mimeType, node)
             : node.width && node.height ? node.width / node.height
               : dimensions ? dimensions.width / dimensions.height : 16 / 9
           const pageBreak = node.pageBreakBefore ? '<w:p><w:r><w:br w:type="page"/></w:r></w:p>' : ''
@@ -624,7 +640,8 @@ function renderPrintNode(
           }`
         }
       }
-      const reason = !node.assetId ? 'pending asset slot exported as a descriptive placeholder'
+      const reason = node.assetId && node.mediaKind === 'image' && context.resolveAsset(node.assetId) ? 'image bytes could not be decoded; this image is a descriptive fallback'
+        : !node.assetId ? 'pending asset slot exported as a descriptive placeholder'
         : node.mediaKind === 'image' && node.crop
         ? 'image crop could not be represented in DOCX; media exported as a descriptive fallback'
         : `${node.mediaKind} media exported as a descriptive fallback`
@@ -732,12 +749,13 @@ export function buildFlowDocxFromPlan(
 ): FlowDocxResult {
   const context: BuildContext = {
     chartMaxHeight: resolveFlowDocxPageBox(plan.pageSize, plan.orientation).maxContentHeightPx - 32,
-    warnings: wordTextAlphaWarnings(plan.nodes),
+    warnings: [...wordTextAlphaWarnings(plan.nodes), ...wordXmlTextWarnings(plan.nodes)],
     report: [],
     layerReport: [],
     images: [],
     nextRelationshipId: 3,
     nextDrawingId: 1,
+    numberedLists: [],
     chartImages: options.chartImages ?? new Map(),
     resolveAsset: options.resolveAsset ?? (() => undefined),
     anchoredMap: new Map(),
@@ -758,7 +776,7 @@ export function buildFlowDocxFromPlan(
     '_rels/.rels': strToU8(PACKAGE_RELS),
     'word/document.xml': strToU8(documentXml),
     'word/styles.xml': strToU8(STYLES),
-    'word/numbering.xml': strToU8(NUMBERING),
+    'word/numbering.xml': strToU8(numberingXml(context)),
     'word/_rels/document.xml.rels': strToU8(wordRelationships(context.images, null)),
     'docProps/core.xml': strToU8(core),
     'docProps/app.xml': strToU8(app),
@@ -781,12 +799,13 @@ export function buildFlowDocxFromProjection(
 ): FlowDocxResult {
   const context: BuildContext = {
     chartMaxHeight: projection.pageBox.maxContentHeightPx - 32,
-    warnings: [...projection.warnings, ...wordTextAlphaWarnings(projection.nodes)],
+    warnings: [...projection.warnings, ...wordTextAlphaWarnings(projection.nodes), ...wordXmlTextWarnings(projection.nodes)],
     report: [],
     layerReport: [...projection.layerReport],
     images: [],
     nextRelationshipId: 3,
     nextDrawingId: 1,
+    numberedLists: [],
     chartImages: options.chartImages ?? new Map(),
     resolveAsset: options.resolveAsset ?? (() => undefined),
     anchoredMap: new Map(projection.anchoredGroups.map((g) => [g.blockId, g.items])),
@@ -919,7 +938,7 @@ export function buildFlowDocxFromProjection(
     '_rels/.rels': strToU8(PACKAGE_RELS),
     'word/document.xml': strToU8(documentXml),
     'word/styles.xml': strToU8(STYLES),
-    'word/numbering.xml': strToU8(NUMBERING),
+    'word/numbering.xml': strToU8(numberingXml(context)),
     'word/_rels/document.xml.rels': strToU8(wordRelationships(context.images, footerRelId, headerRelId)),
     'docProps/core.xml': strToU8(core),
     'docProps/app.xml': strToU8(app),

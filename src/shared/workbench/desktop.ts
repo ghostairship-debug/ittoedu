@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ownRecordSchema } from '../ownRecordSchema'
 import { componentOperationBatchSchema, courseProjectV10Schema, jsonValueSchema } from '../contracts/component-platform/schema'
 import type { DocumentEvent, DocumentModel, DocumentOperation, DocumentOperationResult, DocumentSnapshot } from './document'
 
@@ -6,6 +7,7 @@ export interface DocumentFileObservation {
   bindingVersion: number
   version: string | null
   model: DocumentModel | null
+  baseSource?: string
 }
 export interface ReconcileDocumentFile {
   documentId: string
@@ -25,10 +27,13 @@ export type AdvancedDraftRecovery = z.infer<typeof advancedDraftRecoverySchema>
 export const propertyDraftRecoverySchema = z.object({ bindingKey: z.string().min(1), label: z.string(),
   kind: z.enum(['text', 'number', 'range', 'chart', 'structured']), raw: z.string(), baseline: z.string().optional(), composing: z.boolean() }).strict()
 export type PropertyDraftRecovery = z.infer<typeof propertyDraftRecoverySchema>
-export const authoringDraftRecoverySchema = z.object({ advanced: z.array(advancedDraftRecoverySchema), properties: z.array(propertyDraftRecoverySchema) }).strict()
+export const authoringDraftRecoverySchema = z.object({ advanced: z.array(advancedDraftRecoverySchema), properties: z.array(propertyDraftRecoverySchema),
+  sourceConflict: z.object({ documentId: id, epoch: id, source: z.string(), diskVersion: z.string().nullable(),
+    hunks: z.array(z.object({ id: z.string(), text: z.string() }).strict()) }).strict().optional(),
+}).strict()
 export type AuthoringDraftRecovery = z.infer<typeof authoringDraftRecoverySchema>
 const bytes = z.custom<Uint8Array>(value => value instanceof Uint8Array)
-const resources = z.object({ assets: z.record(z.string(), bytes), components: z.record(z.string(), z.record(z.string(), bytes)) }).strict()
+const resources = z.object({ assets: ownRecordSchema(z.string(), bytes), components: ownRecordSchema(z.string(), ownRecordSchema(z.string(), bytes)) }).strict()
 const model = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('markdown'), source: z.string(), resources }).strict(),
   z.object({ kind: z.literal('text'), source: z.string(), resources }).strict(),
@@ -58,6 +63,8 @@ export const documentHostRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('create'), model, suggestedName: id }).strict(),
   z.object({ type: z.literal('open'), path: z.string().min(1).max(32767) }).strict(),
   z.object({ type: z.literal('read'), documentId: id }).strict(),
+  z.object({ type: z.literal('reveal'), documentId: id }).strict(),
+  z.object({ type: z.literal('rename'), documentId: id, epoch: id, name: z.string().trim().min(1).max(200).refine(value => !/[\\/:*?"<>|]/.test(value) && value !== '.' && value !== '..') }).strict(),
   z.object({ type: z.literal('read-authoring-drafts'), documentId: id }).strict(),
   z.object({ type: z.literal('write-authoring-drafts'), documentId: id, drafts: authoringDraftRecoverySchema }).strict(),
   z.object({ type: z.literal('clear-authoring-drafts'), documentId: id }).strict(),
@@ -70,7 +77,7 @@ export const documentHostRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('close'), documentId: id, discardDirty: z.boolean().optional(), expected: z.object({ epoch: id, revision: z.number().int().nonnegative() }).strict().optional() }).strict(),
   z.object({ type: z.literal('close-dialog'), documentId: id, suggestedDirectory: saveDirectoryContextSchema.optional(), discardOnly: z.boolean().optional() }).strict(),
   z.object({ type: z.literal('recoverable') }).strict(),
-  z.object({ type: z.literal('restore'), documentId: id, mode: z.enum(['original', 'unbound']).optional() }).strict(),
+  z.object({ type: z.literal('restore'), documentId: id, mode: z.enum(['original', 'unbound', 'saved']).optional() }).strict(),
   z.object({ type: z.literal('discard-recovery'), documentId: id }).strict(),
 ])
 export type DocumentHostRequest = z.infer<typeof documentHostRequestSchema>
@@ -81,6 +88,8 @@ export interface DocumentHostAPI {
   create(model: DocumentModel, suggestedName: string): Promise<DocumentSnapshot>
   open(path: string): Promise<DocumentSnapshot>
   read(documentId: string): Promise<DocumentSnapshot>
+  rename?(documentId: string, epoch: string, name: string): Promise<DocumentSnapshot>
+  reveal?(documentId: string): Promise<void>
   readAuthoringDrafts(documentId: string): Promise<AuthoringDraftRecovery | null>
   writeAuthoringDrafts(documentId: string, drafts: AuthoringDraftRecovery): Promise<void>
   clearAuthoringDrafts(documentId: string): Promise<void>
@@ -93,7 +102,7 @@ export interface DocumentHostAPI {
   close(documentId: string, discardDirty?: boolean): Promise<void>
   closeWithDialog(documentId: string, suggestedDirectory?: SaveDirectoryContext, discardOnly?: boolean): Promise<boolean>
   recoverable(): Promise<DocumentSnapshot[]>
-  restore(documentId: string, mode?: 'original' | 'unbound'): Promise<DocumentSnapshot>
+  restore(documentId: string, mode?: 'original' | 'unbound' | 'saved'): Promise<DocumentSnapshot>
   discardRecovery(documentId: string): Promise<void>
   subscribe(listener: (event: DocumentEvent) => void): () => void
 }

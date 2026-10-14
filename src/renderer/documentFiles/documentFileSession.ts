@@ -6,8 +6,11 @@ import { markdownRefPath, markdownSnapshotDocument } from '../../shared/workbenc
 import { DocumentProjection } from '../documents/DocumentProjection'
 import { documentSourceEdits, mergedDocumentSource, planDocumentSourceMerge, type DocumentConflictHunk, type DocumentSourceMerge, type SourceEdit } from './documentSourceMerge'
 import { documentRelativePathSchema } from '../../shared/document/resources'
+import { markdownResourceReferences } from '../../shared/document/markdownResourceReferences'
+import { fileResourceMime } from '../../shared/document/fileResourceMime'
 
 type PendingAttachment = { relativePath: string; bytes: Uint8Array }
+type SourceCandidate = { revision: number; localSource: string; source?: string }
 let sessionEpoch = Date.now()
 export interface RecoverableDocumentFilePort extends DocumentFilePort {
   /** Required by the production editor. Missing host is an error, never a local writer fallback. */
@@ -21,6 +24,7 @@ export interface DocumentFileSessionState {
   autoSave: boolean
   error: string | null; conflict: OpenDocumentResult | 'deleted' | null; recovery: boolean
   conflictHunks: DocumentConflictHunk[]
+  conflictDrafts: Record<string, string>
 }
 export function mergeDocumentSources(base: string, local: string, remote: string): string | null {
   const plan = planDocumentSourceMerge(base, local, remote)
@@ -49,7 +53,7 @@ function rebaseHistorySource(base: string, local: string, confirmed: string): st
 /** View adapter only: canonical source, resources, receipt and History live in main. */
 export class DocumentFileSession {
   readonly epoch = ++sessionEpoch
-  private state: DocumentFileSessionState = { source: '', disk: null, dirty: false, saving: false, composing: false, autoSave: false, error: null, conflict: null, recovery: false, conflictHunks: [] }
+  private state: DocumentFileSessionState = { source: '', disk: null, dirty: false, saving: false, composing: false, autoSave: false, error: null, conflict: null, recovery: false, conflictHunks: [], conflictDrafts: {} }
   private projection?: DocumentProjection
   private stopProjection?: () => void
   private timer?: ReturnType<typeof setTimeout>
@@ -59,6 +63,7 @@ export class DocumentFileSession {
   private pending?: Promise<boolean>
   private savingAs?: Promise<boolean>
   private historyTask?: Promise<void>
+  private compositionResume?: Promise<void>
   private retainedSubmission?: Promise<void>
   private deferredHistoryInput = false
   private historyConflict = false
@@ -71,7 +76,13 @@ export class DocumentFileSession {
   private pendingAttachments = new Map<string, Uint8Array>()
   private conflictPlan: DocumentSourceMerge | null = null
   private observation?: DocumentFileObservation
-  private diskSource = ''
+  private diskSource: string | undefined
+  private localSource = ''
+  private conflictCandidate: SourceCandidate | null = null
+  private conflictDraftTail: Promise<void> = Promise.resolve()
+  private deferredObservation?: DocumentFileObservation
+  private saveCapture?: { documentId: string; epoch: string; revision: number; source: string }
+  private hostSaving = false
   private lastEdit = 0
   private group?: { label: string; id: string }
   constructor(private currentRef: DocumentFileRef, private readonly port: RecoverableDocumentFilePort, private readonly existingDocumentId?: string) {}
@@ -93,12 +104,24 @@ export class DocumentFileSession {
     }
     const shown = view.draft ?? current.model
     if (!isSourceDocumentModel(shown)) return
+    // Main publishes saving=true in the same serialized step that freezes the save model.
+    const finishedHostSave = this.hostSaving && !current.saving
+    if (current.saving && !this.hostSaving) {
+      this.saveCapture = { documentId: current.documentId, epoch: current.epoch, revision: current.revision, source: current.model.source }
+      ++this.watchGeneration; clearTimeout(this.watchTimer); this.watchTimer = undefined
+    }
+    this.hostSaving = current.saving
     const keepInput = this.closeSuspended || this.state.composing || Boolean(this.conflictPlan) || this.deferredHistoryInput
+    if (!keepInput) this.localSource = shown.source
     const disk = current.model.kind === 'markdown' ? markdownSnapshotDocument(this.ref, current)
       : { ref: this.ref, source: current.model.source, version: { contentVersion: String(current.revision), attachments: [] }, diagnostics: [] }
     this.update({ ...(!keepInput ? { source: shown.source } : {}), disk,
       dirty: current.dirty || Boolean(view.pending.length) || this.pendingAttachments.size > 0 || (keepInput && this.state.source !== current.model.source),
       saving: current.saving || Boolean(this.savingAs) || Boolean(this.pending), ...(view.error ? { error: view.error.message } : {}) })
+    if (finishedHostSave) {
+      if (!current.saveError) this.receiveSavedSource(current)
+      this.poll()
+    }
   }
   async open() {
     const documents = this.documents
@@ -115,14 +138,16 @@ export class DocumentFileSession {
     this.project()
     this.initialized = true
     this.update({ recovery: Boolean(recovery) })
+    const auxiliary = await documents.readAuthoringDrafts(snapshot.documentId)
+    if (auxiliary?.sourceConflict) this.update({ conflictDrafts: Object.fromEntries(auxiliary.sourceConflict.hunks.map(hunk => [hunk.id, hunk.text])), recovery: true })
     if (snapshot.binding.kind === 'untitled') return
     const observation = await documents.observeFile(snapshot.documentId)
-    this.diskSource = snapshot.binding.kind === 'file' && observation.version === snapshot.binding.version && observation.model && isSourceDocumentModel(observation.model) ? observation.model.source : ''
+    this.diskSource = observation.baseSource ?? (snapshot.binding.kind === 'file' && observation.version === snapshot.binding.version && observation.model && isSourceDocumentModel(observation.model) ? observation.model.source : undefined)
     await this.observe(observation)
     this.poll()
   }
   private poll() {
-    if (this.disposed || this.closeSuspended || this.savingAs || this.watchTimer || this.watchTask || !this.projection || this.committedDocument?.binding.kind !== 'file') return
+    if (this.disposed || this.closeSuspended || this.savingAs || this.pending || this.hostSaving || this.watchTimer || this.watchTask || !this.projection || this.committedDocument?.binding.kind !== 'file') return
     const generation = this.watchGeneration
     this.watchTimer = setTimeout(async () => {
       this.watchTimer = undefined
@@ -142,7 +167,8 @@ export class DocumentFileSession {
     if (this.disposed || this.closeSuspended) return Promise.reject(new Error('文档输入已停止'))
     const projection = this.projection
     if (!projection) return Promise.reject(new Error('文档尚未连接'))
-    const missing = [...this.removedByHistory].find(path => source.includes(path) && !this.pendingAttachments.has(path))
+    const references = this.removedByHistory.size ? markdownResourceReferences(source) : []
+    const missing = [...this.removedByHistory].find(path => references.includes(path) && !this.pendingAttachments.has(path))
     if (missing) return Promise.reject(new Error(`撤销已移除素材 ${missing}，请移除对应引用或重新添加素材后继续`))
     const view = projection.read(), model = view.draft ?? view.committed!.model
     const resources = structuredClone(model.resources)
@@ -177,6 +203,7 @@ export class DocumentFileSession {
       if (this.group?.label !== historyGroup || Date.now() - this.lastEdit > 800) this.group = { label: historyGroup, id: crypto.randomUUID() }
     } else this.group = undefined
     this.lastEdit = Date.now()
+    this.localSource = source
     this.update({ source, dirty: true, error: null })
     if (this.historyTask) this.deferredHistoryInput = true
     else if (!this.state.composing) this.submitVisible(source, this.group?.id)
@@ -199,10 +226,13 @@ export class DocumentFileSession {
     const model = this.projection?.read().draft ?? this.projection?.read().committed?.model
     let bytes = this.pendingAttachments.get(relativePath) ?? model?.resources.assets[relativePath]
     if (!bytes && model) for (const [directory, files] of Object.entries(model.resources.components)) if (relativePath.startsWith(`${directory}/`)) bytes = files[relativePath.slice(directory.length + 1)]
+    if (!bytes && this.port.readResource) {
+      try { return await this.port.readResource(this.ref, relativePath) }
+      catch (error) { if ((error as { code?: string }).code !== 'ENOENT') throw error }
+    }
     if (!bytes) throw new Error('当前文档未包含该素材')
-    const filename = relativePath.split('/').pop()!, extension = filename.split('.').pop()?.toLowerCase() ?? ''
-    const types: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', mp3: 'audio/mpeg', wav: 'audio/wav', mp4: 'video/mp4', webm: 'video/webm', woff2: 'font/woff2' }
-    return { bytes: new Uint8Array(bytes), filename, mime: types[extension] ?? 'application/octet-stream' }
+    const filename = relativePath.split('/').pop()!
+    return { bytes: new Uint8Array(bytes), filename, mime: fileResourceMime(filename) }
   }
   setComposing(composing: boolean) {
     if (this.disposed) return
@@ -212,9 +242,15 @@ export class DocumentFileSession {
     else {
       if (!this.closeSuspended) {
         if (this.historyTask) this.deferredHistoryInput = true
-        else this.submitVisible(this.state.source, this.group?.id)
+        else this.submitVisible(this.localSource, this.group?.id)
       }
       for (const resolve of this.compositionWaiters.splice(0)) resolve()
+      if (this.observation && !this.closeSuspended) {
+        const observation = this.observation
+        const resume = this.projection!.drain().then(() => this.observe(observation)).catch(error => this.fail(error))
+        this.compositionResume = resume
+        void resume.finally(() => { if (this.compositionResume === resume) this.compositionResume = undefined })
+      }
       this.schedule()
     }
   }
@@ -255,6 +291,7 @@ export class DocumentFileSession {
     if (this.disposed || this.closeSuspended || !this.projection) return false
     try {
       if (this.historyTask && !skipHistoryTask) await this.historyTask
+      if (this.compositionResume) await this.compositionResume
       for (;;) {
         if (this.retainedSubmission) await this.retainedSubmission
         if (this.disposed || this.closeSuspended) return false
@@ -277,19 +314,24 @@ export class DocumentFileSession {
     if (this.savingAs) return this.savingAs
     if (this.pending) return this.pending.then(saved => saved && this.state.dirty ? this.flush() : saved && !this.state.error)
     clearTimeout(this.timer)
+    clearTimeout(this.watchTimer); this.watchTimer = undefined
+    ++this.watchGeneration
+    const priorWatch = this.watchTask
     const operation = Promise.resolve().then(async () => {
+      if (priorWatch) await priorWatch
       if (!await this.drain()) return false
       if (!this.state.dirty) return true
       this.update({ saving: true, error: null })
       try {
+        this.saveCapture = undefined
         const untitled = this.committedDocument?.binding.kind === 'untitled'
-        if (untitled) { if (!await this.documents.saveWithDialog(this.projection!.documentId)) return false }
-        else await this.documents.save(this.projection!.documentId)
+        const saved = untitled ? await this.documents.saveWithDialog(this.projection!.documentId) : await this.documents.save(this.projection!.documentId)
+        if (!saved) return false
+        this.receiveSavedSource(saved)
         if (untitled) this.poll()
         this.project()
         const disk = await this.documents.observeFile(this.projection!.documentId)
-        if (disk.model && isSourceDocumentModel(disk.model)) this.diskSource = disk.model.source
-        this.observation = disk
+        await this.observe(disk)
         this.schedule()
         return true
       } catch (error) {
@@ -299,7 +341,7 @@ export class DocumentFileSession {
       }
     }).finally(() => {
       if (this.pending === operation) this.pending = undefined
-      if (!this.disposed) this.project()
+      if (!this.disposed) { this.project(); this.poll() }
     })
     this.pending = operation
     return operation
@@ -321,16 +363,21 @@ export class DocumentFileSession {
       if (priorWatch) await priorWatch
       if (this.pending) await this.pending
       if (this.disposed || !await this.preserveDraft()) return false
+      this.saveCapture = undefined
       const saved = await this.documents.saveWithDialog(this.projection!.documentId, true)
       if (!saved) return false
+      this.receiveSavedSource(saved)
       this.conflictPlan = null
+      this.conflictCandidate = null
       this.observation = undefined
       this.update({ conflict: null, conflictHunks: [], recovery: false, error: null })
       await this.projection!.drain()
       this.project()
       const disk = await this.documents.observeFile(this.projection!.documentId)
-      if (disk.model && isSourceDocumentModel(disk.model)) this.diskSource = disk.model.source
-      this.observation = disk
+      if (saved.binding.kind === 'file' && disk.version === saved.binding.version) {
+        if (disk.model && isSourceDocumentModel(disk.model)) this.diskSource = disk.model.source
+        this.observation = disk
+      }
       return true
     }).catch(error => { this.fail(error); return false }).finally(() => {
       this.savingAs = undefined
@@ -378,58 +425,137 @@ export class DocumentFileSession {
   undo() { return this.navigateHistory('undo') }
   undoLatestAgent() { return this.navigateHistory('undoLatestAgent') }
   redo() { return this.navigateHistory('redo') }
+  private receiveSavedSource(saved: DocumentSnapshot) {
+    if (!isSourceDocumentModel(saved.model)) return
+    const capture = this.saveCapture
+    if (!saved.dirty) this.diskSource = saved.model.source
+    else if (capture?.documentId === saved.documentId && capture.epoch === saved.epoch) this.diskSource = capture.source
+    this.observation = undefined
+  }
+  private showMerge(local: SourceCandidate, observation: DocumentFileObservation) {
+    if (!observation.model || !isSourceDocumentModel(observation.model)) throw new Error('磁盘文件格式已改变')
+    const disk: OpenDocumentResult = { ref: this.ref, source: observation.model.source, version: { contentVersion: observation.version!, attachments: [] }, diagnostics: [] }
+    const plan = planDocumentSourceMerge(this.diskSource!, local.localSource, disk.source)
+    this.conflictPlan = plan
+    this.conflictCandidate = local
+    this.update({ conflict: disk, conflictHunks: plan.conflicts, source: mergedDocumentSource(plan), dirty: true })
+    return plan
+  }
   private async observe(observation: DocumentFileObservation, generation = this.watchGeneration) {
     if (this.disposed || this.closeSuspended || this.savingAs || generation !== this.watchGeneration || !this.projection) return
     const current = this.projection.read().committed!
+    // A disk publication preceding its own ACK is still owned by this save.
+    if (current.saving) return
     if (current.binding.kind !== 'file' || observation.bindingVersion !== current.binding.bindingVersion) return
-    if (observation.version === current.binding.version) { this.observation = observation; return }
+    if (observation.version === current.binding.version) {
+      if (observation.model && isSourceDocumentModel(observation.model)) this.diskSource = observation.model.source
+      this.observation = observation; return
+    }
+    if (this.conflictPlan && Object.keys(this.state.conflictDrafts).length) { this.deferredObservation = observation; return }
     if (this.observation?.version === observation.version && this.state.conflict) return
     this.observation = observation
 
     if (!observation.model) { this.conflictPlan = null; this.update({ conflict: 'deleted', dirty: true, conflictHunks: [] }); return }
     if (!isSourceDocumentModel(observation.model) || observation.model.kind !== current.model.kind) throw new Error('磁盘文件格式已改变')
-    await this.projection.drain()
+    if (this.state.composing) return // Reconcile the final IME source, never a partial buffer.
+    const live = await this.projection.drain()
     if (this.disposed || this.closeSuspended || this.savingAs || generation !== this.watchGeneration) return
-    const live = this.projection.read().committed!
     if (live.binding.kind !== 'file' || live.binding.bindingVersion !== observation.bindingVersion) return
-    if (!live.dirty && !this.state.composing) { await this.reconcile('disk', undefined, observation, generation); return }
-    const disk: OpenDocumentResult = { ref: this.ref, source: observation.model.source, version: { contentVersion: observation.version!, attachments: [] }, diagnostics: [] }
-    const plan = planDocumentSourceMerge(this.diskSource, this.state.source, disk.source)
-    this.conflictPlan = plan
-    this.update({ conflict: disk, conflictHunks: plan.conflicts, source: mergedDocumentSource(plan), dirty: true })
-    if (!plan.conflicts.length && !this.state.composing) { await this.reconcile('local', mergedDocumentSource(plan), observation, generation); this.schedule() }
+    if (!isSourceDocumentModel(live.model)) throw new Error('文档格式已改变')
+    const candidate = { revision: live.revision, localSource: this.state.composing ? this.localSource : live.model.source }
+    if (!live.dirty && !this.state.composing) { await this.reconcile('disk', candidate, observation, generation); return }
+    if (this.diskSource === undefined) {
+      this.conflictCandidate = candidate
+      this.update({ conflict: { ref: this.ref, source: observation.model.source, version: { contentVersion: observation.version!, attachments: [] }, diagnostics: [] },
+        conflictHunks: [], error: '无法取得原保存基线；当前稿和磁盘稿均已保留，请比较完整正文后选择。', dirty: true })
+      return
+    }
+    const plan = this.showMerge(candidate, observation)
+    if (!plan.conflicts.length && !this.state.composing) { await this.reconcile('local', { ...candidate, source: mergedDocumentSource(plan) }, observation, generation); this.schedule() }
   }
-  private async reconcile(choice: 'disk' | 'local', source?: string, observation = this.observation, generation?: number) {
+  private async reconcile(choice: 'disk' | 'local', candidate: SourceCandidate, observation = this.observation, generation?: number): Promise<boolean> {
     if (!this.projection || !observation) throw new Error('请先重新读取磁盘版本')
     const current = await this.projection.drain()
-    if (this.disposed || this.closeSuspended || this.savingAs || (generation !== undefined && generation !== this.watchGeneration)) return
+    if (this.disposed || this.closeSuspended || this.savingAs || (generation !== undefined && generation !== this.watchGeneration)) return false
     if (current.binding.kind !== 'file' || current.binding.bindingVersion !== observation.bindingVersion) throw new Error('文件位置已改变，请重新读取')
+    if (!isSourceDocumentModel(current.model)) throw new Error('文档格式已改变')
+    let source = candidate.source
+    if (current.revision !== candidate.revision) {
+      const selected = choice === 'disk' && observation.model && isSourceDocumentModel(observation.model) ? observation.model.source : source
+      const rebased = selected === undefined ? null : rebaseHistorySource(candidate.localSource, current.model.source, selected)
+      if (rebased === null) {
+        const plan = this.showMerge({ revision: current.revision, localSource: current.model.source }, observation)
+        if (plan.conflicts.length) return false
+        source = mergedDocumentSource(plan)
+      } else source = rebased
+      choice = 'local'
+    }
     await this.documents.reconcileFile({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision,
       bindingVersion: observation.bindingVersion, version: observation.version, choice, ...(source === undefined ? {} : { source }) })
     this.conflictPlan = null
+    this.conflictCandidate = null
     this.diskSource = observation.model && isSourceDocumentModel(observation.model) ? observation.model.source : ''
     this.update({ conflict: null, conflictHunks: [], recovery: false, error: null })
     await this.projection.drain()
     this.project()
+    return true
   }
   async resolveConflict(choice: 'disk' | 'local' | 'recovery') {
     if (this.state.conflictHunks.length) return
-    try { await this.reconcile(choice === 'disk' ? 'disk' : 'local', choice === 'disk' ? undefined : this.state.source); if (choice !== 'disk') await this.flush() }
+    const current = this.projection?.read().committed
+    if (!current || !isSourceDocumentModel(current.model)) return
+    const candidate = this.conflictCandidate ?? { revision: current.revision, localSource: current.model.source }
+    try { if (await this.reconcile(choice === 'disk' ? 'disk' : 'local', { ...candidate, ...(choice === 'disk' ? {} : { source: this.state.source }) }) && choice !== 'disk') await this.flush() }
     catch (error) { this.fail(error) }
   }
   async resolveConflictHunk(id: string, choice: 'local' | 'remote', customText?: string) {
     const plan = this.conflictPlan, hunk = plan?.conflicts.find(item => item.id === id)
     if (!plan || !hunk || hunk.resolution !== null) return
     hunk.resolution = customText ?? hunk[choice]
+    const conflictDrafts = { ...this.state.conflictDrafts }; delete conflictDrafts[id]
     const source = mergedDocumentSource(plan), remaining = plan.conflicts.filter(item => item.resolution === null)
-    this.update({ source, conflictHunks: remaining })
-    if (!remaining.length) { try { await this.reconcile('local', source); await this.flush() } catch (error) { this.fail(error) } }
+    this.update({ source, conflictHunks: remaining, conflictDrafts })
+    try {
+      await this.submit(source)
+      const confirmed = await this.projection!.drain()
+      this.conflictCandidate = { revision: confirmed.revision, localSource: source }
+      await this.persistConflictDrafts()
+    } catch (error) { this.fail(error); return }
+    if (!remaining.length && this.deferredObservation) {
+      const observation = this.deferredObservation; this.deferredObservation = undefined
+      this.conflictPlan = null; this.conflictCandidate = null
+      this.update({ conflict: null, conflictHunks: [] })
+      await this.observe(observation)
+      return
+    }
+    if (!remaining.length && this.conflictCandidate) { try { if (await this.reconcile('local', { ...this.conflictCandidate, source })) await this.flush() } catch (error) { this.fail(error) } }
+  }
+  setConflictDraft(id: string, text: string): void {
+    this.update({ conflictDrafts: { ...this.state.conflictDrafts, [id]: text }, dirty: true })
+    void this.persistConflictDrafts().catch(error => this.fail(error))
+  }
+  removeConflictDraft(id: string): void {
+    const conflictDrafts = { ...this.state.conflictDrafts }; delete conflictDrafts[id]
+    this.update({ conflictDrafts })
+    void this.persistConflictDrafts().catch(error => this.fail(error))
+  }
+  private persistConflictDrafts(): Promise<void> {
+    const current = this.committedDocument
+    if (!current) return Promise.resolve()
+    const drafts = Object.entries(this.state.conflictDrafts).map(([id, text]) => ({ id, text }))
+    const input = { advanced: [], properties: [], ...(drafts.length ? { sourceConflict: {
+      documentId: current.documentId, epoch: current.epoch, source: this.state.source, diskVersion: this.observation?.version ?? null, hunks: drafts,
+    } } : {}) }
+    const write = this.conflictDraftTail.then(() => this.documents.writeAuthoringDrafts(current.documentId, input))
+    this.conflictDraftTail = write.catch(() => undefined)
+    return write
   }
   async preserveDraft(): Promise<boolean> {
     if (this.disposed || this.closeSuspended) return false
     if (this.state.composing) await new Promise<void>(resolve => this.compositionWaiters.push(resolve))
     try {
       if (this.disposed || this.closeSuspended || !this.projection) return false
+      await this.conflictDraftTail
       const visible = this.projection.read().draft ?? this.projection.read().committed!.model
       if (isSourceDocumentModel(visible) && (visible.source !== this.state.source || (visible.kind === 'markdown' && this.pendingAttachments.size))) await this.submit(this.state.source)
       await this.projection.drain()

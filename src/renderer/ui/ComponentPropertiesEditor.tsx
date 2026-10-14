@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { BufferedInput, usePropertyDraftBindingKey, usePropertyDraftFlush } from './properties/PropertyControls'
+import { BufferedInput, PropertyDraftFieldBoundary, usePropertyDraftBindingKey, usePropertyDraftFlush } from './properties/PropertyControls'
 import { SlidersHorizontal } from 'lucide-react'
 import type { ComponentAsset, ComponentDefinition, ComponentInstance, JsonValue } from '../../shared/contracts/component-platform/project'
 import { componentDefinitionPresentation, componentFieldPresentation, componentEditorPresentation } from './properties/componentDefinitionPresentation'
@@ -93,13 +93,13 @@ export function ComponentPropertiesEditor({definition,node,assets={},onChange,on
     const displayed=value===undefined?metadata.defaultValue:value
     const label=path.map((_,index)=>componentFieldPresentation(definition,path.slice(0,index+1)).label).join(' · ')
     const change=(next:JsonValue|undefined)=>update(path,next)
-    return <div className={`property-row${typeof value==='boolean'?' property-row--checkbox':''}`} key={path.join('.')}><span>{label}</span>{
+    return <PropertyDraftFieldBoundary key={JSON.stringify(path)} fieldKey={path}><div className={`property-row${typeof value==='boolean'?' property-row--checkbox':''}`}><span>{label}</span>{
       metadata.image?<select aria-label={label} value={typeof displayed==='string'?displayed:''} onChange={event=>change(event.currentTarget.value||undefined)}>
         <option value="">未选择工程图片</option>
         {typeof displayed==='string'&&displayed&&!assets[displayed]&&<option value={displayed}>{displayed}（资源未找到）</option>}
         {Object.values(assets).filter(asset=>asset.kind==='image'||asset.mimeType?.startsWith('image/')).sort((a,b)=>(a.filename??a.path).localeCompare(b.filename??b.path,'zh-CN')).map(asset=><option key={asset.id} value={asset.id}>{asset.filename??asset.path.split(/[\\/]/u).at(-1)??asset.id}</option>)}
       </select>
-      :metadata.color?<ColorInput id={`component-${node.id}-${path.join('.')}`} label={label} value={typeof displayed==='string'?displayed:''} onChange={change}
+      :metadata.color?<ColorInput id={`component-${node.id}-${encodeURIComponent(JSON.stringify(path))}`} label={label} value={typeof displayed==='string'?displayed:''} onChange={change}
         onPreviewChange={onPreview?color=>onPreview(color===null?null:updatedData(path,color)):undefined}/>
       :typeof displayed==='boolean'||metadata.type==='boolean'?<input aria-label={label} type="checkbox" checked={displayed===true} onChange={event=>change(event.currentTarget.checked)}/>
       :typeof displayed==='number'||metadata.type==='number'||metadata.type==='integer'?<BufferedInput label={label} type="number" value={typeof displayed==='number'?displayed:''} min={metadata.minimum} max={metadata.maximum} step={metadata.step??(metadata.type==='integer'?1:undefined)}
@@ -114,7 +114,7 @@ export function ComponentPropertiesEditor({definition,node,assets={},onChange,on
       :displayed===undefined?<BufferedInput label={label} value="" placeholder={metadata.placeholder??'未设置'} allowEmpty onCommit={next=>change(next||undefined)}/>
       :<StructuredField label={label} value={displayed} onChange={change}/>
     }{metadata.color&&metadata.optional&&value!==undefined&&<button type="button" aria-label={`${label}使用默认颜色`} onClick={()=>change(undefined)}>使用默认颜色</button>}
-    {metadata.description&&<small className="component-property-description">{metadata.description}</small>}</div>
+    {metadata.description&&<small className="component-property-description">{metadata.description}</small>}</div></PropertyDraftFieldBoundary>
   }
   const merge=(base:JsonValue,patch:JsonValue):JsonValue=>{
     if(!base||typeof base!=='object'||Array.isArray(base)||!patch||typeof patch!=='object'||Array.isArray(patch))return structuredClone(patch)

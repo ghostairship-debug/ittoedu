@@ -158,15 +158,20 @@ export class WorkspaceFiles {
   async registerRoot(absoluteDirectory: string): Promise<RegisteredWorkspaceRoot> {
     if (!path.isAbsolute(absoluteDirectory)) throw new WorkspaceFilesError('root-not-absolute', '工作区根必须是显式授权的绝对目录')
     const resolvedPath = await fs.realpath(absoluteDirectory)
-    const stat = await fs.lstat(resolvedPath)
+    const stat = await fs.lstat(resolvedPath, { bigint: true })
     if (!stat.isDirectory()) throw new WorkspaceFilesError('root-not-directory', '工作区根必须是目录')
     const existingId = this.rootsByPath.get(this.pathKey(resolvedPath))
-    if (existingId) return this.registeredRoot(existingId)
+    if (existingId) {
+      const root = this.roots.get(existingId), entry = root && this.entries.get(root.rootEntryId)
+      if (root && entry && entry.identity === this.fileIdentity(stat)) return this.registeredRoot(existingId)
+      if (root) { this.forgetTree(existingId, root.resolvedPath); this.roots.delete(existingId) }
+      this.rootsByPath.delete(this.pathKey(resolvedPath))
+    }
     const workspaceId = this.createId(), rootEntryId = this.createId()
     const root = { workspaceId, rootEntryId, resolvedPath }
     this.roots.set(workspaceId, root)
     this.rootsByPath.set(this.pathKey(resolvedPath), workspaceId)
-    this.remember({ workspaceId, entryId: rootEntryId, kind: 'directory', resolvedPath })
+    this.remember({ workspaceId, entryId: rootEntryId, kind: 'directory', resolvedPath, identity: this.fileIdentity(stat) })
     return { ...root }
   }
 
@@ -265,7 +270,7 @@ export class WorkspaceFiles {
           rollback: async () => { await this.removePath(target.resolvedPath); this.forgetTree(input.workspaceId, target.resolvedPath) },
           commit: () => this.remember(entry),
         }
-      })
+      }, beforeCommit)
       const operation = this.aggregate(input.operationId, [result])
       if (creation && operation.status === 'success' && result.targetPath) {
         // coordinate() has committed. Keep this outside perform(), which can still be rolled back.
@@ -308,7 +313,7 @@ export class WorkspaceFiles {
     } finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }
   }
 
-  mkdir(input: { operationId: string; workspaceId: string; targetDirectoryId: string; name: string; overwrite?: boolean }): Promise<WorkspaceOperationResult> {
+  mkdir(input: { operationId: string; workspaceId: string; targetDirectoryId: string; name: string; overwrite?: boolean }, beforeCommit?: () => void): Promise<WorkspaceOperationResult> {
     const digest = stableDigest(input)
     return this.runOnce(input.operationId, digest, async () => {
       validateWorkspaceEntryName(input.name)
@@ -316,6 +321,7 @@ export class WorkspaceFiles {
       const action = this.action(input.operationId, input.workspaceId, 'mkdir', [], target, !!input.overwrite)
       const result = await this.coordinate(action, async () => {
         await this.requireAvailableTarget(target.resolvedPath, !!input.overwrite)
+        beforeCommit?.()
         await fs.mkdir(target.resolvedPath)
         const entry = await this.provisionalEntry(input.workspaceId, target.resolvedPath, 'directory')
         return {
@@ -323,12 +329,12 @@ export class WorkspaceFiles {
           rollback: async () => { await fs.rmdir(target.resolvedPath); this.forgetTree(input.workspaceId, target.resolvedPath) },
           commit: () => this.remember(entry),
         }
-      })
+      }, beforeCommit)
       return this.aggregate(input.operationId, [result])
     })
   }
 
-  rename(input: { operationId: string; workspaceId: string; sourceEntryId: string; name: string; overwrite?: boolean }): Promise<WorkspaceOperationResult> {
+  rename(input: { operationId: string; workspaceId: string; sourceEntryId: string; name: string; overwrite?: boolean }, beforeRename?: () => void): Promise<WorkspaceOperationResult> {
     const digest = stableDigest(input)
     return this.runOnce(input.operationId, digest, async () => {
       validateWorkspaceEntryName(input.name)
@@ -336,21 +342,21 @@ export class WorkspaceFiles {
       const parent = path.dirname(source.resolvedPath)
       const parentEntry = await this.issueEntry(input.workspaceId, parent)
       const target = await this.destination(input.workspaceId, parentEntry.entryId, input.name)
-      const result = await this.renameOrMove(input.operationId, input.workspaceId, 'rename', source, target, !!input.overwrite)
+      const result = await this.renameOrMove(input.operationId, input.workspaceId, 'rename', source, target, !!input.overwrite, undefined, beforeRename)
       return this.aggregate(input.operationId, [result])
     })
   }
 
-  copy(input: { operationId: string; workspaceId: string; sourceEntryIds: string[]; targetDirectoryId: string; overwrite?: boolean; resourcePolicy?: 'copy' | 'cancel'; sourceVersion?: 'disk' | 'current' }): Promise<WorkspaceOperationResult> {
-    return this.transferMany('copy', input)
+  copy(input: { operationId: string; workspaceId: string; sourceEntryIds: string[]; targetDirectoryId: string; overwrite?: boolean; resourcePolicy?: 'copy' | 'cancel'; sourceVersion?: 'disk' | 'current' }, beforeCommit?: () => void): Promise<WorkspaceOperationResult> {
+    return this.transferMany('copy', input, beforeCommit)
   }
 
   move(input: { operationId: string; workspaceId: string; sourceEntryIds: string[]; targetWorkspaceId?: string;
-    targetDirectoryId: string; overwrite?: boolean; resourcePolicy?: 'copy' | 'cancel' }): Promise<WorkspaceOperationResult> {
-    return this.transferMany('move', input)
+    targetDirectoryId: string; overwrite?: boolean; resourcePolicy?: 'copy' | 'cancel' }, beforeCommit?: () => void): Promise<WorkspaceOperationResult> {
+    return this.transferMany('move', input, beforeCommit)
   }
 
-  trash(input: { operationId: string; workspaceId: string; entryIds: string[] }): Promise<WorkspaceOperationResult> {
+  trash(input: { operationId: string; workspaceId: string; entryIds: string[] }, beforeCommit?: () => void): Promise<WorkspaceOperationResult> {
     const digest = stableDigest(input)
     return this.runOnce(input.operationId, digest, async () => {
       const items: WorkspaceItemResult[] = []
@@ -360,12 +366,13 @@ export class WorkspaceFiles {
         const action = this.action(input.operationId, input.workspaceId, 'trash', [source], undefined, false)
         items.push(await this.coordinate(action, async () => {
           if (!this.dependencies.trashItem) throw new WorkspaceFilesError('trash-unavailable', '系统回收站接口不可用')
+          beforeCommit?.()
           await this.dependencies.trashItem(source.resolvedPath)
           return {
             result: { status: 'success', sourceEntryId: entryId, sourcePath: source.resolvedPath, affectedPaths: [source.resolvedPath] },
             commit: () => this.forgetTree(input.workspaceId, source.resolvedPath),
           }
-        }))
+        }, beforeCommit))
       }
       return this.aggregate(input.operationId, items)
     })
@@ -387,7 +394,7 @@ export class WorkspaceFiles {
 
   private async transferMany(kind: 'copy' | 'move', input: { operationId: string; workspaceId: string;
     sourceEntryIds: string[]; targetWorkspaceId?: string; targetDirectoryId: string; overwrite?: boolean;
-    resourcePolicy?: 'copy' | 'cancel'; sourceVersion?: 'disk' | 'current' }): Promise<WorkspaceOperationResult> {
+    resourcePolicy?: 'copy' | 'cancel'; sourceVersion?: 'disk' | 'current' }, beforeCommit?: () => void): Promise<WorkspaceOperationResult> {
     const digest = stableDigest({ kind, ...input })
     return this.runOnce(input.operationId, digest, async () => {
       const targetWorkspaceId = kind === 'move' ? input.targetWorkspaceId ?? input.workspaceId : input.workspaceId
@@ -404,8 +411,8 @@ export class WorkspaceFiles {
             affectedPaths: [source.resolvedPath, target.resolvedPath],
           })); continue
         }
-        if (kind === 'move') items.push(await this.renameOrMove(input.operationId, input.workspaceId, kind, source, target, !!input.overwrite, input.resourcePolicy))
-        else items.push(await this.copyOne(input.operationId, input.workspaceId, source, target, !!input.overwrite, input.resourcePolicy, input.sourceVersion))
+        if (kind === 'move') items.push(await this.renameOrMove(input.operationId, input.workspaceId, kind, source, target, !!input.overwrite, input.resourcePolicy, beforeCommit))
+        else items.push(await this.copyOne(input.operationId, input.workspaceId, source, target, !!input.overwrite, input.resourcePolicy, input.sourceVersion, beforeCommit))
       }
       return this.aggregate(input.operationId, items)
     })
@@ -426,7 +433,7 @@ export class WorkspaceFiles {
   }
 
   private async copyOne(operationId: string, workspaceId: string, source: ResolvedWorkspaceEntry,
-    target: WorkspaceDestination, overwrite: boolean, resourcePolicy?: 'copy' | 'cancel', sourceVersion: 'disk' | 'current' = 'disk'): Promise<WorkspaceItemResult> {
+    target: WorkspaceDestination, overwrite: boolean, resourcePolicy?: 'copy' | 'cancel', sourceVersion: 'disk' | 'current' = 'disk', beforeCommit?: () => void): Promise<WorkspaceItemResult> {
     const current = sourceVersion === 'current' ? await this.dependencies.captureCopyContent?.(source.resolvedPath, source.kind) ?? [] : []
     const action = { ...this.action(operationId, workspaceId, 'copy', [source], target, overwrite), resourcePolicy,
       sourceVersion: current.length ? 'current' as const : 'disk' as const }
@@ -434,8 +441,8 @@ export class WorkspaceFiles {
       await this.requireAvailableTarget(target.resolvedPath, overwrite)
       await this.assertTreeClosed(workspaceId, source.resolvedPath)
       let rollbackResources: (() => Promise<void>) | undefined
-      if (current.length) rollbackResources = await this.copyCurrentContent(source.resolvedPath, target.resolvedPath, source.kind, operationId, current, resourcePolicy)
-      else await this.copyVerified(source.resolvedPath, target.resolvedPath, source.kind, operationId)
+      if (current.length) rollbackResources = await this.copyCurrentContent(source.resolvedPath, target.resolvedPath, source.kind, operationId, current, resourcePolicy, beforeCommit)
+      else await this.copyVerified(source.resolvedPath, target.resolvedPath, source.kind, operationId, beforeCommit)
       const copied = await this.provisionalEntry(workspaceId, target.resolvedPath, source.kind)
       return {
           result: { status: 'success', sourceEntryId: source.entryId, entryId: copied.entryId, sourcePath: source.resolvedPath,
@@ -443,17 +450,17 @@ export class WorkspaceFiles {
           rollback: async () => { await this.removePath(target.resolvedPath); await rollbackResources?.(); this.forgetTree(workspaceId, target.resolvedPath) },
         commit: () => this.remember(copied),
       }
-    })
+    }, beforeCommit)
   }
 
   private async renameOrMove(operationId: string, workspaceId: string, kind: 'rename' | 'move', source: ResolvedWorkspaceEntry,
-    target: WorkspaceDestination, overwrite: boolean, resourcePolicy?: 'copy' | 'cancel'): Promise<WorkspaceItemResult> {
+    target: WorkspaceDestination, overwrite: boolean, resourcePolicy?: 'copy' | 'cancel', beforeCommit?: () => void): Promise<WorkspaceItemResult> {
     const affectedPaths = [source.resolvedPath, target.resolvedPath]
     const action = { ...this.action(operationId, workspaceId, kind, [source], target, overwrite), resourcePolicy }
     // Two separately authorized roots can overlap. Moving into the same real
     // directory entry is a no-op even when the root handles differ; copying it
     // over itself and then deleting the source would delete the only file.
-    if (this.pathKey(source.resolvedPath) === this.pathKey(target.resolvedPath)) {
+    if (source.resolvedPath === target.resolvedPath) {
       return { status: 'success', sourceEntryId: source.entryId, entryId: source.entryId, sourcePath: source.resolvedPath,
         targetPath: target.resolvedPath, affectedPaths }
     }
@@ -462,6 +469,7 @@ export class WorkspaceFiles {
       await this.assertTreeClosed(workspaceId, source.resolvedPath)
       if (workspaceId === target.workspaceId) {
         try {
+          beforeCommit?.()
           await this.renamePath(source.resolvedPath, target.resolvedPath)
           return {
             result: { status: 'success', sourceEntryId: source.entryId, entryId: source.entryId, sourcePath: source.resolvedPath,
@@ -473,7 +481,7 @@ export class WorkspaceFiles {
           if (errorCode(error) !== 'EXDEV') throw error
         }
       }
-      const verifiedSource = await this.copyVerified(source.resolvedPath, target.resolvedPath, source.kind, operationId)
+      const verifiedSource = await this.copyVerified(source.resolvedPath, target.resolvedPath, source.kind, operationId, beforeCommit)
       let copiedIdentities: Map<string, string | undefined>
       try {
         copiedIdentities = await this.rememberedIdentities(workspaceId, source.resolvedPath, target.resolvedPath)
@@ -489,7 +497,7 @@ export class WorkspaceFiles {
           sourcePath: source.resolvedPath, targetPath: target.resolvedPath, affectedPaths,
           error: { code: 'source-changed-after-copy', message: '副本已验证，但源项在删除前发生变化；原件未删除，请检查两份内容' } } }
       }
-      try { await this.removePath(source.resolvedPath) }
+      try { beforeCommit?.(); await this.removePath(source.resolvedPath) }
       catch (error) {
         const copied = await this.issueEntry(target.workspaceId, target.resolvedPath)
         const known = workspaceError(error, 'source-delete-failed')
@@ -508,16 +516,17 @@ export class WorkspaceFiles {
           this.updateRememberedIdentities(workspaceId, source.resolvedPath, restoredIdentities)
         },
       }
-    })
+    }, beforeCommit)
   }
 
-  private async coordinate(action: WorkspaceMutationAction, perform: () => Promise<MutationExecution>): Promise<WorkspaceItemResult> {
+  private async coordinate(action: WorkspaceMutationAction, perform: () => Promise<MutationExecution>, beforeCommit?: () => void): Promise<WorkspaceItemResult> {
     let execution: MutationExecution | undefined
     let resources: Awaited<ReturnType<typeof prepareMarkdownMoveResources>> | undefined
     let calls = 0
     const invoke = async () => {
       if (++calls !== 1) throw new WorkspaceFilesError('mutation-performed-twice', '协调钩子只能执行一次文件操作')
       await this.assertMutationPathsCurrent(action)
+      beforeCommit?.()
       const source = action.sources[0], target = action.target
       if ((action.kind === 'move' || action.kind === 'copy' && action.sourceVersion !== 'current') && source?.kind === 'file' && target
         && /\.(md|markdown)$/i.test(source.resolvedPath)
@@ -527,13 +536,14 @@ export class WorkspaceFiles {
           if (action.resourcePolicy === 'cancel') throw new WorkspaceOperationCancelledError('已取消，正文和附件保持原位置')
           if (action.resourcePolicy !== 'copy') throw new WorkspaceFilesError('resource-choice-required', '此文档引用本地附件，请选择一并复制附件或取消')
           await this.requireAvailableTarget(target.resolvedPath, action.overwrite)
-          resources = await prepareMarkdownMoveResources(source.resolvedPath, target.resolvedPath)
+          resources = await prepareMarkdownMoveResources(source.resolvedPath, target.resolvedPath, undefined, beforeCommit)
           if (await readDocumentFileVersion(source.resolvedPath, 'markdown') !== resources.sourceVersion) throw new WorkspaceFilesError('file-conflict', '操作期间源文档或附件已改变')
         }
       }
       // A coordinator can wait for an open document. Recheck after that wait and
       // before touching disk, since a directory may have become a junction.
       await this.assertMutationPathsCurrent(action)
+      beforeCommit?.()
       execution = await perform()
       return execution.result
     }
@@ -587,7 +597,7 @@ export class WorkspaceFiles {
     }
   }
 
-  private async copyVerified(source: string, target: string, kind: WorkspaceEntryKind, operationId: string): Promise<TreeSnapshot> {
+  private async copyVerified(source: string, target: string, kind: WorkspaceEntryKind, operationId: string, beforeCommit?: () => void): Promise<TreeSnapshot> {
     const before = await this.snapshotTree(source)
     const temporary = this.temporarySibling(target, operationId)
     await fs.rm(temporary, { recursive: true, force: true })
@@ -598,6 +608,7 @@ export class WorkspaceFiles {
         || JSON.stringify(snapshotContent(before)) !== JSON.stringify(snapshotContent(copied))) {
         throw new WorkspaceFilesError('copy-verification-failed', '复制后的目录结构或文件内容校验不一致')
       }
+      beforeCommit?.()
       await this.renamePath(temporary, target)
       return before
     } catch (error) {
@@ -607,7 +618,7 @@ export class WorkspaceFiles {
   }
 
   private async copyCurrentContent(source: string, target: string, kind: WorkspaceEntryKind, operationId: string,
-    content: Awaited<ReturnType<NonNullable<WorkspaceFilesDependencies['captureCopyContent']>>>, resourcePolicy?: 'copy' | 'cancel'): Promise<() => Promise<void>> {
+    content: Awaited<ReturnType<NonNullable<WorkspaceFilesDependencies['captureCopyContent']>>>, resourcePolicy?: 'copy' | 'cancel', beforeCommit?: () => void): Promise<() => Promise<void>> {
     const temporary = this.temporarySibling(target, operationId)
     const resources: Awaited<ReturnType<typeof prepareMarkdownMoveResources>>[] = []
     const rollbackResources = async () => { for (const resource of resources.reverse()) await resource.rollback() }
@@ -621,10 +632,11 @@ export class WorkspaceFiles {
           if (resourcePolicy === 'cancel') throw new WorkspaceOperationCancelledError('已取消当前稿及附件复制')
           if (resourcePolicy !== 'copy' && this.pathKey(path.dirname(source)) !== this.pathKey(path.dirname(target)))
             throw new WorkspaceFilesError('resource-choice-required', '当前稿引用本地附件，请选择一并复制附件或取消')
-          resources.push(await prepareMarkdownMoveResources(captured.sourcePath, filename, captured.markdown))
+          resources.push(await prepareMarkdownMoveResources(captured.sourcePath, filename, captured.markdown, beforeCommit, kind === 'directory' ? temporary : undefined))
         }
         await fs.writeFile(filename, captured.bytes)
       }
+      beforeCommit?.()
       await this.renamePath(temporary, target)
       return rollbackResources
     } catch (error) {

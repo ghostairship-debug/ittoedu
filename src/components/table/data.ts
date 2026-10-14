@@ -42,7 +42,9 @@ export function toNativeTableData(data:TableData, includeHeaders=true):NativeTab
 }
 export const tableDataSchema=z.object({...native.shape,columns:z.array(native.shape.columns.element.extend({header:documentTextContentSchema.optional()}).strict()).min(1).max(100),
   rows:z.array(native.shape.rows.element.extend({cells:z.array(z.union([cell,richCell])).min(1).max(100)}).strict()).max(1000),caption:documentTextContentSchema.optional(),headerEnabled:z.boolean().optional()}).strict().superRefine((data,ctx)=>{
-  const result=tableNativeContentObjectSchema.safeParse(toNativeTableData(data as TableData))
+  // The synthetic column header is a view row, outside the authored body capacity.
+  const projectionSchema=tableNativeContentObjectSchema.safeExtend({rows:z.array(native.shape.rows.element).min(0).max(1001)})
+  const result=projectionSchema.safeParse(toNativeTableData(data as TableData))
   if(!result.success)for(const issue of result.error.issues)ctx.addIssue({code:'custom',message:issue.message,path:issue.path})
 })
 export function parseTableData(value:unknown):TableData{return tableDataSchema.parse(value) as TableData}

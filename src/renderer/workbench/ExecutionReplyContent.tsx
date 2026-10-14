@@ -2,7 +2,7 @@ import { createElement, Fragment, memo, useMemo, useState, type ReactNode } from
 import { marked, type Token, type Tokens } from 'marked'
 import { decodeHTMLStrict } from 'entities'
 
-function ReplyLink({ href, children }: { href: string; children: ReactNode }) {
+export function ReplyLink({ href, children }: { href: string; children: ReactNode }) {
   const [error, setError] = useState('')
   return <><a href={href} title={href} onClick={async event => {
     event.preventDefault(); setError('')

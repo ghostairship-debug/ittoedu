@@ -9,6 +9,7 @@ import { attachmentOperationError } from './attachmentOperationErrors'
 import { DesktopOperationError } from '../../errors'
 import { readClipboardFileList } from './clipboardFileList'
 import { operateWorkspaceFiles } from '../workspaceFilesDesktopService'
+import { resolveRendererEntryUrl } from '../../rendererEntry'
 
 export class AttachmentsDesktopService {
   readonly attachments: AttachmentService
@@ -18,7 +19,7 @@ export class AttachmentsDesktopService {
   private readonly gestures = new Map<string, Promise<AttachmentIntakeFile[]>>()
   private readonly windows = new Set<number>()
   constructor(directory: string) {
-    const dev = process.env.VITE_DEV_SERVER_URL
+    const dev = app.isPackaged || !process.env.VITE_DEV_SERVER_URL ? undefined : resolveRendererEntryUrl()
     this.attachments = new AttachmentService({ directory, resolveAuthorizedPath: async id => {
       const grant = this.grants.get(id)
       if (!grant) throw new AttachmentError('path-not-authorized', '附件文件读取授权已失效')

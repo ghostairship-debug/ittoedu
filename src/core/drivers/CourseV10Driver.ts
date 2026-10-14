@@ -3,6 +3,7 @@ import { applyComponentOperation, ComponentOperationConflict, describeComponentC
 import { cloneDocumentResources } from './resources'
 import { validateComponentData } from '../components/validateComponentData'
 import { createCourseProjectV10Archive, openCourseProjectV10Archive, validateCourseProjectV10Archive, validateCourseProjectV10Resources } from './codecs/courseProjectV10Archive'
+import { scopeComponentSourceEdits } from '../components/source/sourceAuthoringEdits'
 
 function course(model: DocumentModel): asserts model is Extract<DocumentModel, { kind: 'course-v10' }> {
   if (model.kind !== 'course-v10') throw new TypeError('Course V10 Driver 不接受其他文档格式')
@@ -25,6 +26,13 @@ export class CourseV10Driver implements DocumentDriver {
   applyValidated(model: DocumentModel, command: DocumentCommand): DocumentModel {
     course(model)
     if (command.type !== 'component-platform.apply') throw new TypeError('V10 只接受身份定位的组件操作')
+    // Check the captured bytes before COW; a new sharing reference alone does
+    // not invalidate this instance's input or authorize changing its neighbor.
+    for (const edit of command.edits) if (edit.type === 'component.files.set' && edit.sourceScope) {
+      const current = Object.hasOwn(model.resources.components, edit.ownerId) ? model.resources.components[edit.ownerId] : null
+      if (!equalComponentValue(current, edit.expectedFiles)) throw new ComponentOperationConflict(['@componentFiles', edit.ownerId], '组件源码文件已变化')
+    }
+    command = { ...command, edits: scopeComponentSourceEdits(model.project, command.edits) }
     const resources = { assets: { ...model.resources.assets }, components: { ...model.resources.components } }
     for (const edit of command.edits) if (edit.type === 'component.files.set') {
       const current = Object.hasOwn(model.resources.components, edit.ownerId) ? model.resources.components[edit.ownerId] : null
@@ -40,7 +48,7 @@ export class CourseV10Driver implements DocumentDriver {
       if (!equalComponentValue(model.resources.assets[edit.asset.id], edit.expectedBytes)) throw new ComponentOperationConflict(['@assetBytes', edit.asset.id], '素材字节已变化')
       Object.defineProperty(resources.assets, edit.asset.id, { value: Uint8Array.from(edit.bytes), enumerable: true, configurable: true, writable: true })
     }
-    const next: DocumentModel = { kind: 'course-v10', project: applyComponentOperation(model.project, command), resources }
+    const next: DocumentModel = { kind: 'course-v10', project: applyComponentOperation(model.project, command, model.resources), resources }
     // applyComponentOperation already parses the candidate project. Only its resource
     // closure and professional data remain to be checked at this boundary.
     validateCourseProjectV10Resources(next.project, next.resources)

@@ -27,7 +27,7 @@ it('copies all saved material ownership without changing content versions and pr
  const f = await fixture(), copied = await f.service.open(f.copy, { asCopy: true })
  expect(copied.identity.lessonId).not.toBe(f.target.lessonId)
  const target = { lessonId: copied.identity.lessonId, rootPath: copied.identity.normalizedDirectory }
- const records = await f.owner.list(target)
+ const { records } = await f.owner.list(target)
  expect(records).toHaveLength(2)
  for (const original of f.records) {
   const record = records.find(record => record.id === original.id)!
@@ -40,7 +40,7 @@ it('copies all saved material ownership without changing content versions and pr
  const moved = path.join(f.root, 'moved'); await fs.rename(f.copy, moved)
  const reopened = await f.service.open(moved)
  expect(reopened.identity.lessonId).toBe(copied.identity.lessonId)
- expect(await f.owner.list({ lessonId: copied.identity.lessonId, rootPath: reopened.identity.normalizedDirectory })).toEqual(records)
+ expect((await f.owner.list({ lessonId: copied.identity.lessonId, rootPath: reopened.identity.normalizedDirectory })).records).toEqual(records)
 })
 it.each(['second-material', 'manifest', 'registration'] as const)('rolls back all copied identities and approvals when %s writing fails', async failure => {
  const f = await fixture(), rename = fs.rename.bind(fs)
@@ -62,7 +62,7 @@ it.each(['second-material', 'manifest', 'registration'] as const)('rolls back al
  expect((await fs.readdir(path.join(f.root, 'app/lesson-locations/v1')))).toEqual([f.target.lessonId + '.json'])
  vi.restoreAllMocks()
  const retried = await f.service.open(f.copy, { asCopy: true })
- expect((await f.owner.list({ lessonId: retried.identity.lessonId, rootPath: retried.identity.normalizedDirectory }))).toHaveLength(2)
+ expect((await f.owner.list({ lessonId: retried.identity.lessonId, rootPath: retried.identity.normalizedDirectory })).records).toHaveLength(2)
 })
 it('fails before rebinding any record when an independent saved original is missing', async () => {
  const f = await fixture()

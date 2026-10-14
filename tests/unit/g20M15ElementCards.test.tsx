@@ -50,6 +50,11 @@ function executionFixture() {
       return structuredClone(created)
     }),
     conversation: vi.fn(async (_workspaceId: string, id: string) => structuredClone(conversations.get(id) ?? null)),
+    setAdvancementMode: vi.fn(async (input: Parameters<NonNullable<ExecutionDesktopAPI['setAdvancementMode']>>[0]) => {
+      const saved: ConversationRecord = { ...conversations.get(input.conversationId)!, advancementMode: input.advancementMode }
+      conversations.set(saved.conversationId, saved)
+      return structuredClone(saved)
+    }),
     draft: vi.fn(async (input: Omit<ExecutionSendInput, 'submissionId' | 'mode'>) => {
       const current = conversations.get(input.conversationId)!
       const saved = { ...current, revision: current.revision + 1, inputDraft: input.text,
@@ -62,7 +67,7 @@ function executionFixture() {
       const current = conversations.get(input.conversationId)!
       // As Main: a send names the revision it saw; across contextBridge only the fixed message arrives.
       if (input.expectedRevision !== current.revision) throw new Error(`消息尚未发送：${executionInputMessages['conversation-draft-changed'][0]}`)
-      const saved = { ...current, revision: current.revision + 1 }
+      const saved = { ...current, revision: current.revision + 1, ...(input.advancementMode ? { advancementMode: input.advancementMode } : {}) }
       conversations.set(saved.conversationId, saved)
       const runId = control.next === 'accepted' ? `run-${submissions.length + 1}` : undefined
       const submission: ExecutionSubmissionRecord = { submissionId: input.submissionId, workspaceId: input.workspaceId, conversationId: input.conversationId,
@@ -139,6 +144,41 @@ function documentsFixture() {
   const documents = { subscribe: vi.fn((listener: (event: { type: 'closed'; documentId: string }) => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }) }
   return { documents: documents as unknown as Pick<DocumentHostAPI, 'subscribe'>, close: (documentId: string) => { for (const listener of listeners) listener({ type: 'closed', documentId }) } }
 }
+
+it('inherits the latest host preference only when creating a card and then sends with the card conversation owner', async () => {
+  const f = executionFixture()
+  const parent = await f.api.createConversation('workspace', '宿主会话')
+  const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings() })
+  cards.setWorkspace('workspace'); cards.setAdvancementPreferenceOwner(parent)
+  // The metadata changes after the host passed its identity; the current owner is read at send time.
+  await f.api.setAdvancementMode({ workspaceId: 'workspace', conversationId: parent.conversationId, advancementMode: 'stepwise' })
+  const a = cards.ensure({ documentId: 'doc', target: target('a'), label: '标题' })
+  await cards.send(a, '局部修改', capture('a'))
+  expect(f.api.send.mock.calls[0]![0]).toMatchObject({ conversationId: 'c2', advancementMode: 'stepwise', expectedRevision: 1 })
+  expect(f.api.setAdvancementMode.mock.calls.at(-1)![0]).toEqual({ workspaceId: 'workspace', conversationId: 'c2', advancementMode: 'stepwise' })
+
+  // An existing card keeps its own preference even after the selected host conversation changes.
+  await f.api.setAdvancementMode({ workspaceId: 'workspace', conversationId: parent.conversationId, advancementMode: 'automatic' })
+  await cards.send(a, '继续局部修改', capture('a'))
+  expect(f.api.send.mock.calls[1]![0]).toMatchObject({ conversationId: 'c2', advancementMode: 'stepwise' })
+  await f.api.setAdvancementMode({ workspaceId: 'workspace', conversationId: 'c2', advancementMode: 'automatic' })
+  await cards.send(a, '卡片的新选择', capture('a'))
+  expect(f.api.send.mock.calls[2]![0]).toMatchObject({ conversationId: 'c2', advancementMode: 'automatic' })
+  const b = cards.ensure({ documentId: 'doc', target: target('b'), label: '图示' })
+  await cards.send(b, '修改另一对象', capture('b'))
+  expect(f.api.send.mock.calls[3]![0]).toMatchObject({ conversationId: 'c3', advancementMode: 'automatic' })
+})
+
+it('leaves a newly created card preference unknown when the host has not chosen one', async () => {
+  const f = executionFixture()
+  const parent = await f.api.createConversation('workspace', '未选模式')
+  const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings() })
+  cards.setWorkspace('workspace'); cards.setAdvancementPreferenceOwner(parent)
+  const key = cards.ensure({ documentId: 'doc', target: target('a'), label: '标题' })
+  await cards.send(key, '局部修改', capture('a'))
+  expect(f.api.send.mock.calls[0]![0].advancementMode).toBeUndefined()
+  expect(f.api.setAdvancementMode).not.toHaveBeenCalled()
+})
 
 it('M15 a card sends only its object as writable, queues behind a busy request, asks inside the card and ends with its document', async () => {
   const f = executionFixture(), d = documentsFixture()

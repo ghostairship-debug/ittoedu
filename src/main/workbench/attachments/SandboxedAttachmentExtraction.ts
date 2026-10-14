@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { AttachmentExtractor, AttachmentExtractionInput, AttachmentExtractionResult } from '../../../shared/workbench/attachments'
+import { diagnosticLog } from '../../diagnosticLog'
+import { diagnosticFailureDetails } from '../../diagnosticPrivacy'
 
 export interface SandboxedAttachmentExtractionOptions {
   preloadPath: string
@@ -55,12 +57,21 @@ export function createSandboxedAttachmentExtractor(options: SandboxedAttachmentE
         settled = true; callOptions.signal?.removeEventListener('abort', onAbort)
         if (!window.isDestroyed()) window.destroy()
         isolatedSession.webRequest.onBeforeRequest(null)
-        if (error) reject(error); else resolve(result!)
+        if (error) {
+          void diagnosticLog.append({ source: 'main', message: error.message, stack: error.stack,
+            details: { ...diagnosticFailureDetails(error), operation: 'attachment-extraction', phase: sent ? 'extract' : 'load' } }).catch(() => undefined)
+          reject(error)
+        } else resolve(result!)
       }
       const onAbort = () => finish(cancelled())
       callOptions.signal?.addEventListener('abort', onAbort, { once: true })
       window.on('closed', () => finish(new AttachmentError('extraction-exited', '附件提取工作窗口已关闭')))
-      window.webContents.on('render-process-gone', () => finish(new AttachmentError('extraction-exited', '附件提取进程已退出')))
+      window.webContents.on('render-process-gone', (_event, details) => {
+        void diagnosticLog.append({ source: 'main', message: '附件提取进程已退出', details: {
+          operation: 'attachment-extraction', phase: sent ? 'extract' : 'load', type: 'renderer', reason: details.reason, exitCode: details.exitCode,
+        } }).catch(() => undefined)
+        finish(new AttachmentError('extraction-exited', '附件提取进程已退出'))
+      })
       window.webContents.ipc.on('attachment-extraction:ready', event => {
         if (event.senderFrame !== window.webContents.mainFrame || sent || settled) return
         sent = true; window.webContents.send('attachment-extraction:input', frozen)

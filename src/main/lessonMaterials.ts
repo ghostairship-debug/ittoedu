@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
-import { type MaterialExtraction, type LessonMaterialTarget, type LessonMaterialRecord, type LessonMaterialRead } from '../shared/materialExtraction'
+import { type MaterialExtraction, type LessonMaterialTarget, type LessonMaterialRecord, type LessonMaterialRead, type LessonMaterialList } from '../shared/materialExtraction'
 
 const locator = z.object({ part: z.string().min(1).max(32767), page: z.number().int().positive().optional(), paragraph: z.number().int().positive().optional() }).strict()
 const fragment = z.object({ id: z.string().min(1).max(1024), kind: z.enum(['text', 'table', 'image', 'formula']), locator, text: z.string().optional(), assetId: z.string().min(1).max(32767).optional() }).strict()
@@ -81,12 +81,16 @@ export class LessonMaterials {
     if (!record.sourcePath.startsWith(prefix) || record.assets.some(asset => !asset.path.startsWith(prefix))) throw new Error('材料文件归属错误')
     return record
   }
-  list(target: LessonMaterialTarget): Promise<LessonMaterialRecord[]> {
+  list(target: LessonMaterialTarget): Promise<LessonMaterialList> {
     return this.serialized(async () => {
       const directory = await this.directory(target)
       const result: LessonMaterialRecord[] = []
-      for (const name of await fs.readdir(directory)) if (z.uuid().safeParse(name).success) result.push(await this.record(target, directory, name))
-      return result.sort((a, b) => a.createdAt - b.createdAt)
+      const diagnostics: LessonMaterialList['diagnostics'] = []
+      for (const name of await fs.readdir(directory)) if (z.uuid().safeParse(name).success) {
+        try { result.push(await this.record(target, directory, name)) }
+        catch { diagnostics.push({ id: name, code: 'material-unavailable', message: '这份材料记录无法读取；原件保留，其他材料仍可使用。' }) }
+      }
+      return { records: result.sort((a, b) => a.createdAt - b.createdAt), diagnostics }
     })
   }
   read(target: LessonMaterialTarget, input: { id: string; extractionVersion: string; fragmentIds: string[] }): Promise<LessonMaterialRead> {
@@ -118,7 +122,8 @@ export class LessonMaterials {
 export async function withCopiedMaterialOwnership<T>(directory: string, previousLessonId: string, lessonId: string, commitIdentity: () => Promise<T>): Promise<T> {
   const owner = new LessonMaterials(async () => {})
   const target = { lessonId: previousLessonId, rootPath: directory }
-  const records = await owner.list(target)
+  const { records, diagnostics } = await owner.list(target)
+  if (diagnostics.length) throw new Error('部分材料记录无法读取，未变更副本材料归属')
   const prepared: { filename: string; temporary: string; before: Uint8Array; applied: boolean }[] = []
   try {
     // Read every independent saved resource before changing any ownership.

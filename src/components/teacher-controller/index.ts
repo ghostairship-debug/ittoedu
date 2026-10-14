@@ -17,7 +17,7 @@ export function createTeacherControllerRuntimeImplementation(
         const record = data && typeof data === 'object' && !Array.isArray(data) ? data : {}
         return { ...record, ...readTeacherControllerConfig(record), enabled: record.enabled !== false } as TeacherControllerData
       }
-      const mounted = mount({ ...context, instance: { ...context.instance, data: normalize(context.instance.data) }, teacherController: port })
+      const mounted = mount({ ...context, instance: { ...context.instance, data: normalize(context.instance.data) }, teacherController: context.teacherController ?? port })
       return { ...mounted, update: instance => mounted.update({ ...instance, data: normalize(instance.data) }) }
     },
   }

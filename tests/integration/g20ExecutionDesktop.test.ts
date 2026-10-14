@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { createServer as createHttpServer, type Server } from 'node:http'
@@ -121,7 +122,7 @@ it('NI01 startNext retains accepted selection baseline through a preceding queue
         queuedPreview = read.data.text
       }
       sse(response, [{ id: `queue-${turn}`, model: payload.model, choices: [{ index: 0, delta: { role: 'assistant',
-        tool_calls: [{ index: 0, id: `write-${turn}`, type: 'function', function: { name: 'text_replace',
+        tool_calls: [{ index: 0, id: `write-${turn}`, type: 'function', function: { name: modelToolWireName('text.replace'),
           arguments: JSON.stringify({ target: refs[0].writable[0].target, content: firstTask ? '123 before' : 'DONE' }) } }] }, finish_reason: 'tool_calls' }] }])
     } else sse(response, [{ id: `done-${turn}`, model: payload.model, choices: [{ index: 0,
       delta: { role: 'assistant', content: '完成' }, finish_reason: 'stop' }] }])
@@ -301,7 +302,7 @@ describe('G20 execution desktop integration', () => {
         const fixed = payload.messages.find(message => message.role === 'system' && message.content?.startsWith('本次固定文档与权限'))!.content!
         const references = JSON.parse(fixed.slice(fixed.indexOf('：') + 1)) as Array<{ writable: Array<{ target: string }> }>
         firstTarget = references[0]!.writable[0]!.target
-        firstToolWireName = payload.tools.find(tool => tool.function.name === 'text_replace')!.function.name
+        firstToolWireName = payload.tools.find(tool => tool.function.name === modelToolWireName('text.replace'))!.function.name
         sse(response, [
           { id: 'fixture-response-1', object: 'chat.completion.chunk', model: 'fixture-model', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'fixture-call-1', type: 'function', function: { name: firstToolWireName, arguments: JSON.stringify({ target: firstTarget, content: 'after provider\n' }) } }] }, finish_reason: null }] },
           { id: 'fixture-response-1', object: 'chat.completion.chunk', model: 'fixture-model', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
@@ -329,7 +330,7 @@ describe('G20 execution desktop integration', () => {
       submissionId: '42222222-2222-4222-8222-222222222222', expectedRevision: input.revision, text: '请替换全文', documents: [reference(document, [{ kind: 'markdown-range', from: 0, to: 'before provider\n'.length }])] }) as { run: ExecutionRunRecord; conversation: { revision: number; inputDraft: string; runIndex: { builtinRunIds: string[] } } }
     expect(sent.conversation).toMatchObject({ inputDraft: '', runIndex: { builtinRunIds: [sent.run.runId] } })
     const run = await waitForRun(service, sent.run.runId)
-    expect(run.status).toBe('completed'); expect(requests).toBe(2); expect(firstTarget).toMatch(/^t/); expect(firstToolWireName).toBe('text_replace')
+    expect(run.status).toBe('completed'); expect(requests).toBe(2); expect(firstTarget).toMatch(/^t/); expect(firstToolWireName).toBe(modelToolWireName('text.replace'))
     expect(firstToolReceipt).toMatchObject({ kind: 'document-operation', result: { status: 'applied', revision: 1 } })
     expect((await fs.readdir(root, { recursive: true })).filter(entry => path.basename(entry) === 'candidate.json')).toEqual([])
     expect(await documents.internalAPI.read(document.documentId)).toMatchObject({ dirty: true, revision: 1, model: { source: 'after provider\n' } })
@@ -572,7 +573,7 @@ it('NI01 sends captured aggregate ranges after a human insertion, returns a curr
     expect(payload.messages.some((message: { content: unknown }) => String(message.content).includes(calls === 1 ? '甲\n乙' : '新甲\n新乙'))).toBe(true)
     const raw = JSON.stringify({ content }), split = raw.length - 2
     const chunks = [
-      { id: `aggregate-${calls}`, model: payload.model, choices: [{ index: 0, delta: { role: 'assistant', content: '修改已完成', tool_calls: [{ index: 0, id: `replace-${calls}`, type: 'function', function: { name: 'text_replace', arguments: raw.slice(0, split) } }] }, finish_reason: null }] },
+      { id: `aggregate-${calls}`, model: payload.model, choices: [{ index: 0, delta: { role: 'assistant', content: '修改已完成', tool_calls: [{ index: 0, id: `replace-${calls}`, type: 'function', function: { name: modelToolWireName('text.replace'), arguments: raw.slice(0, split) } }] }, finish_reason: null }] },
       { id: `aggregate-${calls}`, model: payload.model, choices: [{ index: 0, delta: { tool_calls: [
         { index: 0, function: { arguments: raw.slice(split) } },
       ] }, finish_reason: 'tool_calls' }] },
@@ -631,7 +632,7 @@ it.each([
     if (payload.messages.some((message: { role: string }) => message.role === 'tool')) return finalReplyResponse(payload.model)
     const content = ++calls === 1 ? replacement : '续'
     const chunk = { id: `f02-${calls}`, model: payload.model, choices: [{ index: 0, delta: { role: 'assistant', content: '已修改', tool_calls: [
-      { index: 0, id: `replace-${calls}`, type: 'function', function: { name: 'text_replace', arguments: JSON.stringify({ content }) } },
+      { index: 0, id: `replace-${calls}`, type: 'function', function: { name: modelToolWireName('text.replace'), arguments: JSON.stringify({ content }) } },
     ] }, finish_reason: 'tool_calls' }] }
     return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
   }
@@ -694,7 +695,7 @@ it('NI01 completes a real Flow card aggregate, follows its current receipt and u
     const content = ++calls === 1 ? '<b>新甲</b><br><i>新乙</i>' : '<b>更甲</b><br><i>更乙</i>'
     expect(payload.messages.some((message: { content: unknown }) => String(message.content).includes(expectedInput))).toBe(true)
     const chunk = { id: `flow-${calls}`, model: payload.model, choices: [{ index: 0, delta: { role: 'assistant', content: '修改已完成', tool_calls: [
-      { index: 0, id: `replace-${calls}`, type: 'function', function: { name: 'text_replace', arguments: JSON.stringify({ content, format: 'html' }) } },
+      { index: 0, id: `replace-${calls}`, type: 'function', function: { name: modelToolWireName('text.replace'), arguments: JSON.stringify({ content, format: 'html' }) } },
     ] }, finish_reason: 'tool_calls' }] }
     return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
   }
@@ -800,7 +801,7 @@ it('passes an outside bound HTML exact-file grant through the real Engine file r
     const payload = JSON.parse(String(init?.body)); requests++
     if (requests > 2) return finalReplyResponse(payload.model, '已读当前 HTML；相邻文件没有授权。')
     const chunk = { id: `bound-${requests}`, model: payload.model, choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [
-      { index: 0, id: `read-${requests}`, type: 'function', function: { name: 'file_read', arguments: JSON.stringify({ path: requests === 1 ? outside : sibling }) } },
+      { index: 0, id: `read-${requests}`, type: 'function', function: { name: modelToolWireName('file.read'), arguments: JSON.stringify({ path: requests === 1 ? outside : sibling }) } },
     ] }, finish_reason: 'tool_calls' }] }
     return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
   })

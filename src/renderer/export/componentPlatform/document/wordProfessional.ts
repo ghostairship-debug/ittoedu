@@ -9,14 +9,16 @@ import type { ShapeData } from '../../../../components/shape/data'
 import { tableCellSpan } from '../../../../shared/tableMerge'
 import { resolveNativeShapePath } from '../../../../shared/nativeShapePath'
 import { drawingMlPathGeometryXml, drawingMlGradientFillXml } from '../../drawingMlShapeGeometry'
-import { escapeOutput as x } from './reading'
+import { outputXmlText as x } from '../../xmlText'
+import { parseDocumentColor } from '../../../../shared/document/color'
 
-const color = (value: string) => /^#[0-9a-f]{6}$/i.test(value) ? value.slice(1) : '000000'
+const color = (value: string) => parseDocumentColor(value)?.rgb ?? '000000'
 const text = (value: string) => `<w:r><w:t xml:space="preserve">${x(value)}</w:t></w:r>`
 const pxTwips = (value: number) => Math.round(value * 15)
 
 /** Word-native cells consume the professional layout, including merged-cell ownership. */
-export function wordTable(data: TableData, width: number, paragraph: (content: FlowTextContent, style: NativeTableEffectiveCellStyle) => string): string {
+export function wordTable(data: TableData, width: number, paragraph: (content: FlowTextContent, style: NativeTableEffectiveCellStyle) => string,
+  onDifference: (message: string) => void = () => {}): string {
   const layout = layoutTable(data, { width })
   const native = toNativeTableData(data)
   const rows = native.rows.map((row, ri) => {
@@ -25,11 +27,16 @@ export function wordTable(data: TableData, width: number, paragraph: (content: F
       if (span.columnOffset > 0) return ''
       const owner = layout.cells.find(cell => cell.rowIndex === ri - span.rowOffset && cell.columnIndex === ci)!
       const style = owner.style
-      const borders = ['top', 'left', 'bottom', 'right'].map(edge => `<w:${edge} w:val="${style.lineStyle === 'solid' ? 'single' : style.lineStyle === 'dashed' ? 'dashed' : 'dotted'}" w:sz="${Math.max(0, Math.round(style.borderWidth * 6))}" w:color="${color(style.borderColor)}"/>`).join('')
+      const fillAlpha = style.fillOpacity * (parseDocumentColor(style.fillColor)?.alpha ?? 1)
+      const borderAlpha = style.borderOpacity * (parseDocumentColor(style.borderColor)?.alpha ?? 1)
+      if (fillAlpha > 0 && fillAlpha < 1 || style.borderWidth > 0 && borderAlpha > 0 && borderAlpha < 1)
+        onDifference(`单元格 ${owner.id} 的部分透明填充或边框不能用 Word 原生表格表达；保留 RGB 与可编辑表格，原透明度保留在工程。`)
+      const borders = ['top', 'left', 'bottom', 'right'].map(edge => borderAlpha === 0 || style.borderWidth === 0
+        ? `<w:${edge} w:val="nil"/>` : `<w:${edge} w:val="${style.lineStyle === 'solid' ? 'single' : style.lineStyle === 'dashed' ? 'dashed' : 'dotted'}" w:sz="${Math.max(0, Math.round(style.borderWidth * 6))}" w:color="${color(style.borderColor)}"/>`).join('')
       const merge = `${span.columnSpan > 1 ? `<w:gridSpan w:val="${span.columnSpan}"/>` : ''}${span.rowSpan > 1 ? `<w:vMerge w:val="${span.rowOffset ? 'continue' : 'restart'}"/>` : ''}`
       const padding = ['top', 'left', 'bottom', 'right'].map(edge => `<w:${edge} w:w="${pxTwips(style.cellPadding)}" w:type="dxa"/>`).join('')
       const body = span.covered ? '<w:p/>' : paragraph(tableLayoutCellContent(data, owner), style)
-      return `<w:tc><w:tcPr><w:tcW w:w="${pxTwips(owner.width)}" w:type="dxa"/>${merge}<w:shd w:fill="${color(style.fillColor)}"/><w:tcBorders>${borders}</w:tcBorders><w:tcMar>${padding}</w:tcMar><w:vAlign w:val="${style.verticalAlign === 'middle' ? 'center' : style.verticalAlign}"/></w:tcPr>${body}</w:tc>`
+      return `<w:tc><w:tcPr><w:tcW w:w="${pxTwips(owner.width)}" w:type="dxa"/>${merge}${fillAlpha === 0 ? '<w:shd w:val="nil"/>' : `<w:shd w:fill="${color(style.fillColor)}"/>`}<w:tcBorders>${borders}</w:tcBorders><w:tcMar>${padding}</w:tcMar><w:vAlign w:val="${style.verticalAlign === 'middle' ? 'center' : style.verticalAlign}"/></w:tcPr>${body}</w:tc>`
     }).join('')
     return `<w:tr><w:trPr>${ri < native.headerRowCount ? '<w:tblHeader/>' : ''}<w:trHeight w:val="${pxTwips(layout.rows[ri]!.height)}" w:hRule="atLeast"/></w:trPr>${cells}</w:tr>`
   }).join('')
@@ -88,10 +95,12 @@ export function wordChartParts(data: ChartData): { chart: string; workbook: Uint
   const tag = ({ bar: 'barChart', line: 'lineChart', area: 'areaChart', pie: 'pieChart', donut: 'doughnutChart' } as const)[data.chartType]
   const direction = data.chartType === 'bar' && data.style.barDirection === 'horizontal' ? 'bar' : 'col'
   const chartOptions = data.chartType === 'bar' ? `<c:barDir val="${direction}"/><c:grouping val="clustered"/>` : data.chartType === 'line' || data.chartType === 'area' ? '<c:grouping val="standard"/>' : '<c:varyColors val="1"/>'
-  const axes = circular ? '' : '<c:catAx><c:axId val="1"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:axPos val="b"/><c:crossAx val="2"/><c:crosses val="autoZero"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:axPos val="l"/><c:numFmt formatCode="General" sourceLinked="1"/><c:crossAx val="1"/><c:crosses val="autoZero"/></c:valAx>'
+  const cartesianStyle = 'showCategoryAxis' in data.style ? data.style : undefined
+  const range = `${cartesianStyle?.valueMin !== undefined ? `<c:min val="${cartesianStyle.valueMin}"/>` : ''}${cartesianStyle?.valueMax !== undefined ? `<c:max val="${cartesianStyle.valueMax}"/>` : ''}`
+  const axes = circular ? '' : `<c:catAx><c:axId val="1"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="${cartesianStyle?.showCategoryAxis === false ? 1 : 0}"/><c:axPos val="${direction === 'bar' ? 'l' : 'b'}"/><c:crossAx val="2"/><c:crosses val="autoZero"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling><c:orientation val="minMax"/>${range}</c:scaling><c:delete val="${cartesianStyle?.showValueAxis === false ? 1 : 0}"/><c:axPos val="${direction === 'bar' ? 'b' : 'l'}"/><c:numFmt formatCode="General" sourceLinked="1"/><c:crossAx val="1"/><c:crosses val="autoZero"/></c:valAx>`
   const title = `<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${x(data.title)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>`
   const legend = data.style.showLegend ? `<c:legend><c:legendPos val="${({ top: 't', right: 'r', bottom: 'b', left: 'l' } as const)[data.style.legendPosition]}"/><c:overlay val="0"/></c:legend>` : ''
-  const chart = `<?xml version="1.0" encoding="UTF-8"?><c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:chart>${title}<c:plotArea><c:layout/><c:${tag}>${chartOptions}${series}${data.style.showDataLabels ? '<c:dLbls><c:showVal val="1"/></c:dLbls>' : ''}${data.chartType === 'donut' ? `<c:holeSize val="${data.style.holeSize}"/>` : ''}${circular ? '' : '<c:axId val="1"/><c:axId val="2"/>'}</c:${tag}>${axes}</c:plotArea>${legend}<c:plotVisOnly val="1"/></c:chart><c:externalData r:id="rIdWorkbook"><c:autoUpdate val="0"/></c:externalData></c:chartSpace>`
+  const chart = `<?xml version="1.0" encoding="UTF-8"?><c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:chart>${title}<c:plotArea><c:layout/><c:${tag}>${chartOptions}${series}${data.style.showDataLabels ? `<c:dLbls><c:showVal val="1"/>${circular ? '<c:showPercent val="1"/>' : ''}</c:dLbls>` : ''}${data.chartType === 'donut' ? `<c:holeSize val="${data.style.holeSize}"/>` : ''}${circular ? '' : '<c:axId val="1"/><c:axId val="2"/>'}</c:${tag}>${axes}</c:plotArea>${legend}<c:plotVisOnly val="1"/></c:chart><c:externalData r:id="rIdWorkbook"><c:autoUpdate val="0"/></c:externalData></c:chartSpace>`
   const sheetRows = [['分类', ...semantic.series.map(s => s.name)], ...semantic.labels.map((label, i) => [label, ...semantic.series.map(s => s.values[i]!)])]
   const sheet = `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetRows.map((row, i) => `<row r="${i + 1}">${row.map((value, j) => `<c r="${columnName(j)}${i + 1}"${typeof value === 'number' ? '' : ' t="inlineStr"'}>${typeof value === 'number' ? `<v>${value}</v>` : `<is><t>${x(value)}</t></is>`}</c>`).join('')}</row>`).join('')}</sheetData></worksheet>`
   const workbook = zipSync(Object.fromEntries(Object.entries({

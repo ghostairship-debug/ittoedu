@@ -109,11 +109,11 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
     }, '图片替换失败，原图仍保留。')
   }, [batch])
   const pickAsset = useCallback(async (kind: 'image' | 'video' | 'audio'): Promise<MediaImportItem | null> => {
-    return await current.current.runBusy(async () => {
-      const owner = current.current
-      const selected = kind === 'image' ? await owner.selectImage() : kind === 'video' ? await owner.selectVideo?.() : await owner.selectAudio?.()
-      return selected ? namedAsset(await prepare(selected, kind)) : null
-    }, '媒体文件读取失败。') ?? null
+    // The insertion caller owns the complete serialized action. Preparing a
+    // resource must not enqueue another action behind that waiting caller.
+    const owner = current.current
+    const selected = kind === 'image' ? await owner.selectImage() : kind === 'video' ? await owner.selectVideo?.() : await owner.selectAudio?.()
+    return selected ? namedAsset(await prepare(selected, kind)) : null
   }, [])
   const selectTargetMedia = useCallback(async <T extends object>(input: TargetMediaSelection<T>): Promise<PreparedTargetMedia | null> => {
     const target = input.captureTarget(); if (!target) return null

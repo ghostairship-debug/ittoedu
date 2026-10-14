@@ -1,0 +1,57 @@
+/* The shared fit already leaves the same side margins as Slides. Let Flow's scrolling shell use those
+   margins for paper padding and its vertical scrollbar instead of deducting the side insets twice. */
+.workspace.workspace--flow > .canvas-viewport {
+  left: 0;
+  right: 0;
+}
+
+/* Keep the full formatting capability visible; the existing host measures this actual wrapped height. */
+.workspace.workspace--flow .flow-workspace-toolbar-host .shared-document-toolbar {
+  --flow-format-control-size: clamp(28px, 3.4cqw, 32px);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  gap: clamp(3px, .45cqw, 5px);
+  padding: 5px 6px;
+  overflow: visible;
+  font-size: clamp(12px, 1.45cqw, 13px);
+}
+.workspace.workspace--flow .flow-workspace-toolbar-host .shared-document-toolbar > button {
+  flex: 0 0 auto;
+  min-width: var(--flow-format-control-size);
+  min-height: var(--flow-format-control-size);
+  padding: 3px 5px;
+}
+.workspace.workspace--flow .flow-workspace-toolbar-host .shared-document-toolbar svg {
+  width: clamp(14px, 1.9cqw, 16px);
+  height: clamp(14px, 1.9cqw, 16px);
+  flex: none;
+}
+.workspace.workspace--flow .flow-workspace-toolbar-host .shared-document-toolbar > label {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.workspace.workspace--flow .flow-workspace-toolbar-host .shared-document-toolbar > label > input[type="number"] {
+  width: 62px;
+  min-width: 62px;
+  max-width: 62px;
+  min-height: var(--flow-format-control-size);
+  padding: 3px 4px;
+  text-align: center;
+}
+.workspace.workspace--flow .flow-workspace-toolbar-host .shared-document-toolbar > label > select {
+  width: clamp(120px, 18cqw, 172px);
+  min-width: 120px;
+  max-width: none;
+  min-height: var(--flow-format-control-size);
+  padding: 3px 5px;
+}
+.workspace.workspace--flow .flow-workspace-toolbar-host .shared-document-toolbar > select {
+  width: 94px;
+  min-width: 84px;
+  min-height: var(--flow-format-control-size);
+  padding: 3px 5px;
+}

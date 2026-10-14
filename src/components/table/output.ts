@@ -2,6 +2,12 @@ import type { BuildNativeTableLayoutOptions } from '../../shared/nativeTableLayo
 import { layoutTable } from './render'
 import { tableLayoutCellContent, type TableData } from './data'
 import { renderDocumentText } from '../../shared/document/render'
+import { documentColorChannels } from '../../shared/document/color'
+
+function paint(value: string, opacity: number): string {
+  const color = documentColorChannels(value)
+  return color ? `rgba(${color.red},${color.green},${color.blue},${color.alpha * opacity})` : value
+}
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
@@ -15,12 +21,14 @@ export function outputTableHtml(data: TableData, frame: BuildNativeTableLayoutOp
     const cells = row.cells.map(cell => {
       const tag = cell.isHeader ? 'th' : 'td'
       const s = cell.style
-      const css = `background:${s.fillColor};color:${s.textColor};font-family:${s.fontFamily};font-size:${s.fontSize}px;font-weight:${s.bold ? 700 : 400};font-style:${s.italic ? 'italic' : 'normal'};text-align:${s.horizontalAlign};vertical-align:${s.verticalAlign};border:${s.borderWidth}px ${s.lineStyle} ${s.borderColor};padding:${s.cellPadding}px;white-space:pre-wrap`
-      return `<${tag} data-table-cell-id="${escapeHtml(cell.id)}" rowspan="${cell.rowSpan}" colspan="${cell.columnSpan}" style="${escapeHtml(css)}">${renderDocumentText(tableLayoutCellContent(data,cell))}</${tag}>`
+      const css = `background:${paint(s.fillColor, s.fillOpacity)};color:${s.textColor};font-family:${s.fontFamily};font-size:${s.fontSize}px;font-weight:${s.bold ? 700 : 400};font-style:${s.italic ? 'italic' : 'normal'};text-align:${s.horizontalAlign};vertical-align:${s.verticalAlign};border:${s.borderWidth}px ${s.lineStyle} ${paint(s.borderColor, s.borderOpacity)};padding:${s.cellPadding}px;white-space:pre-wrap`
+      const rowIndex = data.rows.findIndex(row => row.cells.some(value => value.id === cell.id)), cellIndex = rowIndex < 0 ? -1 : data.rows[rowIndex].cells.findIndex(value => value.id === cell.id)
+      const path = rowIndex < 0 ? ['columns', String(data.columns.findIndex(column => column.id === cell.columnId)), 'header'] : ['rows', String(rowIndex), 'cells', String(cellIndex), 'content']
+      return `<${tag} data-table-cell-id="${escapeHtml(cell.id)}" rowspan="${cell.rowSpan}" colspan="${cell.columnSpan}" style="${escapeHtml(css)}">${renderDocumentText(tableLayoutCellContent(data,cell), path)}</${tag}>`
     }).join('')
     return `<tr style="height:${row.height}px">${cells}</tr>`
   }
   const header = layout.rows.filter(row => row.isHeader).map(rowHtml).join('')
   const body = layout.rows.filter(row => !row.isHeader).map(rowHtml).join('')
-  return `<table style="border-collapse:collapse;table-layout:fixed;width:${layout.width}px">${data.caption ? `<caption>${renderDocumentText(data.caption)}</caption>`:''}<colgroup>${columns}</colgroup>${header ? `<thead>${header}</thead>` : ''}<tbody>${body}</tbody></table>`
+  return `<table style="border-collapse:collapse;table-layout:fixed;width:${layout.width}px">${data.caption ? `<caption>${renderDocumentText(data.caption, ['caption'])}</caption>`:''}<colgroup>${columns}</colgroup>${header ? `<thead>${header}</thead>` : ''}<tbody>${body}</tbody></table>`
 }

@@ -9,6 +9,7 @@ import { WorkspaceDocumentStatus } from './WorkspaceDocumentStatus'
 import { LessonDocumentEditor } from '../../documentFiles/LessonDocumentEditor'
 import { MediaFileEditor } from '../../documentFiles/media/MediaFileEditor'
 import { usePptxPicker } from './usePptxPicker'
+import { CourseImportMenu } from '../../ui/CourseImportMenu'
 function relativeFile(lesson: LessonWorkspace, filename: string) {
   const root = lesson.identity.normalizedDirectory.replace(/[\\/]$/, "");
   const lower = (value: string) => value.replace(/\\/g, "/").toLowerCase();
@@ -76,15 +77,18 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
           {externalNotice}
         </p>
       )}
-      <WorkspaceDocumentTabs props={props} layout={layout} hidden={editorFocus} onNewFromPptx={pptx.pick} />
+      <WorkspaceDocumentTabs props={props} layout={layout} hidden={editorFocus} />
       {pptx.element}
       {tabs.tabs.length === 0 && <section className="lesson-workbench-empty" aria-label="没有打开的文件">
         <h2>在这里完成你的作品</h2>
-        <p>打开文件开始编辑，或在 AI 助手中描述目标，边创作边完善。</p>
+        <p>打开文件开始编辑，或在 果铃AI中描述目标，边创作边完善。</p>
         <div className="lesson-chat-empty-actions">
-          <button type="button" onClick={() => void actions.run(() => tabs.createMarkdown())}>新建 Markdown</button>
+          <button type="button" onClick={() => void actions.run(() => tabs.createMarkdown())}>新建 MD 文档</button>
+          <button type="button" onClick={() => void actions.run(() => tabs.createText())}>新建 TXT 文档</button>
           <button type="button" onClick={() => void actions.run(actions.newCourse)}>新建 果铃工程</button>
-          <button type="button" disabled={state.busy} onClick={pptx.pick}>从 PPT 新建 果铃工程</button>
+          <CourseImportMenu busy={state.busy} onPptx={pptx.pick}
+            onFlow={props.onImportFlow ? () => props.onImportFlow?.() : undefined}
+            onHtml={props.onImportHtml ? () => props.onImportHtml?.() : undefined} />
           <button type="button" onClick={() => void actions.run(() => actions.openWorkspace())}>打开文件夹</button>
         </div>
       </section>}

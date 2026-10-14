@@ -142,6 +142,7 @@ it('applies the PDF image mode before and after extraction without losing a blan
   render(<Harness api={f.api} changed={value => { refs = value }} />)
   fireEvent.drop(screen.getByLabelText('聊天'), { dataTransfer: { files: [new File(['%PDF-1.7'], 'notes.pdf')], getData: () => '' } })
   await waitFor(() => expect(refs).toHaveLength(1))
+  fireEvent.click(screen.getByText('notes.pdf').closest('summary')!)
   fireEvent.change(screen.getByLabelText('notes.pdf页范围'), { target: { value: '1-1' } })
   fireEvent.change(screen.getByLabelText('notes.pdf图片提取方式'), { target: { value: 'all' } })
   fireEvent.click(screen.getByRole('button', { name: '提取内容' }))

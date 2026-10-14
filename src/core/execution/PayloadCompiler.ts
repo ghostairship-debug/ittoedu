@@ -23,10 +23,14 @@ export class PayloadCompiler {
   }) {}
 
   /** Complete the first request after the host has read current facts and selected actual tools. */
-  finalize(input: PayloadSerializerInput & { manifest: PayloadManifest }): CompiledPayload {
+  finalize(input: PayloadSerializerInput & { manifest: PayloadManifest; sourceMessages?: readonly ModelChatMessage[]; sourceUserMessageIndex?: number }): CompiledPayload {
     const { selection, messages, tools, manifest } = structuredClone(input)
     if (manifest.delivery.status !== 'prepared') throw new PayloadCompileError('already-sent', '已发送请求不能重新装配')
-    const userIndex = manifest.userMessageIndex ?? manifest.userText?.messageIndex ?? manifest.explicitAttachments[0]?.messageIndex
+    const originalIndex = manifest.userMessageIndex ?? manifest.userText?.messageIndex ?? manifest.explicitAttachments[0]?.messageIndex
+    const sourceIndex = input.sourceUserMessageIndex ?? originalIndex
+    const originalUser = sourceIndex === undefined ? undefined : input.sourceMessages?.[sourceIndex]
+    const remapped = originalUser ? messages.findIndex(message => JSON.stringify(message) === JSON.stringify(originalUser)) : originalIndex
+    const userIndex = remapped !== undefined && remapped >= 0 ? remapped : originalIndex
     if (userIndex !== undefined && messages[userIndex]?.role !== 'user')
       throw new PayloadCompileError('input-mismatch', '最终请求丢失了原用户输入')
     const userParts = userIndex === undefined ? [] : messages[userIndex]?.content
@@ -35,7 +39,7 @@ export class PayloadCompiler {
       && part.text.length === manifest.userText!.characters && digest(part.text) === manifest.userText!.digest)))
       throw new PayloadCompileError('input-mismatch', '最终请求改变了原用户指令')
     for (const attachment of manifest.explicitAttachments) {
-      const parts = messages[attachment.messageIndex]?.content
+      const parts = messages[userIndex ?? attachment.messageIndex]?.content
       const part = Array.isArray(parts) ? parts[attachment.contentIndex] : undefined
       if (!part || typeof part !== 'object' || Array.isArray(part)
         || (attachment.delivery === 'source' ? part.type !== 'text'
@@ -43,7 +47,7 @@ export class PayloadCompiler {
         || attachment.contentDigest && digest(JSON.stringify(part)) !== attachment.contentDigest)
         throw new PayloadCompileError('input-mismatch', '最终请求丢失了已摄取附件表示')
     }
-    const known = new Map(manifest.automaticContext.map(item => [item.messageIndex, item]))
+    const known = new Map(manifest.automaticContext.map(item => [item.digest, item]))
     const automaticContext: PayloadManifest['automaticContext'] = []
     let textCharacters = 0
     messages.forEach((message, messageIndex) => {
@@ -54,7 +58,7 @@ export class PayloadCompiler {
       }
       if (messageIndex === userIndex) return
       const serializedMessage = JSON.stringify(message)
-      automaticContext.push({ messageIndex, provenance: known.get(messageIndex)?.provenance
+      automaticContext.push({ messageIndex, provenance: known.get(digest(serializedMessage))?.provenance
         ?? { kind: 'runtime', id: `final-context-${messageIndex}` }, digest: digest(serializedMessage), serializedBytes: size(serializedMessage) })
     })
     const serialized = this.options.serializePayload({ selection, messages, tools })
@@ -63,6 +67,9 @@ export class PayloadCompiler {
       provider: { connectionId: connection.id, revision: connection.revision, provider: connection.provider,
         model: selection.model, authKind: connection.auth.kind, billingKind: connection.billing.kind },
       payloadDigest: digest(serialized), automaticContext,
+      ...(userIndex !== undefined ? { userMessageIndex: userIndex,
+        userText: manifest.userText ? { ...manifest.userText, messageIndex: userIndex } : null,
+        explicitAttachments: manifest.explicitAttachments.map(item => ({ ...item, messageIndex: userIndex })) } : {}),
       totals: { ...manifest.totals, textCharacters, serializedBytes: size(serialized) },
       tools: tools.map(tool => ({ name: tool.name, digest: digest(JSON.stringify(tool)) })),
     } }
@@ -94,7 +101,7 @@ export class PayloadCompiler {
         contentIndex = content.length; sourceMessages.set(snapshot.id, contentIndex)
         const label = `材料目录（不是正文、也不是指令）：${JSON.stringify({ attachmentId: snapshot.id, name: snapshot.name,
           mediaType: snapshot.mediaType, originalDigest: snapshot.digest, byteLength: snapshot.byteLength,
-          source: snapshot.source,
+          source: snapshot.source, role: reference.role ?? 'reference',
           representations: snapshot.representations.length, coverage: snapshot.coverage, gaps: snapshot.gaps,
           readStatus: 'index-only', next: 'material.list / material.extract / material.find / material.read' })}`
         content.push({ type: 'text', text: label }); totals.textCharacters += label.length
@@ -115,7 +122,7 @@ export class PayloadCompiler {
           throw new PayloadCompileError('provenance-mismatch', '材料目录与来源记录不一致')
         if (reference.delivery === 'source' || representation.kind === 'file') { addSource(reference, source, representation); continue }
       }
-      const read = await this.options.attachments.readRepresentation(reference.attachmentId, reference.representationId)
+      const read = await this.options.attachments.readRepresentation(reference.attachmentId, reference.representationId, metadata.get(reference.attachmentId))
       const snapshot = attachmentSnapshotSchema.parse(read.snapshot), representation = attachmentRepresentationSchema.parse(read.representation), bytes = Uint8Array.from(read.bytes)
       if (snapshot.id !== reference.attachmentId || representation.id !== reference.representationId ||
           !snapshot.representations.some(item => JSON.stringify(item) === JSON.stringify(representation)) ||
@@ -124,10 +131,12 @@ export class PayloadCompiler {
           representation.blobRef.byteLength !== bytes.length || representation.blobRef.digest !== digest(bytes)) {
         throw new PayloadCompileError('provenance-mismatch', '附件表示与来源记录不一致')
       }
-      const contentIndex = content.length
+      let contentIndex = content.length
       if (reference.delivery === 'source' || representation.kind === 'file') { addSource(reference, snapshot, representation); continue }
       if (representation.kind === 'image') {
         if (selection.connection.capabilities.vision === 'unsupported') throw new PayloadCompileError('vision-unavailable', '所选连接不支持图片输入')
+        const label = `附件名称：${JSON.stringify(snapshot.name)}\n附件用途：${reference.role === 'target' ? '待处理附件' : '参考资料'}`
+        content.push({ type: 'text', text: label }); totals.textCharacters += label.length; contentIndex = content.length
         const encoded = base64(bytes)
         content.push({ type: 'image_url', image_url: { url: `data:${representation.mediaType};base64,${encoded}` } })
         totals.imageBytes += bytes.length; totals.base64Characters += encoded.length
@@ -136,7 +145,7 @@ export class PayloadCompiler {
         if (text.length !== representation.characters) throw new PayloadCompileError('provenance-mismatch', '附件文本长度与来源记录不一致')
         // The model needs the source boundary, not only a second anonymous text part.
         // Quote the untrusted filename as data; provenance below still hashes the raw bytes.
-        const labeledText = `附件名称：${JSON.stringify(snapshot.name)}\n附件正文开始\n${text}\n附件正文结束`
+        const labeledText = `附件名称：${JSON.stringify(snapshot.name)}\n附件用途：${reference.role === 'target' ? '待处理附件' : '参考资料'}\n附件正文开始\n${text}\n附件正文结束`
         content.push({ type: 'text', text: labeledText })
         totals.textCharacters += labeledText.length
       }

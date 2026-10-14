@@ -1,6 +1,7 @@
 import type { ExecutionItem, ExecutionProjection } from '../../shared/workbench/executionEvents'
 import { USER_QUESTION_TOOL, type UserQuestionView } from '../../shared/workbench/userQuestion'
 import type { ApprovalView } from '../../shared/workbench/executionPermission'
+import type { ConversationMessage } from '../../shared/workbench/conversations'
 
 const terminal = new Set(['completed', 'failed', 'stopped', 'partial', 'interrupted', 'cancelled'])
 /** A text/tool/usage item's completion does not end its containing built-in run. */
@@ -22,6 +23,71 @@ export function executionActivity(projection: ExecutionProjection) {
   const waitingRuns = open.filter(id => waiting.has(id)).length, activeRuns = open.length - waitingRuns
   // A run waiting for the user's choice is open but produces nothing until answered.
   return { busy: activeRuns > 0 || externalTools > 0, activeRuns, waitingRuns, externalTools }
+}
+
+/** The current phase comes from the complete projection, independently of history pagination. */
+export function currentExecutionStatus(projection: ExecutionProjection): string | null {
+  const ends = executionTimelineIndex(projection).ends
+  const active = projection.items.filter(item => !ends.has(item.runId) && (item.type === 'run.state' && !terminal.has(item.data.status ?? '')
+    || item.type === 'tool' && ['running', 'executing', 'pending', 'queued', 'stopping'].includes(item.data.status ?? '')))
+    .sort((left, right) => right.sequence - left.sequence)[0]
+  if (active?.type === 'tool') return `${active.source === 'external-mcp' ? '外部工具' : '工具'}执行中${active.data.label || active.data.toolName ? ` · ${active.data.label || active.data.toolName}` : ''}`
+  const current = active ?? projection.items.filter(item => item.type === 'run.state' || item.type === 'run.end')
+    .sort((left, right) => right.sequence - left.sequence)[0]
+  if (!current) return null
+  const end = executionTimelineIndex(projection).ends.get(current.runId)
+  const item = end ?? current
+  if (item.type === 'run.end' || terminal.has(item.data.status ?? '')) {
+    return item.data.status === 'completed' ? '本轮已结束'
+      : item.data.label || ({ partial: '部分完成', failed: '已中断', interrupted: '已中断', stopped: '已停止', cancelled: '已停止' } as Record<string, string>)[item.data.status ?? ''] || '本轮已结束'
+  }
+  const phase = item.data.phase
+  const labels = { 'waiting-response': '等待模型响应', generating: '正在生成／思考', tool: '工具执行中', retry: '等待重试', user: '等待你的回答', context: '正在整理上下文', ended: '本轮已结束' }
+  const label = phase ? labels[phase] : item.data.label || (item.data.status === 'waiting' ? '等待你的回答' : '等待模型响应')
+  return phase === 'waiting-response' && item.data.lastReceivedAt !== undefined
+    ? `${label} · 最近收到${item.data.receivedSource === 'heartbeat' ? '服务心跳' : '服务数据'}` : label
+}
+
+export type TimelineEntry =
+  | { kind: 'item'; item: ExecutionItem; time: number; order: number }
+  | { kind: 'message'; message: ConversationMessage; time: number; order: number }
+  | { kind: 'tools'; items: ExecutionItem[]; key: string; time: number; order: number }
+
+/** Group before paging, using first appearance rather than the latest streamed update. */
+export function executionTimelineEntries(projection: ExecutionProjection, messages: readonly ConversationMessage[]): TimelineEntry[] {
+  const ends = executionTimelineIndex(projection).ends
+  const ordered = [
+    ...collapseInterruptedAttempts(projection.items).filter(item => item.type !== 'run.state' || item.itemId.endsWith(':retry-summary'))
+      .map((item, order) => ({ kind: 'item' as const, item, time: item.firstTime ?? item.time, order })),
+    ...messages.map((message, order) => ({ kind: 'message' as const, message, time: message.createdAt, order })),
+  ].sort((left, right) => left.time - right.time || (left.kind === right.kind ? left.order - right.order : left.kind === 'message' ? -1 : 1))
+  const result: TimelineEntry[] = []
+  for (const entry of ordered) {
+    if (entry.kind === 'message') { result.push(entry); continue }
+    const { item } = entry
+    const interaction = item.data.question || item.data.approval
+    const failedEnd = ['partial', 'failed', 'interrupted'].includes(ends.get(item.runId)?.data.status ?? '')
+    const groupable = !interaction && !(failedEnd && item.data.status === 'failed')
+      && ['tool', 'edit', 'build', 'usage', 'document.commit', 'document.save', 'run.state'].includes(item.type)
+    if (!groupable) { result.push(entry); continue }
+    const previous = result.at(-1)
+    if (previous?.kind === 'tools' && previous.items[0]!.runId === item.runId && previous.items[0]!.source === item.source) previous.items.push(item)
+    else result.push({ kind: 'tools', items: [item], key: `${item.runId}:${item.itemId}:group`, time: entry.time, order: entry.order })
+  }
+  return result
+}
+
+export function toolGroupSummary(items: readonly ExecutionItem[]): string {
+  const calls = items.filter(item => item.type === 'tool')
+  const commits = items.filter(item => item.type === 'document.commit' && (item.data.applicationStatus ?? item.data.status) === 'applied')
+  const callOperations = new Map(commits.filter(item => item.itemId.endsWith(':commit') && item.data.operationId)
+    .map(item => [`${item.runId}:${item.itemId.slice(0, -':commit'.length)}`, item.data.operationId!]))
+  const modifications = new Set([...commits, ...calls.filter(item => item.data.applicationStatus === 'applied')]
+    .map(item => item.data.operationId ?? callOperations.get(`${item.runId}:${item.itemId}`) ?? `${item.runId}:${item.itemId}`))
+  const active = calls.findLast(item => ['running', 'executing', 'pending', 'queued'].includes(item.data.status ?? ''))
+  const failed = calls.filter(item => item.data.status === 'failed').length
+  return [calls.length ? `${calls.length} 次工具调用` : '执行记录', modifications.size ? `${modifications.size} 项修改` : '',
+    active ? `正在${active.data.label || active.data.toolName || '执行'}` : '', failed ? `${failed} 次调用有错误` : ''].filter(Boolean).join(' · ')
 }
 
 export interface PendingApproval { runId: string; callId: string; approval: ApprovalView }
@@ -50,13 +116,17 @@ export function pendingQuestion(projection: ExecutionProjection): PendingQuestio
 const indexes = new WeakMap<ExecutionProjection, ReturnType<typeof buildIndex>>()
 function buildIndex(projection: ExecutionProjection) {
   const items = new Map<string, ExecutionItem>(), ends = new Map<string, ExecutionItem>(), commits = new Map<string, ExecutionItem>(), saves = new Map<string, ExecutionItem[]>()
+  const runCommitSequences = new Map<string, number>()
   for (const item of projection.items) {
     items.set(JSON.stringify([item.runId, item.itemId]), item)
     if (item.type === 'run.end' && !ends.has(item.runId)) ends.set(item.runId, item)
-    if (item.type === 'document.commit' && item.data.operationId) { const key = JSON.stringify([item.runId, item.data.operationId]); if (!commits.has(key)) commits.set(key, item) }
+    if (item.type === 'document.commit' && item.data.operationId) {
+      const key = JSON.stringify([item.runId, item.data.operationId]); if (!commits.has(key)) commits.set(key, item)
+      runCommitSequences.set(item.runId, Math.max(runCommitSequences.get(item.runId) ?? 0, item.sequence))
+    }
     if (item.type === 'document.save' && item.data.documentId) { const prior = saves.get(item.data.documentId) ?? []; prior.push(item); saves.set(item.data.documentId, prior) }
   }
-  return { items, ends, commits, saves }
+  return { items, ends, commits, saves, runCommitSequences }
 }
 export function executionTimelineIndex(projection: ExecutionProjection) {
   let index = indexes.get(projection)

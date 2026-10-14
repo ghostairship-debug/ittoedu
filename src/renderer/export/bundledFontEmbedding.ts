@@ -30,6 +30,8 @@ import {
   BUNDLED_TEXT_FONT_FAMILY,
 } from '../../shared/fonts/bundledFontFamilies'
 import { buildBundledFontFaceCss } from '../../shared/fonts/bundledFontFaceCss'
+import { scanHtmlSource } from '../../shared/html/htmlSourceScanner'
+import { bundledFontCharacterUse, unicodeRangeIntersects } from './bundledFontSelection'
 import type {
   BundledFontFaceDescriptor,
   BundledFontFamilyDescriptor,
@@ -154,8 +156,8 @@ export function parseCssFontStack(value: string): string[] {
  * document paths, so it covers a text node's `style.fontFamily`, a run-level
  * override, a presentation-state override, a flow block run, a design token and
  * any component prop that names a font — without having to be taught each new
- * surface. Only object graphs are traversed, so the base64 asset payloads cost
- * nothing.
+ * surface. Web HTML/style strings and CSS source files are inspected as CSS;
+ * script source and base64 asset payloads are not font declarations.
  *
  * The math family cannot be found that way and needs the second rule. A formula
  * carries no font of its own — `FormulaNode.style` is `fontSize/color/align` —
@@ -168,6 +170,29 @@ export function collectBundledFontFamiliesInUse(value: unknown): string[] {
   const found = new Set<string>()
   const visited = new WeakSet<object>()
   const pending: unknown[] = [value]
+  const stack = (value: string) => {
+    for (const name of parseCssFontStack(value)) {
+      const bundled = BUNDLED_FAMILY_BY_LOWERCASE.get(name.toLowerCase())
+      if (bundled) found.add(bundled)
+    }
+  }
+  const css = (value: string) => {
+    const declarations = value.replace(/\/\*[\s\S]*?\*\//g, '')
+    for (const match of declarations.matchAll(/(?:^|[;{}])\s*(font-family|font)\s*:\s*((?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^;{}])*)/gi)) {
+      const families = match[1]!.toLowerCase() === 'font-family' ? match[2]!
+        : /(?:\d+(?:\.\d+)?(?:px|pt|pc|em|rem|%|vh|vw)|xx?-small|small|medium|large|xx?-large|smaller|larger)(?:\s*\/\s*[^\s]+)?\s+(.+)$/i.exec(match[2]!)?.[1]
+      if (families) stack(families)
+    }
+  }
+  const html = (value: string) => {
+    for (const token of scanHtmlSource(value).tokens) {
+      if (token.kind === 'raw-text' && token.rawKind === 'style') css(value.slice(token.span.start, token.span.end))
+      for (const attribute of token.attributes ?? []) {
+        if (attribute.name === 'style' && attribute.decodedValue) css(attribute.decodedValue)
+        if (attribute.name === 'srcdoc' && attribute.decodedValue) html(attribute.decodedValue)
+      }
+    }
+  }
 
   while (pending.length > 0) {
     const current = pending.pop()
@@ -188,11 +213,12 @@ export function collectBundledFontFamiliesInUse(value: unknown): string[] {
 
     for (const [key, entry] of Object.entries(current)) {
       if ((key === 'fontFamily' || key === 'font-family') && typeof entry === 'string') {
-        for (const name of parseCssFontStack(entry)) {
-          const bundled = BUNDLED_FAMILY_BY_LOWERCASE.get(name.toLowerCase())
-          if (bundled) found.add(bundled)
-        }
+        stack(entry)
         continue
+      }
+      if (typeof entry === 'string') {
+        if (key === 'css' || /\.css$/i.test(key)) css(entry)
+        else if (['html', 'sourceHtml', 'srcdoc'].includes(key) || /\.html?$/i.test(key)) html(entry)
       }
       if ((entry === 'formula' || entry === 'math') && FORMULA_DISCRIMINANT_KEYS.has(key)
         || key === 'key' && entry === 'guoling.formula') {
@@ -218,7 +244,8 @@ export function resolveEmbeddedBundledFonts(
 ): readonly EmbeddableBundledFont[] {
   const families = collectBundledFontFamiliesInUse(payload)
   if (families.length === 0 || embedSource === null) return []
-  return embedSource(families)
+  const use = bundledFontCharacterUse(payload)
+  return embedSource(families).map(font => ({ ...font, faces: font.faces.filter(face => unicodeRangeIntersects(face.unicodeRange, use)) }))
 }
 
 /** A registered source that failed to supply a requested family is an actual export diagnostic. */

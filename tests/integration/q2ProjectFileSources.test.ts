@@ -389,3 +389,137 @@ it('admits usable HTML body with a missing local media diagnostic and keeps its 
     await host.tools.stop('partial')
   } finally { await fs.rm(root, { recursive: true, force: true }) }
 })
+
+it('applies precise source edits sequentially as one undoable commit and saves the original frame, neighbours and source files', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-q2-precise-'))
+  try {
+    const project = createBlankCourseProjectV10('Precise source')
+    project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
+    project.definitions.custom = { id: 'custom', title: '程序', role: 'content', version: 'one',
+      implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'shared', entry: 'main.js' } } }
+    const html = `<svg width="320" height="200" style="${'fill:blue;stroke-width:2;'.repeat(240)}"><text>旧caption😺</text><text>删除项</text></svg>`
+    const authoredSource = `${source}\r\n// 旧caption😺\r\n`
+    project.instances.material = { id: 'material', definitionId: WEB_DEFINITION.id, data: { html }, frame, style: { opacity: 0.9 } }
+    project.instances.neighbour = { id: 'neighbour', definitionId: WEB_DEFINITION.id, data: { html: '<button>原互动</button>' }, frame }
+    project.surfaces[0]!.childIds = ['material', 'neighbour']
+    const host = new DocumentHostService(path.join(root, 'recovery'))
+    const initial = await host.internalAPI.create({ kind: 'course-v10', project,
+      resources: { assets: {}, components: { shared: { 'main.js': encode(authoredSource), 'helper.js': encode('export const value=1;'), 'opaque.bin': Uint8Array.of(255, 0, 128) } } } }, 'precise.h5lesson')
+    await host.tools.beginRun({ runId: 'precise', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }] })
+    await host.tools.loadToolFamilies('precise', ['content'])
+    let serial = 0
+    const tool = (name: string, input: unknown) => host.tools.execute('precise', `call-${++serial}`, { name, input })
+    const file = componentProjectFiles(project, model(initial).resources).find(file => file.kind === 'html' && file.target?.kind === 'instance' && file.target.instanceId === 'material')!
+    expect(await tool('project.read', { path: file.path, limit: 40 })).toMatchObject({ kind: 'read', data: { nextOffset: 40 } })
+    const movedFrame = { ...frame, transform: [1, 0, 0, 1, 142, 131] as [number, number, number, number, number, number] }
+    const neighbourHtml = '<button>人工互动</button>'
+    expect(await host.internalAPI.dispatch({ documentId: initial.documentId, epoch: initial.epoch, baseRevision: initial.revision,
+      actor: 'human', operationId: 'move-and-neighbour', mutation: { type: 'command', command: captureComponentOperation(project, [
+        { type: 'frame.set', instanceId: 'material', frame: movedFrame },
+        { type: 'data.set', instanceId: 'neighbour', path: ['html'], value: neighbourHtml },
+      ]) } })).toMatchObject({ status: 'applied' })
+    const before = await host.internalAPI.read(initial.documentId)
+    const caption = '新caption🫧'
+    const expectedHtml = html.replace('旧caption😺', () => caption).replace('<text>删除项</text>', '')
+    expect(await tool('project.apply', { path: file.path, edits: [
+      { old: '旧caption😺', new: '中间🫧' }, { old: '中间🫧', new: caption }, { old: '<text>删除项</text>', new: '' },
+    ] })).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
+    const changed = await host.internalAPI.read(initial.documentId)
+    expect(changed.revision).toBe(before.revision + 1)
+    expect(model(changed).project.instances.material).toEqual({ ...project.instances.material, data: { html: expectedHtml }, frame: movedFrame })
+    expect(model(changed).project.instances.neighbour).toEqual({ ...project.instances.neighbour, data: { html: neighbourHtml } })
+    const history = async (type: 'undo' | 'redo') => {
+      const snapshot = await host.internalAPI.read(initial.documentId)
+      return host.internalAPI.dispatch({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision,
+        actor: 'human', operationId: `precise-${type}`, mutation: { type } })
+    }
+    expect(await history('undo')).toMatchObject({ status: 'applied' })
+    expect(model(await host.internalAPI.read(initial.documentId)).project.instances).toEqual(model(before).project.instances)
+    expect(await history('redo')).toMatchObject({ status: 'applied' })
+    const shared = componentProjectFiles(project, model(initial).resources).find(file => file.binding?.kind === 'definition-source' && file.sourceFile?.path === 'main.js')!
+    await tool('project.read', { path: shared.path })
+    const literalCaption = "新caption $& $1 $` $' 🫧"
+    expect(await tool('project.apply', { path: shared.path, edits: [
+      { old: '\r\n// 旧caption😺\r\n', new: '\r\n// 中间🫧\r\n' }, { old: '中间🫧', new: literalCaption },
+      { old: 'mount()', new: 'value:2,mount()' },
+    ] })).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
+    const filename = path.join(root, 'saved.h5lesson')
+    await host.internalAPI.save(initial.documentId, filename)
+    const reopened = model(await new DocumentHostService(path.join(root, 'cold')).internalAPI.open(filename))
+    expect(reopened.project.instances).toEqual(model(changed).project.instances)
+    expect(reopened.resources.components.shared).toEqual({ 'main.js': encode(authoredSource.replace('旧caption😺', () => literalCaption).replace('mount()', 'value:2,mount()')), 'helper.js': encode('export const value=1;'), 'opaque.bin': Uint8Array.of(255, 0, 128) })
+    expect(reopened.project.definitions.custom).toEqual(project.definitions.custom)
+    await host.tools.stop('precise')
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+
+it('rejects unobserved, binary, missing and ambiguous precise edits without a partial write', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-q2-precise-errors-'))
+  try {
+    const project = createBlankCourseProjectV10('Precise errors')
+    project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
+    project.definitions.custom = { id: 'custom', role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'shared', entry: 'main.js' } } }
+    project.instances.material = { id: 'material', definitionId: WEB_DEFINITION.id, data: { html: '<p>aaa 重复 重复 唯一</p>' }, frame }
+    project.surfaces[0]!.childIds = ['material']
+    const host = new DocumentHostService(path.join(root, 'recovery'))
+    const initial = await host.internalAPI.create({ kind: 'course-v10', project,
+      resources: { assets: {}, components: { shared: { 'main.js': encode(source), 'opaque.bin': Uint8Array.of(255, 0, 128) } } } }, 'precise-errors.h5lesson')
+    await host.tools.beginRun({ runId: 'precise-errors', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }] })
+    await host.tools.loadToolFamilies('precise-errors', ['content'])
+    let serial = 0
+    const tool = (name: string, input: unknown) => host.tools.execute('precise-errors', `call-${++serial}`, { name, input })
+    const files = componentProjectFiles(project, model(initial).resources)
+    const file = files.find(file => file.kind === 'html' && file.target?.kind === 'instance' && file.target.instanceId === 'material')!
+    const unobserved = { name: 'project.apply', input: { path: file.path, edits: [{ old: '唯一', new: '更改' }] } }
+    expect(await host.tools.effectTargets('precise-errors', unobserved)).toMatchObject([
+      { documentId: initial.documentId, epoch: initial.epoch, target: { kind: 'course-instance', instanceId: 'material' } },
+    ])
+    expect(await host.tools.effectWriteScopes('precise-errors', unobserved)).toBeUndefined()
+    expect(await tool(unobserved.name, unobserved.input)).toMatchObject({ kind: 'error', code: 'file-not-observed' })
+    await tool('project.read', { path: file.path })
+    for (const { edits, code } of [
+      { edits: [{ old: '缺失', new: '更改' }], code: 'edit-mismatch' },
+      { edits: [{ old: '重复', new: '更改' }], code: 'edit-ambiguous' },
+      { edits: [{ old: 'aa', new: '更改' }], code: 'edit-ambiguous' },
+      { edits: [{ old: '唯一', new: '先改' }, { old: '缺失', new: '后改' }], code: 'edit-mismatch' },
+    ]) expect(await tool('project.apply', { path: file.path, edits })).toMatchObject({ kind: 'error', code })
+    expect(await tool('project.apply', { path: file.path, content: '互斥', edits: [{ old: '唯一', new: '更改' }] })).toMatchObject({ kind: 'error' })
+    expect(await tool('project.apply', { path: file.path, edits: [{ old: '', new: '更改' }] })).toMatchObject({ kind: 'error' })
+    const binary = files.find(file => file.sourceFile?.path === 'opaque.bin')!
+    await tool('project.read', { path: binary.path })
+    expect(await tool('project.apply', { path: binary.path, edits: [{ old: 'x', new: 'y' }] })).toMatchObject({ kind: 'error', code: 'file-text-required' })
+    const after = await host.internalAPI.read(initial.documentId)
+    expect(after.revision).toBe(initial.revision)
+    expect(after.model).toEqual(initial.model)
+    await host.tools.stop('precise-errors')
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+
+it('keeps same-field human HTML changes protected when precise edits still match the latest text', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-q2-precise-cas-'))
+  try {
+    const project = createBlankCourseProjectV10('Precise CAS')
+    project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
+    project.instances.material = { id: 'material', definitionId: WEB_DEFINITION.id, data: { html: '<svg><text>原图注</text></svg>' }, frame }
+    project.surfaces[0]!.childIds = ['material']
+    const host = new DocumentHostService(path.join(root, 'recovery'))
+    const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'precise-cas.h5lesson')
+    await host.tools.beginRun({ runId: 'precise-cas', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }] })
+    await host.tools.loadToolFamilies('precise-cas', ['content'])
+    const file = componentProjectFiles(project, model(initial).resources).find(file => file.kind === 'html' && file.target?.kind === 'instance' && file.target.instanceId === 'material')!
+    await host.tools.execute('precise-cas', 'read', { name: 'project.read', input: { path: file.path } })
+    const humanHtml = '<svg><text>原图注</text></svg><p>人工补充</p>'
+    expect(await host.internalAPI.dispatch({ documentId: initial.documentId, epoch: initial.epoch, baseRevision: initial.revision,
+      actor: 'human', operationId: 'human-html', mutation: { type: 'command', command: captureComponentOperation(project, [
+        { type: 'data.set', instanceId: 'material', path: ['html'], value: humanHtml },
+      ]) } })).toMatchObject({ status: 'applied' })
+    const human = await host.internalAPI.read(initial.documentId)
+    const edit = { name: 'project.apply', input: { path: file.path, edits: [{ old: '原图注', new: '模型图注' }] } }
+    expect(await host.tools.effectWriteScopes('precise-cas', edit)).toBeUndefined()
+    expect(await host.tools.execute('precise-cas', 'edit', edit)).toMatchObject({ kind: 'error', code: 'read-basis-changed' })
+    const after = await host.internalAPI.read(initial.documentId)
+    expect(after.revision).toBe(human.revision)
+    expect(after.model).toEqual(human.model)
+    await host.tools.stop('precise-cas')
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})

@@ -3,7 +3,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { app, dialog, type BrowserWindow } from 'electron'
 import { zipSync, strToU8 } from 'fflate'
-import { privateDiagnostic, privateDiagnosticLog } from './diagnosticPrivacy'
+import { randomUUID } from 'node:crypto'
+import { privateDiagnostic, privateDiagnosticLog, diagnosticFailureDetails } from './diagnosticPrivacy'
+import { BUILD_INFO } from './buildInfo'
 import {
   APP_EXECUTABLE_NAME,
   APP_NAME,
@@ -23,13 +25,14 @@ export interface DiagnosticEntry {
 
 function errorEntry(source: DiagnosticSource, error: unknown): DiagnosticEntry {
   if (error instanceof Error) {
-    return { source, message: error.message || error.name, stack: error.stack }
+    return { source, message: error.message || error.name, stack: error.stack, details: diagnosticFailureDetails(error) }
   }
   return { source, message: String(error) }
 }
 
 export class DiagnosticLog {
   private queue: Promise<void> = Promise.resolve()
+  private readonly sessionId = randomUUID()
 
   constructor(private readonly directory: string | (() => string)) {}
 
@@ -46,7 +49,9 @@ export class DiagnosticLog {
   }
 
   append(entry: DiagnosticEntry): Promise<void> {
-    const normalized = privateDiagnostic(entry)
+    const normalized = privateDiagnostic({ ...entry, details: { ...entry.details,
+      buildId: BUILD_INFO.buildId, buildRevision: BUILD_INFO.revision, sessionId: this.sessionId, packaged: app?.isPackaged ?? false,
+    } })
     this.queue = this.queue
       .catch(() => undefined)
       .then(async () => {
@@ -75,13 +80,16 @@ export class DiagnosticLog {
       `${APP_NAME}诊断报告`,
       `生成时间：${new Date().toISOString()}`,
       `应用版本：${app?.isReady?.() ? app.getVersion() : (process.env.npm_package_version ?? 'unknown')}`,
+      `构建：${BUILD_INFO.buildId}（${BUILD_INFO.builtAt || '源码运行'}）`,
+      `启动会话：${this.sessionId}`,
+      `是否打包：${app?.isPackaged ?? false}`,
       `平台：${process.platform} ${process.arch}`,
       `系统：${os.type()} ${os.release()}`,
       `Electron：${process.versions.electron ?? 'unknown'}`,
       `Chrome：${process.versions.chrome ?? 'unknown'}`,
       `Node：${process.versions.node}`,
       '',
-      '默认报告仅含版本、错误类别、错误代码、位置编号与错误指纹；错误正文、路径、请求和任意附加内容已省略。',
+      '报告包含构建、操作阶段、软件错误原因/代码及应用内部调用位置；未知错误正文、个人路径、凭据和请求/作品内容不进入默认报告。',
       '未自动附加用户文档、对话、图片或登录凭据。',
       '',
     ].join('\n')

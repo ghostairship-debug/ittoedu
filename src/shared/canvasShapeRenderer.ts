@@ -1,6 +1,7 @@
 import type { ArrowHead, ShapeNode } from './contracts/native-v1/types'
 import { resolveNativeLinePoints } from './nativeLineGeometry'
 import { resolveNativeShapePath } from './nativeShapePath'
+import { documentColorChannels } from './document/color'
 
 interface Point { x: number; y: number }
 
@@ -118,15 +119,15 @@ export function renderShapeCanvas(
 ): void {
   const style = node.style
   context.save()
-  context.lineWidth = Math.max(1, style.borderWidth)
+  context.lineWidth = style.borderWidth > 0 ? style.borderWidth : 1
   context.strokeStyle = style.borderColor
   context.fillStyle = style.fillColor
   if (style.fillGradient) {
     const gradient = style.fillGradient
     const paint = context.createLinearGradient(gradient.start[0] * width, gradient.start[1] * height, gradient.end[0] * width, gradient.end[1] * height)
     for (const stop of gradient.stops) {
-      const rgb = Number.parseInt(stop.color.slice(1), 16)
-      paint.addColorStop(stop.offset, `rgba(${rgb >> 16},${(rgb >> 8) & 255},${rgb & 255},${stop.opacity})`)
+      const rgb = documentColorChannels(stop.color)
+      paint.addColorStop(stop.offset, rgb ? `rgba(${rgb.red},${rgb.green},${rgb.blue},${rgb.alpha * stop.opacity})` : stop.color)
     }
     context.fillStyle = paint
   }
@@ -193,8 +194,11 @@ export function renderShapeCanvas(
       const points = resolveNativeLinePoints(node.lineGeometry, width, height, node.shapeType)
       context.save(); context.globalAlpha *= style.borderOpacity; context.beginPath(); context.moveTo(points[0].x, points[0].y)
       points.slice(1).forEach((point) => context.lineTo(point.x, point.y)); context.stroke(); context.fillStyle = style.borderColor
-      arrowHead(context, points[0], points[1], style.startArrow, Math.max(12, style.borderWidth * 4))
-      arrowHead(context, points.at(-1)!, points.at(-2)!, style.endArrow, Math.max(12, style.borderWidth * 4)); context.restore(); break
+      const first = points[0]!, last = points.at(-1)!
+      const forward = points.slice(1).find(point => Math.hypot(point.x - first.x, point.y - first.y) > 1e-9)
+      const backward = points.slice(0, -1).reverse().find(point => Math.hypot(point.x - last.x, point.y - last.y) > 1e-9)
+      if (forward) arrowHead(context, first, forward, style.startArrow, Math.max(12, style.borderWidth * 4))
+      if (backward) arrowHead(context, last, backward, style.endArrow, Math.max(12, style.borderWidth * 4)); context.restore(); break
     }
     case 'brace-left':
       if (style.borderWidth > 0 && style.borderOpacity > 0) {
@@ -208,7 +212,8 @@ export function renderShapeCanvas(
       break
     case 'brace-pair-horizontal':
       if (style.borderWidth > 0 && style.borderOpacity > 0) {
-        context.save(); context.globalAlpha *= style.borderOpacity; verticalBrace(context, width, height, 'left'); verticalBrace(context, width, height, 'right'); context.restore()
+        context.save(); context.globalAlpha *= style.borderOpacity; verticalBrace(context, width / 2, height, 'left')
+        context.translate(width / 2, 0); verticalBrace(context, width / 2, height, 'right'); context.restore()
       }
       break
     case 'brace-top':
@@ -216,8 +221,9 @@ export function renderShapeCanvas(
     case 'brace-pair-vertical': {
       if (style.borderWidth <= 0 || style.borderOpacity <= 0) break
       context.save(); context.globalAlpha *= style.borderOpacity; context.translate(width, 0); context.rotate(Math.PI / 2)
-      if (node.shapeType === 'brace-top' || node.shapeType === 'brace-pair-vertical') verticalBrace(context, height, width, 'left')
-      if (node.shapeType === 'brace-bottom' || node.shapeType === 'brace-pair-vertical') verticalBrace(context, height, width, 'right')
+      if (node.shapeType === 'brace-pair-vertical') {
+        verticalBrace(context, height / 2, width, 'left'); context.translate(height / 2, 0); verticalBrace(context, height / 2, width, 'right')
+      } else verticalBrace(context, height, width, node.shapeType === 'brace-top' ? 'left' : 'right')
       context.restore(); break
     }
     case 'bracket-left':

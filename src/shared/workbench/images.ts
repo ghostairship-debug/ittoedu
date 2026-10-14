@@ -1,5 +1,10 @@
 import type { ModelCapability, ModelConnectionSnapshot, ModelFailure, ModelJsonObject } from './modelProvider'
 
+/** New OAuth image selections prefer Flare; an explicit image catalog still limits available choices. */
+export const CHATGPT_IMAGE_MODEL_PREFERENCES = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2'] as const
+/** Codex text catalogs may omit image models; this is a project candidate, not verified account availability. */
+export const DEFAULT_CHATGPT_IMAGE_MODEL = CHATGPT_IMAGE_MODEL_PREFERENCES[0]
+
 export interface ImageModelSelection {
   connection: ModelConnectionSnapshot
   /** Image endpoint model, frozen with its connection for this run. */

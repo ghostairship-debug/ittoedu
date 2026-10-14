@@ -1,11 +1,11 @@
 import { useLayoutEffect, useRef, useState } from 'react'
+import { X } from 'lucide-react'
 import type { LessonWorkspaceViewProps } from './lessonWorkspaceViewTypes'
 import type { WorkbenchLayoutController } from './useWorkbenchLayoutPrefs'
 import type { LessonFileTab } from '../controller/useDocumentTabsController'
 import { useContextMenu } from '../../editing/commands/CommandMenu'
-import { dispatchRevealInExplorer } from '../../workbench/revealInExplorer'
 import { documentTabCommands } from './documentTabCommands'
-export function WorkspaceDocumentTabs({ props, layout, hidden = false, onNewFromPptx }: { props: LessonWorkspaceViewProps; layout: WorkbenchLayoutController; hidden?: boolean; onNewFromPptx?(): void }) {
+export function WorkspaceDocumentTabs({ props, layout, hidden = false }: { props: LessonWorkspaceViewProps; layout: WorkbenchLayoutController; hidden?: boolean }) {
  const { state, actions, tabs } = props;
  const tabList = useRef<HTMLDivElement>(null);
  useLayoutEffect(() => {
@@ -18,6 +18,16 @@ export function WorkspaceDocumentTabs({ props, layout, hidden = false, onNewFrom
  }, [tabs.activeTab, tabs.tabs, hidden]);
  const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
  const [newDocName, setNewDocName] = useState('');
+ const [renaming, setRenaming] = useState<LessonFileTab | null>(null), [renameName, setRenameName] = useState('');
+ const renameTab = async () => {
+   if (!renaming?.documentId) throw new Error('这个标签没有可重命名的文档')
+   const api = props.documentPort.documents
+   if (!api?.rename) throw new Error('重命名服务尚未连接，请重新打开应用')
+   if (!await tabs.drainAll([renaming.documentId])) throw new Error('当前编辑尚未同步，请完成编辑后再重命名')
+   const snapshot = await api.read(renaming.documentId)
+   const saved = await api.rename(snapshot.documentId, snapshot.epoch, renameName.trim())
+   tabs.updateDirty(renaming.path, saved.dirty); setRenaming(null); actions.refreshTree()
+ }
  const tabLabels = distinguishTabNames(tabs.tabs);
  const revealContent = () => { layout.setContentClosed(false); actions.setMobilePane('workbench') }
  const createMarkdown = async () => {
@@ -33,11 +43,36 @@ export function WorkspaceDocumentTabs({ props, layout, hidden = false, onNewFrom
    const all = [...tabs.tabs];
    tabMenu.open(at, `${tabLabels[index]} 标签菜单`, documentTabCommands({ index, count: all.length, saved: Boolean(tab.path) }, {
      close: () => closeTabs([tab]),
+     rename: tab.documentId ? () => { setRenaming(tab); setRenameName(tab.name) } : undefined,
      closeOthers: () => closeTabs(all.filter(other => other.id !== tab.id)),
      closeRight: () => closeTabs(all.slice(index + 1)),
      closeAll: () => closeTabs(all),
      copyPath: () => { void navigator.clipboard.writeText(tab.path).catch(() => {}) },
-     reveal: () => dispatchRevealInExplorer({ path: tab.path, kind: 'file' }),
+     reveal: () => { void actions.run(async () => {
+       if (tab.documentId) {
+         if (!props.documentPort.documents?.reveal) throw new Error('文档服务尚未连接')
+         await props.documentPort.documents.reveal(tab.documentId)
+         return
+       }
+       const files = props.workspaceFiles, directory = state.workspace ?? tab.lesson?.identity.normalizedDirectory
+       if (!files || !directory) throw new Error('工作空间文件服务尚未连接')
+       const root = await files({ type: 'root', directory })
+       const filename = tab.path.replace(/\\/g, '/'), rootPath = root.resolvedPath.replace(/\\/g, '/').replace(/\/$/, '')
+       if (!filename.toLowerCase().startsWith(`${rootPath.toLowerCase()}/`)) throw new Error('该文件不在当前授权工作空间内')
+       const parts = filename.slice(rootPath.length + 1).split('/'); let entryId = root.rootEntryId
+       for (const name of parts) {
+         let cursor: string | undefined, found: string | undefined
+         do {
+           const page = await files({ type: 'list', workspaceId: root.workspaceId, directoryEntryId: entryId, cursor })
+           const entry = page.entries.find(item => item.status === 'accessible' && item.name === name)
+           if (entry?.status === 'accessible') found = entry.entryId
+           cursor = page.nextCursor
+         } while (!found && cursor)
+         if (!found) throw new Error('文件位置已改变，请刷新文件列表')
+         entryId = found
+       }
+       await files({ type: 'reveal', operationId: crypto.randomUUID(), workspaceId: root.workspaceId, entryId })
+     }) },
      openExternal: () => {
        void actions.run(async () => {
          const result = await props.operation({ operation: 'open-external', path: tab.path });
@@ -98,7 +133,7 @@ export function WorkspaceDocumentTabs({ props, layout, hidden = false, onNewFrom
           <div className="lesson-new-tab-popover">
             <p className="lesson-eyebrow">新建</p>
             <label>
-              Markdown 文档名
+              文档名
               <input
                 value={newDocName}
                 onChange={(event) => setNewDocName(event.target.value)}
@@ -112,8 +147,11 @@ export function WorkspaceDocumentTabs({ props, layout, hidden = false, onNewFrom
                 void actions.run(createMarkdown);
               }}
             >
-              创建文档
+              新建 MD 文档
             </button>
+            <button type="button" disabled={state.busy} onClick={() => void actions.run(async () => {
+              await tabs.createText(newDocName.trim() || undefined); revealContent(); setNewDocName(''); setNewTabMenuOpen(false)
+            })}>新建 TXT 文档</button>
             <button
               type="button"
               disabled={state.busy}
@@ -124,19 +162,14 @@ export function WorkspaceDocumentTabs({ props, layout, hidden = false, onNewFrom
             >
               新建 果铃工程
             </button>
-            {onNewFromPptx && <button
-              type="button"
-              disabled={state.busy}
-              onClick={() => {
-                setNewTabMenuOpen(false);
-                onNewFromPptx();
-              }}
-            >
-              从 PPT 新建 果铃工程
-            </button>}
           </div>
         </details>
         {tabMenu.element}
+        {renaming && <div className="lesson-modal-backdrop" role="presentation"><form className="lesson-modal" role="dialog" aria-modal="true" aria-label="重命名文档" onSubmit={event => { event.preventDefault(); void actions.run(renameTab) }}>
+          <h3>重命名</h3><label>名称<input aria-label="文档名称" autoFocus value={renameName} onChange={event => setRenameName(event.target.value)} onFocus={event => { const suffix = event.target.value.lastIndexOf('.'); event.target.setSelectionRange(0, suffix > 0 ? suffix : event.target.value.length) }} /></label>
+          <p>保留文件扩展名；作品内容和未保存的编辑保持不变。</p>
+          <div className="lesson-modal-actions"><button type="button" onClick={() => setRenaming(null)}>取消</button><button type="submit" disabled={state.busy || !renameName.trim()}>保存名称</button></div>
+        </form></div>}
       </div>
  );
 }
@@ -156,7 +189,7 @@ function TabButton({
   onMenu(at: { x: number; y: number }): void;
 }) {
   return (
-    <span className="lesson-workbench-tab" onContextMenu={event => { event.preventDefault(); onMenu({ x: event.clientX, y: event.clientY }) }}>
+    <span className="lesson-workbench-tab" data-selected={active} onContextMenu={event => { event.preventDefault(); onMenu({ x: event.clientX, y: event.clientY }) }}>
       <button
         type="button"
         role="tab"
@@ -171,9 +204,10 @@ function TabButton({
         type="button"
         className="lesson-icon-button"
         aria-label={`关闭 ${label}`}
-        onClick={onClose}
+        title={`关闭 ${label}`}
+        onClick={event => { event.stopPropagation(); onClose() }}
       >
-        ×
+        <X size={14} aria-hidden="true" />
       </button>
     </span>
   );

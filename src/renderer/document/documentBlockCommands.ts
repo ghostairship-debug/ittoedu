@@ -56,7 +56,7 @@ export function createDocumentBlock(kind: DocumentBlockKind, id: () => string = 
     case 'code': return { id: blockId, type: kind, code: initial.text ?? '' }
     case 'divider': return { id: blockId, type: kind }
     case 'callout': return { id: blockId, type: kind, tone: 'note', title: { inlines: [{ type: 'text', text: initial.title ?? '提示' }] }, body: text() }
-    case 'section': return { id: blockId, type: kind, title: text(), collapsedByDefault: false, blocks: [] }
+    case 'section': return { id: blockId, type: kind, title: text(), collapsedByDefault: false, blocks: [{id:id(),type:'paragraph',content:empty()}] }
     case 'table': {
       const columns = Array.from({ length: 2 }, () => ({ id: id(), header: empty() }))
       const rows = Array.from({ length: 2 }, () => ({ id: id(), cells: Object.fromEntries(columns.map(column => [column.id, empty()])) }))
@@ -76,9 +76,9 @@ function convert(block: DocumentBlock, kind: DocumentBlockKind, id: () => string
   if (block.type === 'quote' && block.citation?.inlines.length) throw new Error('带出处的引用不能直接转换')
   if (block.type === 'list' && block.items.length !== 1) throw new Error('多项列表不能直接转换')
   const paragraphStyle = block.type === 'paragraph' || block.type === 'heading' || block.type === 'quote'
-    ? { ...(block.textAlign ? { textAlign: block.textAlign } : {}), ...(block.lineSpacing !== undefined ? { lineSpacing: block.lineSpacing } : {}) }
+    ? { ...(block.textAlign && block.textAlign!=='left' ? { textAlign: block.textAlign } : {}), ...(block.lineSpacing !== undefined && block.lineSpacing!==0 ? { lineSpacing: block.lineSpacing } : {}),...(block.textDefaults ? {textDefaults:block.textDefaults}:{}) }
     : {}
-  if ((kind === 'list' || kind === 'code' || kind === 'divider') && Object.keys(paragraphStyle).length) throw new Error('转换会丢失段落排版')
+  if ((kind === 'list' || kind === 'code' || kind === 'divider') && Object.keys(paragraphStyle).some(key=>key!=='textDefaults')) throw new Error('转换会丢失段落排版')
   const content = block.type === 'list' ? block.items[0]!.content : block.type === 'code'
     ? { inlines: block.code ? [{ type: 'text' as const, text: block.code }] : [] }
     : block.type === 'divider' ? empty() : block.content

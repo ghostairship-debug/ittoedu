@@ -1,10 +1,11 @@
 import { isDeepStrictEqual } from 'node:util'
 import type { ModelAssistantMessage, ModelConnectionSnapshot, ModelEvent, ModelFailure, ModelJsonObject, ModelProvider, ModelRequest, ModelUsage } from '../../../shared/workbench/modelProvider'
 import { effectiveModelProtocol } from '../../../shared/workbench/modelRouting'
+import { normalizeModelOutputParameters } from '../../../shared/workbench/modelOutputParameters'
 import { modelToolWireName, waitForModelOperation } from './OpenAIChatProvider'
 import { serverSentEvents } from './serverSentEvents'
 import { modelFetch, responseIdleTimeoutCode } from './modelFetch'
-import { httpFailureKind } from './providerHttpFailure'
+import { httpFailure, providerStreamFailure } from './providerHttpFailure'
 
 export const CHATGPT_RESPONSES_BASE_URL = 'https://chatgpt.com/backend-api/codex'
 interface ResponsesTransportOptions {
@@ -30,9 +31,9 @@ class ProtocolError extends Error {
 class TruncatedStreamError extends Error {}
 class ProviderResponseError extends Error {
   constructor(readonly code: 'chatgpt-provider-sse-error' | 'chatgpt-provider-response-failed' | 'chatgpt-provider-response-incomplete',
-    readonly incompleteReason?: 'max_output_tokens' | 'content_filter') { super(code) }
+    readonly incompleteReason?: 'max_output_tokens' | 'content_filter', readonly failure?: ReturnType<typeof providerStreamFailure>) { super(code) }
 }
-type Payload = Pick<ModelRequest, 'selection' | 'messages' | 'tools'>
+type Payload = Pick<ModelRequest, 'selection' | 'messages' | 'tools' | 'nativeSearch'>
 
 function prepare(request: Payload, protocol: ResponsesProtocol) {
   const { connection, model, parameters = {} } = request.selection
@@ -50,19 +51,20 @@ function prepare(request: Payload, protocol: ResponsesProtocol) {
   if (connection.capabilities.stream === 'unsupported' || request.tools?.length && connection.capabilities.tools === 'unsupported') throw new Error('unsupported-capability')
   const reserved = new Set(['model', 'input', 'instructions', 'messages', 'tools', 'stream', 'store', 'previous_response_id', 'conversation', 'background', 'include', 'api_key', 'apiKey', 'authorization', 'headers', 'base_url', 'baseURL'])
   if (Object.keys(parameters).some(key => reserved.has(key))) throw new Error('reserved-parameter')
-  const { reasoning_effort: selectedEffort, ...wireParameters } = parameters
+  const { reasoning_effort: selectedEffort, ...wireParameters } = normalizeModelOutputParameters(protocol, parameters)
   if (selectedEffort !== undefined) {
     if (wireParameters.reasoning !== undefined || typeof selectedEffort !== 'string'
       || !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(selectedEffort)) throw new Error('invalid-reasoning-effort')
     wireParameters.reasoning = { effort: selectedEffort }
   }
   const names = new Map<string, string>()
-  const tools = request.tools?.map(tool => {
+  const tools: ModelJsonObject[] = request.tools?.map(tool => {
     const name = modelToolWireName(tool.name)
     if (!tool.name || names.has(name)) throw new Error('duplicate-tool')
     names.set(name, tool.name)
     return { type: 'function', name, description: tool.description, parameters: tool.inputSchema, strict: false }
-  })
+  }) ?? []
+  if (request.nativeSearch) tools.push({ type: 'web_search', search_context_size: request.nativeSearch.contextSize ?? 'low', external_web_access: true })
   const input: ModelJsonObject[] = []
   const instructions: string[] = []
   for (const message of request.messages) {
@@ -107,7 +109,8 @@ function prepare(request: Payload, protocol: ResponsesProtocol) {
   }
   if (!input.length) throw new Error('missing-input')
   return { names, endpoint: connection.baseURL.replace(/\/+$/, '') + '/responses', body: { ...wireParameters, model, instructions: instructions.join('\n\n') || 'You are a helpful assistant.', input, ...(tools?.length ? { tools } : {}), stream: true, store: false,
-    include: ['reasoning.encrypted_content'] } }
+    ...(request.nativeSearch ? { tool_choice: { type: 'web_search' } } : {}),
+    include: ['reasoning.encrypted_content', ...(request.nativeSearch ? ['web_search_call.action.sources'] : [])] } }
 }
 
 /** Same final wire JSON is used by request budgeting and actual transport. Contains no credentials. */
@@ -142,7 +145,7 @@ class ResponsesProvider implements ModelProvider {
     const abort = () => controller.abort()
     options.signal?.addEventListener('abort', abort, { once: true })
     if (options.signal?.aborted) abort()
-    let response: Response | undefined
+    let response: Response | undefined, providerRequestId: string | undefined
     try {
       const request = structuredClone(input)
       let prepared: ReturnType<typeof prepare>
@@ -171,12 +174,12 @@ class ResponsesProvider implements ModelProvider {
         method: 'POST', redirect: 'error', signal: controller.signal,
         headers, body: JSON.stringify(prepared.body),
       })
+      providerRequestId = response.headers.get('x-request-id') ?? response.headers.get('request-id') ?? undefined
       credential = { accessToken: '', accountId: '' }
       if (!response.ok) {
         const status = response.status
-        const kind = await httpFailureKind(response)
-        yield event({ type: 'response.failed', failure: { outcome: status >= 400 && status < 500 && status !== 408 ? 'rejected' : 'unknown', kind,
-          code: `http-${status}`, message: `${providerLabel} 返回 HTTP ${status}；本次调用结束；重试由执行器按实际策略处理，不切换连接。`, httpStatus: status,
+        const failure = await httpFailure(response)
+        yield event({ type: 'response.failed', failure: { outcome: status >= 400 && status < 500 && status !== 408 ? 'rejected' : 'unknown', ...failure, httpStatus: status, ...(providerRequestId ? { providerRequestId } : {}),
           ...(retryAfter(response.headers.get('retry-after'), (this.options.now ?? Date.now)()) !== undefined
             ? { retryAfterMs: retryAfter(response.headers.get('retry-after'), (this.options.now ?? Date.now)()) } : {}) } }); return
       }
@@ -188,26 +191,32 @@ class ResponsesProvider implements ModelProvider {
       // and can differ from the requested model after backend routing.
       const headerModel = response.headers.get('openai-model')
       if (headerModel !== null && !text(headerModel)) throw new ProtocolError()
-      let responseId = '', streamModel: string | undefined, previewText = '', completed = false, sawFramedEvent = false
+      let responseId = '', streamModel: string | undefined, previewText = '', previewRefusal = '', completed = false, sawFramedEvent = false, lengthTerminated = false
       const toolPreviews = new Map<number, { id: string; name: string; arguments: string; toolIndex: number }>()
       const argumentDones = new Map<number, string>()
       const doneItems = new Map<number, ModelJsonObject>()
       const doneItemIds = new Set<string>()
       let nextDoneIndex = 0
-      for await (const data of serverSentEvents(response.body)) {
+      let lastActivity = -Infinity
+      for await (const data of serverSentEvents(response.body, { yieldActivity: true })) {
         controller.signal.throwIfAborted()
+        if (data === '') {
+          const receivedAt = (this.options.now ?? Date.now)()
+          if (receivedAt - lastActivity >= 1000) { lastActivity = receivedAt; yield event({ type: 'response.activity', receivedAt, source: 'data' }) }
+          continue
+        }
         if (data === '[DONE]') break
         sawFramedEvent = true
         const chunk: unknown = JSON.parse(data)
         if (!object(chunk) || !text(chunk.type)) throw new ProtocolError()
         if (object(chunk.response) && object(chunk.response.usage)) yield event({ type: 'usage.reported', usage: usageOf(chunk.response.usage) })
         // These are explicit provider terminal events. Never forward their untrusted error text or payload.
-        if (chunk.type === 'error') throw new ProviderResponseError('chatgpt-provider-sse-error')
-        if (chunk.type === 'response.failed') throw new ProviderResponseError('chatgpt-provider-response-failed')
+        if (chunk.type === 'error') throw new ProviderResponseError('chatgpt-provider-sse-error', undefined, providerStreamFailure(chunk.error ?? chunk))
+        if (chunk.type === 'response.failed') throw new ProviderResponseError('chatgpt-provider-response-failed', undefined, providerStreamFailure(object(chunk.response) ? chunk.response.error : chunk.error))
         if (chunk.type === 'response.incomplete') {
           const reason = object(chunk.response) && object(chunk.response.incomplete_details) ? chunk.response.incomplete_details.reason : undefined
-          throw new ProviderResponseError('chatgpt-provider-response-incomplete',
-            reason === 'max_output_tokens' || reason === 'content_filter' ? reason : undefined)
+          if (reason !== 'max_output_tokens') throw new ProviderResponseError('chatgpt-provider-response-incomplete', reason === 'content_filter' ? reason : undefined)
+          lengthTerminated = true
         }
         if (object(chunk.response)) {
           const native = chunk.response
@@ -218,7 +227,7 @@ class ResponsesProvider implements ModelProvider {
           }
           if (!responseId) {
             responseId = native.id
-            yield event({ type: 'response.started', responseId, ...(headerModel || streamModel ? { actualModel: headerModel || streamModel } : {}) })
+            yield event({ type: 'response.started', responseId, ...(providerRequestId ? { providerRequestId } : {}), ...(headerModel || streamModel ? { actualModel: headerModel || streamModel } : {}) })
           } else if (responseId !== native.id) throw new ProtocolError()
         }
         if (chunk.type === 'response.output_text.delta' || chunk.type === 'response.reasoning_summary_text.delta') {
@@ -226,21 +235,26 @@ class ResponsesProvider implements ModelProvider {
           if (chunk.type === 'response.output_text.delta') previewText += chunk.delta
           yield event({ type: chunk.type === 'response.output_text.delta' ? 'text.delta' : 'reasoning.delta', text: chunk.delta })
         }
+        if (chunk.type === 'response.refusal.delta') {
+          if (!responseId || typeof chunk.delta !== 'string') throw new ProtocolError()
+          previewRefusal += chunk.delta
+          yield event({ type: 'text.delta', text: chunk.delta })
+        }
         if (chunk.type === 'response.output_item.added' && object(chunk.item) && chunk.item.type === 'function_call') {
           const item = chunk.item
-          if (!Number.isSafeInteger(chunk.output_index) || Number(chunk.output_index) < 0 || !text(item.call_id) || !text(item.name) || !prepared.names.has(item.name)) throw new ProtocolError()
+          if (!Number.isSafeInteger(chunk.output_index) || Number(chunk.output_index) < 0 || !text(item.call_id) || !text(item.name)) throw new ProtocolError()
           const index = Number(chunk.output_index)
           if (toolPreviews.has(index)) throw new ProtocolError()
           // output_index includes reasoning/messages; the engine indexes only function calls.
           const toolIndex = toolPreviews.size
           toolPreviews.set(index, { id: item.call_id, name: item.name, arguments: '', toolIndex })
-          yield event({ type: 'tool.delta', index: toolIndex, id: item.call_id, name: prepared.names.get(item.name), argumentsDelta: '' })
+          yield event({ type: 'tool.delta', index: toolIndex, id: item.call_id, name: prepared.names.get(item.name) ?? item.name, argumentsDelta: '' })
         }
         if (chunk.type === 'response.function_call_arguments.delta') {
           const index = Number(chunk.output_index), call = toolPreviews.get(index)
           if (!call || argumentDones.has(index) || typeof chunk.delta !== 'string') throw new ProtocolError()
           call.arguments += chunk.delta
-          yield event({ type: 'tool.delta', index: call.toolIndex, id: call.id, name: prepared.names.get(call.name), argumentsDelta: chunk.delta })
+          yield event({ type: 'tool.delta', index: call.toolIndex, id: call.id, name: prepared.names.get(call.name) ?? call.name, argumentsDelta: chunk.delta })
         }
         if (chunk.type === 'response.function_call_arguments.done') {
           const index = Number(chunk.output_index), call = toolPreviews.get(index)
@@ -249,7 +263,7 @@ class ResponsesProvider implements ModelProvider {
           argumentDones.set(index, chunk.arguments)
           if (call && !call.arguments && chunk.arguments) {
             call.arguments = chunk.arguments
-            yield event({ type: 'tool.delta', index: call.toolIndex, id: call.id, name: prepared.names.get(call.name), argumentsDelta: chunk.arguments })
+            yield event({ type: 'tool.delta', index: call.toolIndex, id: call.id, name: prepared.names.get(call.name) ?? call.name, argumentsDelta: chunk.arguments })
           }
         }
         if (chunk.type === 'response.output_item.done') {
@@ -263,7 +277,7 @@ class ResponsesProvider implements ModelProvider {
             || previewIndexes.length && previewIndexes[0] !== index || doneItems.has(index)
             || text(item.id) && doneItemIds.has(item.id)) throw new ProtocolError()
           if (item.type === 'function_call') {
-            if (!text(item.call_id) || !text(item.name) || !prepared.names.has(item.name) || typeof item.arguments !== 'string') throw new ProtocolError()
+            if (!text(item.call_id) || !text(item.name) || typeof item.arguments !== 'string') throw new ProtocolError()
             const preview = toolPreviews.get(index), finalArguments = argumentDones.get(index)
             if (preview && (preview.id !== item.call_id || preview.name !== item.name || preview.arguments && preview.arguments !== item.arguments)
               || finalArguments !== undefined && finalArguments !== item.arguments) throw new ProtocolError()
@@ -272,46 +286,53 @@ class ResponsesProvider implements ModelProvider {
           if (text(item.id)) doneItemIds.add(item.id)
           nextDoneIndex = Math.max(nextDoneIndex, index + 1)
         }
-        if (chunk.type === 'response.completed') {
+        if (chunk.type === 'response.completed' || lengthTerminated && chunk.type === 'response.incomplete') {
           const native = chunk.response
-          if (!object(native) || native.status !== undefined && native.status !== 'completed'
+          if (!object(native) || native.status !== undefined && native.status !== (lengthTerminated ? 'incomplete' : 'completed')
             || native.output !== undefined && (!Array.isArray(native.output) || !native.output.every(object))) throw new ProtocolError()
           // Codex may send only id/usage here; complete done items then become the native continuation.
-          const doneOutput = Array.from({ length: doneItems.size }, (_, index) => doneItems.get(index))
+          const doneOutput = lengthTerminated ? [...doneItems].sort(([a], [b]) => a - b).map(([, item]) => item)
+            : Array.from({ length: doneItems.size }, (_, index) => doneItems.get(index))
           if (doneOutput.some(item => !item)) throw new ProtocolError()
           // The Codex backend can include output: [] in the completion envelope even
           // after delivering complete output_item.done records. Those records carry
           // the actual assistant turn and its native continuation.
-          const sparseCompletion = doneItems.size > 0 && (native.output === undefined || native.output.length === 0)
-          const output = sparseCompletion ? doneOutput as ModelJsonObject[] : native.output as ModelJsonObject[]
-          if (!output?.length || doneItems.size && !sparseCompletion && (doneItems.size !== output.length
+          const sparseCompletion = doneItems.size > 0 && (lengthTerminated || native.output === undefined || native.output.length === 0)
+          const availableEntries: [number, ModelJsonObject][] = sparseCompletion
+            ? [...doneItems].sort(([a], [b]) => a - b)
+            : (native.output as ModelJsonObject[] | undefined ?? []).map((item, index) => [index, item])
+          const completeEntries = lengthTerminated ? availableEntries.filter(([, item]) => item.status === undefined || item.status === 'completed') : availableEntries
+          const output = completeEntries.map(([, item]) => item)
+          if (!output?.length && !lengthTerminated || doneItems.size && !sparseCompletion && (doneItems.size !== output.length
             || doneOutput.some((item, index) => !isDeepStrictEqual(item, output[index])))) throw new ProtocolError()
           const calls: { id: string; name: string; argumentsText: string }[] = []
           let content = ''
           const seen = new Set<string>()
-          for (const [index, item] of output.entries()) {
+          for (const [index, item] of completeEntries) {
             if (item.status !== undefined && item.status !== 'completed') throw new ProtocolError()
             if (item.type === 'message' && Array.isArray(item.content)) for (const part of item.content) {
               if (object(part) && part.type === 'output_text' && typeof part.text === 'string') content += part.text
+              if (object(part) && part.type === 'refusal' && typeof part.refusal === 'string') content += part.refusal
             }
             if (item.type === 'function_call') {
-              if (!text(item.call_id) || !text(item.name) || !prepared.names.has(item.name) || typeof item.arguments !== 'string' || seen.has(item.call_id)) throw new ProtocolError()
+              if (!text(item.call_id) || !text(item.name) || typeof item.arguments !== 'string' || seen.has(item.call_id)) throw new ProtocolError()
               seen.add(item.call_id)
-              const preview = toolPreviews.get(index)
-              if (preview && (preview.toolIndex !== calls.length || preview.id !== item.call_id || preview.name !== item.name || preview.arguments && preview.arguments !== item.arguments)
+              const preview = toolPreviews.get(index) ?? (lengthTerminated ? [...toolPreviews.values()].find(preview => preview.id === item.call_id) : undefined)
+              if (preview && (!lengthTerminated && preview.toolIndex !== calls.length || preview.id !== item.call_id || preview.name !== item.name || preview.arguments && preview.arguments !== item.arguments)
                 || argumentDones.has(index) && argumentDones.get(index) !== item.arguments) throw new ProtocolError()
-              calls.push({ id: item.call_id, name: prepared.names.get(item.name)!, argumentsText: item.arguments })
+              calls.push({ id: item.call_id, name: prepared.names.get(item.name) ?? item.name, argumentsText: item.arguments })
             }
           }
-          if (previewText && content !== previewText || [...toolPreviews.values()].some(call => !seen.has(call.id))
-            || [...argumentDones.keys()].some(index => output[index]?.type !== 'function_call')) throw new ProtocolError()
+          if (!lengthTerminated && (previewText || previewRefusal) && content !== previewText + previewRefusal || !lengthTerminated && [...toolPreviews.values()].some(call => !seen.has(call.id))
+            || !lengthTerminated && [...argumentDones.keys()].some(index => output[index]?.type !== 'function_call')) throw new ProtocolError()
+          if (lengthTerminated && !content) content = previewText + previewRefusal
           const assistant: ModelAssistantMessage = { role: 'assistant', content: content || null,
-            nativeResponses: { protocol: this.protocol, responseId, output: structuredClone(output) } }
+            nativeResponses: { protocol: this.protocol, responseId, output: structuredClone(output ?? []) } }
           if (calls.length) assistant.tool_calls = output.filter(item => item.type === 'function_call').map(item => ({
             id: item.call_id as string, type: 'function', function: { name: item.name as string, arguments: item.arguments as string },
           }))
           yield event({ type: 'response.completed', responseId, ...(headerModel || streamModel ? { actualModel: headerModel || streamModel } : {}), assistant, toolCalls: calls,
-            finishReason: calls.length ? 'tool_calls' : 'stop', ...(object(native.usage) ? { usage: usageOf(native.usage) } : {}),
+            finishReason: lengthTerminated ? 'length' : calls.length ? 'tool_calls' : 'stop', ...(object(native.usage) ? { usage: usageOf(native.usage) } : {}),
             nativeResponse: structuredClone({ ...native, output }) })
           completed = true; break
         }
@@ -325,7 +346,7 @@ class ResponsesProvider implements ModelProvider {
       const idleCode = aborted ? undefined : responseIdleTimeoutCode(error)
       const providerFailure = !aborted && error instanceof ProviderResponseError ? error : undefined
       const isProtocol = !aborted && !providerFailure && (error instanceof ProtocolError || error instanceof SyntaxError || error instanceof TruncatedStreamError)
-      const kind: ModelFailure['kind'] = aborted ? 'aborted' : idleCode ? 'timeout' : providerFailure ? 'server' : isProtocol ? 'protocol' : 'transport'
+      const kind: ModelFailure['kind'] = aborted ? 'aborted' : idleCode ? 'timeout' : providerFailure?.failure?.kind ?? (providerFailure ? 'server' : isProtocol ? 'protocol' : 'transport')
       if (kind === 'protocol' && error instanceof Error && this.options.onProtocolError) {
         const report = this.options.onProtocolError
         void Promise.resolve().then(() => report(error)).catch(() => undefined)
@@ -342,8 +363,9 @@ class ResponsesProvider implements ModelProvider {
             : idleCode ? `${providerLabel} 响应长时间未收到网络数据，连接已结束；是否重试由执行器决定，已提交工具不会重放。`
             : kind === 'protocol' ? `${providerLabel} 响应格式无法解析；结果未知，是否重试由执行器决定，已提交工具不会重放。`
               : attempted ? `${providerLabel} 请求未取得完整结果，执行状态未知；是否重试由执行器决定，已提交工具不会重放。` : `${providerLabel} 请求未发送。`
-      yield event({ type: 'response.failed', failure: { outcome: providerFailure && providerFailure.code !== 'chatgpt-provider-response-incomplete'
-        ? 'rejected' : attempted ? 'unknown' : 'not-sent', kind, code: failureCode(code), message } })
+      yield event({ type: 'response.failed', failure: { ...(providerFailure?.failure ?? {}), ...(providerRequestId ? { providerRequestId } : {}),
+        ...(providerFailure ? { httpStatus: 200 } : {}), outcome: providerFailure && providerFailure.code !== 'chatgpt-provider-response-incomplete'
+        ? 'rejected' : attempted ? 'unknown' : 'not-sent', kind, code: providerFailure?.failure?.code ?? failureCode(code), message: providerFailure?.failure?.message ?? message } })
     } finally {
       options.signal?.removeEventListener('abort', abort); controller.abort()
       if (response?.body && !response.body.locked) await response.body.cancel().catch(() => undefined)

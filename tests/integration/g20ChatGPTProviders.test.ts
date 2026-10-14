@@ -3,10 +3,11 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import { setTimeout as delay } from 'node:timers/promises'
 import { createHash } from 'node:crypto'
 import { afterEach, expect, it } from 'vitest'
-import { ChatGPTResponsesProvider, CHATGPT_RESPONSES_BASE_URL, serializeChatGPTResponsesRequest } from '../../src/main/workbench/providers/ChatGPTResponsesProvider'
+import { ChatGPTResponsesProvider, OpenAIResponsesProvider, CHATGPT_RESPONSES_BASE_URL, serializeChatGPTResponsesRequest, serializeOpenAIResponsesRequest } from '../../src/main/workbench/providers/ChatGPTResponsesProvider'
 import { ChatGPTOAuthClient, type ChatGPTOAuthSecurePersistence, type OAuthSecureEntry } from '../../src/main/workbench/providers/ChatGPTOAuthClient'
-import { serializeModelRequest } from '../../src/main/workbench/providers/OpenAIChatProvider'
+import { modelToolWireName, serializeModelRequest } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import type { ModelEvent, ModelRequest, ModelJsonObject } from '../../src/shared/workbench/modelProvider'
+import { modelContextBudget } from '../../src/core/execution/modelContextBudget'
 
 const servers: Server[] = []
 afterEach(async () => { await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) }))) })
@@ -39,6 +40,56 @@ it('maps the selected OAuth reasoning strength only through the Responses reason
   expect(() => serializeChatGPTResponsesRequest(input)).toThrow('invalid-reasoning-effort')
   input.selection.parameters = { reasoning_effort: 'imaginary' }
   expect(() => serializeChatGPTResponsesRequest(input)).toThrow('invalid-reasoning-effort')
+})
+
+it.each([
+  ['chatgpt-responses', undefined, 1200, 'max_tokens'],
+  ['chatgpt-responses', 4096, 4096, 'max_tokens'],
+  ['openai-responses', undefined, 1200, 'max_tokens'],
+  ['openai-responses', 4096, 4096, 'max_tokens'],
+  ['chatgpt-responses', undefined, 1200, 'max_completion_tokens'],
+  ['openai-responses', 4096, 4096, 'max_completion_tokens'],
+  ['chatgpt-responses', undefined, undefined, null],
+  ['openai-responses', undefined, undefined, null],
+] as const)('canonicalizes legacy output caps for %s without changing the frozen selection (canonical=%s, expected=%s, key=%s)', async (protocol, canonical, expectedCap, legacyKey) => {
+  const input = request()
+  input.selection.model = 'gpt-6.1-sol'
+  input.selection.connection.protocol = protocol
+  if (protocol === 'openai-responses') {
+    input.selection.connection.baseURL = 'https://api.openai.com/v1'
+    input.selection.connection.auth = { kind: 'api-key', credentialRef: 'own-api-ref' }
+  }
+  input.selection.parameters = { ...(legacyKey ? { [legacyKey]: 1200 } : {}), reasoning: { effort: 'xhigh' }, metadata: { source: 'local-cap-regression' },
+    ...(canonical !== undefined ? { max_output_tokens: canonical } : {}) }
+  const original = structuredClone(input), sent: string[] = []
+  const serialize = protocol === 'chatgpt-responses' ? serializeChatGPTResponsesRequest : serializeOpenAIResponsesRequest
+  const serialized = serialize(input), wire = JSON.parse(serialized)
+  expect(wire).not.toHaveProperty('max_tokens')
+  expect(wire).not.toHaveProperty('max_completion_tokens')
+  expect(wire.max_output_tokens).toBe(expectedCap)
+  if (expectedCap !== undefined) expect(modelContextBudget(input.selection).outputReserve).toBe(wire.max_output_tokens)
+  expect(wire).toMatchObject({ model: 'gpt-6.1-sol',
+    reasoning: { effort: 'xhigh' }, metadata: { source: 'local-cap-regression' } })
+  expect(input).toEqual(original)
+  const transport = await serve(async (req, res) => {
+    sent.push(await body(req))
+    expect(req.url).toBe(protocol === 'chatgpt-responses' ? '/backend-api/codex/responses' : '/v1/responses')
+    expect(JSON.parse(sent.at(-1)!)).not.toHaveProperty('max_tokens')
+    expect(JSON.parse(sent.at(-1)!).max_output_tokens).toBe(expectedCap)
+    expect(JSON.parse(sent.at(-1)!)).toMatchObject({ reasoning: { effort: 'xhigh' } })
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    res.end(frame({ type: 'response.completed', response: { id: 'cap-response', model: 'gpt-6.1-sol', status: 'completed', output: [
+      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'OK' }] },
+    ] } }))
+  })
+  const provider = protocol === 'chatgpt-responses'
+    ? new ChatGPTResponsesProvider({ fetch: transport, credentialResolver: async () => ({ accessToken: 'own-token', accountId: 'account' }) })
+    : new OpenAIResponsesProvider({ fetch: transport, credentialResolver: async () => 'own-api-token' })
+  const events: ModelEvent[] = []
+  for await (const event of provider.stream(input)) events.push(event)
+  expect(events.at(-1)).toMatchObject({ type: 'response.completed', actualModel: 'gpt-6.1-sol', assistant: { content: 'OK' } })
+  expect(sent).toEqual([serialized])
+  expect(input).toEqual(original)
 })
 
 it('classifies a successful HTTP response without SSE using only safe, fixed error codes', async () => {
@@ -78,7 +129,7 @@ it('direct Responses HTTP preserves every native continuation item, wire tools, 
     res.writeHead(200, { 'Content-Type': 'text/event-stream' })
     if (bodies.length === 1) {
       const name = wire.tools[0].name
-      expect(name).toBe('text_replace'); expect(wire.tools[0].parameters).toEqual(request().tools![0]!.inputSchema)
+      expect(name).toBe(modelToolWireName('text.replace')); expect(wire.tools[0].parameters).toEqual(request().tools![0]!.inputSchema)
       expect(wire.tools[0].strict).toBe(false); expect(wire.instructions).toBe('保留系统指令😀')
       nativeOutput.push({ id: 'reason', type: 'reasoning', encrypted_content: 'opaque-ciphertext', signature: { opaque: '签名' }, summary: [{ type: 'summary_text', text: '思考摘要' }] },
         { id: 'call-item', type: 'function_call', call_id: 'native-call', name, arguments: '{"text":"你好😀"}', status: 'completed', opaque_extension: { keep: true } },
@@ -321,8 +372,8 @@ it('distinguishes provider terminal SSE events from local protocol mismatch and 
   const provider = new ChatGPTResponsesProvider({ fetch: transport, credentialResolver: async () => ({ accessToken: 'own-token', accountId: 'account' }) })
   const started = frame({ type: 'response.created', response: { id: 'one', model: 'actual' } })
   const cases = [
-    { packet: frame({ type: 'error', error: { message: secret, code: secret } }), kind: 'server', outcome: 'rejected', code: 'chatgpt-provider-sse-error' },
-    { packet: started + frame({ type: 'response.failed', response: { id: 'one', model: 'actual', status: 'failed', error: { message: secret } } }), kind: 'server', outcome: 'rejected', code: 'chatgpt-provider-response-failed' },
+    { packet: frame({ type: 'error', error: { message: secret, code: secret } }), kind: 'server', outcome: 'rejected', code: 'provider-unknown-sse' },
+    { packet: started + frame({ type: 'response.failed', response: { id: 'one', model: 'actual', status: 'failed', error: { message: secret } } }), kind: 'server', outcome: 'rejected', code: 'provider-unknown-sse' },
     { packet: started + frame({ type: 'response.incomplete', response: { id: 'one', model: 'actual', status: 'incomplete', incomplete_details: { reason: secret } } }), kind: 'server', outcome: 'unknown', code: 'chatgpt-provider-response-incomplete' },
     { packet: started + `data: {"type":"response.completed","secret":"${secret}"\n\n`, kind: 'protocol', outcome: 'unknown', code: 'chatgpt-protocol-mismatch' },
     { packet: started + 'data: [DONE]\n\n', kind: 'protocol', outcome: 'unknown', code: 'chatgpt-stream-truncated' },
@@ -336,7 +387,7 @@ it('distinguishes provider terminal SSE events from local protocol mismatch and 
   expect(requests).toBe(cases.length)
 })
 
-it('retains declared incomplete reasons without publishing unfinished calls or retrying the request', async () => {
+it('retains length termination and content filtering without publishing unfinished calls or retrying the request', async () => {
   for (const reason of ['max_output_tokens', 'content_filter']) {
     let requests = 0
     const transport = await serve(async (req, res) => {
@@ -347,8 +398,13 @@ it('retains declared incomplete reasons without publishing unfinished calls or r
     })
     const provider = new ChatGPTResponsesProvider({ fetch: transport, credentialResolver: async () => ({ accessToken: 'own-token', accountId: 'account' }) })
     const events = await collect(provider, request())
-    expect(events.at(-1)).toMatchObject({ type: 'response.failed', failure: { outcome: 'unknown', kind: 'server', code: 'chatgpt-provider-response-incomplete', message: expect.stringContaining(reason) } })
-    expect(events.some(event => event.type === 'response.completed')).toBe(false)
+    if (reason === 'max_output_tokens') {
+      expect(events.at(-1)).toMatchObject({ type: 'response.completed', finishReason: 'length', toolCalls: [], assistant: { content: null } })
+      expect(events.some(event => event.type === 'response.failed')).toBe(false)
+    } else {
+      expect(events.at(-1)).toMatchObject({ type: 'response.failed', failure: { outcome: 'unknown', kind: 'server', code: 'chatgpt-provider-response-incomplete', message: expect.stringContaining(reason) } })
+      expect(events.some(event => event.type === 'response.completed')).toBe(false)
+    }
     expect(requests).toBe(1)
   }
 })

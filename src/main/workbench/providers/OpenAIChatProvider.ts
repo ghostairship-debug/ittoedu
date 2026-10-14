@@ -4,9 +4,10 @@ import type {
   ModelJsonObject, ModelNativeToolCall, ModelProvider, ModelRequest, ModelUsage,
 } from '../../../shared/workbench/modelProvider'
 import { effectiveModelProtocol } from '../../../shared/workbench/modelRouting'
+import { normalizeModelOutputParameters } from '../../../shared/workbench/modelOutputParameters'
 import { serverSentEvents } from './serverSentEvents'
 import { modelFetch, responseIdleTimeoutCode } from './modelFetch'
-import { httpFailureKind } from './providerHttpFailure'
+import { httpFailure, providerStreamFailure } from './providerHttpFailure'
 
 export interface OpenAIChatProviderOptions {
   /** Main-owned resolver. Product configuration uses secure references, never ambient environment keys. */
@@ -117,9 +118,12 @@ export async function waitForModelOperation<T>(work: () => Promise<T>, signal: A
 }
 export function modelToolWireName(name: string): string {
   // Provider-only spelling: the catalog and returned calls keep their original names.
-  const alias = name.replace(/[^A-Za-z0-9_-]/g, '_')
-  if (/^[A-Za-z0-9_-]{1,64}$/.test(alias)) return alias
-  return `tool_${createHash('sha256').update(name).digest('hex').slice(0, 48)}`
+  if (/^[A-Za-z0-9_-]{1,64}$/.test(name)) return name
+  // Keep the operation recognizable: long opaque names caused real models to
+  // omit a character and repeatedly miss skills.read. The digest distinguishes
+  // dotted names from underscores; prepare still checks exact alias collisions.
+  const stem = name.replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 55) || 'tool'
+  return `${stem}_${createHash('sha256').update(name).digest('hex').slice(0, 8)}`
 }
 export type ModelRequestPayload = Pick<ModelRequest, 'selection' | 'messages' | 'tools'>
 function prepare(request: ModelRequestPayload) {
@@ -133,7 +137,7 @@ function prepare(request: ModelRequestPayload) {
     && message.content.some(part => object(part) && ['image_url', 'input_image'].includes(String(part.type))))) throw new Error('unsupported-vision')
   if (!request.messages.length) throw new Error('missing-messages')
   if (request.messages.some(message => message.nativeResponses !== undefined || message.nativeAnthropic !== undefined)) throw new Error('incompatible-native-continuation')
-  const parameters = request.selection.parameters ?? {}
+  const parameters = normalizeModelOutputParameters('openai-chat', request.selection.parameters)
   const reserved = ['model', 'messages', 'tools', 'stream', 'stream_options', 'n', 'api_key', 'apiKey', 'authorization', 'headers', 'base_url', 'baseURL']
   if (Object.keys(parameters).some(key => reserved.includes(key))) throw new Error('reserved-parameter')
   const names = new Map<string, string>()
@@ -211,10 +215,9 @@ export class OpenAIChatProvider implements ModelProvider {
       credential = ''
       if (!response.ok) {
         const rejected = response.status >= 400 && response.status < 500 && response.status !== 408
-        const kind = await httpFailureKind(response)
+        const failure = await httpFailure(response)
         const retryAfterMs = retryAfter(response.headers.get('retry-after'), (this.options.now ?? Date.now)())
-        yield event({ type: 'response.failed', failure: { outcome: rejected ? 'rejected' : 'unknown', kind,
-          code: `http-${response.status}`, message: `模型服务返回 HTTP ${response.status}；是否重试由执行器依据错误类型决定。`, httpStatus,
+        yield event({ type: 'response.failed', failure: { outcome: rejected ? 'rejected' : 'unknown', ...failure, httpStatus,
           ...(providerRequestId ? { providerRequestId } : {}),
           ...(retryAfterMs !== undefined ? { retryAfterMs } : {}) } })
         return
@@ -232,7 +235,11 @@ export class OpenAIChatProvider implements ModelProvider {
         try { const parsed: unknown = JSON.parse(data); if (!object(parsed)) throw new Error(); chunk = parsed }
         catch { throw new ProtocolError('invalid-json-event') }
         chunks.push(chunk)
-        if (chunk.error !== undefined) throw new ProtocolError('provider-stream-error')
+        if (chunk.error !== undefined) {
+          const failure = providerStreamFailure(chunk.error)
+          if (failure) { yield event({ type: 'response.failed', failure: { outcome: 'unknown', ...failure, httpStatus } }); return }
+          throw new ProtocolError('provider-stream-error')
+        }
         if (typeof chunk.id !== 'string' || !chunk.id || typeof chunk.model !== 'string' || !chunk.model || !Array.isArray(chunk.choices)) throw new ProtocolError('invalid-completion-chunk')
         if (!responseId) {
           responseId = chunk.id; actualModel = chunk.model
@@ -255,7 +262,8 @@ export class OpenAIChatProvider implements ModelProvider {
           retain(assistant, delta, ['role', 'content', 'reasoning_content', 'refusal', 'tool_calls'])
           const text = appendText(assistant, 'content', delta.content)
           const reasoning = appendText(assistant, 'reasoning_content', delta.reasoning_content)
-          appendText(assistant, 'refusal', delta.refusal)
+          const refusal = appendText(assistant, 'refusal', delta.refusal)
+          if (refusal) { appendText(assistant, 'content', refusal); yield event({ type: 'text.delta', text: refusal }); ensureActive() }
           if (text) { yield event({ type: 'text.delta', text }); ensureActive() }
           if (reasoning) { yield event({ type: 'reasoning.delta', text: reasoning }); ensureActive() }
           if (delta.tool_calls !== undefined && delta.tool_calls !== null) {
@@ -297,21 +305,22 @@ export class OpenAIChatProvider implements ModelProvider {
       }
       ensureActive()
       if (!done || !responseId || !actualModel || !finishReason) throw new ProtocolError('incomplete-stream')
-      const ordered = [...calls].sort(([left], [right]) => left - right)
+      const allCalls = [...calls].sort(([left], [right]) => left - right)
+      const ordered = finishReason === 'length' ? allCalls.filter(([, call]) => call.id && call.function.name) : allCalls
       const ids = new Set<string>()
       for (let index = 0; index < ordered.length; index++) {
         const [position, call] = ordered[index]!
-        if (position !== index || !call.id || ids.has(call.id) || !prepared.names.has(call.function.name)) throw new ProtocolError('incomplete-tool-call')
+        if (finishReason !== 'length' && position !== index || !call.id || ids.has(call.id) || !call.function.name) throw new ProtocolError('incomplete-tool-call')
         ids.add(call.id)
       }
-      if (ordered.length && finishReason !== 'tool_calls' || !ordered.length && finishReason === 'tool_calls') throw new ProtocolError('inconsistent-tool-finish')
+      if (ordered.length && !['tool_calls', 'length'].includes(finishReason) || !ordered.length && finishReason === 'tool_calls') throw new ProtocolError('inconsistent-tool-finish')
       if (!['stop', 'tool_calls', 'length', 'content_filter'].includes(finishReason)) throw new ProtocolError('interrupted-generation')
       if (ordered.length) assistant.tool_calls = ordered.map(([, call]) => call)
       const nativeResponse: ModelJsonObject = { ...native, object: 'chat.completion',
         choices: [{ ...choiceFields, index: 0, message: assistant, finish_reason: finishReason }],
         ...(usage ? { usage: usage.raw } : {}), stream_chunks: chunks }
       yield event({ type: 'response.completed', responseId, actualModel, assistant,
-        toolCalls: ordered.map(([, call]) => ({ id: call.id, name: prepared.names.get(call.function.name)!, argumentsText: call.function.arguments })),
+        toolCalls: ordered.map(([, call]) => ({ id: call.id, name: prepared.names.get(call.function.name) ?? call.function.name, argumentsText: call.function.arguments })),
         finishReason, ...(usage ? { usage } : {}), nativeResponse })
     } catch (error) {
       const idleCode = controller.signal.aborted ? undefined : responseIdleTimeoutCode(error)

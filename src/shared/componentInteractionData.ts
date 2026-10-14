@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { componentDefinitionBuiltinKey, componentIsLocked, type ComponentDefinition, type ComponentInstance, type ComponentTarget, type CourseProjectV10, type JsonValue } from './contracts/component-platform/project'
 import type { ComponentEdit } from './contracts/component-platform/operations'
 import { sceneInteractionsSchema } from './interactionSchema'
-import type { InteractionRule } from './interactionTypes'
+import type { InteractionActionPayload, InteractionRule } from './interactionTypes'
 import { courseSoundReference, courseSurfaceReference, prepareCourseInteractionRules, type CourseAuthoringReferences } from '../core/course/courseAuthoringReferences'
 
 export const componentInteractionDataSchema = z.object({ rules: sceneInteractionsSchema }).strict()
@@ -73,6 +73,68 @@ export function createComponentInteractionCopyIdentities(data: JsonValue) {
 }
 
 export interface ComponentInteractionAuthoringTarget { project: CourseProjectV10; surfaceId: string | null; instanceId: string | null; activeStateId: string | null }
+export type ComponentClickNavigationAction = Extract<InteractionActionPayload, { type: 'scene.go' }>
+
+function clickInteractionProgram(target: ComponentInteractionAuthoringTarget) {
+  const { project, instanceId, surfaceId } = target
+  if (!instanceId || !project.instances[instanceId] || !surfaceId) throw new Error('点击互动目标已不存在')
+  const visited = new Set<string>()
+  const owns = (id: string): boolean => {
+    if (visited.has(id)) return false
+    visited.add(id)
+    return id === instanceId || (project.instances[id]?.childIds ?? []).some(owns)
+  }
+  const global = [...project.global.underlay, ...project.global.overlay].some(owns)
+  const owner: ComponentTarget = global ? { kind: 'project' } : { kind: 'surface', surfaceId }
+  const rules = structuredClone(interactionRules(interactionBehavior(project, owner)))
+  const matches = rules.filter(rule => rule.trigger.type === 'node.click' && rule.trigger.nodeId === instanceId)
+  const simple = matches.length === 1 && matches[0]!.conditions.length === 0
+  const unavailableReason = componentIsLocked(project, instanceId) ? '锁定对象的互动不能修改，请先解锁。'
+    : matches.length && !simple ? '此对象已有多条或带条件的点击规则，请在“互动与动画”中选择规则编辑。'
+    : target.activeStateId && !global ? '命名状态中的条件点击规则请在“互动与动画”中编辑。' : null
+  return { owner, rules, matches, simple, unavailableReason }
+}
+
+/** The simple property editor projects the existing click program; reading it never creates a rule. */
+export function componentClickNavigationView(target: ComponentInteractionAuthoringTarget) {
+  const program = clickInteractionProgram(target)
+  const actions = program.matches.flatMap(rule => rule.actions.map(step => step.action))
+  const navigation = actions.filter(action => action.type === 'scene.go' || action.type === 'location.go')
+  const current = navigation[0]
+  return { action: current?.type === 'location.go' ? { type: 'scene.go' as const, sceneId: current.locationId }
+    : current?.type === 'scene.go' ? current : null,
+    otherActions: actions.some(action => action.type !== 'scene.go' && action.type !== 'location.go'),
+    unavailableReason: program.unavailableReason ?? (navigation.length > 1 ? '此对象已有多个跳转动作，请在“互动与动画”中编辑。' : null) }
+}
+
+/** Edits just the navigation action in the ordinary object's canonical click rule. */
+export function componentClickNavigationEdits(target: ComponentInteractionAuthoringTarget, action: ComponentClickNavigationAction | null): ComponentEdit[] {
+  const { owner, rules, matches } = clickInteractionProgram(target), view = componentClickNavigationView(target)
+  if (view.unavailableReason) throw new Error(view.unavailableReason)
+  if (action) {
+    const surface = target.project.surfaces.find(surface => surface.id === action.sceneId)
+    if (!surface) throw new Error('目标页面已不存在')
+    if (action.targetStateId && !surface.spatial?.frames.some(frame => frame.id === action.targetStateId)
+      && !surface.presentation?.states.some(state => state.id === action.targetStateId)) throw new Error('目标镜头或状态已不存在')
+  }
+  const current = matches[0]
+  if (!current) {
+    if (!action) return []
+    rules.push({ id: crypto.randomUUID(), name: '点击跳转到镜头', enabled: true,
+      trigger: { type: 'node.click', nodeId: target.instanceId! }, conditions: [],
+      actions: [{ id: crypto.randomUUID(), start: 'after-previous', delayMs: 0, action }] })
+  } else {
+    const index = current.actions.findIndex(step => step.action.type === 'scene.go' || step.action.type === 'location.go')
+    if (action) {
+      if (index >= 0) current.actions[index]!.action = action
+      else current.actions.push({ id: crypto.randomUUID(), start: 'after-previous', delayMs: 0, action })
+    } else if (index >= 0) {
+      current.actions.splice(index, 1)
+      if (!current.actions.length) rules.splice(rules.indexOf(current), 1)
+    } else return []
+  }
+  return componentRuleEdits(target.project, owner, rules)
+}
 
 export function componentRevealSequenceEdits(project: CourseProjectV10, target: ComponentTarget, rule: InteractionRule,
   existingRules: readonly InteractionRule[] = interactionRules(interactionBehavior(project, target)), references?: CourseAuthoringReferences): ComponentEdit[] {
@@ -88,28 +150,18 @@ export function componentRevealSequenceEdits(project: CourseProjectV10, target: 
 }
 
 export function componentClickInteractionEdits(target: ComponentInteractionAuthoringTarget, kind: 'audio-play' | 'location-go', value: string, references?: CourseAuthoringReferences): ComponentEdit[] {
-  const { project, instanceId, surfaceId, activeStateId } = target
+  const { project, instanceId, surfaceId } = target
   if (!instanceId || !project.instances[instanceId] || !surfaceId) throw new Error('点击互动目标已不存在')
   if (componentIsLocked(project, instanceId)) throw new Error('锁定对象的互动不能修改，请先解锁。')
   value = kind === 'audio-play' ? courseSoundReference(project, value, references) : courseSurfaceReference(project, value, references)
   if (kind === 'audio-play' && !project.media?.audio.sounds[value]) throw new Error('声音已不存在')
   if (kind === 'location-go' && !project.surfaces.some(surface => surface.id === value)) throw new Error('目标页面已不存在')
-  const visited = new Set<string>()
-  const owns = (id: string): boolean => {
-    if (visited.has(id)) return false
-    visited.add(id)
-    return id === instanceId || (project.instances[id]?.childIds ?? []).some(owns)
-  }
-  const global = [...project.global.underlay, ...project.global.overlay].some(owns)
-  const owner: ComponentTarget = global ? { kind: 'project' } : { kind: 'surface', surfaceId }
-  const rules = structuredClone(interactionRules(interactionBehavior(project, owner)))
-  const matches = rules.filter(rule => rule.trigger.type === 'node.click' && rule.trigger.nodeId === instanceId)
-  const simple = matches.length === 1 && matches[0]!.conditions.length === 0
-  if (matches.length && !simple) throw new Error('此对象已有多条或带条件的点击规则，请在“互动与动画”中选择规则编辑。')
-  if (activeStateId) throw new Error('命名状态中的条件点击规则请在“互动与动画”中编辑。')
+  const { owner, rules, matches, simple, unavailableReason } = clickInteractionProgram(target)
+  if (unavailableReason) throw new Error(unavailableReason)
   const action = kind === 'audio-play' ? { type: 'audio.play' as const, soundId: value } : { type: 'location.go' as const, locationId: value }
   if (simple) {
-    const step = matches[0]!.actions.find(step => step.action.type === action.type)
+    const step = matches[0]!.actions.find(step => step.action.type === action.type
+      || kind === 'location-go' && step.action.type === 'scene.go')
     if (step) step.action = action
     else matches[0]!.actions.push({ id: crypto.randomUUID(), start: 'after-previous', delayMs: 0, action })
   }

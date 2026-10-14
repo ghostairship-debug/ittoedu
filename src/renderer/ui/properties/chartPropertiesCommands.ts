@@ -13,7 +13,11 @@ export function createChartPropertiesCommands(
     try { return commit(chartDataSchema.parse(build())) }
     catch (error) { return error instanceof Error ? error.message : '图表数据无效' }
   }
-  const run = (build: () => ChartData) => { void Promise.resolve(apply(build)).then(error => { if (error) report(error) }, error => report(error instanceof Error ? error.message : String(error))) }
+  const run = (build: () => ChartData): Promise<void> => {
+    const pending = Promise.resolve(apply(build)).then(error => { if (error) throw new Error(error) })
+    void pending.catch(error => report(error instanceof Error ? error.message : String(error)))
+    return pending
+  }
   return {
     patchTitle: title => run(() => ({ ...chart, title })),
     patchType: (type, series) => run(() => changeChartType(chart, type, series)),

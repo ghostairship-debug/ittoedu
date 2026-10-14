@@ -4,6 +4,8 @@ import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
 import { APP_NAME } from './src/shared/constants'
 import { htmlPreviewAgentPlugin } from './scripts/htmlPreviewAgentPlugin'
+import { bundledFontOutputManifest } from './src/shared/fonts/bundledFontOutputManifest'
+import type { BundledFontFamilyDescriptor } from './src/shared/fonts/bundledFontManifest'
 import {
   bundledFontFaceSpecifiers,
   resolveBundledFontDescriptors,
@@ -19,16 +21,16 @@ function productIdentityPlugin(): Plugin {
 }
 
 function playerBundlePlugin(): Plugin {
-  const virtualId = 'virtual:player-bundle'
-  const resolvedVirtualId = `\0${virtualId}`
+  const bundles: Record<string, string> = { 'virtual:player-bundle': 'player.iife.js', 'virtual:compiled-player-bundle': 'compiled-player.iife.js' }
   return {
     name: 'embedded-player-bundle',
     resolveId(id) {
-      return id === virtualId ? resolvedVirtualId : undefined
+      return Object.hasOwn(bundles, id) ? `\0${id}` : undefined
     },
     load(id) {
-      if (id !== resolvedVirtualId) return undefined
-      const bundlePath = resolve(__dirname, 'dist-player/player.iife.js')
+      const filename = bundles[id.slice(1)]
+      if (!id.startsWith('\0') || !filename) return undefined
+      const bundlePath = resolve(__dirname, 'dist-player', filename)
       return `export default ${JSON.stringify(readFileSync(bundlePath, 'utf8'))}`
     },
   }
@@ -37,6 +39,7 @@ function playerBundlePlugin(): Plugin {
 function bundledFontsPlugin(): Plugin {
   const virtualId = 'virtual:bundled-fonts'
   const resolvedVirtualId = `\0${virtualId}`
+  let descriptors: readonly BundledFontFamilyDescriptor[] | undefined
   return {
     name: 'bundled-fonts-manifest',
     resolveId(id) {
@@ -44,7 +47,7 @@ function bundledFontsPlugin(): Plugin {
     },
     load(id) {
       if (id !== resolvedVirtualId) return undefined
-      const descriptors = resolveBundledFontDescriptors(
+      descriptors = resolveBundledFontDescriptors(
         resolve(__dirname, 'node_modules'),
       )
       const specifiers = bundledFontFaceSpecifiers(descriptors)
@@ -60,6 +63,11 @@ function bundledFontsPlugin(): Plugin {
         `export default assembleBundledFontManifest(${JSON.stringify(descriptors)}, [${urls}])`,
         '',
       ].join('\n')
+    },
+    generateBundle(_options, bundle) {
+      if (!descriptors) return
+      const assets = Object.values(bundle).filter(value => value.type === 'asset')
+      this.emitFile({ type: 'asset', fileName: 'bundled-font-manifest.json', source: JSON.stringify(bundledFontOutputManifest(descriptors, assets)) })
     },
   }
 }

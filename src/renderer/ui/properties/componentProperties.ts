@@ -14,6 +14,7 @@ import { inputAuthoringContent, inputContentPatchEdits } from '../../../componen
 import { switchShapeType } from '../../../components/shape/authoring'
 import type { PropertiesItemBase, PropertiesItemView, PropertiesPatch } from './SlideNativePropertiesPanel'
 import { componentDefinitionPresentation } from './componentDefinitionPresentation'
+import { stepFontSize } from '../../../shared/fontSizeStep'
 
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
 
@@ -73,7 +74,7 @@ export function componentPropertiesView(instance: ComponentInstance, definition?
     x: transform[4]!, y: transform[5]!, width: frame?.width ?? 0, height: frame?.height ?? 0,
     rotation: Math.atan2(transform[1]!, transform[0]!) * 180 / Math.PI,
     opacity: typeof instance.style?.opacity === 'number' ? instance.style.opacity : 1,
-    visible: instance.visible !== false, locked: instance.locked === true,
+    visible: instance.visible !== false, locked: instance.locked === true, ownLocked: instance.locked === true,
     playbackInitialVisibility: instance.playbackInitialVisibility ?? 'inherit',
   }
   // A private implementation override does not replace the definition's professional data/editor.
@@ -153,14 +154,23 @@ export function componentPropertiesEdits(instance: ComponentInstance, definition
     edits.push({ type: 'frame.set', instanceId: instance.id, frame: propertiesFramePatch(instance.frame, patch) })
   }
   const content = Object.fromEntries(Object.entries(patch).filter(([key, value]) => value !== undefined
-    && !['id', 'name', 'type', 'x', 'y', 'width', 'height', 'rotation', 'opacity', 'visible', 'locked', 'playbackInitialVisibility'].includes(key)))
+    && !['id', 'name', 'type', 'x', 'y', 'width', 'height', 'rotation', 'opacity', 'visible', 'locked', 'playbackInitialVisibility', 'solidFillColor'].includes(key)))
   if (view.type === 'text') {
+    if (patch.fontSizeStep) {
+      const data = textComponentDataSchema.parse(instance.data)
+      edits.push({ type: 'data.set', instanceId: instance.id, path: ['appearance', 'fontSize'], value: stepFontSize(data.appearance.fontSize, patch.fontSizeStep) })
+      data.content.inlines.forEach((inline, index) => {
+        if (inline.style?.fontSize !== undefined) edits.push({ type: 'data.set', instanceId: instance.id,
+          path: ['content', 'inlines', String(index), 'style', 'fontSize'], value: stepFontSize(inline.style.fontSize, patch.fontSizeStep!) })
+      })
+    }
     const style = content.style as Partial<TextNode['style']> | undefined
     if (style) {
       const { overflow, ...appearance } = style
       edits.push(...leafEdits(instance.id, appearance, ['appearance']))
       if (overflow) edits.push({ type: 'data.set', instanceId: instance.id, path: ['sizing', 'mode'],
         value: overflow === 'auto-height' ? 'grow-height' : overflow === 'shrink' ? 'shrink-text' : 'fixed' })
+      if (overflow === 'fixed') edits.push({ type: 'data.set', instanceId: instance.id, path: ['sizing', 'overflow'], value: 'clip' })
     }
     for (const key of ['flipX', 'flipY']) if (key in content) edits.push(...leafEdits(instance.id, content[key], ['appearance', key]))
   } else if (view.type === 'formula') {
@@ -202,6 +212,10 @@ export function componentPropertiesEdits(instance: ComponentInstance, definition
       }
     }
   } else {
+    if (view.type === 'shape' && typeof patch.solidFillColor === 'string') {
+      const { fillGradient: _gradient, ...style } = shapeDataSchema.parse(instance.data).style
+      edits.push({ type: 'data.set', instanceId: instance.id, path: ['style'], value: json({ ...style, fillColor: patch.solidFillColor }) })
+    }
     edits.push(...leafEdits(instance.id, content))
   }
   return edits

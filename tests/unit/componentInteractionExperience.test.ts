@@ -47,7 +47,7 @@ function interactionHarness(rules: InteractionRule[] = []) {
     } }, state: { get: key => state.get(key), set: (key, value) => { state.set(key, value) }, subscribe: () => () => {} } }
   const interactions = new ComponentWorldInteractions({ project: () => project, element: () => undefined, document: () => document,
     audio: () => undefined, active: () => playing, playback: () => true, report() {}, navigation: {
-      read: () => ({ locationId: surfaceId, scenes: [], progress: null, zoom: 1, muted: false, fullscreen: false }),
+      readLocation: () => surfaceId, read: () => ({ locationId: surfaceId, scenes: [], progress: null, zoom: 1, muted: false, fullscreen: false }),
       subscribe: listener => { changed.add(listener); return () => { changed.delete(listener) } }, canExecute: () => true, execute,
       setCollapsed() {}, moveBy() {}, setZoom() {}, resetView() {},
     } })

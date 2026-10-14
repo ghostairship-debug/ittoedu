@@ -29,11 +29,13 @@ export async function mountWebContent(context: ComponentRuntimeContext<WebRuntim
   }
   const documentAttributes = documentRoot ? [document.documentElement, document.head, document.body].map(element => ({ element, values: attributes(element) })) : []
   let signature: string | undefined, instance = context.instance, disposed = false, rootStyle = authoredDocument ? root.style.cssText : '', renderRevision = 0, measuredContainer = false
+  let styledElement: HTMLElement | null = null, appliedRootStyle = ''
   let releaseLayout = () => {}
   const urls = new Set<string>(), style = document.createElement('style'), headNodes: Node[] = [], cancelScripts = new Set<() => void>()
   document.head.append(style)
   const report = (message: string) => scope.events.emit('component.diagnostic', { instanceId: instance.id, message })
-  const releaseUrls = () => { for (const url of urls) URL.revokeObjectURL(url); urls.clear() }
+  let releaseModuleUrls = () => {}
+  const releaseUrls = () => { for (const url of urls) URL.revokeObjectURL(url); urls.clear(); releaseModuleUrls() }
   const clearHeadNodes = () => {
     for (const cancel of [...cancelScripts]) cancel()
     for (const node of headNodes) node.parentNode?.removeChild(node)
@@ -43,7 +45,8 @@ export async function mountWebContent(context: ComponentRuntimeContext<WebRuntim
   const resolveResources = (source: string) => source.replace(/cw-resource:[a-zA-Z0-9_.-]+/g,
     reference => context.resources?.url(instance.data.resourceBindings?.[reference] ?? reference) ?? reference)
   const writeStyle = () => {
-    style.textContent = resolveResources(context.resourceCss ?? instance.data.css ?? '')
+    const stylesheet = resolveResources(context.resourceCss ?? instance.data.css ?? '')
+    if (style.textContent !== stylesheet) style.textContent = stylesheet
     const marker = fragmentBox.resourceMarker({ $text: context.resourceCss ?? instance.data.css ?? '' }, instance.data.resourceBindings ?? {}, id => context.resources?.url(id))
     if (marker) style.setAttribute('data-component-resource-bindings', marker)
     else style.removeAttribute('data-component-resource-bindings')
@@ -65,35 +68,45 @@ export async function mountWebContent(context: ComponentRuntimeContext<WebRuntim
         authoredRootStyle = projected.cssText
       }
     }
-    element.style.cssText = authoredRootStyle
+    const declaredStyle = document.createElement('span').style
+    declaredStyle.cssText = authoredRootStyle
     for (const [key, value] of Object.entries(instance.style ?? {})) {
       if (['transform', 'transformOrigin', 'position', 'left', 'top', 'right', 'bottom', 'width', 'height', 'zIndex'].includes(key)) continue
       if (typeof value !== 'number' && typeof value !== 'string') continue
       const property = key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)
-      element.style.setProperty(property, typeof value === 'number' && /^(font-size|letter-spacing|border.*width|border-radius|padding.*|margin.*|gap)$/.test(property) ? `${value}px` : String(value))
+      declaredStyle.setProperty(property, typeof value === 'number' && /^(font-size|letter-spacing|border.*width|border-radius|padding.*|margin.*|gap)$/.test(property) ? `${value}px` : String(value))
     }
     // The parser document and fragment carrier have distinct outer owners.
-    const effectiveStyle = Object.fromEntries(Array.from({ length: element.style.length }, (_unused, index) => {
-      const key = element.style.item(index)
-      return [key, element.style.getPropertyValue(key)]
+    const effectiveStyle = Object.fromEntries(Array.from({ length: declaredStyle.length }, (_unused, index) => {
+      const key = declaredStyle.item(index)
+      return [key, declaredStyle.getPropertyValue(key)]
     }))
     if (fragmentBox.isMeasured(instance, documentRoot ? 'document' : 'fragment', effectiveStyle,
       context.builtinKey ? { implementation: { kind: 'builtin', key: context.builtinKey } } : undefined)) {
-      element.style.cssText = ''
+      declaredStyle.cssText = ''
       const layout = context.layout?.read() ?? { mode: 'free-frame' as const, inlineSize: instance.frame!.width, blockSize: instance.frame!.height }
-      for (const [key, value] of Object.entries(fragmentBox.style(effectiveStyle, layout, instance.style ?? {}))) element.style.setProperty(key, String(value))
+      for (const [key, value] of Object.entries(fragmentBox.style(effectiveStyle, layout, instance.style ?? {}))) declaredStyle.setProperty(key, String(value))
       // Absolute retained decorations use the formal border-box origin, not the painted root's padding edge.
       measuredContainer = true
       root.style.position = 'relative'
       root.style.width = `${layout.inlineSize}px`
       root.style.height = layout.mode === 'flow-content' ? 'auto' : `${layout.blockSize}px`
     } else restoreContainer()
+    const previousStyle = document.createElement('span').style
+    previousStyle.cssText = styledElement === element ? appliedRootStyle : element.style.cssText
+    for (const property of new Set([...Array.from(previousStyle), ...Array.from(declaredStyle)])) {
+      const value = declaredStyle.getPropertyValue(property), priority = declaredStyle.getPropertyPriority(property)
+      if (value === previousStyle.getPropertyValue(property) && priority === previousStyle.getPropertyPriority(property)) continue
+      if (value) element.style.setProperty(property, value, priority)
+      else element.style.removeProperty(property)
+    }
+    styledElement = element; appliedRootStyle = declaredStyle.cssText
   }
   const render = async () => {
     if (disposed || !scope.isActive()) return
     pageText.setRules(instance.data.textOverrides ?? [])
     writeStyle()
-    const nextSignature = JSON.stringify([instance.data.html, instance.data.modules, instance.data.moduleGraph])
+    const nextSignature = JSON.stringify([instance.data.html, instance.data.moduleGraph])
     if (signature === nextSignature) return
     signature = nextSignature
     // This root belongs to the browser's authored document parser. Source changes
@@ -109,12 +122,14 @@ export async function mountWebContent(context: ComponentRuntimeContext<WebRuntim
       // Follow the browser's script types; JSON and other data blocks remain readable DOM.
       const classic = /^(?:(?:application|text)\/(?:x-)?(?:java|ecma)script|text\/(?:javascript1\.[0-5]|jscript|livescript))$/.test(type)
       if (!module && (!classic || script.noModule)) return []
-      script.remove()
-      return [{ source: script.textContent ?? '', url: script.getAttribute('src'), module, index,
+      const marker = `guoling-script:${instance.id}:${revision}:${index}`
+      script.replaceWith(parsed.createComment(marker))
+      return [{ source: script.hasAttribute('data-guoling-classic-source') ? JSON.parse(script.getAttribute('data-guoling-classic-source')!) : script.textContent ?? '', url: script.getAttribute('src'), module, index,
+        attributes: attributes(script), marker,
         async: script.hasAttribute('async') && (module || script.hasAttribute('src') || script.hasAttribute('data-cw-async')),
         deferred: module || script.hasAttribute('data-cw-defer') || script.hasAttribute('src') && script.hasAttribute('defer') }]
     })
-    const sourcePrograms = [...scripts.map(script => script.source), ...Object.values(instance.data.modules ?? {})]
+    const sourcePrograms = [...scripts.map(script => script.source), ...Object.values(instance.data.moduleGraph?.modules ?? {}).map(module => module.code)]
     if (sourcePrograms.some(source => /\b(?:document|window)\s*\.\s*addEventListener\s*\(\s*['"](?:DOMContentLoaded|load)['"]|\bdocument\s*\.\s*(?:readyState|onreadystatechange)\b|\bwindow\s*\.\s*onload\b/.test(source)))
       report('HTML 初始加载事件已在内容装载前发生；DOMContentLoaded/load 等初始时序尚未等价运行，相关源码已保留')
     if (documentRoot) {
@@ -143,9 +158,12 @@ export async function mountWebContent(context: ComponentRuntimeContext<WebRuntim
         for (const reference of [...module.imports].sort((a, b) => b.start - a.start)) {
           source = source.slice(0, reference.start) + JSON.stringify(prefix + reference.path) + source.slice(reference.end)
         }
-        const url = blob(resolveResources(source))
+        const url = blob(source)
         moduleUrls.set(path, url); imports[prefix + path] = url
       }
+      const moduleProperty = `__guoling_module_urls_${encodeURIComponent(instance.id)}`, values = Object.fromEntries(moduleUrls)
+      Object.defineProperty(window, moduleProperty, { configurable: true, value: values })
+      releaseModuleUrls = () => { if ((window as unknown as Record<string, unknown>)[moduleProperty] === values) Reflect.deleteProperty(window, moduleProperty) }
       const map = document.createElement('script')
       map.type = 'importmap'; map.textContent = JSON.stringify({ imports })
       headNodes.push(map); document.head.append(map)
@@ -174,9 +192,14 @@ export async function mountWebContent(context: ComponentRuntimeContext<WebRuntim
       if (entry && !url) { report(`本地模块尚不可用：${entry}；原源码和其他内容已保留`); return }
       if (url && !/^(blob:|data:)/i.test(url)) { report(`程序脚本资源尚未闭合：${url}；其余内容继续运行`); return }
       const element = document.createElement('script')
+      for (const attribute of script.attributes) if (attribute.name !== 'src') {
+        if (attribute.namespaceURI) element.setAttributeNS(attribute.namespaceURI, attribute.name, attribute.value)
+        else element.setAttribute(attribute.name, attribute.value)
+      }
       if (script.module) element.type = 'module'
       element.async = script.async
-      element.src = url ?? blob(resolveResources(script.source))
+      element.src = url ?? blob(script.source)
+      element.textContent = script.source
       try { await new Promise<void>((resolve, reject) => {
         const abort = () => { finish(); reject(new Error('HTML 程序运行已取消')) }
         const scriptError = (event: ErrorEvent) => { if (event.filename === element.src) report(`HTML脚本错误：${event.message}；原源码已保留`) }
@@ -186,7 +209,13 @@ export async function mountWebContent(context: ComponentRuntimeContext<WebRuntim
         scope.signal.addEventListener('abort', abort, { once: true })
         element.onload = () => { finish(); resolve() }
         element.onerror = () => { finish(); reject(new Error('HTML 程序脚本运行失败，原源码已保留')) }
-        document.head.append(element)
+        // Execute at its authored position so native currentScript parent/data
+        // access retains the same local program scope as the source fragment.
+        const comments = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT)
+        let marker: Node | null = comments.nextNode()
+        while (marker && marker.nodeValue !== script.marker) marker = comments.nextNode()
+        if (marker) marker.parentNode!.replaceChild(element, marker)
+        else document.head.append(element)
       }) } catch (error) { if (current()) report(String(error)) }
     }
     const delayed: Array<typeof scripts[number]> = [], running: Promise<void>[] = []

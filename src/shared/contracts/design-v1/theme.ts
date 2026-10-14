@@ -4,19 +4,20 @@ import type { CourseTheme, CourseThemePackage, ProjectDesignTokens } from './typ
 /** Cascade layer for course-wide styles: a page's own unlayered styles always win. */
 export const COURSE_THEME_LAYER = 'guoling-theme'
 
-function tokenName(id: string): string {
-  return id.replace(/[^a-zA-Z0-9_-]/g, '-')
+export function courseTokenVariableName(kind: 'font' | 'color', id: string): string {
+  // Escape the escape marker too: literal underscores cannot collide with dots.
+  return `--${kind}-${id.replace(/[^a-zA-Z0-9-]/g, character => `_${character.codePointAt(0)!.toString(16)}_`)}`
 }
 
 function declarationValue(value: string): string {
   return value.replace(/[{};]/g, '')
 }
 
-/** `designTokens` as CSS variables: `--font-<id>` and `--color-<id>` (dots become dashes). */
+/** Stable, distinct CSS variable names for every accepted token identity. */
 export function courseThemeVariables(tokens: ProjectDesignTokens): Record<string, string> {
   const variables: Record<string, string> = {}
-  for (const font of tokens.fonts) variables[`--font-${tokenName(font.id)}`] = declarationValue(font.fontFamily)
-  for (const color of tokens.colors) variables[`--color-${tokenName(color.id)}`] = color.color
+  for (const font of tokens.fonts) variables[courseTokenVariableName('font', font.id)] = declarationValue(font.fontFamily)
+  for (const color of tokens.colors) variables[courseTokenVariableName('color', color.id)] = color.color
   return variables
 }
 

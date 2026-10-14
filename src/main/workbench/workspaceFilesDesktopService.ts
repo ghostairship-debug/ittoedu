@@ -17,6 +17,7 @@ type RelocateConversationHomes = (input: { workspaceId: string; sourceRoot: stri
 /** Root authorization is granted by native selection or a previously confirmed recent workspace. */
 export class WorkspaceFilesDesktopService {
   private readonly authorized = new Map<string, RegisteredWorkspaceRoot>()
+  private readonly pendingHomes = new Map<string, { input: Extract<Parameters<WorkspaceFilesAPI>[0], { type: 'rename' | 'move' | 'trash' }>; result: WorkspaceOperationResult }>()
   private readonly listeners = new Set<(event: WorkspaceFilesChange) => void>()
   private readonly watchers = new Map<string, () => void>()
   private readonly preparedCourses = new Map<string, { input: string; bytes: Uint8Array }>()
@@ -81,6 +82,7 @@ export class WorkspaceFilesDesktopService {
     try {
       await this.relocateConversationHomes({ workspaceId: input.workspaceId, sourceRoot: sourceRoot.resolvedPath,
         ...(targetWorkspaceId !== input.workspaceId ? { targetRoot: targetRoot.resolvedPath } : {}), changes })
+      this.pendingHomes.delete(input.operationId)
       // Watcher events can arrive before the conversation index is durable. Emit a
       // second notification after relocation so the session rail reads the new home.
       for (const workspaceId of new Set([input.workspaceId, targetWorkspaceId])) {
@@ -88,6 +90,7 @@ export class WorkspaceFilesDesktopService {
       }
       return result
     } catch {
+      this.pendingHomes.set(input.operationId, { input, result })
       return { ...result, status: 'partial', items: result.items.map(item => item.status === 'success'
         ? { ...item, status: 'partial', error: { code: 'conversation-home-update-failed', message: '文件操作已发生，但会话所属位置暂未同步；请重试该操作以恢复关联。' } }
         : item) }
@@ -95,6 +98,17 @@ export class WorkspaceFilesDesktopService {
   }
   readonly operate: WorkspaceFilesAPI = (async (request: unknown) => {
     const input = workspaceFilesRequestSchema.parse(request)
+    if (input.type === 'rename' || input.type === 'move' || input.type === 'trash') {
+      const sources = input.type === 'rename' ? [input.sourceEntryId] : input.type === 'move' ? input.sourceEntryIds : input.entryIds
+      for (const pending of this.pendingHomes.values()) {
+        if (pending.input.workspaceId !== input.workspaceId || !pending.result.items.some(item => sources.includes(item.entryId ?? item.sourceEntryId ?? ''))) continue
+        const retried = await this.relocate(pending.input, pending.result)
+        if (this.pendingHomes.has(pending.input.operationId)) return { ...retried, operationId: input.operationId }
+        const { operationId: _originalOperation, ...originalRequest } = pending.input
+        const { operationId: _retryOperation, ...retryRequest } = input
+        if (JSON.stringify(originalRequest) === JSON.stringify(retryRequest)) return { ...retried, operationId: input.operationId }
+      }
+    }
     if (input.type === 'root') {
       const root = this.authorized.get(pathKey(input.directory))
       if (!root) throw new Error('请先通过工作空间选择器授权此目录')

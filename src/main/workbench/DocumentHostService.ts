@@ -5,6 +5,7 @@ import { sourceFileKind } from '../../shared/workbench/sourceFileKind'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { DocumentRegistry } from '../../core/documents/DocumentRegistry'
 import type { DocumentSession, DocumentSaveObserver } from '../../core/documents/DocumentSession'
 import { createMarkdownDriver } from '../../core/drivers/MarkdownDriver'
@@ -14,7 +15,7 @@ import { checkComponentExpectations, ComponentOperationConflict } from '../../co
 import { isSourceDocumentModel, type DocumentDriver, type DocumentEvent, type DocumentKind, type DocumentModel, type DocumentSnapshot, type DocumentOperation, type DocumentOperationResult } from '../../shared/workbench/document'
 import { DesktopOperationError } from '../errors'
 import { authoringDraftRecoverySchema, documentHostRequestSchema, type AuthoringDraftRecovery, type DocumentHostRequest, type DocumentHostAPI, type DocumentFileObservation, type ReconcileDocumentFile } from '../../shared/workbench/desktop'
-import { createDocumentJournal, readDocumentFileVersion, readDocumentMarkdownResources } from './documentJournal'
+import { captureDocumentSaveModel, createDocumentJournal, readDocumentFileVersion, readDocumentMarkdownResources } from './documentJournal'
 import { DocumentToolGateway } from '../../core/tools/DocumentToolGateway'
 import { WorkspaceFiles, type WorkspaceFilesDependencies } from './WorkspaceFiles'
 import { DocumentFileCoordinator } from './DocumentFileCoordinator'
@@ -58,7 +59,7 @@ export class DocumentHostService {
   readonly agentFiles: AgentFileService
   readonly artifactDeliveries: HostArtifactDeliveryService
   /** Main consumers share compilation output; each runtime still owns its own load lease. */
-  readonly compilation: Pick<InMemoryComponentCompilation, 'compile'>
+  readonly compilation: Pick<InMemoryComponentCompilation, 'compile' | 'clear'>
   private readonly journal
   private readonly drivers
   private readonly subscribed = new Set<string>()
@@ -81,8 +82,10 @@ export class DocumentHostService {
     this.authoringDraftDirectory = path.join(directory, 'authoring-drafts')
     this.discardFlowDrafts = options.discardFlowRecovery ?? discardFlowDocumentRecovery
     this.drivers = [createMarkdownDriver(), createTextDriver(), createCourseV10Driver()]
-    this.journal = createDocumentJournal({ directory })
-    this.registry = new DocumentRegistry({ persistence: this.journal, drivers: this.drivers, createId: randomUUID, bindingKey: binding => canonicalKey(binding.path) })
+    this.journal = createDocumentJournal({ directory, isLive: documentId => this.registry?.has(documentId) ?? false,
+      onBindingRecovered: (state, before) => this.moveAuthoringDrafts({ ...state, binding: before }, state) })
+    this.registry = new DocumentRegistry({ persistence: this.journal, drivers: this.drivers, createId: randomUUID, bindingKey: binding => canonicalKey(binding.path),
+      onClosed: () => { if (this.registry.size === 0) this.compilation.clear() } })
     this.compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
     this.tools = new DocumentToolGateway(this.registry, this.drivers, randomUUID, { prepareImage: prepareImageResource, prepareMedia: prepareMediaResource,
       prepareInput: documentId => this.prepareDocumentInput(documentId),
@@ -115,6 +118,17 @@ export class DocumentHostService {
       },
     })
     this.fileCoordinator = new DocumentFileCoordinator(this.registry, this.journal, path.join(directory, 'binding-intents'))
+    this.fileCoordinator.subscribeRelocations(async action => {
+      if (!action.target || !action.sources[0]) return
+      const source = action.sources[0].resolvedPath, target = action.target.resolvedPath
+      for (const entry of await this.journal.listBindings()) {
+        if (entry.binding.kind !== 'file') continue
+        const relative = path.relative(target, entry.binding.path)
+        if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue
+        const state = await this.journal.recover(entry.documentId)
+        if (state) await this.moveAuthoringDrafts({ ...state, binding: { ...entry.binding, path: path.join(source, relative) } }, state)
+      }
+    })
     this.files = new WorkspaceFiles({ ...fileDependencies, aroundMutation: this.fileCoordinator.aroundMutation,
       creationReceiptDirectory: path.join(directory, 'creation-receipts'),
       aroundOperation: perform => this.fileCoordinator.withFileOperation(perform),
@@ -130,9 +144,10 @@ export class DocumentHostService {
           if (snapshot.binding.kind !== 'file' || canonicalKey(snapshot.binding.path) !== canonicalKey(observed.binding.path)) throw new Error('复制期间当前稿文件位置已变化')
           const driver = this.drivers.find(driver => driver.kind === snapshot.model.kind)
           if (!driver) throw new Error('当前稿格式没有可用的保存编码器')
+          const copyModel = await captureDocumentSaveModel(snapshot.model, snapshot.binding)
           captured.push({ sourcePath: snapshot.binding.path, relativePath: kind === 'file' ? '' : relative,
             bytes: await driver.serialize(snapshot.model), ...(snapshot.model.kind === 'markdown'
-              ? { markdown: { source: snapshot.model.source, resources: snapshot.model.resources } } : {}) })
+              ? { markdown: { source: snapshot.model.source, resources: copyModel.resources } } : {}) })
         }
         const media = await this.mediaCopyPreparer?.(source, kind) ?? []
         if (media.length) captured.push(...await this.artifacts.captureCopyContent(source, kind, media))
@@ -188,13 +203,13 @@ export class DocumentHostService {
     return this.bootstrapping
   }
 
-  private authoringDraftPath(snapshot: DocumentSnapshot): string {
-    if (snapshot.model.kind !== 'course-v10') throw new Error('高级课件草稿需要当前 Project V10')
+  private authoringDraftPath(snapshot: Pick<DocumentSnapshot, 'documentId' | 'model' | 'binding'>): string {
+    if (snapshot.model.kind !== 'course-v10') return path.join(this.authoringDraftDirectory, documentDigest({ documentId: snapshot.documentId }) + '.json')
     // The filename is an auxiliary storage key, never a target supplied by an author or model.
     return path.join(this.authoringDraftDirectory, documentDigest({ projectId: snapshot.model.project.id,
       file: snapshot.binding.kind === 'file' ? canonicalKey(snapshot.binding.path) : null }) + '.json')
   }
-  private async readDraftFile(snapshot: DocumentSnapshot): Promise<AuthoringDraftRecovery | null> {
+  private async readDraftFile(snapshot: Pick<DocumentSnapshot, 'documentId' | 'model' | 'binding'>): Promise<AuthoringDraftRecovery | null> {
     try {
       const value = JSON.parse(await fs.readFile(this.authoringDraftPath(snapshot), 'utf8'))
       return authoringDraftRecoverySchema.parse(value)
@@ -209,7 +224,7 @@ export class DocumentHostService {
     if (drafts) this.authoringDraftClaims.set(documentId, { epoch: snapshot.epoch,
       records: new Set([...drafts.advanced.filter(record => snapshot.model.kind === 'course-v10' && record.projectId === snapshot.model.project.id),
         ...drafts.properties.filter(record => { try { return Array.isArray(JSON.parse(record.bindingKey)) } catch { return false } })]
-        .map(record => this.authoringRecordKey(record))) })
+        .map(record => this.authoringRecordKey(record)).concat(drafts.sourceConflict ? [JSON.stringify(['source-conflict', drafts.sourceConflict.documentId, drafts.sourceConflict.epoch])] : [])) })
     return drafts
   }
   private authoringRecordKey(record: AuthoringDraftRecovery['advanced'][number] | AuthoringDraftRecovery['properties'][number]): string {
@@ -221,6 +236,8 @@ export class DocumentHostService {
     const claimed = (record: AuthoringDraftRecovery['advanced'][number] | AuthoringDraftRecovery['properties'][number]) =>
       claim?.epoch === snapshot.epoch && claim.records.has(this.authoringRecordKey(record))
     return {
+      ...(drafts.sourceConflict && !(claim?.epoch === snapshot.epoch && claim.records.has(JSON.stringify(['source-conflict', drafts.sourceConflict.documentId, drafts.sourceConflict.epoch])))
+        && !(drafts.sourceConflict.documentId === snapshot.documentId && drafts.sourceConflict.epoch === snapshot.epoch) ? { sourceConflict: drafts.sourceConflict } : {}),
       advanced: drafts.advanced.filter(record => !claimed(record) && !(record.documentId === snapshot.documentId && record.epoch === snapshot.epoch)),
       properties: drafts.properties.filter(record => {
         if (claimed(record)) return false
@@ -230,7 +247,7 @@ export class DocumentHostService {
       }),
     }
   }
-  private async writeDraftFile(snapshot: DocumentSnapshot, drafts: AuthoringDraftRecovery, requireLive = true): Promise<void> {
+  private async writeDraftFile(snapshot: Pick<DocumentSnapshot, 'documentId' | 'epoch' | 'model' | 'binding'>, drafts: AuthoringDraftRecovery, requireLive = true): Promise<void> {
     const filename = this.authoringDraftPath(snapshot), temporary = `${filename}.${randomUUID()}.tmp`
     await fs.mkdir(this.authoringDraftDirectory, { recursive: true })
     try {
@@ -240,14 +257,27 @@ export class DocumentHostService {
       await fs.rename(temporary, filename)
     } finally { await fs.rm(temporary, { force: true }).catch(() => {}) }
   }
+  private moveAuthoringDrafts(before: Pick<DocumentSnapshot, 'documentId' | 'epoch' | 'model' | 'binding'>,
+    after: Pick<DocumentSnapshot, 'documentId' | 'epoch' | 'model' | 'binding'>): Promise<void> {
+    if (this.authoringDraftPath(before) === this.authoringDraftPath(after)) return Promise.resolve()
+    const move = this.authoringDraftTail.then(async () => {
+      const drafts = await this.readDraftFile(before)
+      if (!drafts) return
+      if (!await this.readDraftFile(after)) await this.writeDraftFile(after, drafts, false)
+      await fs.rm(this.authoringDraftPath(before), { force: true })
+    })
+    this.authoringDraftTail = move.catch(() => undefined)
+    return move
+  }
   writeAuthoringDrafts(documentId: string, input: AuthoringDraftRecovery): Promise<void> {
     const drafts = authoringDraftRecoverySchema.parse(input)
     const epoch = this.registry.get(documentId).read().epoch
     const write = this.authoringDraftTail.then(async () => {
       const snapshot = await this.registry.get(documentId).drain()
       const model = snapshot.model
-      if (snapshot.epoch !== epoch || model.kind !== 'course-v10'
-        || drafts.advanced.some(record => record.projectId !== model.project.id || record.documentId !== documentId || record.epoch !== epoch))
+      if (snapshot.epoch !== epoch
+        || drafts.advanced.some(record => model.kind !== 'course-v10' || record.projectId !== model.project.id || record.documentId !== documentId || record.epoch !== epoch)
+        || drafts.sourceConflict && (model.kind === 'course-v10' || drafts.sourceConflict.documentId !== documentId || drafts.sourceConflict.epoch !== epoch))
         throw new Error('原始草稿不属于当前课件，未覆盖恢复记录')
       for (const record of drafts.properties) {
         const binding: unknown = JSON.parse(record.bindingKey)
@@ -255,7 +285,7 @@ export class DocumentHostService {
       }
       const previous = await this.readDraftFile(snapshot)
       const retained = previous ? this.unclaimedAuthoringDrafts(snapshot, previous) : { advanced: [], properties: [] }
-      await this.writeDraftFile(snapshot, { advanced: [...retained.advanced, ...drafts.advanced], properties: [...retained.properties, ...drafts.properties] })
+      await this.writeDraftFile(snapshot, { ...retained, ...drafts, advanced: [...retained.advanced, ...drafts.advanced], properties: [...retained.properties, ...drafts.properties] })
     })
     this.authoringDraftTail = write.catch(() => undefined)
     return write
@@ -274,7 +304,7 @@ export class DocumentHostService {
     const previous = await this.readDraftFile(snapshot)
     if (!previous) return
     const retained = this.unclaimedAuthoringDrafts(snapshot, previous)
-    if (retained.advanced.length || retained.properties.length) await this.writeDraftFile(snapshot, retained, false)
+    if (retained.advanced.length || retained.properties.length || retained.sourceConflict) await this.writeDraftFile(snapshot, retained, false)
     else await fs.rm(this.authoringDraftPath(snapshot), { force: true })
   }
 
@@ -403,9 +433,10 @@ export class DocumentHostService {
 
   observeFile(documentId: string): Promise<DocumentFileObservation> { return this.fileCoordinator.withFileAccess(() => this.observeDisk(documentId)) }
   private async observeDisk(documentId: string): Promise<DocumentFileObservation> {
-    const snapshot = await this.registry.get(documentId).drain()
+    const session = this.registry.get(documentId), snapshot = await session.drain()
     if (snapshot.binding.kind !== 'file') throw new Error('未保存文档没有磁盘版本')
-    return { bindingVersion: snapshot.binding.bindingVersion, ...await this.readDisk(snapshot.binding.path, snapshot.model.kind) }
+    const baseSource = session.readSavedSource()
+    return { bindingVersion: snapshot.binding.bindingVersion, ...(baseSource === undefined ? {} : { baseSource }), ...await this.readDisk(snapshot.binding.path, snapshot.model.kind) }
   }
 
   reconcileFile(input: ReconcileDocumentFile, assertActive?: () => void): Promise<DocumentSnapshot> {
@@ -418,18 +449,26 @@ export class DocumentHostService {
       if (!disk.model) throw new Error('磁盘文件已删除或移动，请另存当前稿或重新定位')
       if (input.choice === 'disk') {
         if (input.source !== undefined) throw new Error('采纳磁盘版本不能夹带其他正文')
-        return { model: disk.model, version: disk.version, matchesDisk: true }
+        return { model: disk.model, diskModel: disk.model, version: disk.version, matchesDisk: true }
       }
       const model = structuredClone(current.model)
       if (input.source !== undefined) {
         if (!isSourceDocumentModel(model)) throw new Error('果铃工程不能使用 Markdown 合并正文')
         model.source = input.source
-        if (model.kind === 'markdown' && disk.model?.kind === 'markdown') model.resources = {
-          assets: { ...disk.model.resources.assets, ...model.resources.assets },
-          components: { ...disk.model.resources.components, ...model.resources.components },
+        if (model.kind === 'markdown' && disk.model?.kind === 'markdown') {
+          const base = this.registry.get(input.documentId).readSavedModel()?.resources
+          const merge = <T>(local: Record<string, T>, remote: Record<string, T>, before: Record<string, T> = {}) => Object.fromEntries(
+            [...new Set([...Object.keys(local), ...Object.keys(remote)])].flatMap(key => {
+              const localChanged = !isDeepStrictEqual(local[key], before[key]), remoteChanged = !isDeepStrictEqual(remote[key], before[key])
+              if (localChanged && remoteChanged && !isDeepStrictEqual(local[key], remote[key])) throw new Error(`素材 ${key} 在当前稿和磁盘稿均有改变，请保留原稿后处理素材冲突`)
+              const value = localChanged ? local[key] : remote[key]
+              return value === undefined ? [] : [[key, value]]
+            }))
+          model.resources = { assets: merge(model.resources.assets, disk.model.resources.assets, base?.assets),
+            components: merge(model.resources.components, disk.model.resources.components, base?.components) }
         }
       }
-      return { model, version: disk.version, matchesDisk: false }
+      return { model, diskModel: disk.model, version: disk.version, matchesDisk: false }
     }))
   }
 
@@ -500,18 +539,7 @@ export class DocumentHostService {
     return this.fileCoordinator.withFileAccess(async () => {
       const saved = await this.saveFile(documentId, filename, overwriteConfirmed, observer, saveIdentity)
       if (saved.binding.kind === 'file') await this.files.acknowledgeDocumentSave(saved.binding.path, saved.model.kind, saved.binding.version)
-      if (initial.model.kind === 'course-v10' && saved.model.kind === 'course-v10'
-        && this.authoringDraftPath(initial) !== this.authoringDraftPath(saved)) {
-        const move = this.authoringDraftTail.then(async () => {
-          const drafts = await this.readDraftFile(initial)
-          if (!drafts) return
-          // A concurrent current-binding collector may already have saved newer visible inputs.
-          if (!await this.readDraftFile(saved)) await this.writeDraftFile(saved, drafts)
-          await fs.rm(this.authoringDraftPath(initial), { force: true })
-        })
-        this.authoringDraftTail = move.catch(() => undefined)
-        await move
-      }
+      await this.moveAuthoringDrafts(initial, saved)
       return saved
     }).catch(error => {
       error = error instanceof DocumentSaveFailure ? error : new DocumentSaveFailure(enteredSession ? 'unknown' : 'not-published', error)
@@ -538,6 +566,39 @@ export class DocumentHostService {
     return this.registry.save(documentId, { kind: 'file', path: canonical, version, bindingVersion: current.binding.kind === 'file' ? current.binding.bindingVersion + 1 : 1 }, observer, saveIdentity)
   }
 
+  async renameDocument(input: Extract<DocumentHostRequest, { type: 'rename' }>): Promise<DocumentSnapshot> {
+    const failure = (message: string) => new DesktopOperationError('DOCUMENT_RENAME_FAILED', '重命名未完成', message, '原稿保留；请核对名称或刷新后重试。')
+    const original = await this.internalAPI.read(input.documentId)
+    if (original.epoch !== input.epoch) throw failure('文档已关闭或重开，请重新重命名')
+    const oldName = original.binding.kind === 'file' ? path.basename(original.binding.path) : original.binding.suggestedName
+    if (path.extname(input.name).toLowerCase() !== path.extname(oldName).toLowerCase()) throw failure('重命名请保留原文件扩展名')
+    if (original.binding.kind === 'untitled') return this.fileCoordinator.withFileAccess(() => this.registry.get(input.documentId).withFileLease(async lease => {
+      const current = lease.read()
+      if (current.epoch !== input.epoch || current.binding.kind !== 'untitled') throw failure('文档绑定已改变，请重新重命名')
+      return lease.rebind({ kind: 'untitled', suggestedName: input.name })
+    }))
+    const sourcePath = original.binding.path
+    // Register an internal handle only; this does not grant the renderer a new workspace root.
+    const root = await this.files.registerRoot(path.dirname(sourcePath))
+    let cursor: string | undefined, entryId: string | undefined
+    do {
+      const page = await this.files.listChildren({ workspaceId: root.workspaceId, directoryEntryId: root.rootEntryId, cursor })
+      const found = page.entries.find(entry => entry.status === 'accessible' && entry.name === oldName)
+      if (found?.status === 'accessible') entryId = found.entryId
+      cursor = page.nextCursor
+    } while (!entryId && cursor)
+    if (!entryId) throw failure('原文件已移动，请刷新后重新命名')
+    const result = await this.files.rename({ workspaceId: root.workspaceId, operationId: randomUUID(), sourceEntryId: entryId, name: input.name }, () => {
+      // Already in FileService's exclusive queue. Read synchronously to avoid a nested shared lock.
+      const current = this.registry.get(input.documentId).read()
+      if (current.epoch !== input.epoch || current.binding.kind !== 'file' || canonicalKey(current.binding.path) !== canonicalKey(sourcePath))
+        throw failure('文档绑定已改变，请重新重命名')
+    })
+    const failedItem = result.items.find(item => item.status !== 'success')
+    if (failedItem) throw failure(failedItem.error?.message ?? '文件未能重命名，原稿保留')
+    return this.internalAPI.read(input.documentId)
+  }
+
   async operate(raw: unknown): Promise<unknown> {
     const input: DocumentHostRequest = documentHostRequestSchema.parse(raw)
     switch (input.type) {
@@ -560,11 +621,11 @@ export class DocumentHostService {
         this.fileCoordinator.assertResolved([], [input.documentId])
         const snapshot = await this.registry.get(input.documentId).drain()
         await this.registry.close(input.documentId, { discardDirty: input.discardDirty, expected: input.expected })
-        if (input.discardDirty && snapshot.model.kind === 'course-v10') {
+        if (input.discardDirty) {
           const clear = this.authoringDraftTail.then(() => this.removeOwnedAuthoringDrafts(snapshot))
           this.authoringDraftTail = clear.catch(() => undefined)
           await clear
-          await this.discardFlowDrafts({ projectId: snapshot.model.project.id,
+          if (snapshot.model.kind === 'course-v10') await this.discardFlowDrafts({ projectId: snapshot.model.project.id,
             projectPath: snapshot.binding.kind === 'file' ? snapshot.binding.path : null, epoch: snapshot.epoch })
         }
         await this.journal.discard(input.documentId)
@@ -573,23 +634,45 @@ export class DocumentHostService {
       })
       case 'recoverable': return this.fileCoordinator.withFileAccess(async () => {
         const snapshots: DocumentSnapshot[] = []
+        for (const entry of await this.journal.listBindings()) {
+          if (!entry.unavailable || entry.binding.kind !== 'file' || this.registry.has(entry.documentId)) continue
+          try {
+            const disk = await this.readDisk(entry.binding.path, entry.kind)
+            if (!disk.model) continue
+            snapshots.push({ documentId: entry.documentId, epoch: entry.epoch, revision: entry.revision, model: disk.model,
+              binding: entry.binding, dirty: false, saving: false, recoverable: false, undoDepth: 0, redoDepth: 0,
+              recoveryUnavailable: '这份恢复记录损坏，未读取其中内容。已保存原文件可用；可保留损坏记录后打开已保存稿。' })
+          } catch { /* The existing recoveryIssues remains available if the saved file is unreadable too. */ }
+        }
         for (const documentId of await this.journal.list()) {
           // A live dirty session is already authoritative. Listing its journal as
           // crash recovery races a view attachment and falsely blocks editing.
-          if (this.registry.list().some(snapshot => snapshot.documentId === documentId)) continue
+          if (this.registry.has(documentId)) continue
           const state = await this.journal.recover(documentId)
           let bindingUnresolved = false
           try { this.fileCoordinator.assertResolved([], [documentId]) } catch { bindingUnresolved = true }
-          if (state && (state.savedRevision !== state.revision || bindingUnresolved)) snapshots.push({ documentId, epoch: state.epoch, revision: state.revision, model: state.model, binding: state.binding, dirty: true, saving: false, recoverable: true, undoDepth: state.past.length, redoDepth: state.future.length })
+          const drafts = state && await this.readDraftFile(state)
+          if (state && (state.savedRevision !== state.revision || bindingUnresolved || drafts && (drafts.advanced.length || drafts.properties.length || drafts.sourceConflict))) snapshots.push({ documentId, epoch: state.epoch, revision: state.revision, model: state.model, binding: state.binding, dirty: true, saving: false, recoverable: true, undoDepth: state.past.length, redoDepth: state.future.length })
         }
         return snapshots
       })
+      case 'rename': return this.renameDocument(input)
       case 'restore': return this.fileCoordinator.withFileAccess(async () => {
+        if (input.mode === 'saved') {
+          const entry = (await this.journal.listBindings()).find(entry => entry.documentId === input.documentId && entry.unavailable)
+          if (!entry || entry.binding.kind !== 'file') throw new Error('没有可处理的损坏恢复记录')
+          if (this.registry.has(input.documentId)) throw new Error('文档已打开，请保留当前稿后处理')
+          this.fileCoordinator.assertResolved([entry.binding.path], [input.documentId], true)
+          const disk = await this.readDisk(entry.binding.path, entry.kind)
+          if (!disk.model) throw new Error('已保存原文件无法读取，损坏恢复记录仍保留')
+          await this.journal.preserveUnavailable(input.documentId)
+          return this.openFile(entry.binding.path)
+        }
         if (input.mode !== 'unbound') this.fileCoordinator.assertResolved([], [input.documentId])
         const state = await this.journal.recover(input.documentId)
         if (!state) throw new Error('恢复稿不存在')
         if (input.mode === 'unbound') {
-          if (this.registry.list().some(snapshot => snapshot.documentId === input.documentId))
+          if (this.registry.has(input.documentId))
             throw new Error('该恢复稿已经打开，请从文档另存为；未改变当前绑定')
           // This explicit recovery choice changes only the binding. Content, undo/redo,
           // operation receipts and stop barriers remain owned by the same document.
@@ -601,7 +684,7 @@ export class DocumentHostService {
       })
       case 'discard-recovery': return this.fileCoordinator.withFileAccess(async () => {
         this.fileCoordinator.assertResolved([], [input.documentId])
-        if (this.registry.list().some(snapshot => snapshot.documentId === input.documentId)) throw new Error('文档已打开，请从文档关闭入口处理未保存更改')
+        if (this.registry.has(input.documentId)) throw new Error('文档已打开，请从文档关闭入口处理未保存更改')
         await this.journal.discard(input.documentId)
         return
       })

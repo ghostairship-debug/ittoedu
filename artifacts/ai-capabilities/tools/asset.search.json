@@ -1,21 +1,43 @@
 {
-  "description": "检索与组件库面板相同的 Component API 5 条目，按名称、标签、学科、学段和说明匹配，返回 packageId、版本、来源与信任状态；可用 asset.use 插入。",
+  "description": "query 检索与组件库面板相同的 Component API 5 条目，返回 packageId/版本/来源/信任；或传已找到的 packageId 与可选 version，读取该条目的真实 rootIds、对象子树、页面及可改输入，用于选择全部或子集。两种输入择一；asset.use插入，不自行猜对象身份或裁剪任意程序内部视图。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "additionalProperties": false,
-    "properties": {
-      "limit": {
-        "maximum": 9007199254740991,
-        "minimum": 1,
-        "type": "integer"
+    "anyOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "query": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
       },
-      "query": {
-        "minLength": 1,
-        "type": "string"
+      {
+        "additionalProperties": false,
+        "properties": {
+          "packageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "packageId"
+        ],
+        "type": "object"
       }
-    },
-    "required": [
-      "query"
     ],
     "type": "object"
   },

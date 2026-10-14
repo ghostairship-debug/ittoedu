@@ -47,7 +47,7 @@ it('discovers only the selected current subtree and refuses parent, sibling and 
     expect(await f.call('inspect', { target: child.target })).toMatchObject({ kind: 'read', data: { writable: true } })
   }
   expect(childReads.map(child => child.id)).toEqual(['paragraph', 'picture', 'interaction'])
-  expect(childReads[0].data.authoringRecords.paragraph.binding.baseline).toBe(currentFragmentPrompt)
+  expect(childReads[0].authoring.records.paragraph.binding.baseline).toBe(currentFragmentPrompt)
   expect(childReads[1].data.resourceBindings).toEqual({ photo: 'source-photo' })
   for (const id of ['heading', 'right', 'chart']) expect(JSON.stringify(childReads)).not.toContain(`"id":"${id}"`)
   for (const target of [f.source.target, f.source.instanceTarget('right'), f.source.instanceTarget('chart')]) {
@@ -95,11 +95,11 @@ it('refuses human changes to text, ownership, ancestor lock, selected identity o
   for (const change of ['content', 'move', 'lock', 'remove', 'binding'] as const) {
     const f = await harness(`selection-${change}`), field = await f.issue(f.source.textTarget)
     const edit: ComponentEdit = change === 'content'
-      ? { type: 'data.set', instanceId: 'paragraph', path: f.source.textTarget.dataPath, value: '教师已经改写的正文' }
+      ? { type: 'authoring.set', instanceId: 'paragraph', path: f.source.textTarget.dataPath, value: '教师已经改写的正文' }
       : change === 'move' ? { type: 'instance.move', instanceId: 'paragraph', container: { kind: 'instance', instanceId: 'right' }, index: 1, frame: { ...f.source.project.instances.paragraph.frame!, transform: [1, 0, 0, 1, -390, 0] } }
         : change === 'lock' ? { type: 'instance.patch', instanceId: 'left', patch: { locked: true } }
           : change === 'remove' ? { type: 'instance.remove', instanceId: 'left' }
-            : { type: 'data.set', instanceId: 'paragraph', path: ['authoringRecords', 'paragraph', 'binding', 'baseline'], value: '重新绑定的原文' }
+            : { type: 'authoring.set', instanceId: 'paragraph', path: ['records', 'paragraph', 'binding', 'baseline'], value: '重新绑定的原文' }
     const human = await f.session.execute(operation(f.session.read(), [edit])); expect(human, `${change}: ${JSON.stringify(human)}`).toMatchObject({ status: 'applied' })
     const manual = f.session.read()
     expect(await f.call('text.replace', { target: field, content: '错误覆盖新正文或选区外字段' })).toMatchObject({ kind: 'error' })

@@ -83,10 +83,11 @@ export function dragCropBox(box: CropRect, handle: CropHandle, dx: number, dy: n
 const round = (value: number) => Math.round(value * 100) / 100
 
 /** The frame and crop to commit for `box`: the box becomes the frame, so the kept part stays where it was seen. */
-export function commitCrop(image: CropImage & { frame: CropRect }, box: CropRect): { frame: CropRect; crop: CropEdges } {
+export function commitCrop(image: CropImage & { frame: CropRect & { transform?: readonly number[] } }, box: CropRect): { frame: CropRect; crop: CropEdges } {
   const crop = cropForBox(image, box)
+  const matrix = image.frame.transform ?? [1, 0, 0, 1, image.frame.x, image.frame.y]
   return {
-    frame: { x: round(image.frame.x + box.x), y: round(image.frame.y + box.y), width: round(box.width), height: round(box.height) },
+    frame: { x: round(image.frame.x + matrix[0]! * box.x + matrix[2]! * box.y), y: round(image.frame.y + matrix[1]! * box.x + matrix[3]! * box.y), width: round(box.width), height: round(box.height) },
     crop: { left: round4(crop.left), top: round4(crop.top), right: round4(crop.right), bottom: round4(crop.bottom) },
   }
 }

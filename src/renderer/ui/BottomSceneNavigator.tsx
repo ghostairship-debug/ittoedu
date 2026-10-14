@@ -145,7 +145,7 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
           <span className="bottom-scene-card__identity"><small>{String(card.number).padStart(2, '0')} · {card.kind === 'slide' ? '演示页' : card.kind === 'flow' ? '流式布局' : '无限画布'}</small>{!renamingCard && <strong title={card.page.label}>{card.page.label}</strong>}</span>
         </button>
         {renamingCard && <RenameField label="页面名称" value={card.page.label} onCommit={name => { setRenaming(null); renameCard(card, name) }} onCancel={() => setRenaming(null)} />}
-        {card.kind === 'slide' ? <SceneStateButtons documentId={documentId} surfaceId={card.key} compact /> : <div className="bottom-scene-card__children" role="group" aria-label={card.page.label + '的' + (card.kind === 'flow' ? '标题与章节' : '世界与镜头')}>
+        {card.kind === 'slide' ? <SceneStateButtons documentId={documentId} surfaceId={card.key} compact /> : <div className="bottom-scene-card__children" role="group" aria-label={card.page.label + '的' + (card.kind === 'flow' ? '标题与章节' : '镜头')}>
           {card.kind === 'spatial' && <>
             <button type="button" className="bottom-scene-card__tool" aria-label="从当前画面添加镜头" title="从当前画面添加镜头" disabled={!active} onClick={() => {
               const target = captureCamera(card.key)
@@ -154,7 +154,7 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
             <button type="button" className="bottom-scene-card__tool" aria-label="镜头操作" title="镜头操作" aria-haspopup="menu" disabled={!active || !cameraChild}
               onClick={event => cameraChild && openMenu(event, '镜头操作', cameraCommands(card, cameraChild))}><MoreHorizontal size={13} /></button>
           </>}
-          {card.kind === 'spatial' && <button type="button" className="bottom-scene-card__child" aria-pressed={active && activeCamera === null} onClick={() => goTo(card.page)}>世界</button>}
+          {card.kind === 'spatial' && children.length === 0 && <span className="bottom-scene-card__empty">暂无镜头</span>}
           {children.map(child => renamingCamera?.surfaceId === card.key && renamingCamera.frameId === child.frameId
             ? <RenameField key={child.id} label="镜头名称" value={renamingCamera.title} onCommit={name => {
               const edit = renamingCamera; setRenamingCamera(null)
@@ -168,9 +168,9 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
         </div>}
       </li>
     })}
-    <li className="bottom-scene-nav__add"><button type="button" className="bottom-scene-nav__add-button" aria-label="新建场景或页面" title="新建场景或页面" aria-haspopup="menu" onClick={event => {
+    <li className="bottom-scene-nav__add"><button type="button" className="bottom-scene-nav__add-button" aria-label="新建页面" title="新建页面" aria-haspopup="menu" onClick={event => {
       const rect = event.currentTarget.getBoundingClientRect()
-      menu.open({ x: rect.left, y: rect.top - 4, above: true }, '新建场景或页面', newPageCommands(kind => addPage(kind), null))
+      menu.open({ x: rect.left, y: rect.top - 4, above: true }, '新建页面', newPageCommands(kind => addPage(kind)))
     }}><Plus size={18} aria-hidden="true" /></button></li>
   </ol>{menu.element}
   <ConfirmDialog open={pendingDelete !== null} title="删除页面？" message={pendingDelete ? '“' + pendingDelete.card.page.label + '”及其中的全部对象将被删除。此操作可以撤销。' : ''} confirmLabel="删除页面" danger onCancel={() => setPendingDelete(null)} onConfirm={() => {

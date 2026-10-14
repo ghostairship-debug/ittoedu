@@ -77,6 +77,44 @@ function attachTextRendererHost(port: RecoverableDocumentFilePort, fixedRef: Doc
 
 afterEach(cleanup)
 describe('LessonDocumentEditor mounted shared core', () => {
+  it('uses canonical Markdown resource keys for a lesson subdirectory image', async () => {
+    const ref = { kind: 'lesson' as const, lessonId: 'lesson', lessonDirectory: '/lesson', relativePath: 'sub/plan.md' }
+    const port: RecoverableDocumentFilePort = {
+      openDocument: vi.fn(), watchDocument: () => () => {}, saveDocument: vi.fn(),
+    }
+    const host = attachMarkdownRendererHost(port, ref)
+    const initial = await host.documents.create({ kind: 'markdown', source: '![本地图](image.png)', resources: { assets: { 'image.png': new Uint8Array([1, 2]) }, components: {} } }, 'plan.md')
+    render(<LessonDocumentEditor documentRef={ref} documentId={initial.documentId} port={port} />)
+    expect(await screen.findByRole('img', { name: '本地图' })).toHaveAttribute('src', expect.stringContaining('blob:'))
+    expect(screen.queryByText('正在读取图示…')).not.toBeInTheDocument()
+  })
+  it('saves and closes editable raw Markdown even when its layout projection is unsupported', async () => {
+    const ref = { kind: 'file' as const, path: '/lesson/raw.md' }
+    let disk: OpenDocumentResult = { ref, source: '<div>完整原始课文</div>', version: { contentVersion: 'v1', attachments: [] }, diagnostics: [] }
+    const save = vi.fn<RecoverableDocumentFilePort['saveDocument']>(async request => {
+      disk = { ...disk, source: request.source, version: { contentVersion: `v${Number(disk.version.contentVersion.slice(1)) + 1}`, attachments: [] } }
+      return { status: 'saved', operationId: request.operationId, version: disk.version }
+    })
+    const port: RecoverableDocumentFilePort = { openDocument: async () => disk, watchDocument: () => () => {}, saveDocument: save }
+    const host = attachMarkdownRendererHost(port, ref)
+    vi.spyOn(host.documents, 'saveWithDialog').mockImplementation(id => host.documents.save(id))
+    const close = vi.spyOn(host.documents, 'closeWithDialog').mockImplementation(async id => { await host.documents.save(id); await host.documents.close(id); return true })
+    const handle = createRef<LessonDocumentEditorHandle>()
+    render(<LessonDocumentEditor ref={handle} documentRef={ref} port={port} />)
+    const box = await screen.findByRole('textbox', { name: '正文源文编辑' })
+    const view = EditorView.findFromDOM(box)
+    if (!view) throw new Error('源文编辑器尚未挂载')
+    act(() => view.dispatch({ changes: { from: 0, insert: '# 新标题\n\n' } }))
+    const source = '# 新标题\n\n<div>完整原始课文</div>'
+    await waitFor(() => expect(handle.current!.session.getSnapshot().source).toBe(source))
+    await act(async () => { expect(await handle.current!.flush()).toBe(true) })
+    expect(save.mock.calls.at(-1)![0].source).toBe(source)
+    await act(async () => { expect(await handle.current!.saveAs()).toBe(true) })
+    await act(async () => { expect(await handle.current!.preserveDraft()).toBe(true) })
+    await act(async () => { expect(await handle.current!.close()).toBe(true) })
+    expect(close).toHaveBeenCalled()
+    expect(disk.source).toBe(source)
+  })
   it('opens once through StrictMode replay and releases its watcher on real unmount', async () => {
     const ref = { kind: 'lesson' as const, lessonId: 'lesson', lessonDirectory: '/lesson', relativePath: 'strict.md' }
     const stop = vi.fn()

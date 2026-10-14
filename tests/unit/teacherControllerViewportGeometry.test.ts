@@ -5,6 +5,8 @@ import { createTeacherControllerHudGeometry, teacherControllerReferenceSize, pro
   restoreTeacherControllerFrameEdits, type TeacherControllerDisplayPort } from '../../src/shared/teacherControllerViewportGeometry'
 import { createTeacherControllerData, TEACHER_CONTROLLER_DEFINITION } from '../../src/components/teacher-controller'
 import { ComponentNavigationOwner } from '../../src/renderer/components/ComponentNavigationOwner'
+import { prepareCourseTeacherControllerEdits } from '../../src/core/course/courseElementInsertion'
+import { captureComponentOperation, applyComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 
 const project = (): CourseProjectV10 => ({ schemaVersion: 10, id: 'teacher-viewport', revision: 0, title: 'Mixed',
@@ -69,17 +71,18 @@ it('clamps an existing resized affine frame by its actual HUD bounds without cha
 })
 
 it('moves the actual default collapsed producer by screen pixels through the existing navigation offset owner', () => {
-  const original = createBlankCourseProjectV10(), saved = structuredClone(original), geometry = hud(original, { width: 640, height: 360 })
+  const blank = createBlankCourseProjectV10()
+  const original = applyComponentOperation(blank, captureComponentOperation(blank, prepareCourseTeacherControllerEdits(blank, blank.surfaces[0].id, 'slide-authoring').edits)), saved = structuredClone(original), geometry = hud(original, { width: 640, height: 360 })
   const surfaceId = original.surfaces[0].id, teacherId = original.global.overlay.find(id => isGlobalTeacherController(original, id))!
   const navigation = new ComponentNavigationOwner({ project: () => original, surfaceId: () => surfaceId, select() {},
     viewportBounds: () => ({ left: 100, top: 50, right: 740, bottom: 410 }) })
   const show = () => projectTeacherControllerInstances(original, geometry, navigation).instances[teacherId].frame!
-  const before = show(); expect(navigation.read().collapsed).toBe(true)
-  navigation.moveBy(-10, -10)
+  const before = show(); expect(navigation.forInstance(teacherId).read().collapsed).toBe(true)
+  navigation.forInstance(teacherId).moveBy(-10, -10)
   const once = show()
   expect(once.transform[4]).toBeCloseTo(before.transform[4] - 10, 8)
   expect(once.transform[5]).toBeCloseTo(before.transform[5] - 10, 8)
-  navigation.moveBy(-10, -10)
+  navigation.forInstance(teacherId).moveBy(-10, -10)
   expect(show().transform[4]).toBeCloseTo(before.transform[4] - 20, 8)
   expect(show().transform[5]).toBeCloseTo(before.transform[5] - 20, 8)
   expect(original).toEqual(saved)
@@ -91,13 +94,13 @@ it('defaults to the formal collapsed value and lets the quick bar control editin
   original.instances.teacher.data = JSON.parse(JSON.stringify(createTeacherControllerData()))
   let playing = false
   const navigation = new ComponentNavigationOwner({ project: () => original, surfaceId: () => 'flow', select() {}, interactive: () => playing })
-  expect(navigation.read().collapsed).toBe(true)
+  expect(navigation.forInstance('teacher').read().collapsed).toBe(true)
   expect(projectTeacherControllerInstances(original, geometry, navigation).instances.teacher.frame!.width).toBe(52)
-  playing = true; navigation.setCollapsed(false)
-  expect(navigation.read().collapsed).toBe(false)
+  playing = true; navigation.forInstance('teacher').setCollapsed(false)
+  expect(navigation.forInstance('teacher').read().collapsed).toBe(false)
   playing = false
-  expect(navigation.read().collapsed).toBe(true)
+  expect(navigation.forInstance('teacher').read().collapsed).toBe(true)
   ;(original.instances.teacher.data as Record<string, unknown>).defaultCollapsed = false
-  expect(navigation.read().collapsed).toBe(false)
+  expect(navigation.forInstance('teacher').read().collapsed).toBe(false)
   navigation.dispose()
 })

@@ -9,6 +9,13 @@
         "minLength": 1,
         "type": "string"
       },
+      "resourcePolicy": {
+        "enum": [
+          "copy",
+          "cancel"
+        ],
+        "type": "string"
+      },
       "sources": {
         "items": {
           "maxLength": 32767,

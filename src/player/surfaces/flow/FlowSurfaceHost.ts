@@ -385,6 +385,8 @@ export class FlowSurfaceHost {
       const root = dom.createElement('section')
       root.className = 'flow-surface-host'
       root.dataset.surfaceId = this.#surfaceId
+      root.dataset.canvasWidth = String(this.#canvas.width)
+      root.dataset.canvasHeight = String(this.#canvas.height)
       root.style.position = 'relative'
       root.style.isolation = 'isolate'
       root.style.width = '100%'
@@ -553,7 +555,13 @@ export class FlowSurfaceHost {
       this.#components = nextComponents
       this.#surfaceId = nextSurfaceId
       this.#locationId = nextLocationId
-      if (this.#root) this.#root.dataset.surfaceId = this.#surfaceId
+      if (this.#root) {
+        this.#root.dataset.surfaceId = this.#surfaceId
+        this.#root.dataset.canvasWidth = String(this.#canvas.width)
+        this.#root.dataset.canvasHeight = String(this.#canvas.height)
+        if (this.#options.playbackView && this.#content) this.#options.playbackView.register({ id: this.#surfaceId, kind: 'flow', root: this.#root, content: this.#content,
+          onObservationChange: () => this.#syncTeacherControllerSession(true) })
+      }
       this.#render()
       this.#toc?.sync()
       this.#applyShellLayout()
@@ -1028,7 +1036,7 @@ export class FlowSurfaceHost {
     const geometry = this.#flowGeometry()
     const paper = article.querySelector<HTMLElement>('.flow-runtime-reading')
     const paragraphLayout = paper && entries.some(entry => entry.source === 'surface' && entry.item.paperSpace === 'paper' && entry.paragraphAnchor)
-      ? measurePublishedFlowParagraphLayout(paper, this.#options.playbackView?.state.zoom ?? 1) : null
+      ? measurePublishedFlowParagraphLayout(paper, (this.#options.playbackView?.fitScale(this.#surfaceId) ?? 1) * (this.#options.playbackView?.state.zoom ?? 1)) : null
     const runtimeSlots = new Map<string, { top: number; height: number }>()
     if (paper && paragraphLayout) {
       const blockRects = new Map(paragraphLayout.blocks.map(block => [block.blockId, block]))
@@ -1115,14 +1123,14 @@ export class FlowSurfaceHost {
     const article = this.#article
     const paper = article?.querySelector<HTMLElement>('.flow-runtime-reading')
     const size = {
-      width: root?.clientWidth || CANVAS_WIDTH,
-      height: root?.clientHeight || CANVAS_HEIGHT,
+      width: this.#content?.clientWidth || root?.clientWidth || CANVAS_WIDTH,
+      height: this.#content?.clientHeight || root?.clientHeight || CANVAS_HEIGHT,
     }
     return createFlowViewportGeometry({
       viewportClientRect: { x: 0, y: 0, ...size },
       layoutViewportSize: size,
       paperOriginLayout: root && article && paper
-        ? measureFlowPaperOrigin(root, article, paper, this.#options.playbackView?.state.zoom ?? 1, this.#options.playbackView?.state.pan)
+        ? measureFlowPaperOrigin(root, article, paper, (this.#options.playbackView?.fitScale(this.#surfaceId) ?? 1) * (this.#options.playbackView?.state.zoom ?? 1), this.#options.playbackView?.state.pan)
         : { x: 0, y: 0 },
       paperScrollLayout: { x: article?.scrollLeft ?? 0, y: article?.scrollTop ?? 0 },
     })
@@ -1791,13 +1799,17 @@ function renderFlowArticle(
   article.style.background = 'transparent'
   article.style.padding = FLOW_BODY_SCROLL_PADDING
   article.style.color = '#172033'
+  const contentScale = () => {
+    const shown = article.getBoundingClientRect().width
+    return shown > 0 && article.clientWidth > 0 ? shown / article.clientWidth : 1
+  }
 
   article.addEventListener('wheel', (event: WheelEvent) => {
     if (event.ctrlKey || event.defaultPrevented || playbackGestureOccupied(event.target, article)) return
     const maxScroll = Math.max(0, article.scrollHeight - article.clientHeight)
     if (maxScroll <= 0) return
     const prevScroll = article.scrollTop
-    const nextScroll = Math.min(Math.max(0, prevScroll + event.deltaY), maxScroll)
+    const nextScroll = Math.min(Math.max(0, prevScroll + event.deltaY / contentScale()), maxScroll)
     if (nextScroll !== prevScroll) {
       article.scrollTop = nextScroll
       event.preventDefault()
@@ -1829,7 +1841,7 @@ function renderFlowArticle(
   article.addEventListener('pointermove', (event: PointerEvent) => {
     if (!isDragging || event.pointerId !== activePointerId) return
     const maxScroll = Math.max(0, article.scrollHeight - article.clientHeight)
-    const targetScroll = Math.min(Math.max(0, dragStartScroll - (event.clientY - dragStartY)), maxScroll)
+    const targetScroll = Math.min(Math.max(0, dragStartScroll - (event.clientY - dragStartY) / contentScale()), maxScroll)
     article.scrollTop = targetScroll
   })
 

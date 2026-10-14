@@ -42,7 +42,7 @@ async function removeOwned(items: Owned[]): Promise<void> {
 
 /** Prepares immutable sidecars only. The caller owns the file-operation lock and Markdown rename. */
 export async function prepareMarkdownMoveResources(sourcePath: string, targetPath: string,
-  captured?: { source: string; resources: DocumentResources }): Promise<{ sourceVersion: string; rollback(): Promise<void> }> {
+  captured?: { source: string; resources: DocumentResources }, beforeCommit?: () => void, ownedCopyRoot?: string): Promise<{ sourceVersion: string; rollback(): Promise<void> }> {
   const source = path.resolve(sourcePath), target = path.resolve(targetPath)
   for (const filename of [source, target]) {
     const volume = path.parse(filename).root
@@ -55,7 +55,13 @@ export async function prepareMarkdownMoveResources(sourcePath: string, targetPat
   if (sourceVersion === null) throw new Error('移动源文件已不存在')
   const references = await markdownReferences(captured?.source ?? await fs.readFile(source, 'utf8'))
   for (const relative of references) await resourcePath(sourceRoot, relative, { rejectSymlinks: true })
-  const resources = captured?.resources ?? await readDocumentMarkdownResources(source)
+  const resources = structuredClone(captured?.resources ?? await readDocumentMarkdownResources(source))
+  const ownedRelative = ownedCopyRoot === undefined ? null : path.relative(path.resolve(ownedCopyRoot), targetRoot)
+  const replaceOwnCopy = ownedRelative !== null && ownedRelative !== '..' && !ownedRelative.startsWith(`..${path.sep}`) && !path.isAbsolute(ownedRelative)
+  if (ownedCopyRoot !== undefined && !replaceOwnCopy) throw new Error('当前稿资源覆盖越出本次私有副本')
+  for (const [relative, bytes] of Object.entries(resources.assets)) for (const [directory, entries] of Object.entries(resources.components)) {
+    if (relative.startsWith(`${directory}/`)) entries[relative.slice(directory.length + 1)] = bytes
+  }
   const packageNames = Object.keys(resources.components).filter(relative => !Object.keys(resources.components).some(other => other !== relative && relative.startsWith(`${other}/`)))
   const packages: Package[] = []
   const files: { relative: string; target: string; bytes: Uint8Array; prepared?: string }[] = []
@@ -74,6 +80,15 @@ export async function prepareMarkdownMoveResources(sourcePath: string, targetPat
     }
     const existing = await stat(filename)
     if (existing) {
+      if (replaceOwnCopy) {
+        if (!existing.isDirectory() || existing.isSymbolicLink()) throw conflict()
+        for (const [child, bytes] of Object.entries(entries)) {
+          const targetFile = await checkedPath(`${relative}/${child}`)
+          await fs.mkdir(path.dirname(targetFile), { recursive: true })
+          await fs.writeFile(targetFile, bytes)
+        }
+        continue
+      }
       const actual = (await tree(filename)).filter(item => item.digest !== undefined)
       if (actual.length !== Object.keys(entries).length || actual.some(item => {
         const bytes = entries[path.relative(filename, item.filename).split(path.sep).join('/')]
@@ -85,6 +100,11 @@ export async function prepareMarkdownMoveResources(sourcePath: string, targetPat
     if (packageNames.some(directory => relative.startsWith(`${directory}/`))) continue
     const filename = await checkedPath(relative), existing = await stat(filename)
     if (existing) {
+      if (replaceOwnCopy) {
+        if (!existing.isFile() || existing.isSymbolicLink()) throw conflict()
+        await fs.writeFile(filename, bytes)
+        continue
+      }
       if (!existing.isFile() || hash(await fs.readFile(filename)) !== hash(bytes)) throw conflict()
     } else files.push({ relative, target: filename, bytes })
   }
@@ -116,6 +136,7 @@ export async function prepareMarkdownMoveResources(sourcePath: string, targetPat
       current = path.join(current, part)
       const existing = await stat(current)
       if (existing) { if (!existing.isDirectory() || existing.isSymbolicLink()) throw conflict(); continue }
+      beforeCommit?.()
       await fs.mkdir(current)
       owned.push({ filename: current, stat: await fs.lstat(current) })
     }
@@ -132,6 +153,7 @@ export async function prepareMarkdownMoveResources(sourcePath: string, targetPat
   }
   try {
     if (!files.length && !packages.length) return { sourceVersion, rollback }
+    beforeCommit?.()
     const stage = await fs.mkdtemp(path.join(targetRoot, '.guoling-move-'))
     staging.push({ filename: stage, stat: await fs.lstat(stage) })
     for (const [index, item] of files.entries()) {
@@ -151,6 +173,7 @@ export async function prepareMarkdownMoveResources(sourcePath: string, targetPat
       await ensureDirectory(path.dirname(item.target), created)
       await checkedPath(item.relative)
       try {
+        beforeCommit?.()
         await fs.link(item.prepared!, item.target)
         created.push({ filename: item.target, stat: await fs.lstat(item.target), digest: hash(item.bytes) })
       } catch (error) {
@@ -163,6 +186,7 @@ export async function prepareMarkdownMoveResources(sourcePath: string, targetPat
       await checkedPath(bundle.relative)
       if (await stat(bundle.target)) throw conflict()
       const owned = await tree(bundle.prepared!)
+      beforeCommit?.()
       await fs.rename(bundle.prepared!, bundle.target)
       bundle.owned = owned.map(item => ({ ...item, filename: path.join(bundle.target, path.relative(bundle.prepared!, item.filename)) }))
     }

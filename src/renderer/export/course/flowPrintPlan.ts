@@ -29,12 +29,13 @@ export type FlowPrintNode =
       content: FlowTextContent
       paragraph?: FlowParagraphPresentation
     }
-  | { type: 'paragraph'; blockId: string; content: FlowTextContent; paragraph?: FlowParagraphPresentation }
+  | { type: 'paragraph'; blockId: string; content: FlowTextContent; paragraph?: FlowParagraphPresentation; outputStyle?: 'Caption'; keepNext?: boolean }
   | { type: 'quote'; blockId: string; content: FlowTextContent; citation?: FlowTextContent; paragraph?: FlowParagraphPresentation }
   | {
       type: 'list'
       blockId: string
       ordered: boolean
+      start?: number
       items: Array<{ id: string; content: FlowTextContent }>
     }
   | {
@@ -68,6 +69,8 @@ export type FlowPrintNode =
       crop?: FlowImageCrop['crop']
       cropX?: number
       cropY?: number
+      /** Target-only source rectangle, including readable capture-page segments. */
+      sourceRect?: { x: number; y: number; width: number; height: number }
     }
   | { type: 'code'; blockId: string; language?: string; code: string }
   | {
@@ -299,6 +302,7 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
         type: 'list',
         blockId: block.id,
         ordered: block.ordered,
+        start: block.start,
         items: block.items.map((item) => ({
           id: item.id,
           content: item.content,

@@ -10,9 +10,15 @@ if not exist "package.json" goto invalid_root
 where npm.cmd >nul 2>nul
 if errorlevel 1 goto missing_node
 
-if not exist "node_modules\electron\dist\electron.exe" (
+if not exist "node_modules\electron\install.js" (
   echo [Guoling Workbench] Installing locked dependencies for first launch...
   call npm.cmd ci
+  if errorlevel 1 goto failed
+)
+
+if not exist "node_modules\electron\dist\electron.exe" (
+  echo [Guoling Workbench] Installing the Electron runtime...
+  node node_modules\electron\install.js
   if errorlevel 1 goto failed
 )
 
@@ -21,6 +27,7 @@ node scripts\prepare-source-launch.mjs
 if errorlevel 1 goto failed
 
 start "" /D "%CD%" "%CD%\node_modules\electron\dist\electron.exe" "%CD%" %*
+if errorlevel 1 goto failed
 exit /b 0
 
 :missing_node

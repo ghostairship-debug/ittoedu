@@ -2,32 +2,41 @@ import { type Node as PMNode, type Mark } from 'prosemirror-model'
 import { documentContentSchema, documentVisibleTextSlots, normalizeDocumentText, type DocumentBlock, type DocumentContent, type FlowInline, type FlowTextContent } from '../../shared/document/content'
 import type { DocumentPoint, DocumentSlot } from '../../shared/document/ports'
 import { documentEditorSchema as schema } from './editorSchema'
+import { TableMap } from 'prosemirror-tables'
 
 function inlineNodes(content: FlowTextContent): PMNode[] {
   return content.inlines.flatMap(atom => {
     const marks: Mark[] = []
+    if (atom.rangeIds?.length) marks.push(schema.marks.range.create({ ids: atom.rangeIds }))
     if (atom.style) marks.push(schema.marks.style.create({ value: atom.style }))
     if (atom.link) marks.push(schema.marks.link.create(atom.link))
     if (atom.type === 'math') return [schema.nodes.math.create({ data: atom }, null, marks)]
+    if (atom.type === 'component') return [schema.nodes.inline_component.create({ data: atom }, null, marks)]
     if (atom.code) marks.push(schema.marks.code.create())
     return atom.text.split('\n').flatMap((part, index) => [...(index ? [schema.nodes.hard_break.create(null, null, marks)] : []), ...(part ? [schema.text(part, marks)] : [])])
   })
+}
+export function readEditorMath(child:PMNode):Extract<FlowInline,{type:'math'}> {
+  const atom=structuredClone(child.attrs.data) as Extract<FlowInline,{type:'math'}>
+  delete atom.style;delete atom.link;delete atom.rangeIds
+  for(const mark of child.marks) {
+    if(mark.type.name==='style'){const value=mark.attrs.value;const style={...(value.fontSize!==undefined ? {fontSize:value.fontSize}:{}),...(value.color!==undefined ? {color:value.color}:{})};if(Object.keys(style).length)atom.style=style}
+    if(mark.type.name==='range')atom.rangeIds=mark.attrs.ids
+    if(mark.type.name==='link')atom.link={href:mark.attrs.href,...(mark.attrs.title ? {title:mark.attrs.title}:{})}
+  }
+  return atom
 }
 function readInlines(node: PMNode): FlowTextContent {
   const inlines: FlowInline[] = []
   node.forEach(child => {
     if (child.type.name === 'math') {
-      const atom = structuredClone(child.attrs.data) as Extract<FlowInline, { type: 'math' }>
-      for (const mark of child.marks) {
-        if (mark.type.name === 'style') { const value = mark.attrs.value; atom.style = { ...(value.fontSize ? { fontSize: value.fontSize } : {}), ...(value.color ? { color: value.color } : {}) } }
-        if (mark.type.name === 'link') atom.link = { href: mark.attrs.href, ...(mark.attrs.title ? { title: mark.attrs.title } : {}) }
-      }
-      inlines.push(atom); return
+      inlines.push(readEditorMath(child)); return
     }
-    const atom: Extract<FlowInline, { type: 'text' }> = { type: 'text', text: child.type.name === 'hard_break' ? '\n' : child.text ?? '' }
+    const atom: FlowInline = child.type.name === 'inline_component' ? { ...structuredClone(child.attrs.data), rangeIds: undefined } : { type: 'text', text: child.type.name === 'hard_break' ? '\n' : child.text ?? '' }
     for (const mark of child.marks) {
       if (mark.type.name === 'style') atom.style = mark.attrs.value
-      if (mark.type.name === 'code') atom.code = true
+      if (mark.type.name === 'code' && atom.type === 'text') atom.code = true
+      if (mark.type.name === 'range') atom.rangeIds = mark.attrs.ids
       if (mark.type.name === 'link') atom.link = { href: mark.attrs.href, ...(mark.attrs.title ? { title: mark.attrs.title } : {}) }
     }
     inlines.push(atom)
@@ -47,7 +56,7 @@ function blockNode(block: DocumentBlock): PMNode {
         schema.nodes.table_cell.create({ colspan: slot.tableCell!.columnSpan, rowspan: slot.tableCell!.rowSpan },
           schema.nodes.slot.create({ key: slot.key }, inlineNodes(slot.content))))))
       return schema.nodes.table_container.create(attrs, [...slots.filter(slot => !slot.tableCell).map(slot =>
-        schema.nodes.slot.create({ key: slot.key }, inlineNodes(slot.content))), schema.nodes.table.create(null, [header, ...rows])])
+        schema.nodes.slot.create({ key: slot.key }, inlineNodes(slot.content))), schema.nodes.table.create(null, [...(block.headerEnabled === false ? [] : [header]), ...rows])])
     }
     case 'paragraph': case 'heading': return schema.nodes[block.type].create(attrs, inlineNodes(block.content))
     case 'formula': return schema.nodes.formula.create(attrs)
@@ -72,7 +81,8 @@ function setSlot(block: DocumentBlock, key: string, content: FlowTextContent): v
 function readBlock(node: PMNode): DocumentBlock {
   const block = { ...structuredClone(node.attrs.data), id: node.attrs.id } as DocumentBlock
   if (node.type.name === 'paragraph' || node.type.name === 'heading') {
-    const result = { ...block, type: node.type.name, content: readInlines(node) } as DocumentBlock
+    const { code: _code, language: _language, ...fields } = block as DocumentBlock & { code?: string; language?: string }
+    const result = { ...fields, type: node.type.name, content: readInlines(node) } as DocumentBlock
     if (result.type === 'paragraph') delete (result as unknown as Record<string, unknown>).level
     return result
   }
@@ -83,6 +93,9 @@ function readBlock(node: PMNode): DocumentBlock {
     return block
   }
   if (block.type === 'section') block.blocks = []
+  if (block.type === 'quote') { block.content = { inlines: [] }; delete block.citation }
+  if (block.type === 'callout') { block.body = { inlines: [] }; delete block.title }
+  if (block.type === 'media') delete block.caption
   if (block.type === 'table') {
     node.descendants(child => { if (child.type.name === 'slot') { setSlot(block, child.attrs.key, readInlines(child)); return false } })
     return block
@@ -149,6 +162,34 @@ export function renewEditorIdentities(doc: PMNode, createId: () => string, copie
     }
     const children: PMNode[] = []
     node.forEach(child => children.push(visit(child, ids)))
+    if(node.type.name==='table_container' && attrs.data.type==='table') {
+      const tableIndex=children.findIndex(child=>child.type.name==='table'), table=children[tableIndex]
+      if(table) {
+        const map=TableMap.get(table)
+        attrs.data=structuredClone(attrs.data)
+        const headerRows=attrs.data.headerEnabled===false ? 0:1
+        while(attrs.data.columns.length<map.width)attrs.data.columns.push({id:createId(),header:{inlines:[]}})
+        while(attrs.data.rows.length<map.height-headerRows)attrs.data.rows.push({id:createId(),cells:{}})
+        for(const row of attrs.data.rows)for(const column of attrs.data.columns)row.cells[column.id] ??= {inlines:[]}
+        const merges:{rowIds:string[];columnIds:string[]}[]=[]
+        const rows:PMNode[]=[]
+        table.forEach((row,rowOffset,rowIndex)=>{
+          const header=attrs.data.headerEnabled!==false && rowIndex===0
+          const formalRow=attrs.data.rows[rowIndex-(attrs.data.headerEnabled===false ? 0:1)]
+          const cells:PMNode[]=[]
+          row.forEach((cell,cellOffset)=>{
+            const rect=map.findCell(rowOffset+1+cellOffset),column=attrs.data.columns[rect.left]
+            if(!header && (cell.attrs.colspan>1 || cell.attrs.rowspan>1))merges.push({rowIds:attrs.data.rows.slice(rect.top-headerRows,rect.bottom-headerRows).map((row:{id:string})=>row.id),columnIds:attrs.data.columns.slice(rect.left,rect.right).map((column:{id:string})=>column.id)})
+            const key=column && (header ? `column:${column.id}`:formalRow && `cell:${JSON.stringify([formalRow.id,column.id])}`)
+            const slot=cell.firstChild
+            cells.push(key && slot ? cell.type.create(cell.attrs,schema.nodes.slot.create({key},slot.content),cell.marks):cell)
+          })
+          rows.push(row.type.create(row.attrs,cells,row.marks))
+        })
+        if(merges.length || attrs.data.merges)attrs.data.merges=merges
+        children[tableIndex]=table.type.create(table.attrs,rows,table.marks)
+      }
+    }
     return node.isText ? node : node.type.create(attrs, children, node.marks)
   }
   return visit(doc)

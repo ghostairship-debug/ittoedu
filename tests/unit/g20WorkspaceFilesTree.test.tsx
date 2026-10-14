@@ -18,6 +18,32 @@ const roots: string[] = []
 const services: WorkspaceFilesDesktopService[] = []
 afterEach(async () => { cleanup(); vi.unstubAllGlobals(); for (const service of services.splice(0)) service.dispose(); vi.restoreAllMocks(); for (const root of roots.splice(0)) { if (!root.startsWith(os.tmpdir())) throw new Error('Invalid temp root'); await fs.rm(root, { recursive: true, force: true }) } })
 async function fixture() { const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-file-tree-')); roots.push(root); return root }
+it.each(['rename', 'move'] as const)('keeps the original %s source when browsing another file while its dialog is open', async operation => {
+  const directory = await fixture(), target = path.join(directory, 'target')
+  await fs.mkdir(target); await fs.writeFile(path.join(directory, 'a.txt'), 'A'); await fs.writeFile(path.join(directory, 'b.txt'), 'B')
+  const { host } = createMarkdownTestHost(path.join(directory, 'journal'))
+  const service = new WorkspaceFilesDesktopService(host.files)
+  services.push(service); await service.authorizeRoot(directory)
+  render(<LessonDirectoryTree directory={directory} files={service.operate} operation={async () => ({})} onFile={vi.fn()} onDirectory={vi.fn()} />)
+  const a = await screen.findByRole('button', { name: 'a.txt' })
+  fireEvent.click(a)
+  if (operation === 'rename') {
+    fireEvent.keyDown(a, { key: 'F2' })
+    fireEvent.change(screen.getByLabelText('文件名称'), { target: { value: 'new.txt' } })
+  } else {
+    fireEvent.contextMenu(a)
+    fireEvent.click(within(screen.getByRole('menu', { name: '文件菜单' })).getByRole('menuitem', { name: '移动到…' }))
+    const destination = await screen.findByLabelText('目标文件夹')
+    await waitFor(() => expect([...destination.querySelectorAll('option')].some(option => option.textContent === 'target')).toBe(true))
+    fireEvent.change(destination, { target: { value: [...destination.querySelectorAll('option')].find(option => option.textContent === 'target')!.value } })
+  }
+  fireEvent.click(screen.getByRole('button', { name: 'b.txt' }))
+  fireEvent.click(screen.getByRole('button', { name: '确认' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  expect(await fs.readFile(operation === 'rename' ? path.join(directory, 'new.txt') : path.join(target, 'a.txt'), 'utf8')).toBe('A')
+  expect(await fs.readFile(path.join(directory, 'b.txt'), 'utf8')).toBe('B')
+  await expect(fs.access(path.join(directory, 'a.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+})
 it('reports selected file and folder scopes without opening a file on single click', async () => {
   const directory = await fixture(), folder = path.join(directory, 'unit')
   await fs.mkdir(folder); await fs.writeFile(path.join(folder, 'a.md'), 'text')
@@ -213,11 +239,11 @@ it('displays creation menu items in correct order and wording in toolbar and con
   const itemBtn = await screen.findByRole('button', { name: 'item.md' })
   const createMenu = document.querySelector('.workspace-files-create-options')!
   const toolbarButtons = within(createMenu as HTMLElement).getAllByRole('menuitem').map(b => b.getAttribute('aria-label'))
-  expect(toolbarButtons.slice(0, 6)).toEqual(['新建 Markdown 文档', '新建 果铃工程', '从 PPT 新建 果铃工程', '新建文本文档', '新建 HTML 文档', '新建文件夹'])
+  expect(toolbarButtons).toEqual(['新建文件夹', '新建 MD 文档', '新建 TXT 文档', '新建 果铃工程'])
   fireEvent.contextMenu(itemBtn)
   const contextMenu = screen.getByRole('menu', { name: '文件菜单' })
   const contextButtons = within(contextMenu).getAllByRole('menuitem').map(b => b.getAttribute('aria-label'))
-  expect(contextButtons.slice(0, 6)).toEqual(['新建 Markdown 文档', '新建 果铃工程', '从 PPT 新建 果铃工程', '新建文本文档', '新建 HTML 文档', '新建文件夹'])
+  expect(contextButtons.slice(0, 4)).toEqual(['新建文件夹', '新建 MD 文档', '新建 TXT 文档', '新建 果铃工程'])
 })
 
 it('prefills default names, numbers collisions with (2) and selects only the main stem on focus', async () => {

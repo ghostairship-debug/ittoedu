@@ -24,8 +24,8 @@ it('saves a first internal text edit with its local binding and reopens the same
   const driver = new CourseV10Driver(), model = driver.apply({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, captureComponentOperation(project, edits))
   const reopened = driver.load(driver.serialize(model))
   if (reopened.kind !== 'course-v10') throw new Error('Expected V10')
-  const data = webDataSchema.parse(reopened.project.instances.web.data)
-  expect(data.authoringRecords?.['local-a']).toEqual({ kind: 'text', scope: spot.scope, binding: spot.binding, overrides: { text: 'Edited' } })
+  const data = reopened.project.instances.web.authoring!
+  expect(data.records?.['local-a']).toEqual({ kind: 'text', scope: spot.scope, binding: spot.binding, overrides: { text: 'Edited' } })
 })
 it('merges a delayed text edit with newer geometry and another internal object but rejects changed text', () => {
   let project = fixture()
@@ -33,19 +33,19 @@ it('merges a delayed text edit with newer geometry and another internal object b
   project = applyComponentOperation(project, captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, spot, { geometry: { translateX: 12 } })))
   project = applyComponentOperation(project, captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, { ...spot, authorKey: 'local-b' }, { text: 'Other edit' })))
   project = applyComponentOperation(project, captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, spot, { text: 'Edited' })))
-  expect(webDataSchema.parse(project.instances.web.data).authoringRecords!['local-a'].overrides).toEqual({ text: 'Edited', geometry: { translateX: 12 } })
+  expect(project.instances.web.authoring!.records!['local-a'].overrides).toEqual({ text: 'Edited', geometry: { translateX: 12 } })
   const capture = { ...spot, initialValue: 'Edited' }
   const text = captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, capture, { text: 'AI revision' }))
   project = applyComponentOperation(project, captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, capture, { geometry: { translateX: 35, width: 210 } })))
   project = applyComponentOperation(project, captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, { ...spot, authorKey: 'local-b', initialValue: 'Other edit' }, { text: 'Newer other edit' })))
   project = applyComponentOperation(project, text)
-  const records = webDataSchema.parse(project.instances.web.data).authoringRecords!
+  const records = project.instances.web.authoring!.records!
   expect(records['local-a'].overrides).toEqual({ text: 'AI revision', geometry: { translateX: 35, width: 210 } })
   expect(records['local-b'].overrides.text).toBe('Newer other edit')
   expect(() => prepareWebAuthoringRecordEdits(project, capture, { text: 'Stale' })).toThrow('内容已变化')
   const nextText = captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, { ...capture, initialValue: 'AI revision' }, { text: 'Later' }))
   const rebound = structuredClone(project)
-  ;(rebound.instances.web.data as { authoringRecords: Record<string, { scope: Record<string, string> }> }).authoringRecords['local-a'].scope = { 'item.id': 'another-item' }
+  ;rebound.instances.web.authoring!.records!['local-a'].scope = { 'item.id': 'another-item' }
   expect(() => applyComponentOperation(rebound, nextText)).toThrow('目标内容或归属已变化')
   expect(() => prepareWebAuthoringRecordEdits(rebound, { ...capture, initialValue: 'AI revision' }, { text: 'Old object reply' })).toThrow('对象绑定已变化')
 })

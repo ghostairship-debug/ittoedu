@@ -2,16 +2,15 @@ import { parse, serializeOuter, type DefaultTreeAdapterTypes } from 'parse5'
 import type { ComponentImplementation, ComponentInstance, CourseProjectV10 } from '../../../shared/contracts/component-platform'
 import type { DocumentResources } from '../../../shared/workbench/document'
 import type { ContentApplyTarget, HtmlContentProjection } from '../../contentApply/planning/types'
-import { getBuiltinComponentSource } from '../../components/source/builtinSources'
+import { prepareComponentAuthorSource, componentAuthorSourceModules, type ComponentAuthorSource } from '../../components/source/componentAuthorSource'
 import { componentSourceFileText } from '../../components/compilation/componentCompilationInput'
 import { htmlDocumentKind } from '../../../shared/html/documentKind'
 import { createCourseSurface } from '../../course/courseSurfaceStructure'
 import { projectFlowDocument } from '../../components/document/flowDocumentProjection'
 import { serializeDocumentMarkdown, type MarkdownDocument } from '../../../shared/document/markdown'
 import { inlineHtml, serializeFlowHtml } from '../../../shared/document/html'
-import { componentSourceOwnerIsShared } from '../../components/source/sourceAuthoringEdits'
 import { componentAssetIds, sourceAssetIds, sourceModuleBindings } from '../../components/library/references'
-import { isComponentVisibleAtSurface } from '../../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, isComponentVisibleAtSurface, resolveComponentPresentation } from '../../../shared/contracts/component-platform/project'
 import { observeSpatialSource, type SpatialObservedRefs, type SpatialGraphScope, spatialGraphItem } from '../../course/courseSpatialEdits'
 import { formulaComponentDataSchema, textComponentDataSchema } from '../../../components/text/data'
 import { formulaComponentHtml, textComponentHtml } from '../../../components/text/render'
@@ -52,6 +51,7 @@ export interface ComponentProjectFile {
   language?: 'javascript' | 'typescript'
   implementation?: Extract<ComponentImplementation, { kind: 'source' }>
   sourceFile?: { path: string; files: Record<string, Uint8Array>; privateOwner: boolean }
+  authorSource?: { prepared: ComponentAuthorSource; dependencyId?: string }
   /** Canonical fields that are not object content. Identities stay inside this software projection. */
   binding?:
     | { kind: 'project-settings' }
@@ -59,6 +59,7 @@ export interface ComponentProjectFile {
     | { kind: 'definition'; definitionId: string }
     | { kind: 'definition-source'; definitionId: string }
     | { kind: 'instance-source'; instanceId: string }
+    | { kind: 'instance-authoring'; instanceId: string }
     | { kind: 'spatial'; surfaceId: string; objectPaths: Record<string, string>; refs: SpatialObservedRefs; graphScope?: SpatialGraphScope }
     | { kind: 'asset'; assetId: string }
     | { kind: 'flow'; surfaceId: string; format: 'html' | 'markdown'; document: MarkdownDocument; objectPaths: Record<string, string> }
@@ -72,7 +73,8 @@ function bodyOf(html: string): Element {
 }
 function webHtml(project: CourseProjectV10, instance: ComponentInstance): string | undefined {
   const implementation = instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation
-  if (implementation?.kind !== 'builtin' || !['guoling.web', 'guoling.html-program'].includes(implementation.key)) return undefined
+  const key = implementation?.kind === 'builtin' ? implementation.key : componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
+  if (!['guoling.web', 'guoling.html-program'].includes(key ?? '')) return undefined
   const data = instance.data
   return data && typeof data === 'object' && !Array.isArray(data) && typeof data.html === 'string' ? data.html : undefined
 }
@@ -164,31 +166,38 @@ export function componentProjectFiles(project: CourseProjectV10, resources: Docu
     note: '完整正式作者内容观察。可直接应用 title/background/designTokens/playback 设置补丁；身份、版本和编号由软件维护。对象、页面、资源和源码修改使用各内容路径或语义工具，保留未提供的设置。' })
   files.push({ path: 'theme.css', kind: 'style', content: project.theme?.css ?? '', binding: { kind: 'theme' },
     note: '整课主题源码；修改主题保留对象和人工 frame，资源仍来自本工程。' })
+  const sources = (base: string, effective: ComponentImplementation, binding: Extract<NonNullable<ComponentProjectFile['binding']>, { kind: 'instance-source' | 'definition-source' }>, target?: ContentApplyTarget) => {
+    const prepared = prepareComponentAuthorSource(project, effective)
+    if (!prepared) return
+    for (const module of componentAuthorSourceModules(project, resources, prepared)) {
+      const implementation = module.implementation
+      const moduleBase = module.id ? `${base}.dependencies/${stem(module.id)}` : base
+      const note = module.id ? '完整依赖源码；从此作者入口深改只复制必要引用路径，其他实例和未改依赖保持。'
+        : binding.kind === 'definition-source' ? '共享定义的作者入口；应用后使用此定义的实例一起更新。' : '当前实例的作者入口；应用只改变本实例，完整实现可在依赖源码中继续深改。'
+      const common = { binding, target, implementation, language: implementation.language, authorSource: { prepared, dependencyId: module.id }, note }
+      if (!implementation.workspace) {
+        files.push({ ...common, path: `${moduleBase}.view.${implementation.language === 'typescript' ? 'ts' : 'js'}`, kind: 'source', content: implementation.source })
+        continue
+      }
+      const sourceFiles = resources.components[implementation.workspace.ownerId] ?? {}
+      // The final transaction performs owner COW; retain original bytes for its CAS.
+      const privateOwner = true
+      const names = new Set([implementation.workspace.entry, ...Object.keys(sourceFiles)])
+      for (const path of names) {
+        const bytes = sourceFiles[path], content = bytes && componentSourceFileText(bytes)
+        files.push({ ...common, path: `${moduleBase}.source/${path}`, kind: content === null ? 'asset' : 'source',
+          ...(content === null ? { bytes, mimeType: 'application/octet-stream' } : { content }),
+          sourceFile: { path, files: sourceFiles, privateOwner },
+          ...(!bytes ? { note: '此源码入口尚未提供；可补入源文，其余文件与依赖保留。' } : {}) })
+      }
+    }
+  }
   Object.values(project.definitions).forEach((definition, index) => {
     const base = `components/${String(index + 1).padStart(2, '0')}-${stem(definition.title ?? definition.id)}`
     const { id: _id, implementation: effective, ...metadata } = definition
     files.push({ path: `${base}.definition.json`, kind: 'data', content: json(metadata), binding: { kind: 'definition', definitionId: definition.id },
       note: '共享定义的名称、角色与专业数据合同；内部身份和源码文件引用由软件维护。' })
-    const implementation = effective.kind === 'source' ? effective : getBuiltinComponentSource(effective.key)
-    if (implementation?.kind !== 'source') return
-    const binding = { kind: 'definition-source' as const, definitionId: definition.id }
-    if (!implementation.workspace) {
-      files.push({ path: `${base}.view.${implementation.language === 'typescript' ? 'ts' : 'js'}`, kind: 'source', content: implementation.source,
-        language: implementation.language, implementation, binding, note: '共享定义源码；应用后所有未独立源码的实例一起更新。' })
-      return
-    }
-    const sourceFiles = resources.components[implementation.workspace.ownerId] ?? {}
-    const privateOwner = !componentSourceOwnerIsShared(project, '', implementation.workspace.ownerId, definition.id)
-    if (!Object.hasOwn(sourceFiles, implementation.workspace.entry)) files.push({ path: `${base}.source/${implementation.workspace.entry}`,
-      kind: 'source', language: implementation.language, implementation, binding,
-      sourceFile: { path: implementation.workspace.entry, files: sourceFiles, privateOwner },
-      note: '此共享定义的源码入口尚未提供；可补入源文，其余内容仍保留。' })
-    for (const [path, bytes] of Object.entries(sourceFiles)) {
-      const content = componentSourceFileText(bytes)
-      files.push({ path: `${base}.source/${path}`, kind: content === null ? 'asset' : 'source', ...(content === null ? { bytes, mimeType: 'application/octet-stream' } : { content }),
-        binding, implementation, language: implementation.language, sourceFile: { path, files: sourceFiles, privateOwner },
-        note: '共享定义的正式文件；源文与二进制资源在同一批提交。' })
-    }
+    sources(base, effective, { kind: 'definition-source', definitionId: definition.id })
   })
   const objects = (ids: readonly string[], folder: string, containerViewport: { width: number; height: number }) => ids.forEach((id, index) => {
     const firstFile = files.length
@@ -207,40 +216,18 @@ export function componentProjectFiles(project: CourseProjectV10, resources: Docu
         note: 'HTML 程序的正式数据；modules 按原相对路径保存可编辑模块源码。修改后复用同一事务并重新准备运行图。',
       })
     } else files.push({ path: `${base}.data.json`, kind: 'data', content: json(instance.data), target })
+    if (instance.authoring !== undefined || project.surfaces.some(surface => surface.presentation?.states.some(state => state.overrides[id]?.authoring !== undefined))) {
+      files.push({ path: `${base}.authoring.json`, kind: 'data', content: json(instance.authoring ?? {}), target,
+        binding: { kind: 'instance-authoring', instanceId: id },
+        note: '当前对象的局部作者记录与资源绑定；修改沿用当前对象和展示状态，业务数据与源码保持。' })
+    }
     files.push({ path: `${base}.style.json`, kind: 'style', content: json(instance.style ?? {}), target })
     const effectiveImplementation = instance.implementationOverride ?? definition.implementation
-    const implementation = effectiveImplementation.kind === 'source' ? effectiveImplementation
-      : getBuiltinComponentSource(effectiveImplementation.key)
-    if (implementation?.kind === 'source') {
-      if (implementation.workspace) {
-        const ownerId = implementation.workspace.ownerId
-        const sourceFiles = resources.components[ownerId] ?? {}
-        if (!Object.hasOwn(sourceFiles, implementation.workspace.entry)) files.push({
-          path: `${base}.source/${implementation.workspace.entry}`, kind: 'source', target,
-          language: implementation.language, implementation,
-          sourceFile: { path: implementation.workspace.entry, files: sourceFiles, privateOwner: false },
-          note: '此组件的正式源码入口尚未提供；其余工程内容仍可读取。',
-        })
-        const usedElsewhere = componentSourceOwnerIsShared(project, instance.id, ownerId)
-        for (const [path, bytes] of Object.entries(sourceFiles)) {
-          const content = componentSourceFileText(bytes)
-          if (content === null) files.push({ path: `${base}.source/${path}`, kind: 'asset', bytes, mimeType: 'application/octet-stream',
-            target, binding: { kind: 'instance-source', instanceId: id }, implementation,
-            sourceFile: { path, files: sourceFiles, privateOwner: !!instance.implementationOverride && !usedElsewhere },
-            note: 'workspace 的二进制原文件；应用为本实例保留原字节，其余文件和共享定义保持。' })
-          else files.push({ path: `${base}.source/${path}`, kind: 'source', content, target,
-            language: implementation.language, implementation,
-            sourceFile: { path, files: sourceFiles, privateOwner: !!instance.implementationOverride && !usedElsewhere },
-            note: '正式组件源码文件；应用只修改这一文件，并保留同一 workspace 的其他文件。默认定义编辑为本实例私有实现。' })
-        }
-      } else files.push({ path: `${base}.view.${implementation.language === 'typescript' ? 'ts' : 'js'}`,
-        kind: 'source', content: implementation.source, target, language: implementation.language, implementation,
-        note: '应用为这个实例的私有实现；默认定义及其他实例保留。' })
-    }
+    sources(base, effectiveImplementation, { kind: 'instance-source', instanceId: id }, target)
     for (const file of files.slice(firstFile)) {
       if (file.target?.kind !== 'instance' || file.target.instanceId !== id) continue
       file.programViewport = programViewport
-      if (effectiveImplementation.kind === 'source') file.implementation = effectiveImplementation
+      if (effectiveImplementation.kind === 'source' && !file.authorSource) file.implementation = effectiveImplementation
     }
     if (instance.childIds?.length) objects(instance.childIds, base, programViewport)
   })
@@ -253,19 +240,19 @@ export function componentProjectFiles(project: CourseProjectV10, resources: Docu
     const projection = projectHtmlProjection(project, surface.childIds, programViewport)
     if (projection) files.push({ path: `${base}.html`, kind: 'page', content: projection.html, target, projection, programViewport })
     files.push({ path: `${base}.json`, kind: 'structure', content: json({ title: surface.title, kind: surface.kind,
-      designSize: surface.designSize, objects: surface.childIds.map((id, order) => ({ order: order + 1, type: project.definitions[project.instances[id]!.definitionId]!.title ?? project.instances[id]!.definitionId,
+      designSize: surface.designSize, ...(surface.flow ? { flowLayout: surface.flow.layout } : {}), objects: surface.childIds.map((id, order) => ({ order: order + 1, type: project.definitions[project.instances[id]!.definitionId]!.title ?? project.instances[id]!.definitionId,
         frame: project.instances[id]!.frame })) }), target, programViewport, note: '当前结构与人工位置；内容在同名目录。可向本页插入内容，整页重做须明确表达 redo。' })
     objects(surface.childIds, base, programViewport)
     if (surface.kind === 'spatial') {
       const spatial = surface.spatial ?? { home: { x: 0, y: 0, zoom: 1 }, frames: [] }
-      const objectPaths = Object.fromEntries(files.flatMap(file => file.target?.kind === 'instance' && (file.kind === 'data' || file.kind === 'html') ? [[file.target.instanceId, file.path]] : []))
+      const objectPaths = Object.fromEntries(files.flatMap(file => file.target?.kind === 'instance' && file.binding?.kind !== 'instance-authoring' && (file.kind === 'data' || file.kind === 'html') ? [[file.target.instanceId, file.path]] : []))
       const { source, refs } = observeSpatialSource(project, surface.id, objectPaths)
       files.push({ path: `${base}.spatial.json`, kind: 'data', content: json(source), binding: { kind: 'spatial', surfaceId: surface.id, objectPaths, refs },
-        note: '空间镜头源文；保留已观察 ref 可重排镜头、路径和关系。新项省略 ref；target/objects 使用本次对象路径，paths.stops 使用已读镜头 ref，新镜头也可用本文件镜头序号。pose 可为 currentViewport，由当前空间视口提供。' })
+        note: '空间镜头源文；保留已观察 ref 可重排镜头、路径和关系。新项省略 ref；target/objects 使用本次对象路径，paths.stops 使用已读镜头 ref，新镜头也可用本文件镜头序号。pose 可为 currentViewport，由当前空间视口提供。defaultRoute 选择 frames 或已读路径 ref，新路径也可用本文件路径序号；省略保留既有默认，删除默认路径会回到按镜头顺序。' })
     }
     if (surface.kind === 'flow') {
       const document = projectFlowDocument(project, surface.id)
-      const objectPaths = Object.fromEntries(files.flatMap(file => file.target?.kind === 'instance' && (file.kind === 'data' || file.kind === 'html') ? [[file.target.instanceId, file.path]] : []))
+      const objectPaths = Object.fromEntries(files.flatMap(file => file.target?.kind === 'instance' && file.binding?.kind !== 'instance-authoring' && (file.kind === 'data' || file.kind === 'html') ? [[file.target.instanceId, file.path]] : []))
       const context = { assets: project.assets, packageName: (id: string) => id,
         instanceHtml: (id: string) => `<guoling-instance path="${(objectPaths[id] ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></guoling-instance>` }
       files.push({ path: `${base}.body.html`, kind: 'html', content: serializeFlowHtml({ title: surface.title, blocks: document.content.blocks }, context),
@@ -277,10 +264,15 @@ export function componentProjectFiles(project: CourseProjectV10, resources: Docu
     }
   })
   for (const plane of ['underlay', 'overlay'] as const) objects(project.global[plane], `global/${plane}`, defaultViewport)
+  const usedPaths = new Set(files.map(file => file.path))
   for (const asset of Object.values(project.assets)) {
     const bytes = resources.assets[asset.id]
     const content = bytes && (asset.mimeType?.startsWith('text/') || asset.mimeType === 'image/svg+xml') ? componentSourceFileText(bytes) : null
-    files.push({ path: asset.path, kind: 'asset', bytes, mimeType: asset.mimeType, binding: { kind: 'asset', assetId: asset.id },
+    let path = asset.path
+    const name = asset.path.split('/').at(-1) ?? 'asset'
+    for (let suffix = 0; usedPaths.has(path); suffix++) path = `assets/${encodeURIComponent(asset.id)}/${suffix ? `${suffix}-` : ''}${name}`
+    usedPaths.add(path)
+    files.push({ path, kind: 'asset', bytes, mimeType: asset.mimeType, binding: { kind: 'asset', assetId: asset.id },
       ...(content !== null ? { content } : {}) })
   }
   return files
@@ -330,9 +322,10 @@ export function componentProjectScopeFiles(project: CourseProjectV10, files: Com
     if (scope.kind === 'surface' && surface.background?.assetId) assets.add(surface.background.assetId)
     for (const state of surface.presentation?.states ?? []) {
       if (scope.kind === 'surface' && state.background?.assetId) assets.add(state.background.assetId)
-      for (const [id, override] of Object.entries(state.overrides)) if (instances.has(id) && override.data !== undefined) {
-        const instance = project.instances[id], definition = project.definitions[instance.definitionId]
-        if (definition) componentAssetIds({ ...instance, data: override.data }, definition).forEach(id => assets.add(id))
+      const effective = resolveComponentPresentation(project, surface.id, state.id)
+      for (const id of Object.keys(state.overrides)) if (instances.has(id)) {
+        const instance = effective.instances[id], definition = effective.definitions[instance.definitionId]
+        if (definition) componentAssetIds(instance, definition).forEach(id => assets.add(id))
       }
     }
   }
@@ -344,7 +337,7 @@ export function componentProjectScopeFiles(project: CourseProjectV10, files: Com
     if (binding.kind === 'project-settings') return false
     if (binding.kind === 'theme') return true
     if (binding.kind === 'definition' || binding.kind === 'definition-source') return definitions.has(binding.definitionId)
-    if (binding.kind === 'instance-source') return instances.has(binding.instanceId)
+    if (binding.kind === 'instance-source' || binding.kind === 'instance-authoring') return instances.has(binding.instanceId)
     if (binding.kind === 'asset') return assets.has(binding.assetId)
     return scope.kind === 'surface' && binding.surfaceId === scope.surfaceId
   })

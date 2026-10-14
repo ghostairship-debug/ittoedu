@@ -7,7 +7,7 @@ import type { DocumentSelection, DocumentSlot, DocumentSourceRange } from './por
 /** Lexer coordinates precede the parser's original-source (including CRLF) offset projection. */
 export interface MarkdownInlineWrapper { from: number; to: number; kind: string; retained?: MarkdownInlineWrapper[] }
 interface Unit { from: number; to: number; text: string; barrier?: true; wrappers?: MarkdownInlineWrapper[] }
-export interface SlotMap { key: string; units: Unit[]; from?: number; to?: number; depth?: number; ordered?: boolean; retained?: MarkdownInlineWrapper[] }
+export interface SlotMap { key: string; units: Unit[]; from?: number; to?: number; depth?: number; ordered?: boolean; ordinal?: number; retained?: MarkdownInlineWrapper[] }
 /** `keys` keeps the block's own slot order, including slots this map could not locate, so a
  * selection across an unlocatable slot is still visible to the caller. */
 export interface MarkdownBlockMap { blockId: string; from: number; to: number; keys: string[]; slots: SlotMap[]; table?: { rows: string[]; columns: string[] } }
@@ -102,7 +102,7 @@ function inlineUnits(p: Projection, lex: (source: string) => Token[]): InlineUni
         if (chars.map(c => c.text).join('') !== t.text) throw new UnmappedSyntax('code span mismatch')
         append(wrapped(chars)); break
       }
-      case 'cwMath': result.push(unit(q, 0, q.text.length, '\uFFFC')); break
+      case 'cwInline': case 'cwMath': result.push(unit(q, 0, q.text.length, '\uFFFC')); break
       default: throw new UnmappedSyntax('unmapped inline')
     }
   }
@@ -154,21 +154,22 @@ function listItemBody(raw: Projection): { projection: Projection; barriers: { fr
   return { projection: slice(raw, ranges), barriers }
 }
 
-export interface MarkdownListProjection { text: string; projection: Projection; barriers: { from: number }[]; depth: number; ordered: boolean }
+export interface MarkdownListProjection { text: string; projection: Projection; barriers: { from: number }[]; depth: number; ordered: boolean; ordinal?: number }
 /** Markdown's nested list is a read/edit projection; its indentation stays in source, never in the Flow schema. */
 export function projectMarkdownList(token: Tokens.List, offset = 0): MarkdownListProjection[] {
   const root: Projection = { text: token.raw, positions: Array.from({ length: token.raw.length }, (_, i) => offset + i) }
   const result: MarkdownListProjection[] = []
   function visit(list: Tokens.List, source: Projection, depth: number) {
     let at = 0
-    for (const item of list.items) {
+    for (const [index, item] of list.items.entries()) {
+      const marker = list.ordered ? { ordinal: Number(list.start || 1) + index } : {}
       while (source.text[at] === '\n') at++
       if (source.text.slice(at, at + item.raw.length) !== item.raw) throw new UnmappedSyntax('list item span')
       const itemProjection = cut(source, at, at + item.raw.length); at += item.raw.length
       const body = listItemBody(itemProjection)
-      if (!body) { result.push({ text: item.text, projection: { text: '', positions: [] }, barriers: [], depth, ordered: list.ordered }); continue }
+      if (!body) { result.push({ text: item.text, projection: { text: '', positions: [] }, barriers: [], depth, ordered: list.ordered, ...marker }); continue }
       const nested = item.tokens.filter(value => value.type === 'list') as Tokens.List[]
-      if (!nested.length) { result.push({ text: body.projection.text, ...body, depth, ordered: list.ordered }); continue }
+      if (!nested.length) { result.push({ text: body.projection.text, ...body, depth, ordered: list.ordered, ...marker }); continue }
       let nestedAt = 0
       const spans = nested.map(child => {
         const start = body.projection.text.indexOf(child.raw.replace(/\n+$/, ''), nestedAt)
@@ -178,7 +179,7 @@ export function projectMarkdownList(token: Tokens.List, offset = 0): MarkdownLis
       })
       if (body.projection.text.slice(nestedAt).trim()) throw new UnmappedSyntax('text after nested list')
       const own = blockBody(cut(body.projection, 0, spans[0].start))
-      result.push({ text: own.text, projection: own, barriers: body.barriers.filter(b => b.from < (own.positions.at(-1) ?? 0)), depth, ordered: list.ordered })
+      result.push({ text: own.text, projection: own, barriers: body.barriers.filter(b => b.from < (own.positions.at(-1) ?? 0)), depth, ordered: list.ordered, ...marker })
       for (const span of spans) {
         const childSource = cut(body.projection, span.start, span.end)
         // Marked may retain a final newline consumed by its parent; coordinates of all text remain exact.
@@ -196,7 +197,7 @@ export function mapMarkdownBlock(token: Token, block: DocumentBlock, offset: num
   const p: Projection = { text: token.raw, positions: Array.from({ length: token.raw.length }, (_, i) => offset + i) }
   const slots = documentTextSlots(block)
   const map: MarkdownBlockMap = { blockId: block.id, from: offset, to: offset + blockBody(p).text.length, keys: slots.map(slot => slot.key), slots: [] }
-  const add = (key: string, source: Projection, barriers: readonly { from: number }[] = [], table = false, extra: { depth?: number; ordered?: boolean } = {}) => {
+  const add = (key: string, source: Projection, barriers: readonly { from: number }[] = [], table = false, extra: { depth?: number; ordered?: boolean; ordinal?: number } = {}) => {
     // A token can become a block that carries no such slot (an image-only paragraph becomes
     // a media block); it owns no text here, so there is nothing to map or to fail on.
     const slot = slots.find(slot => slot.key === key)
@@ -236,7 +237,7 @@ export function mapMarkdownBlock(token: Token, block: DocumentBlock, offset: num
   } else if (token.type === 'list' && block.type === 'list') {
     for (const [index, item] of projectMarkdownList(token as Tokens.List, offset).entries()) {
       const id = block.items[index]?.id
-      if (id !== undefined) add(`item:${id}`, omit(item.projection, /<!--cw:item\s+[\s\S]*?-->/g), item.barriers, false, { depth: item.depth, ordered: item.ordered })
+      if (id !== undefined) add(`item:${id}`, omit(item.projection, /<!--cw:item\s+[\s\S]*?-->/g), item.barriers, false, { depth: item.depth, ordered: item.ordered, ...(item.ordinal === undefined ? {} : { ordinal: item.ordinal }) })
     }
   } else if (token.type === 'table' && block.type === 'table') {
     map.table = { rows: block.rows.map(row => row.id), columns: block.columns.map(column => column.id) }

@@ -1,9 +1,11 @@
+import type { ComponentAuthorSpot } from '../../shared/contracts/component-platform/runtime'
+import { equalComponentValue } from '../../core/drivers/courseV10Operations'
 import type { SlideEditorView } from '../../core/tools/slideLayerView'
 import { useSyncExternalStore } from 'react'
 import type { DocumentContextSelection } from '../../shared/document/ports'
 import type { DocumentSnapshot } from '../../shared/workbench/document'
 import type { ExecutionDocumentReference, ExecutionSelectionTarget } from '../../shared/workbench/executionDesktop'
-import { containsTarget, readTarget, prepareExecutionContentOutput, flowTextSelectionTarget } from '../../core/tools/ToolTargets'
+import { containsTarget, readTarget, courseAuthorFieldTarget, prepareExecutionContentOutput, flowTextSelectionTarget,flowCellSelectionTargets } from '../../core/tools/ToolTargets'
 import type { ExecutionContentOutput } from '../../shared/workbench/execution'
 import { isCourseInstanceRange, type CourseInstanceTarget } from '../../core/tools/ToolTargets'
 import type { UserQuestionView } from '../../shared/workbench/userQuestion'
@@ -33,7 +35,12 @@ export function captureCourseObjectSelection(snapshot: DocumentSnapshot, locatio
 export function captureCourseInstanceSelection(snapshot: DocumentSnapshot, surfaceId: string, instanceIds: readonly string[], label = `所选 ${instanceIds.length} 个对象`, stateId?: string | null): SelectionCapture {
   return captureSelection(snapshot, instanceIds.map(instanceId => ({ kind: 'course-instance', surfaceId, instanceId, stateId: stateId ?? null })), label)
 }
-export function captureCourseInstanceRange(snapshot: DocumentSnapshot, surfaceId: string, instanceId: string, dataPath: readonly string[], from: number, to: number, label = '所选文字', stateId?: string | null, fieldScope: 'data' | 'flowLayout' = 'data'): SelectionCapture {
+export function captureCourseAuthorField(snapshot: DocumentSnapshot, surfaceId: string, spot: ComponentAuthorSpot, stateId?: string | null): SelectionCapture {
+  const target = courseAuthorFieldTarget(surfaceId, spot, stateId)
+  if (!equalComponentValue(readTarget(snapshot.model, target), spot.initialValue)) throw new Error('所选内部字段已改变，请重新选择')
+  return captureSelection(snapshot, [target], spot.kind === 'text' ? '所选内部文字' : '所选内部图片')
+}
+export function captureCourseInstanceRange(snapshot: DocumentSnapshot, surfaceId: string, instanceId: string, dataPath: readonly string[], from: number, to: number, label = '所选文字', stateId?: string | null, fieldScope: 'data' | 'flowLayout' | 'authoring' = 'data'): SelectionCapture {
   return captureSelection(snapshot, [{ kind: 'course-instance', surfaceId, instanceId, stateId: stateId ?? null, ...(fieldScope !== 'data' ? { fieldScope } : {}), dataPath: [...dataPath], from, to }], label)
 }
 /** Composition addresses belong to the software; an element card freezes only the selected subtree. */
@@ -73,6 +80,7 @@ export function captureFlowSelection(snapshot: DocumentSnapshot, surfaceId: stri
   const selected = value.selection
   if (selected.revision !== String(snapshot.revision)) throw new Error('正文选区已改变，请重新选择。')
   if (selected.kind === 'object') return captureFlowBlock(snapshot, surfaceId, selected.blockId, value.label)
+  if(selected.kind==='cells')return captureSelection(snapshot,flowCellSelectionTargets(snapshot.model,surfaceId,selected,stateId),value.label)
   if (selected.kind !== 'text') throw new Error('请选择一个明确的正文或文字范围。')
   return captureSelection(snapshot, [flowTextSelectionTarget(snapshot.model, surfaceId, selected, stateId)], value.label)
 }

@@ -12,6 +12,7 @@ import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { HTML_PROGRAM_DEFINITION } from '../../src/components/web/data'
 import type { ComponentAuthorRecord } from '../../src/shared/contracts/component-platform'
 import type { DocumentOperation } from '../../src/shared/workbench/document'
+import type { CommittedDocumentOperation } from '../../src/core/documents/DocumentSession'
 
 async function center(locator: Locator) { const box = await locator.boundingBox(); if (!box) throw Error('Visible canvas control required'); return { x: box.x + box.width / 2, y: box.y + box.height / 2 } }
 it('F05 edits actual current Slide author spots through one Web runtime and canonical history without a dialog or program reset', async () => {
@@ -23,9 +24,9 @@ it('F05 edits actual current Slide author spots through one Web runtime and cano
     project.surfaces = [{ id: 'slide', kind: 'slide', title: '内容编辑', childIds: ['canvas-content'], designSize: { width: 1000, height: 620 } }]
     const html = '<!doctype html><html><head><style>body{margin:0;position:relative;height:620px;background:white;font:18px sans-serif}#free{position:absolute;left:100px;top:240px;width:240px;height:100px;margin:0;background:#fff1cc;box-sizing:border-box}main{display:flex;gap:16px;padding:30px}section{flex:0 0 180px;height:100px;background:#e9f2ff}#counter{position:absolute;left:100px;top:420px}</style></head><body><p id="free" data-cw-author-key="free">Editable content</p><main><section>Card a</section><section>Card b</section><section>Card c</section></main><button id="counter">count:0</button><script>window.counterCreates=(window.counterCreates||0)+1;let count=0;document.getElementById("counter").onclick=()=>document.getElementById("counter").textContent="count:"+(++count)</script></body></html>'
     const record: ComponentAuthorRecord = { kind: 'text', binding: { kind: 'dom', path: [{ tag: 'body', index: 1 }, { tag: 'p', index: 0, attributes: { id: 'free', 'data-cw-author-key': 'free' } }], textIndex: 0, baseline: 'Editable content' }, overrides: {} }
-    project.instances['canvas-content'] = { id: 'canvas-content', definitionId: HTML_PROGRAM_DEFINITION.id, data: { html, authoringRecords: JSON.parse(JSON.stringify({ free: record })) }, frame: { width: 1000, height: 620, transform: [1, 0, 0, 1, 0, 0] } }
+    project.instances['canvas-content'] = { id: 'canvas-content', definitionId: HTML_PROGRAM_DEFINITION.id, data: { html }, authoring: { records: { free: record } }, frame: { width: 1000, height: 620, transform: [1, 0, 0, 1, 0, 0] } }
     const initial = { kind: 'course-v10' as const, project, resources: { assets: {}, components: {} } }, session = await registry.create(initial, 'canvas.glx')
-    const commits: DocumentOperation[] = []; session.subscribeCommits(commit => commits.push(commit.operation))
+    const commits: CommittedDocumentOperation['operation'][] = []; session.subscribeCommits(commit => commits.push(commit.operation))
     const bundle = buildSync({ stdin: { contents: "export * from './tests/helpers/currentCourseBrowserHarness'", resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, write: false, format: 'iife', globalName: 'CurrentCourse', platform: 'browser',
       loader: { '.css': 'empty', '.svg': 'dataurl', '.png': 'dataurl', '.woff': 'dataurl', '.woff2': 'dataurl', '.ttf': 'dataurl' }, define: { 'process.env.NODE_ENV': '"test"' } }).outputFiles[0].text
     const page = await browser.newPage({ viewport: { width: 1100, height: 850 } }), pageErrors: string[] = []; page.setDefaultTimeout(10_000); page.on('pageerror', error => pageErrors.push(error.message))

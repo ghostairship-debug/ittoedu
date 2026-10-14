@@ -54,9 +54,8 @@ export function createSlideLightEditingPort(owner: SlideLightEditingOwner) {
     if (!item) throw new Error('对象已不存在')
     const data = item.data && typeof item.data === 'object' && !Array.isArray(item.data) ? item.data as JsonObject : {}
     const appearance = data.appearance && typeof data.appearance === 'object' && !Array.isArray(data.appearance) ? data.appearance as JsonObject : {}
-    const key = target.editingProject.definitions[item.definitionId]?.implementation
     const professional = componentPropertiesView(item, target.editingProject.definitions[item.definitionId])
-    const commands = slideLightObjectCommands({ isText: key?.kind === 'builtin' && key.key === 'guoling.text', locked: componentIsLocked(target.editingProject,target.instanceId),
+    const commands = slideLightObjectCommands({ isText: professional.type === 'text', locked: componentIsLocked(target.editingProject,target.instanceId),
       clickBindable: Boolean(owner.runInteraction), sounds: owner.readSounds?.(target) ?? [], locations: target.editingProject.surfaces.map(surface => ({ id: surface.id, label: surface.title })) })
     return { target, commands, fontFamily: typeof appearance.fontFamily === 'string' ? appearance.fontFamily : null,
       lineSpacing: professional.type === 'text' ? professional.style.lineSpacing : null,

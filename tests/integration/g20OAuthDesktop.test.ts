@@ -75,18 +75,19 @@ it('real loopback login atomically saves current account and encrypted tokens, r
   const reopened = new ExecutionSettingsStore({ directory, encryption: port })
   expect((await reopened.read()).connections[0]).toEqual(status.connection)
   expect(await oauth.resolveCredential(status.connection.connection)).toEqual({ accountId: 'current-account', accessToken: token() })
-  let catalogRequests = 0
+  let catalogRequests = 0, emptyCatalog = false
   const catalog = new ExecutionSettingsDesktopService(store, async (url, init) => {
     catalogRequests++
     expect(String(url)).toBe('https://chatgpt.com/backend-api/codex/models?client_version=1.0.0')
     expect(init?.headers).toMatchObject({ Authorization: `Bearer ${token()}`, 'chatgpt-account-id': 'current-account' })
+    if (emptyCatalog) return Response.json({ models: [] })
     return Response.json({ models: [{ slug: 'gpt-6-sol', display_name: 'GPT 6 Sol', description: '日常工作',
       supported_reasoning_efforts: [{ reasoning_effort: 'none' }, { reasoning_effort: 'minimal' },
         { reasoning_effort: 'low', description: '更快' }, { reasoning_effort: 'medium' },
         { reasoning_effort: 'high', description: '更深' }, { reasoning_effort: 'xhigh' },
         { reasoning_effort: 'max' }, { reasoning_effort: 'imaginary' }], default_reasoning_effort: 'low' },
     { slug: 'gpt-6-luna', supported_reasoning_efforts: [] }, { slug: 'gpt-6-sol' }] })
-  }, oauth, '1.0.0')
+  }, oauth)
   const liveCatalog = await catalog.operate({ type: 'discover-models', id: saved.connection.id, revision: 2 })
   expect(liveCatalog).toMatchObject({
     models: [{ id: 'gpt-6-luna', reasoningEfforts: [] }, { id: 'gpt-6-sol', displayName: 'GPT 6 Sol', description: '日常工作',
@@ -97,14 +98,82 @@ it('real loopback login atomically saves current account and encrypted tokens, r
   expect((await reopened.cachedModelCatalog(saved.connection.id, 2))?.models[1]?.reasoningEfforts)
     .toEqual((liveCatalog as { models: { reasoningEfforts?: unknown }[] }).models[1]?.reasoningEfforts)
   expect(catalogRequests).toBe(1)
+  emptyCatalog = true
+  await expect(catalog.operate({ type: 'discover-models', id: saved.connection.id, revision: 2 }))
+    .rejects.toMatchObject({ code: 'model-discovery-empty' })
+  expect((await reopened.cachedModelCatalog(saved.connection.id, 2))?.models.map(model => model.id))
+    .toEqual(['gpt-6-luna', 'gpt-6-sol'])
+  emptyCatalog = false
+  expect(await catalog.operate({ type: 'discover-models', id: saved.connection.id, revision: 2 }))
+    .toMatchObject({ source: 'live', models: [{ id: 'gpt-6-luna' }, { id: 'gpt-6-sol' }] })
+  expect(catalogRequests).toBe(3)
+  const discovered = (liveCatalog as { models: import('../../src/shared/workbench/executionSettingsDesktop').DiscoveredModel[] }).models
+  emptyCatalog = true
+  expect(await catalog.operate({ type: 'oauth-login-status', loginId: started.loginId }))
+    .toMatchObject({ status: 'connected', modelDirectoryError: expect.stringContaining('空模型目录') })
+  expect((await store.read()).profile.roles.conversation).toBeNull()
+  emptyCatalog = false
+  expect(await catalog.operate({ type: 'oauth-login-status', loginId: started.loginId }))
+    .toMatchObject({ status: 'connected' })
+  expect((await store.read()).profile.roles).toMatchObject({ conversation: { model: 'gpt-6-sol' },
+    vision: null, compression: { model: 'gpt-6-luna' },
+    imageGenerate: { model: 'gpt-image-2.5-flare' }, imageEdit: { model: 'gpt-image-2.5-flare' } })
+  const configured = (await store.read()).profile
+  await store.saveProfile({ expectedRevision: configured.revision, roles: { ...configured.roles,
+    conversation: { connectionId: saved.connection.id, model: 'manual-model', parameters: { temperature: 0.4 } } } })
+  const manualProfile = (await store.read()).profile
+  await store.applyOAuthModelDefaults(saved.connection.id, 2, discovered)
+  expect((await store.read()).profile).toEqual(manualProfile)
   expect((await store.read()).connections[0]?.connection.capabilities.tools).toBe('unknown')
   now += 70_000; await Promise.all([oauth.resolveCredential(status.connection.connection), oauth.resolveCredential(status.connection.connection)])
   expect(refreshes).toBe(1)
   await service.operate({ type: 'revoke-connection', id: saved.connection.id })
   await expect(oauth.resolveCredential(status.connection.connection)).rejects.toMatchObject({ code: 'credential-revoked' })
   await expect(catalog.operate({ type: 'discover-models', id: saved.connection.id, revision: 2 })).rejects.toMatchObject({ code: 'credential-revoked' })
-  expect(catalogRequests).toBe(1)
+  expect(catalogRequests).toBe(5)
   expect((await reopened.read()).connections[0]).toMatchObject({ revoked: true, hasCredential: false })
+})
+
+async function imageDefaultsFixture() {
+  const { store, saved } = await setup()
+  const target = await store.reserveOAuthLogin(saved.connection.id, saved.connection.revision)
+  expect(await store.compareAndSetOAuthCredential(target.credentialRef, 0, { connectionId: target.connectionId,
+    revision: target.revision, accountId: 'current-account', accessToken: 'fixture-access', refreshToken: 'fixture-refresh',
+    expiresAt: Date.now() + 3_600_000 })).toBe(true)
+  return { store, connection: (await store.read()).connections[0]!.connection }
+}
+
+it.each([
+  { imageModels: ['gpt-image-2', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare'], expected: 'gpt-image-2.5-flare' },
+  { imageModels: ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2'], expected: 'gpt-image-2.5-flare' },
+  { imageModels: ['gpt-image-2', 'gpt-image-2.5-sunburst'], expected: 'gpt-image-2.5-sunburst' },
+  { imageModels: ['gpt-image-2'], expected: 'gpt-image-2' },
+  { imageModels: [], expected: 'gpt-image-2.5-flare' },
+])('chooses OAuth image defaults $expected from $imageModels independently of directory order', async ({ imageModels, expected }) => {
+  const { store, connection } = await imageDefaultsFixture()
+  await store.applyOAuthModelDefaults(connection.id, connection.revision,
+    ['gpt-6-sol', 'gpt-6-luna', ...imageModels].map(id => ({ id })))
+  expect((await store.read()).profile.roles).toMatchObject({ conversation: { model: 'gpt-6-sol' },
+    compression: { model: 'gpt-6-luna' }, imageGenerate: { connectionId: connection.id, model: expected },
+    imageEdit: { connectionId: connection.id, model: expected } })
+  expect((await store.snapshot('imageGenerate')).connection).toMatchObject({ id: connection.id,
+    accountId: 'current-account', auth: { kind: 'oauth' }, billing: { kind: 'subscription' } })
+})
+
+it('preserves all saved OAuth model choices, including a legacy image model and separate editing choice', async () => {
+  const { store, connection } = await imageDefaultsFixture()
+  await store.saveProfile({ expectedRevision: 0, roles: {
+    conversation: { connectionId: connection.id, model: 'manual-main', parameters: { temperature: 0.4 } },
+    compression: { connectionId: connection.id, model: 'manual-compression' }, vision: null,
+    imageGenerate: { connectionId: connection.id, model: 'gpt-image-2' },
+    imageEdit: { connectionId: connection.id, model: 'manual-edit' },
+  } })
+  const saved = (await store.read()).profile
+  await store.applyOAuthModelDefaults(connection.id, connection.revision,
+    ['gpt-6-sol', 'gpt-6-luna', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'].map(id => ({ id })))
+  expect((await store.read()).profile).toEqual(saved)
+  expect((await store.snapshot('imageGenerate')).model).toBe('gpt-image-2')
+  expect((await store.snapshot('imageEdit')).model).toBe('manual-edit')
 })
 
 it('port collision and cancelled or configuration-stale login preserve saved metadata and cannot create credentials', async () => {

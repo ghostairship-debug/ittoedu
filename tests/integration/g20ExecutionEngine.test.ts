@@ -887,6 +887,94 @@ it('preserves incomplete project arguments locally without executing or replayin
   expect((await h.runs.read(started.runId))!.requests[0]!.argumentDrafts?.[0]!.argumentsText).toBe(prefix)
 })
 
+it('continues once after a completed empty final while retaining native history, usage and the single prior write', async () => {
+  let requests = 0
+  const emptyNative = { role: 'assistant' as const, content: '', reasoning_content: '准备继续处理当前工程', reasoning_signature: 'native-signature' }
+  const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {
+    requests++
+    if (requests === 1) {
+      const target = refsOf(request)[0]!.writable[0]!.target
+      yield complete(request, [{ id: 'write-once', name: 'text.replace', argumentsText: JSON.stringify({ target, content: 'NEW' }) }], '')
+    } else if (requests === 2) {
+      yield { ...complete(request, [], ''), assistant: emptyNative, usage: { inputTokens: 12, outputTokens: 7, raw: { prompt_tokens: 12, completion_tokens: 7 } } }
+    } else {
+      expect(request.messages).toContainEqual(emptyNative)
+      expect(request.messages.filter(message => message.role === 'tool')).toHaveLength(1)
+      yield complete(request, [], '修改已经完成。')
+    }
+  } }
+  const h = await fixture(provider), started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('completed')
+  expect(requests).toBe(3)
+  expect(final.requests.map(request => request.state)).toEqual(['completed', 'completed', 'completed'])
+  expect(final.requests[1]).toMatchObject({ finishReason: 'stop', inputTokens: 12, outputTokens: 7 })
+  expect(final.requests[1]).not.toHaveProperty('failure')
+  expect(final.messages[final.requests[1]!.assistantMessageIndex!]).toEqual(emptyNative)
+  expect(final.tools.map(tool => tool.call.name)).toEqual(['text.replace'])
+  expect(h.session.read()).toMatchObject({ revision: 1, undoDepth: 1, model: { source: '前文 NEW 后文' } })
+}, 10_000)
+
+it.each([undefined, 'pure-generation'] as const)('ends repeated empty finals clearly for retry safety %s without inventing request uncertainty', async retrySafety => {
+  let requests = 0
+  const provider: ModelProvider = { retrySafety, async *stream(request) {
+    requests++
+    yield { ...complete(request, [], ''), assistant: { role: 'assistant', content: '', reasoning_content: '只返回了思考' } }
+  } }
+  const h = await fixture(provider), started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('failed')
+  expect(final.failure?.code).toBe('model-empty-final')
+  expect(requests).toBe(retrySafety ? 2 : 1)
+  expect(final.requests.every(request => request.state === 'completed' && !request.failure)).toBe(true)
+  expect(final.tools).toEqual([])
+  expect(h.session.read()).toMatchObject({ revision: 0, undoDepth: 0 })
+}, 10_000)
+
+it('stops the completed-empty-final wait without sending a replacement generation', async () => {
+  let requests = 0
+  const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {
+    requests++
+    yield { ...complete(request, [], ''), assistant: { role: 'assistant', content: '', reasoning_content: '思考记录保留' } }
+  } }
+  const h = await fixture(provider), started = await h.engine.start(h.input)
+  await vi.waitFor(async () => expect((await h.events.readPage({ conversationId: h.input.conversationId, limit: 1000 })).events.some(event => event.data.label === '空回复，正在继续')).toBe(true))
+  await h.engine.stop(started.runId)
+  const final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('stopped')
+  expect(requests).toBe(1)
+  expect(final.requests[0]).toMatchObject({ state: 'completed', finishReason: 'stop' })
+  expect(final.requests[0]).not.toHaveProperty('failure')
+})
+
+it('applies accepted steering before ending repeated empty finals at the job-settlement boundary', async () => {
+  let requests = 0, paused = false
+  const entered = deferred(), release = deferred()
+  const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {
+    requests++
+    if (requests <= 2) yield complete(request, [], '')
+    else {
+      expect(request.messages).toContainEqual({ role: 'user', content: '按当前结果说明剩余事项' })
+      yield complete(request, [], '当前剩余事项已经说明。')
+    }
+  } }
+  const h = await fixture(provider)
+  const engineBoundary = h.engine as unknown as { waitForRunningJobs(...args: unknown[]): Promise<boolean> }
+  const originalWait = engineBoundary.waitForRunningJobs.bind(engineBoundary)
+  vi.spyOn(engineBoundary, 'waitForRunningJobs').mockImplementation(async (...args) => {
+    if (requests === 2 && !paused) { paused = true; entered.resolve(); await release.promise }
+    return originalWait(...args)
+  })
+  const started = await h.engine.start(h.input)
+  await entered.promise
+  const accepted = await h.engine.steer(started.runId, 'empty-final-adjustment', '按当前结果说明剩余事项')
+  expect(accepted.steering?.[0]).toMatchObject({ submissionId: 'empty-final-adjustment' })
+  release.resolve()
+  const final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('completed')
+  expect(requests).toBe(3)
+  expect(final.steering?.[0]?.messageIndex).toBeTypeOf('number')
+  expect(final.requests.every(request => request.state === 'completed' && !request.failure)).toBe(true)
+}, 10_000)
+
 it('stops both short and long same-task cooldowns without sending a replacement request', async () => {
   let requests = 0, retryAfterMs = 1000
   const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {

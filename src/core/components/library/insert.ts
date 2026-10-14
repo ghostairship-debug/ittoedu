@@ -1,10 +1,15 @@
 import type { ComponentLibraryEntry } from '../../../shared/contracts/component-platform/library'
 import type { ComponentEdit, ComponentOperationBatch } from '../../../shared/contracts/component-platform/operations'
 import type { ComponentContainer, ComponentImplementation, ComponentInstance, CourseProjectV10, JsonValue } from '../../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, isComponentVisibleAtSurface } from '../../../shared/contracts/component-platform/project'
 import { captureComponentOperation, equalComponentValue } from '../../drivers/courseV10Operations'
-import { componentAssetIds, rebindDeclaredTargets, rebindInteractionReferences, rebindProfessionalAssets, rebindWebAssets, sourceAssetIds, sourceModuleBindings } from './references'
+import { authoringAssetIds, componentAssetIds, rebindAuthoringAssets, rebindInteractionReferences, rebindProfessionalAssets, rebindWebAssets, sourceAssetIds, sourceModuleBindings } from './references'
 import type { LibraryDiagnostic, LibraryIdentityMap, LibraryInputValues, LibraryReferenceAdapter } from './types'
 import { rebindComponentLibraryImplementation } from './rebindSource'
+import { createProfessionalDocumentIdentityCopy } from './professionalCopy'
+import { extractComponentLibraryEntry } from './extract'
+import { componentInteractionDataSchema, createComponentInteractionCopyIdentities } from '../../../shared/componentInteractionData'
+import { remapComponentInputData } from '../../../components/input/authoring'
 
 export interface InsertLibraryOptions {
   container: ComponentContainer
@@ -15,6 +20,10 @@ export interface InsertLibraryOptions {
   surfaceBindings?: Readonly<Record<string, string>>
   inputs?: LibraryInputValues
   adapters?: Readonly<Record<string, LibraryReferenceAdapter>>
+  definitionsOnly?:boolean
+  /** Explicit selection of reusable object roots; descendants and behavior/resource closure follow. */
+  rootIds?: readonly string[]
+  surfaceIndex?: number
 }
 export interface LibraryInsertion { command: ComponentOperationBatch; rootIds: string[]; identities: LibraryIdentityMap; diagnostics: LibraryDiagnostic[] }
 
@@ -25,13 +34,19 @@ function setInput(data: JsonValue, path: string[], value: JsonValue): JsonValue 
     if (!target || typeof target !== 'object' || !Object.hasOwn(target, part)) throw new Error('库输入字段已不存在')
     target = (target as Record<string, JsonValue>)[part]
   }
-  if (!target || typeof target !== 'object' || path.some(part => ['__proto__', 'constructor', 'prototype'].includes(part))) throw new Error('库输入字段无效')
+  if (!target || typeof target !== 'object') throw new Error('库输入字段无效')
   Object.defineProperty(target, path.at(-1)!, { value: structuredClone(value), configurable: true, writable: true, enumerable: true })
   return data
 }
 
 /** Produces a single canonical batch. It never writes a project or owns history. */
 export function prepareComponentLibraryInsertion(project: CourseProjectV10, entry: ComponentLibraryEntry, options: InsertLibraryOptions): LibraryInsertion {
+  if (options.rootIds) {
+    const source: CourseProjectV10 = { schemaVersion: 10, id: entry.id, title: entry.title, revision: 0, definitions: entry.definitions,
+      instances: entry.example.instances, assets: entry.assets, surfaces: entry.surfaces ?? [{ id: 'library', kind: 'slide', title: entry.title, childIds: entry.example.rootIds }],
+      global: entry.global ?? { underlay: [], overlay: [] } }
+    entry = extractComponentLibraryEntry(source, entry.resources, { id: entry.id, title: entry.title, rootIds: [...options.rootIds], adapters: options.adapters }).entry
+  }
   // Missing bytes remain unresolved in the new namespace instead of resolving to an unrelated destination asset.
   const assetIds = new Set(Object.keys(entry.assets))
   const implementations = [...Object.values(entry.definitions).map(value => value.implementation),
@@ -39,11 +54,19 @@ export function prepareComponentLibraryInsertion(project: CourseProjectV10, entr
   for (const implementation of implementations) if (implementation?.kind === 'source') {
     for (const id of sourceAssetIds(implementation)) assetIds.add(id)
   }
-  for (const instance of Object.values(entry.example.instances)) {
+  for (const instance of options.definitionsOnly ? [] : Object.values(entry.example.instances)) {
     const definition = entry.definitions[instance.definitionId]
     if (definition) {
       for (const id of componentAssetIds(instance, definition)) assetIds.add(id)
       for (const id of options.adapters?.[instance.definitionId]?.references(instance, definition).assetIds ?? []) assetIds.add(id)
+    }
+  }
+  if (!options.definitionsOnly) for (const surface of entry.surfaces ?? []) for (const state of surface.presentation?.states ?? []) {
+    for (const [id, override] of Object.entries(state.overrides)) {
+      const instance = entry.example.instances[id], definition = instance && entry.definitions[instance.definitionId]
+      if (!instance || !definition) continue
+      for (const assetId of authoringAssetIds(override.authoring)) assetIds.add(assetId)
+      if (override.data !== undefined) for (const assetId of componentAssetIds({ ...instance, data: override.data }, definition)) assetIds.add(assetId)
     }
   }
   const diagnostics: LibraryDiagnostic[] = [...assetIds].filter(id => !entry.assets[id] || !entry.resources.assets[id])
@@ -59,25 +82,44 @@ export function prepareComponentLibraryInsertion(project: CourseProjectV10, entr
     occupied.add(id)
     return id
   }
+  const missingDependencies=[...new Set(implementations.flatMap(value=>value?.kind==='source' ? Object.values(sourceModuleBindings(value)):[]))].filter(id=>!Object.hasOwn(entry.definitions,id))
+  const primaryDefinitionId=entry.example.instances[entry.example.rootIds[0]]?.definitionId
+  const libraryIdentity=(definition:typeof entry.definitions[string])=>({packageId:entry.id,version:definition.library?.version ?? definition.version ?? '1.0.0'})
+  diagnostics.push(...missingDependencies.map(id=>({code:'missing-source-dependency',message:`保留待修复模块：${id}；副本不会绑定目的工程同名定义`})))
   const identities: LibraryIdentityMap = {
     instances: new Map(Object.keys(entry.example.instances).map(id => [id, allocate('instance')])),
-    definitions: new Map(Object.keys(entry.definitions).map(id => {
+    definitions: new Map([...Object.keys(entry.definitions).map(id => {
       const bound = options.definitionBindings?.[id]
       if (bound !== undefined) {
-        if (!project.definitions[bound]) throw new Error(`待替换组件定义不存在：${bound}`)
+        if (!Object.hasOwn(project.definitions,bound)) throw new Error(`待替换组件定义不存在：${bound}`)
         return [id, bound]
       }
       const implementation = entry.definitions[id].implementation
       // Rebinding an equal source definition would also change the destination's existing instances.
       const ownsReboundReferences = implementation.kind === 'source' && (implementation.workspace
         || Object.keys(sourceModuleBindings(implementation)).length > 0 || assetIds.size > 0)
-      return [id, !project.definitions[id] || !ownsReboundReferences
-        && equalComponentValue(project.definitions[id], entry.definitions[id]) ? id : allocate('definition')]
-    })),
+      const comparable={...entry.definitions[id],...(id===primaryDefinitionId ? {library:libraryIdentity(entry.definitions[id])}:{})}
+      return [id, !Object.hasOwn(project.definitions,id) || !ownsReboundReferences
+        && equalComponentValue(project.definitions[id], comparable) ? id : allocate('definition')]
+    }) as [string,string][],...missingDependencies.map(id=>[id,allocate('definition')] as [string,string])]),
     assets: new Map([...assetIds].map(id => [id, allocate('asset')])),
     components: new Map(Object.keys(entry.resources.components).map(id => [id, allocate('component')])),
-    surfaces: new Map(Object.entries(options.surfaceBindings ?? {})),
+    surfaces: new Map([...Object.entries(options.surfaceBindings ?? {}), ...(options.definitionsOnly ? [] : entry.surfaces ?? []).map(surface => [surface.id, allocate('instance')] as [string, string])]),
   }
+  const stateIds = new Map((entry.surfaces ?? []).flatMap(surface => [...surface.presentation?.states ?? [], ...surface.spatial?.frames ?? []]).map(state => [state.id, allocate('instance')]))
+  const stateId = (id: string) => stateIds.get(id) ?? id
+  const rules = new Map<string, string>(), actions = new Map<string, string>(), stateKeys = new Map<string, string>()
+  const collectRules = (data: JsonValue) => {
+    const copy = createComponentInteractionCopyIdentities(data)
+    for (const [id, next] of copy.rules) if (!rules.has(id)) rules.set(id, next)
+    for (const [id, next] of copy.actions) if (!actions.has(id)) actions.set(id, next)
+  }
+  for (const original of Object.values(entry.example.instances)) if (componentDefinitionBuiltinKey(entry.definitions[original.definitionId]) === 'guoling.interactions') {
+    collectRules(original.data)
+    for (const surface of entry.surfaces ?? []) for (const state of surface.presentation?.states ?? []) if (state.overrides[original.id]?.data !== undefined) collectRules(state.overrides[original.id]!.data!)
+  }
+  for (const declaration of entry.logic?.courseState ?? []) stateKeys.set(declaration.key,
+    project.logic?.courseState.some(existing => existing.key === declaration.key) ? allocate('instance') : declaration.key)
   const implementation = (original: ComponentImplementation): ComponentImplementation => {
     if (original.kind === 'builtin') return structuredClone(original)
     if (original.workspace && !Object.hasOwn(entry.resources.components[original.workspace.ownerId] ?? {}, original.workspace.entry)) {
@@ -91,7 +133,8 @@ export function prepareComponentLibraryInsertion(project: CourseProjectV10, entr
     files: Object.fromEntries(Object.entries(files).map(([path, bytes]) => [path, Uint8Array.from(bytes)])),
   })
   for (const original of Object.values(entry.definitions)) {
-    const definition = { ...structuredClone(original), id: identities.definitions.get(original.id)!, implementation: implementation(original.implementation) }
+    const definition = { ...structuredClone(original), id: identities.definitions.get(original.id)!, implementation: implementation(original.implementation),
+      ...(primaryDefinitionId===original.id ? {library:libraryIdentity(original)}:{}) }
     if (!equalComponentValue(project.definitions[definition.id], definition)) edits.push({ type: 'definition.set', definition })
   }
   for (const original of Object.values(entry.assets)) {
@@ -110,34 +153,81 @@ export function prepareComponentLibraryInsertion(project: CourseProjectV10, entr
   }
   const surfaceTarget = (id: string) => {
     const mapped = identities.surfaces.get(id)
-    if (!mapped || !project.surfaces.some(surface => surface.id === mapped)) throw new Error(`请绑定实际表面目标：${id}`)
+    if (!mapped || !entry.surfaces?.some(surface => surface.id === id) && !project.surfaces.some(surface => surface.id === mapped)) throw new Error(`请绑定实际表面目标：${id}`)
     return mapped
   }
-  const instances: ComponentInstance[] = Object.values(entry.example.instances).map(original => {
-    let instance: ComponentInstance = { ...structuredClone(original), id: identities.instances.get(original.id)!, definitionId: identities.definitions.get(original.definitionId)! }
+  const unresolvedInstances = new Map<string, string>(), unresolvedSurfaces = new Map<string, string>()
+  const externalInstance = (id: string) => {
+    if (!project.instances[id]) return id
+    if (!unresolvedInstances.has(id)) unresolvedInstances.set(id, allocate('instance'))
+    return unresolvedInstances.get(id)!
+  }
+  const externalSurface = (id: string) => {
+    if (!project.surfaces.some(surface => surface.id === id)) return id
+    if (!unresolvedSurfaces.has(id)) unresolvedSurfaces.set(id, allocate('instance'))
+    return unresolvedSurfaces.get(id)!
+  }
+  const rebindData = (original: ComponentInstance): JsonValue => {
+    const key = componentDefinitionBuiltinKey(entry.definitions[original.definitionId])
+    if (key === 'guoling.input') return remapComponentInputData(original.data, { fromInstanceId: original.id, toInstanceId: identities.instances.get(original.id)!, rules, stateKeys })
+    if (key === 'guoling.navigation' && original.data && typeof original.data === 'object' && !Array.isArray(original.data) && Array.isArray(original.data.buttons)) {
+      return { ...original.data, buttons: original.data.buttons.map(button => {
+        if (!button || typeof button !== 'object' || Array.isArray(button) || !button.action || typeof button.action !== 'object' || Array.isArray(button.action)) return button
+        const action = button.action
+        if (action.type !== 'scene.go' && action.type !== 'location.go') return button
+        const field = action.type === 'scene.go' ? 'sceneId' : 'locationId', id = action[field]
+        if (typeof id !== 'string') return button
+        if (!identities.surfaces.has(id)) diagnostics.push({ code: 'surface-binding-required', message: `导航尚未绑定目标页面：${id}`, instanceId: original.id })
+        return { ...button, action: { ...action, [field]: identities.surfaces.has(id) ? surfaceTarget(id) : externalSurface(id),
+          ...(typeof action.targetStateId === 'string' ? { targetStateId: stateId(action.targetStateId) } : {}) } }
+      }) }
+    }
+    return structuredClone(original.data)
+  }
+  const professionalCopy=createProfessionalDocumentIdentityCopy(identities.instances)
+  for(const original of options.definitionsOnly ? [] : Object.values(entry.example.instances))professionalCopy(structuredClone(original.data),componentDefinitionBuiltinKey(entry.definitions[original.definitionId]),original.id,true)
+  const copyInstance = (original: ComponentInstance): ComponentInstance => {
+    let instance: ComponentInstance = { ...structuredClone(original), data: rebindData(original), id: identities.instances.get(original.id)!, definitionId: identities.definitions.get(original.definitionId)! }
     if (!instance.definitionId) throw new Error(`库条目缺少定义：${original.definitionId}`)
-    instance.data = rebindDeclaredTargets(rebindProfessionalAssets(instance.data, identities), instanceTarget, surfaceTarget)
+    const key=componentDefinitionBuiltinKey(entry.definitions[original.definitionId])
+    if(key)instance.data = rebindProfessionalAssets(instance.data, identities,key)
+    instance.data=professionalCopy(instance.data,key,original.id)
     instance = rebindInteractionReferences(instance, entry.definitions[original.definitionId], id => {
       if (identities.instances.has(id) || options.targetBindings?.[id]) return instanceTarget(id)
       diagnostics.push({ code: 'target-binding-required', instanceId: instance.id, message: `互动尚未绑定目标对象：${id}` })
-      return id
+      return externalInstance(id)
     }, id => {
       if (identities.surfaces.has(id)) return surfaceTarget(id)
       diagnostics.push({ code: 'surface-binding-required', instanceId: instance.id, message: `互动尚未绑定目标页面：${id}` })
-      return id
-    })
+      return externalSurface(id)
+    }, { rules, actions, stateKeys })
+    if (key === 'guoling.interactions') {
+      const data = componentInteractionDataSchema.parse(instance.data)
+      for (const rule of data.rules) {
+        if (rule.trigger.type === 'presentation.enter') rule.trigger.stateId = stateId(rule.trigger.stateId)
+        for (const condition of rule.conditions) if (condition.type === 'presentation.in') condition.stateIds = condition.stateIds.map(stateId)
+        for (const { action } of rule.actions) {
+          if (action.type === 'presentation.set') action.stateId = stateId(action.stateId)
+          if (action.type === 'scene.go' && action.targetStateId) action.targetStateId = stateId(action.targetStateId)
+        }
+      }
+      instance.data = JSON.parse(JSON.stringify(data)) as JsonValue
+    }
     instance = rebindWebAssets(instance, entry.definitions[original.definitionId], identities)
     if (original.visibility) instance.visibility = { ...original.visibility, surfaceIds: original.visibility.surfaceIds.map(id => {
       if (identities.surfaces.has(id)) return surfaceTarget(id)
       if (original.visibility!.mode !== 'all') diagnostics.push({ code: 'surface-binding-required', instanceId: instance.id,
         message: `可见范围尚未绑定目标页面：${id}` })
-      return id
+      return externalSurface(id)
     }) }
     const anchor = original.flowPlacement?.paragraphAnchor
     if (anchor) {
       if (identities.instances.has(anchor.blockId) || options.targetBindings?.[anchor.blockId]) {
         instance.flowPlacement = { ...original.flowPlacement!, paragraphAnchor: { ...anchor, blockId: instanceTarget(anchor.blockId) } }
-      } else diagnostics.push({ code: 'anchor-binding-required', instanceId: instance.id, message: `随段落对象尚未绑定目标段落：${anchor.blockId}` })
+      } else {
+        diagnostics.push({ code: 'anchor-binding-required', instanceId: instance.id, message: `随段落对象尚未绑定目标段落：${anchor.blockId}` })
+        instance.flowPlacement = { ...original.flowPlacement!, paragraphAnchor: { ...anchor, blockId: externalInstance(anchor.blockId) } }
+      }
     }
     if (original.childIds) instance.childIds = original.childIds.map(id => {
       const mapped = identities.instances.get(id)
@@ -147,20 +237,84 @@ export function prepareComponentLibraryInsertion(project: CourseProjectV10, entr
     if (original.implementationOverride) instance.implementationOverride = implementation(original.implementationOverride)
     if (original.attachments) instance.attachments = original.attachments.map(attachment => ({
       instanceId: instanceTarget(attachment.instanceId),
-      target: attachment.target.kind === 'instance' ? { kind: 'instance', instanceId: instanceTarget(attachment.target.instanceId) }
+      target: attachment.target.kind === 'text-range' ? { ...attachment.target, instanceId: instanceTarget(attachment.target.instanceId), rangeId: professionalCopy.identity(attachment.target.rangeId), dataPath: professionalCopy.path(attachment.target.dataPath) } : attachment.target.kind === 'instance' ? { kind: 'instance', instanceId: instanceTarget(attachment.target.instanceId) }
         : attachment.target.kind === 'surface' ? { kind: 'surface', surfaceId: surfaceTarget(attachment.target.surfaceId) } : { kind: 'project' },
     }))
     // Definition-specific source/data references remain under their real consumer's adapter.
     instance = options.adapters?.[original.definitionId]?.rebind(instance, identities) ?? instance
     for (const input of entry.inputs ?? []) if (input.instanceId === original.id && options.inputs && Object.hasOwn(options.inputs, input.role)) instance.data = setInput(instance.data, input.path, options.inputs[input.role])
     return instance
-  })
-  const rootIds = entry.example.rootIds.map(id => {
+  }
+  const instances: ComponentInstance[] = (options.definitionsOnly ? [] : Object.values(entry.example.instances)).map(copyInstance)
+  const rootIds = (options.definitionsOnly ? [] : entry.example.rootIds).map(id => {
     const mapped = identities.instances.get(id)
     if (!mapped) throw new Error(`库条目缺少根对象：${id}`)
     return mapped
   })
-  edits.push({ type: 'instance.insert', container: structuredClone(options.container), index: options.index, instances, rootIds })
+  if (!options.definitionsOnly && entry.surfaces?.length) {
+    const copyBackground = (background: typeof project.background) => background ? { ...background,
+      ...(background.assetId ? { assetId: identities.assets.get(background.assetId) ?? background.assetId } : {}) } : undefined
+    const destinationSurfaceId = options.container.kind === 'surface' ? options.container.surfaceId : undefined
+    let surfaceIndex = options.surfaceIndex ?? (destinationSurfaceId
+      ? project.surfaces.findIndex(surface => surface.id === destinationSurfaceId) + 1 : project.surfaces.length)
+    const scopedRoots = new Set((entry.global?.underlay ?? []).concat(entry.global?.overlay ?? []))
+    let remainingInstances = instances
+    const insert = (container: ComponentContainer, index: number, originalRoots: string[]) => {
+      if (!originalRoots.length && !remainingInstances.length) return
+      edits.push({ type: 'instance.insert', container, index, instances: remainingInstances, rootIds: originalRoots.map(instanceTarget) })
+      remainingInstances = []
+    }
+    for (const original of entry.surfaces) {
+      const surface = { ...structuredClone(original), id: surfaceTarget(original.id), childIds: [], background: copyBackground(original.background) }
+      if (surface.presentation) {
+        surface.presentation.initialStateId = surface.presentation.initialStateId ? stateId(surface.presentation.initialStateId) : surface.presentation.initialStateId
+        surface.presentation.thumbnailStateId = surface.presentation.thumbnailStateId ? stateId(surface.presentation.thumbnailStateId) : surface.presentation.thumbnailStateId
+        surface.presentation.states = surface.presentation.states.map(state => ({ ...state, id: stateId(state.id), background: copyBackground(state.background),
+          overrides: Object.fromEntries(Object.entries(state.overrides).map(([id, override]) => {
+            const source = entry.example.instances[id]
+            if (!source) { diagnostics.push({ code: 'target-binding-required', message: `展示状态目标未提炼：${id}` }); return [] }
+            return [instanceTarget(id), { ...override, ...(override.data === undefined ? {} : { data: copyInstance({ ...source, data: override.data }).data }),
+              ...(override.authoring === undefined ? {} : { authoring: rebindAuthoringAssets(override.authoring, identities) }) }]
+          }).filter(value => value.length)), ...(state.order ? { order: state.order.map(instanceTarget) } : {}) }))
+      }
+      if (surface.spatial) {
+        const spatial = surface.spatial, pathIds = new Map((spatial.paths ?? []).map(path => [path.id, allocate('instance')]))
+        if (spatial.defaultPathId) spatial.defaultPathId = pathIds.get(spatial.defaultPathId)!
+        spatial.frames = spatial.frames.map(frame => ({ ...frame, id: stateId(frame.id), ...(frame.targetInstanceId ? { targetInstanceId: instanceTarget(frame.targetInstanceId) } : {}) }))
+        spatial.paths = spatial.paths?.map(path => ({ ...path, id: pathIds.get(path.id)!, frameIds: path.frameIds.map(stateId), ...(path.instanceIds ? { instanceIds: path.instanceIds.map(instanceTarget) } : {}) }))
+        spatial.relations = spatial.relations?.map(relation => ({ ...relation, id: allocate('instance'), sourceInstanceId: instanceTarget(relation.sourceInstanceId), targetInstanceId: instanceTarget(relation.targetInstanceId) }))
+        spatial.semanticZoom = spatial.semanticZoom?.map(rule => ({ ...rule, id: allocate('instance'), instanceIds: rule.instanceIds.map(instanceTarget) }))
+      }
+      edits.push({ type: 'surface.insert', surface, index: surfaceIndex++ })
+      original.childIds.forEach(id => scopedRoots.add(id))
+      insert({ kind: 'surface', surfaceId: surface.id }, 0, original.childIds)
+    }
+    for (const plane of ['underlay', 'overlay'] as const) {
+      const roots = entry.global?.[plane] ?? []
+      for (const id of roots) {
+        const instance = instances.find(value => value.id === instanceTarget(id))
+        if (instance) instance.visibility = { mode: 'include', surfaceIds: entry.surfaces
+          .filter(surface => isComponentVisibleAtSurface({ ...entry.example.instances[id], visible: true }, surface.id)).map(surface => surfaceTarget(surface.id)) }
+      }
+      insert({ kind: 'global', plane }, project.global[plane].length, roots)
+    }
+    const extra = entry.example.rootIds.filter(id => !scopedRoots.has(id))
+    insert({ kind: 'surface', surfaceId: surfaceTarget(entry.surfaces[0].id) }, entry.surfaces[0].childIds.length, extra)
+    if (entry.logic) {
+      const logic = structuredClone(project.logic ?? { courseState: [], navigationGuards: [] })
+      logic.courseState.push(...entry.logic.courseState.map(declaration => ({ ...declaration, key: stateKeys.get(declaration.key)! })))
+      for (const guard of entry.logic.navigationGuards) {
+        if (!guard.toSurfaceIds.every(id => identities.surfaces.has(id)) || guard.fromSurfaceIds?.some(id => !identities.surfaces.has(id))) {
+          diagnostics.push({ code: 'surface-binding-required', message: `导航条件“${guard.message}”包含未绑定页面，未将其指向目标工程同名页面。` }); continue
+        }
+        logic.navigationGuards.push({ ...guard, id: allocate('instance'), toSurfaceIds: guard.toSurfaceIds.map(surfaceTarget),
+          ...(guard.fromSurfaceIds ? { fromSurfaceIds: guard.fromSurfaceIds.map(surfaceTarget) } : {}),
+          conditions: guard.conditions.map(condition => ({ ...condition, key: stateKeys.get(condition.key) ?? condition.key })) })
+      }
+      if (entry.logic.network?.connectOrigins?.length) logic.network = { connectOrigins: [...new Set([...(logic.network?.connectOrigins ?? []), ...entry.logic.network.connectOrigins])] }
+      edits.push({ type: 'project.logic.set', logic })
+    }
+  } else if (!options.definitionsOnly) edits.push({ type: 'instance.insert', container: structuredClone(options.container), index: options.index, instances, rootIds })
   return { command: captureComponentOperation(project, edits), rootIds, identities, diagnostics }
 }
 

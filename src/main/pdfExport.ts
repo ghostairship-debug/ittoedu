@@ -55,9 +55,10 @@ export async function exportPdfFromHtml(
   parent: BrowserWindowType,
   suggestedName: string,
   html: string,
+  projectPath?: string,
 ): Promise<{ path: string } | null> {
   const bytes = await renderPdfFromHtml(html, parent)
-  return writeBinaryExportFile(parent, suggestedName, 'pdf', bytes)
+  return writeBinaryExportFile(parent, suggestedName, 'pdf', bytes, projectPath)
 }
 
 /** The same Chromium carrier is used by interactive export and direct output verification. */

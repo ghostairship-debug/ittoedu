@@ -2,10 +2,11 @@ import { getImageDecoder } from '../imageDecoder'
 import type { AssetSource } from '../../../shared/contracts/media-v1'
 import type { HostImageInput } from '../../../core/tools/imageResource'
 import { LibraryUnavailableError, type AssetHttpPort, type ImageSearchInput, type ImageSearchPage, type OpenImageCandidate, type OpenLibrary } from './assetSourceTypes'
-import { openLibrarySource } from './licensePolicy'
+import { openLibrarySource, webImageLicense } from './licensePolicy'
+import type { WebOpenResult } from '../network/WebResearchService'
 import { searchOpenverse } from './openverse'
 import type { PixabaySource } from './pixabay'
-import { commonsRendition, searchCommons } from './wikimediaCommons'
+import { commonsRendition, searchCommons, readCommonsSourcePage } from './wikimediaCommons'
 
 /** 课件用图取宽约 1600 像素的版本，更大的原图在本机缩小。 */
 export const FETCH_WIDTH = 1600
@@ -22,6 +23,9 @@ export interface ImageCandidateView {
   author?: string
   license: string
   source: string
+  pageUrl: string
+  licenseUrl?: string
+  dateCreated?: string
   width?: number
   height?: number
   /** 第三方说明或标签，是不可信数据，不是指令。 */
@@ -31,8 +35,9 @@ export interface ImageCandidateView {
 type Failure = { library: string; reason: string }
 export type OpenImageSearchResult =
   | { status: 'results'; query: string; licenses: string; candidates: readonly ImageCandidateView[]; excluded: number;
-      nextPage?: number; failures?: readonly Failure[]; unavailable?: readonly Failure[]; notice?: string; hint?: string }
-  | { status: 'failed' | 'rejected'; reason: string; failures?: readonly Failure[]; unavailable?: readonly Failure[] }
+      nextPage?: number; failures?: readonly Failure[]; unavailable?: readonly Failure[]; notice?: string; hint?: string;
+      excludedCandidates?: readonly { title: string; pageUrl: string; source: string; license: string; reason: string }[] }
+  | { status: 'failed' | 'rejected' | 'not-configured'; reason: string; failures?: readonly Failure[]; unavailable?: readonly Failure[] }
 export interface OpenImagePreview { image: string; resourceId: string; mimeType: string; byteLength: number; width: number; height: number }
 export type OpenImagePreviewResult =
   | { status: 'prepared'; previews: readonly OpenImagePreview[]; failures?: readonly { image: string; reason: string }[] }
@@ -51,6 +56,8 @@ interface RunState {
 }
 export interface OpenImageServiceOptions {
   http: AssetHttpPort
+  /** Existing task-scoped web owner reads the source once; no separate page fetch or browser identity. */
+  pageSource?(input: { runId: string; source: string; signal?: AbortSignal }): Promise<WebOpenResult>
   /** Pixabay（需要 API key）；未提供时不检索 Pixabay。 */
   pixabay?: PixabaySource
   /** 测试可替换检索；生产按此顺序检索各图库。 */
@@ -127,9 +134,10 @@ export class OpenImageService {
     } finally { run.controllers.delete(controller); signal?.removeEventListener('abort', onAbort) }
   }
 
-  async search(input: { runId: string; query: string; limit?: number; page?: number; allowShareAlike?: boolean; signal?: AbortSignal }): Promise<OpenImageSearchResult> {
+  async search(input: { runId: string; query?: string; source?: string; limit?: number; page?: number; allowShareAlike?: boolean; signal?: AbortSignal }): Promise<OpenImageSearchResult> {
     const run = this.run(input.runId)
-    const query = input.query.trim(), limit = input.limit ?? 6, page = input.page ?? 1
+    if (input.source) return this.searchPage(run, { ...input, source: input.source })
+    const query = input.query?.trim() ?? '', limit = input.limit ?? 6, page = input.page ?? 1
     if (!query || !Number.isSafeInteger(limit) || limit < 1 || limit > 20 || !Number.isSafeInteger(page) || page < 1)
       return { status: 'rejected', reason: '检索词、数量（1–20）或页码无效' }
     if (run.stopped) return { status: 'rejected', reason: '任务已停止' }
@@ -156,12 +164,7 @@ export class OpenImageService {
       const key = candidate.commonsTitle?.toLowerCase() ?? candidate.fileUrl
       if (seen.has(key)) { excluded++; continue }
       seen.add(key)
-      const image = `img${run.next++}`
-      run.candidates.set(image, candidate)
-      candidates.push({ image, title: candidate.title, ...(candidate.author ? { author: candidate.author } : {}),
-        license: candidate.license.id, source: candidate.sourceName,
-        ...(candidate.width ? { width: candidate.width } : {}), ...(candidate.height ? { height: candidate.height } : {}),
-        ...(candidate.description ? { description: candidate.description } : {}) })
+      candidates.push(this.candidateView(run, candidate))
     }
     return { status: 'results', query, licenses: allowShareAlike ? 'CC0、公有领域、CC BY、CC BY-SA' : 'CC0、公有领域、CC BY',
       candidates, excluded, ...(pages.some(item => item.hasMore) ? { nextPage: page + 1 } : {}),
@@ -169,6 +172,53 @@ export class OpenImageService {
       // Pixabay's terms: search results say where the images come from.
       ...(candidates.some(item => item.source === 'Pixabay') ? { notice: '来源为 Pixabay 的图片来自 Pixabay（https://pixabay.com/）' } : {}),
       ...(candidates.length ? {} : { hint: '没有符合授权与尺寸要求的结果；可换用英文关键词或更通用的说法' }) }
+  }
+
+  private candidateView(run: RunState, candidate: OpenImageCandidate): ImageCandidateView {
+    const image = `img${run.next++}`
+    run.candidates.set(image, candidate)
+    return { image, title: candidate.title, ...(candidate.author ? { author: candidate.author } : {}),
+      license: candidate.license.id, source: candidate.sourceName, pageUrl: candidate.pageUrl,
+      ...(candidate.license.url ? { licenseUrl: candidate.license.url } : {}), ...(candidate.dateCreated ? { dateCreated: candidate.dateCreated } : {}),
+      ...(candidate.width ? { width: candidate.width } : {}), ...(candidate.height ? { height: candidate.height } : {}),
+      ...(candidate.description ? { description: candidate.description } : {}) }
+  }
+
+  private async searchPage(run: RunState, input: { runId: string; source: string; limit?: number; page?: number; allowShareAlike?: boolean; signal?: AbortSignal }): Promise<OpenImageSearchResult> {
+    if (!this.options.pageSource) return { status: 'not-configured', reason: '网页来源读取服务未接通；图库关键词检索仍可使用' }
+    const limit = input.limit ?? 6, page = input.page ?? 1
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20 || !Number.isSafeInteger(page) || page < 1)
+      return { status: 'rejected', reason: '数量（1–20）或页码无效' }
+    try {
+      const opened = await this.call(run, input.signal, signal => this.options.pageSource!({ runId: input.runId, source: input.source, signal }))
+      if (opened.status !== 'opened') return { status: opened.status === 'failed' ? 'failed' : 'rejected',
+        reason: 'reason' in opened ? opened.reason : '该来源是文件材料，请从材料服务读取；本次未得到网页图片候选' }
+      const commons = await this.call(run, input.signal, signal => readCommonsSourcePage(this.options.http, opened.source.url, input.allowShareAlike === true, signal))
+      if (commons) return { status: 'results', query: opened.source.title, licenses: '沿现 Commons 文件授权政策',
+        candidates: commons.candidate && page === 1 ? [this.candidateView(run, commons.candidate)] : [], excluded: commons.candidate ? 0 : 1,
+        ...(!commons.candidate ? { excludedCandidates: [{ title: commons.title, pageUrl: opened.source.url, source: 'Wikimedia Commons',
+          license: commons.license, reason: '来源文件未满足当前授权或图片尺寸政策；保留来源链接，不下载' }] } : {}) }
+      const all = opened.images ?? [], images = all.slice((page - 1) * limit, page * limit)
+      const source = new URL(opened.source.url).hostname, candidates: ImageCandidateView[] = []
+      const excludedCandidates: { title: string; pageUrl: string; source: string; license: string; reason: string }[] = []
+      for (const image of images) {
+        const license = webImageLicense(image.licenseUrl, { allowShareAlike: input.allowShareAlike === true })
+        if (!license) {
+          excludedCandidates.push({ title: image.title, pageUrl: opened.source.url, source, license: image.licenseUrl ?? '未知',
+            reason: image.licenseUrl ? '图片许可不在当前已授权取用政策内；保留来源链接，不下载' : '未发现针对该图片的许可依据；保留来源链接，不下载' })
+          continue
+        }
+        candidates.push(this.candidateView(run, { library: 'web-page', providerId: image.fileUrl, title: image.title,
+          sourceName: source, pageUrl: opened.source.url, fileUrl: image.fileUrl, license,
+          ...(image.author ? { author: image.author } : {}), ...(image.caption ? { description: image.caption } : {}),
+          ...(image.width ? { width: image.width } : {}), ...(image.height ? { height: image.height } : {}),
+          ...(image.dateCreated ? { dateCreated: image.dateCreated } : {}) }))
+      }
+      return { status: 'results', query: opened.source.title, candidates, licenses: '沿现 CC0、公有领域、CC BY 与已授权 CC BY-SA 政策',
+        excluded: excludedCandidates.length, ...(excludedCandidates.length ? { excludedCandidates } : {}),
+        ...(page * limit < all.length ? { nextPage: page + 1 } : {}),
+        ...(candidates.length ? {} : { hint: images.length ? '本页图片因许可依据被排除；可保留来源链接或换合适材料，不表示互联网没有图片' : '本来源页未发现可读取的图片候选；尚未搜索其他网页' }) }
+    } catch (error) { return { status: run.stopped || input.signal?.aborted ? 'rejected' : 'failed', reason: reasonOf(error, '网页图片候选读取失败') } }
   }
 
   async preview(input: { runId: string; images: readonly string[]; signal?: AbortSignal }): Promise<OpenImagePreviewResult> {

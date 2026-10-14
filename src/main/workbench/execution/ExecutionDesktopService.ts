@@ -9,7 +9,7 @@ import type { ExecutionEvent, ExecutionEventInput } from '../../../shared/workbe
 import type { EditEvent } from '../../../shared/workbench/editSession'
 import type { ModelChatMessage, ModelSelection } from '../../../shared/workbench/modelProvider'
 import type { InputContext } from '../../../shared/workbench/attachments'
-import { type ExecutionRunRecord, type ExecutionStart } from '../../../shared/workbench/execution'
+import { executionAdvancementMode, type ExecutionRunRecord, type ExecutionStart } from '../../../shared/workbench/execution'
 import { conversationHistoryIndex } from './ConversationHistoryIndex'
 import { PayloadCompiler } from '../../../core/execution/PayloadCompiler'
 import { AttachmentError, AttachmentService, type AttachmentLiveConversation } from '../attachments/AttachmentService'
@@ -33,6 +33,7 @@ import { ExecutionChangeReviewService } from '../review/ExecutionChangeReviewSer
 import type { HostArtifactDeliveryService } from './HostArtifactDeliveryService'
 import { forkDraftFromCheckpoint, indexUserCheckpoint } from './CheckpointForkService'
 import { executionFinalReply, fileCreated } from './executionOutcome'
+import { terminalModelFailure } from './executionOutcome'
 import { continueDocumentTargets } from './continuationTargets'
 import { ElementChangeTracker } from './ElementChangeTracker'
 import { diagnosticLog } from '../../diagnosticLog'
@@ -165,6 +166,14 @@ export class ExecutionDesktopService {
       subscribeSaves: listener => options.documents.subscribeSaves(listener),
       subscribeDocumentEvents: listener => options.documents.subscribeEvents(listener),
       subscribeFileRelocations: listener => options.documents.fileCoordinator.subscribeRelocations(listener),
+      setAdvancementMode: (conversationId, advancementMode, isCurrent) => this.serial(conversationId, async () => {
+        if (isCurrent && !isCurrent()) throw new Error('推进方式已有更新的用户决定，旧选择未接受')
+        for (const space of await this.conversations.listWorkspaces()) {
+          const conversation = await this.conversations.readConversation({ workspaceId: space.workspaceId, conversationId })
+          if (conversation) { await this.conversations.setAdvancementMode({ workspaceId: space.workspaceId, conversationId, advancementMode }); return }
+        }
+        throw new Error('会话已不存在，推进偏好未写入')
+      }),
       edits: this.edits, provider, serializePayload, initialCompiler: new PayloadCompiler({ attachments: this.attachments, serializePayload }),
       files: options.documents.agentFiles, materials: this.attachments, visualAnalysis, changeReview: this.changeReview,
       artifacts: this.artifacts,
@@ -262,11 +271,14 @@ export class ExecutionDesktopService {
             : value.input.taskId === record.submissionId)
           const conversation = await this.conversations.readConversation(record)
           if (!conversation) { await this.retireOrphanedSubmission(record, run); continue }
-          if (run) await this.bindRun(record, run)
+          if (run) {
+            await this.bindRun(record, run)
+            if (!['queued', 'running', 'stopping'].includes(run.status)) await this.collectReply(run)
+          }
           else if (record.steeringRunId) {
             await this.submissions.update(record.submissionId, { state: 'failed', updatedAt: Date.now(), failure: { code: 'steering-unconfirmed', message: '原任务没有确认这份调整；输入已保留，未作为新任务自动发送。' } })
             await this.restoreFailedDraft(record)
-          } else if (record.state === 'starting') await this.submissions.update(record.submissionId, { updatedAt: Date.now(),
+          } else if (record.state === 'starting') await this.submissions.update(record.submissionId, { state: 'failed', updatedAt: Date.now(),
             failure: { code: 'submission-outcome-unknown', message: '应用中断时启动结果未知；未自动重发，请核对后重试新消息。' } })
           } catch { this.recoveryIssues.set(record.submissionId, '一项旧提交无法恢复，已保留；其他会话仍可使用。') }
         }
@@ -303,9 +315,10 @@ export class ExecutionDesktopService {
   private async collectAttachmentReleases(): Promise<void> {
     const live: AttachmentLiveConversation[] = []
     for (const workspace of await this.conversations.listWorkspaces())
-      for (const conversation of await this.conversations.listConversations(workspace.workspaceId))
+      for (const conversation of await this.conversations.listConversations(workspace.workspaceId)) {
         live.push({ workspaceId: conversation.workspaceId, conversationId: conversation.conversationId,
-          attachmentIds: conversationAttachmentIds(conversation) })
+          attachmentIds: await this.ownedConversationAttachments(conversation) })
+      }
     await this.attachments.collectConversationReleases(live)
   }
   private async required(workspaceId: string, conversationId: string): Promise<ConversationRecord> {
@@ -359,9 +372,20 @@ export class ExecutionDesktopService {
       ...(document.referenceId ? { referenceId: document.referenceId } : {}), ...(document.pinned !== undefined ? { pinned: document.pinned } : {}),
       ...(document.displayLabel ? { displayLabel: document.displayLabel } : {}), epoch: document.epoch, revision: document.revision, writeScope: document.writable, ...(document.selection?.length ? { selection: document.selection } : {}) }))
   }
+  private samePinnedDraftReferences(current: ConversationRecord, documents: ExecutionDocumentReference[]): boolean {
+    // Automatic references follow the current view; continuing still uses the original task's freeze.
+    // Only changed explicit references represent another draft, as in the composer's continuation check.
+    const pinned = (refs: ConversationRecord['frozenContextRefs']) => refs.filter(ref => ref.pinned !== false).map(ref => ({
+      documentId: ref.documentId, epoch: ref.epoch, revision: ref.revision, writable: ref.writeScope ?? [],
+      ...(ref.selection?.length ? { selection: ref.selection } : {}),
+    }))
+    const canonical = (value: unknown) => JSON.stringify(value, (_key, item: unknown) => item && typeof item === 'object' && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item)
+    return canonical(pinned(current.frozenContextRefs)) === canonical(pinned(this.refs(documents)))
+  }
   private digest(input: ExecutionSendInput): string {
     return createHash('sha256').update(JSON.stringify({ workspaceId: input.workspaceId, conversationId: input.conversationId,
-      text: input.text, documents: input.documents, attachments: input.attachments ?? [], mode: input.mode ?? 'queue',
+      text: input.text, advancementMode: input.advancementMode ?? null, documents: input.documents, attachments: input.attachments ?? [], mode: input.mode ?? 'queue',
       retryOfRunId: input.retryOfRunId ?? null, permission: input.permission ?? DEFAULT_PERMISSION_MODE,
       ...(input.contentOutput ? { contentOutput: input.contentOutput } : {}),
       ...(input.materials ? { materials: input.materials } : {}),
@@ -419,13 +443,19 @@ export class ExecutionDesktopService {
     this.timing(input.conversationId, input.submissionId, `${input.submissionId}:attachments:start`, 'submission.attachments.started',
       { detail: { attachmentCount: attachments.length } })
     try {
+      const snapshots = new Map<string, ReturnType<AttachmentService['readSnapshot']>>()
       for (const reference of attachments) {
+        if (!snapshots.has(reference.attachmentId)) snapshots.set(reference.attachmentId, this.attachments.readSnapshot(reference.attachmentId))
+        const source = await snapshots.get(reference.attachmentId)!.catch(error => {
+          if (error instanceof AttachmentError && ['corrupt-snapshot', 'corrupt-blob'].includes(error.code)
+            || (error as NodeJS.ErrnoException)?.code === 'ENOENT') throw executionInputError('attachment-unavailable', error)
+          throw error
+        })
         if (reference.delivery === 'source') {
-          const source = await this.attachments.readSnapshot(reference.attachmentId)
           if (!source.representations.some(rep => rep.id === reference.representationId)) throw executionInputError('attachment-unavailable')
           continue
         }
-        const read = await this.attachments.readRepresentation(reference.attachmentId, reference.representationId).catch(error => {
+        const read = await this.attachments.readRepresentation(reference.attachmentId, reference.representationId, source).catch(error => {
           if (error instanceof AttachmentError && ['representation-unavailable', 'corrupt-snapshot', 'corrupt-blob'].includes(error.code)
             || (error as NodeJS.ErrnoException)?.code === 'ENOENT') throw executionInputError('attachment-unavailable', error)
           throw error
@@ -530,26 +560,26 @@ export class ExecutionDesktopService {
     }
     const now = Date.now(), attachmentIds = [...new Set(attachments.map(reference => reference.attachmentId))]
     return { schemaVersion: 1, submissionId: input.submissionId, workspaceId: input.workspaceId, conversationId: input.conversationId,
-      state: 'queued', mode: input.mode ?? 'queue', text: input.text, documents: structuredClone(input.documents), attachments: structuredClone(attachments), permission,
+      state: 'queued', mode: input.mode ?? 'queue', text: input.text, advancementMode: input.advancementMode ?? current.advancementMode, documents: structuredClone(input.documents), attachments: structuredClone(attachments), permission,
       ...(input.contentOutput ? { contentOutput: structuredClone(input.contentOutput) } : {}),
       ...(input.materials ? { materials: structuredClone(input.materials) } : {}),
       ...(input.webAuthorization ? { webAuthorization: structuredClone(input.webAuthorization) } : {}),
       model: { provider: selection.connection.provider, model: selection.model, accountId: selection.connection.accountId, billing: selection.connection.billing.kind },
       createdAt: now, updatedAt: now, digest, attachmentIds,
-      start: { conversationId: current.conversationId, taskId: input.submissionId, instruction: input.text, selection, documents,
+      start: { conversationId: current.conversationId, taskId: input.submissionId, instruction: input.text, advancementMode: input.advancementMode ?? current.advancementMode, selection, documents,
         ...(compressionSelection ? { compressionSelection } : {}), ...(compressionUnavailableReason ? { compressionUnavailableReason } : {}),
         ...(contentOutput ? { contentOutput: structuredClone(contentOutput) } : {}),
         ...(input.materials ? { materials: structuredClone(input.materials) } : {}),
         ...(input.webAuthorization ? { webAuthorization: structuredClone(input.webAuthorization) } : {}),
         ...(visionSelection ? { visionSelection } : {}), ...(visionUnavailableReason ? { visionUnavailableReason } : {}),
         permission, workspaceRoot: space.rootPath, boundReadPaths: [...new Set(boundReadPaths)],
-        ...(current.home ? { conversationHome: structuredClone(current.home), conversationHomeRoot: space.rootPath } : {}),
         ...(input.disclosedSettings ? { disclosedSettings: input.disclosedSettings } : {}),
         selectionSource: { role: selection.role as 'conversation' | 'vision', reason: selectionReason, profileRevision: selection.profileRevision },
         inputContext: { id: `${input.submissionId}:input`, capturedAt: now, instruction: input.text, attachments,
           context } } }
   }
   private async acceptSubmission(record: StoredExecutionSubmission, current: ConversationRecord): Promise<StoredExecutionSubmission> {
+    if (record.advancementMode) await this.conversations.setAdvancementMode({ workspaceId: current.workspaceId, conversationId: current.conversationId, advancementMode: record.advancementMode })
     const conversation = await this.conversations.updateConversation({ workspaceId: record.workspaceId, conversationId: record.conversationId, expectedRevision: current.revision,
       patch: { inputDraft: '', inputAttachments: [], frozenContextRefs: this.refs(record.documents),
         title: current.title || record.text.slice(0, 30) || '附件会话', attachmentIds: [...new Set([...current.attachmentIds, ...record.attachmentIds])] } })
@@ -578,8 +608,8 @@ export class ExecutionDesktopService {
   private async startSubmission(record: StoredExecutionSubmission, continuation = record.continuation): Promise<StoredExecutionSubmission> {
     if (this.closing) throw refused('应用正在关闭；排队输入已保留，未启动新任务')
     record = await this.submissions.update(record.submissionId, { state: 'starting', continuation, updatedAt: Date.now(), failure: undefined })
-    await this.recordElementBaseline(record)
     try {
+      await this.recordElementBaseline(record)
       const run = await this.engine.start(record.start, continuation, prepared => this.bindRun(record, prepared).then(() => undefined))
       return (await this.submissions.read(record.submissionId)) ?? { ...record, state: 'accepted', runId: run.runId }
     } catch (error) {
@@ -610,14 +640,14 @@ export class ExecutionDesktopService {
     if (!explicit) {
       const latestRunId = current.runIndex.builtinRunIds.at(-1)
       const latest = latestRunId ? await this.engine.read(latestRunId) : null
-      const kind = latest?.requests.at(-1)?.failure?.kind
-      if (latest && ['failed', 'partial', 'interrupted'].includes(latest.status)
-        && kind && ['auth', 'quota', 'rate-limit', 'transport', 'timeout'].includes(kind)) return
+      if (latest && terminalModelFailure(latest)) return
     }
-    const next = records.find(record => record.state === 'queued')
-    if (!next) return
-    const continuation = previous ? this.continuation(previous) : next.continuation
-    await this.startSubmission(next, continuation)
+    for (const next of records.filter(record => record.state === 'queued')) {
+      const continuation = previous ? this.continuation(previous) : next.continuation
+      const started = await this.startSubmission(next, continuation)
+      // A local failure before any run exists cannot leave another independent input waiting for run.end.
+      if (started.state !== 'failed' || started.runId) return
+    }
   }
   private async continuationLineage(previous: ExecutionRunRecord): Promise<ExecutionRunRecord[]> {
     const lineage: ExecutionRunRecord[] = [], seen = new Set<string>()
@@ -725,7 +755,7 @@ export class ExecutionDesktopService {
     if (previous && await this.activeRun(current)) throw refused('当前会话仍有运行中的任务，请等待结束后继续原任务')
     if (previous && (current.inputDraft && current.inputDraft !== input.text
       || current.inputAttachments.length && JSON.stringify(current.inputAttachments) !== JSON.stringify(input.attachments ?? [])
-      || JSON.stringify(current.frozenContextRefs) !== JSON.stringify(this.refs(input.documents))))
+      || !this.samePinnedDraftReferences(current, input.documents)))
       throw refused('输入框已有另一份草稿，请先处理后再继续原任务')
     this.timing(input.conversationId, input.submissionId, `${input.submissionId}:prepare:start`, 'submission.prepare.started')
     let record: StoredExecutionSubmission
@@ -745,6 +775,9 @@ export class ExecutionDesktopService {
       }
       record = await this.prepareSubmission(preparedInput, current, digest, previous?.input.inputContext?.context)
       if (previous) {
+        // Mode is a switchable preference, not part of the original document/material grant.
+        record.advancementMode = input.advancementMode ?? current.advancementMode ?? executionAdvancementMode(previous)
+        record.start.advancementMode = record.advancementMode
         // The public submission remains the user's original frozen payload so
         // lost ACK confirmation computes the same digest with the same ID.
         record.documents = structuredClone(input.documents)
@@ -796,7 +829,7 @@ export class ExecutionDesktopService {
       ...(document.selection ? { selection: [...document.selection] } : {}),
     }))
     let record: StoredExecutionSubmission = { schemaVersion: 1, digest, submissionId: input.submissionId, workspaceId: input.workspaceId,
-      conversationId: input.conversationId, state: 'starting', mode: 'adjust', steeringRunId: original.runId, text: input.text,
+      conversationId: input.conversationId, state: 'starting', mode: 'adjust', steeringRunId: original.runId, text: input.text, ...(input.advancementMode ? { advancementMode: input.advancementMode } : {}),
       documents, attachments: [], attachmentIds: [], createdAt: now, updatedAt: now, permission: original.input.permission,
       model: { provider: original.input.selection.connection.provider, model: original.input.selection.model,
         accountId: original.input.selection.connection.accountId, billing: original.input.selection.connection.billing.kind },
@@ -805,7 +838,7 @@ export class ExecutionDesktopService {
     record = (await this.submissions.create(record)).record
     try {
       record = await this.acceptSubmission(record, current)
-      const acknowledged = await this.engine.steer(original.runId, input.submissionId, input.text)
+      const acknowledged = await this.engine.steer(original.runId, input.submissionId, input.text, input.advancementMode)
       await this.bindRun(record, acknowledged)
     } catch (error) {
       // A lost acknowledgement is queried from the same run and submission ID.
@@ -829,6 +862,15 @@ export class ExecutionDesktopService {
         patch: { messages: [...current.messages, { messageId: randomUUID(), role: 'assistant', text: reply, createdAt: Date.now(), attachmentIds: [], runId }] } })
     }
   }
+  private async ownedConversationAttachments(current: ConversationRecord): Promise<string[]> {
+    const ids = new Set(conversationAttachmentIds(current))
+    for (const runId of current.runIndex.builtinRunIds) {
+      const run = await this.engine.read(runId).catch(() => null)
+      if (run?.input.conversationId !== current.conversationId) continue
+      for (const id of await this.engine.materialSourceIds(run)) ids.add(id)
+    }
+    return [...ids]
+  }
   /**
    * Runs in the conversation's serial queue, entered when the end is published. Conversation reads wait in the same
    * queue, so a view reading the record after it saw run.end gets everything written here: the restored input, the
@@ -842,6 +884,13 @@ export class ExecutionDesktopService {
       if (record?.runId === runId && record.state === 'accepted') await this.restoreFailedDraft(record)
     }
     await this.collectReply(run)
+    const submission = await this.submissions.read(run.input.taskId)
+    const current = submission ? await this.conversations.readConversation({ workspaceId: submission.workspaceId, conversationId: run.input.conversationId }) : null
+    if (current) {
+      const attachmentIds = [...new Set([...conversationAttachmentIds(current), ...await this.engine.materialSourceIds(run)])]
+      if (attachmentIds.some(id => !current.attachmentIds.includes(id))) await this.conversations.updateConversation({ workspaceId: current.workspaceId,
+        conversationId: current.conversationId, expectedRevision: current.revision, patch: { attachmentIds } })
+    }
     await this.startNext(run.input.conversationId, run)
   }
   private runWritesDocument(run: ExecutionRunRecord, documentId: string): boolean {
@@ -914,7 +963,7 @@ export class ExecutionDesktopService {
         prepareResourceRelease: async owner => {
           await this.imageRetention?.prepare(owner); prepared = !!this.imageRetention
           await this.attachments.prepareConversationRelease({ version: 1, workspaceId: owner.workspaceId, conversationId: owner.conversationId,
-            attachmentIds: conversationAttachmentIds(record) })
+            attachmentIds: await this.ownedConversationAttachments(record) })
         },
       } })
       this.imageRetention?.collect()
@@ -1004,14 +1053,22 @@ export class ExecutionDesktopService {
         case 'set-conversation-home': return await this.serial(input.conversationId, async () => this.conversations.setConversationHome({ ...input,
           home: input.home ? await this.validateHome(input.workspaceId, input.home) : null }))
         // Behind Main's own writes queued on this conversation (a task's end, a send), so the record read is final.
+        case 'set-advancement-mode': return await this.serial(input.conversationId, async () => {
+          const current = await this.required(input.workspaceId, input.conversationId)
+          const active = await this.activeRun(current)
+          if (active) await this.engine.steer(active.runId, randomUUID(), `用户在输入区选择推进方式：${input.advancementMode}。`, input.advancementMode)
+          return this.conversations.setAdvancementMode(input)
+        })
         case 'conversation': return await this.serial(input.conversationId, () => this.conversations.readConversation(input))
         case 'prepare-documents': return await this.serial(input.conversationId, () => this.prepareDocuments(input))
         case 'draft': return await this.serial('attachment-lifecycle', () => this.serial(input.conversationId, async () => {
+          const snapshots = new Map<string, ReturnType<AttachmentService['readSnapshot']>>()
           for (const ref of input.attachments) {
+            if (!snapshots.has(ref.attachmentId)) snapshots.set(ref.attachmentId, this.attachments.readSnapshot(ref.attachmentId))
+            const snapshot = await snapshots.get(ref.attachmentId)!
             if (ref.delivery === 'source') {
-              const snapshot = await this.attachments.readSnapshot(ref.attachmentId)
               if (!snapshot.representations.some(rep => rep.id === ref.representationId)) throw executionInputError('attachment-unavailable')
-            } else await this.attachments.readRepresentation(ref.attachmentId, ref.representationId)
+            } else await this.attachments.readRepresentation(ref.attachmentId, ref.representationId, snapshot)
           }
           // An older revision is the same refusal as at send time; its fixed reason lets the composer re-read and save again.
           return this.conversations.updateConversation({ ...input, patch: { inputDraft: input.text, inputAttachments: input.attachments, frozenContextRefs: this.refs(input.documents) } })

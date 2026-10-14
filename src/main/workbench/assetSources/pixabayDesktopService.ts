@@ -5,7 +5,7 @@ import { DesktopOperationError } from '../../errors'
 import { createElectronCredentialEncryption } from '../providers/providerCredentials'
 import { PixabaySettingsStore } from './PixabaySettingsStore'
 import { PixabaySource } from './pixabay'
-import { OpenImageService } from './OpenImageService'
+import { OpenImageService, type OpenImageServiceOptions } from './OpenImageService'
 import { openLibraryUserAgent, publicAssetHttp } from './publicAssetHttp'
 import type { AssetHttpPort } from './assetSourceTypes'
 
@@ -42,8 +42,8 @@ export async function operatePixabaySettings(raw: unknown, store?: PixabaySettin
 
 /** This is the production composition used by image.search; tests may supply a local HTTP fixture. */
 export function createWorkbenchOpenImageService(version: string, options: {
-  http?: AssetHttpPort; settings?: Pick<PixabaySettingsStore, 'resolveKey'>
+  http?: AssetHttpPort; settings?: Pick<PixabaySettingsStore, 'resolveKey'>; pageSource?: OpenImageServiceOptions['pageSource']
 } = {}): OpenImageService {
-  return new OpenImageService({ http: options.http ?? publicAssetHttp(openLibraryUserAgent(version)),
+  return new OpenImageService({ pageSource: options.pageSource, http: options.http ?? publicAssetHttp(openLibraryUserAgent(version)),
     pixabay: new PixabaySource({ key: async () => (options.settings ?? await pixabaySettingsStore()).resolveKey() }) })
 }

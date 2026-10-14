@@ -110,16 +110,32 @@ export class AttachmentService implements AttachmentReader {
       const snapshots = [] as Awaited<ReturnType<AttachmentService['readSnapshot']>>[]
       for (const name of (await fs.readdir(snapshotsDirectory)).filter(value => /^[a-f0-9-]{36}\.json$/.test(value)))
         snapshots.push(await this.readSnapshot(name.slice(0, -5)))
+      // A surviving source owner may reuse its cached derivatives in a later run.
+      // Resolve that ownership closure inside the storage queue, independent of run timing.
+      const ownedSources = new Set(retainedIds)
+      for (const snapshot of snapshots) if (ownedSources.has(snapshot.id) && snapshot.derivedFrom) ownedSources.add(snapshot.derivedFrom)
+      for (const snapshot of snapshots) if (snapshot.derivedFrom && ownedSources.has(snapshot.derivedFrom)) retainedIds.add(snapshot.id)
       // A surviving derived snapshot still needs its immutable original for later page extraction.
       for (const snapshot of snapshots) if (snapshot.derivedFrom && (!candidates.has(snapshot.id) || retainedIds.has(snapshot.id)))
         retainedIds.add(snapshot.derivedFrom)
       const retainedDigests = new Set<string>()
+      const removed = new Set<string>()
       for (const snapshot of snapshots) {
         if (candidates.has(snapshot.id) && !retainedIds.has(snapshot.id)) {
           await fs.rm(path.join(snapshotsDirectory, `${snapshot.id}.json`), { force: true })
+          removed.add(snapshot.id)
         } else {
           retainedDigests.add(snapshot.blobRef.digest)
           for (const representation of snapshot.representations) retainedDigests.add(representation.blobRef.digest)
+        }
+      }
+      // Extraction progress belongs to the snapshots it references. Removing a derived snapshot retires its cache entry.
+      if (removed.size) {
+        const progressDirectory = path.join(this.directory, 'extraction-progress')
+        for (const name of (await fs.readdir(progressDirectory).catch(() => [] as string[])).filter(value => /^[a-f0-9]{64}\.json$/.test(value))) {
+          const filename = path.join(progressDirectory, name)
+          const progress = await fs.readFile(filename, 'utf8').then(value => JSON.parse(value) as { result?: string; batches?: string[] }).catch(() => null)
+          if (progress && (progress.result && removed.has(progress.result) || progress.batches?.some(id => removed.has(id)))) await fs.rm(filename, { force: true })
         }
       }
       for (const digest of (await fs.readdir(path.join(this.directory, 'blobs'))).filter(value => /^[a-f0-9]{64}$/.test(value)))
@@ -127,6 +143,14 @@ export class AttachmentService implements AttachmentReader {
       for (const intent of intents) if (intent.ownerLive || intent.value.attachmentIds.every(id => !retainedIds.has(id)))
         await fs.rm(intent.filename, { force: true })
     })
+  }
+
+  /** Immutable original bytes for an already authorized material ID; this method grants no path authority. */
+  async readOriginal(attachmentId: string): Promise<{ snapshot: AttachmentSnapshot; bytes: Uint8Array }> {
+    const snapshot = await this.readSnapshot(attachmentId)
+    const bytes = await this.readFile(path.join(this.directory, 'blobs', snapshot.blobRef.digest))
+    if (bytes.length !== snapshot.byteLength || hash(bytes) !== snapshot.digest) throw new AttachmentError('corrupt-blob', '附件原件快照已损坏')
+    return { snapshot, bytes: Uint8Array.from(bytes) }
   }
 
   async receivePath(input: { authorizationId: string; name?: string }, options: { signal?: AbortSignal; onProgress?: (loaded: number, total: number) => void } = {}): Promise<AttachmentSnapshot> {
@@ -398,8 +422,9 @@ export class AttachmentService implements AttachmentReader {
     return structuredClone(snapshot)
   }
 
-  async readRepresentation(attachmentId: string, representationId: string) {
-    const snapshot = await this.readSnapshot(attachmentId)
+  async readRepresentation(attachmentId: string, representationId: string, preparedSnapshot?: AttachmentSnapshot) {
+    const snapshot = preparedSnapshot ?? await this.readSnapshot(attachmentId)
+    if (snapshot.id !== attachmentId) throw new AttachmentError('corrupt-snapshot', '附件快照与请求的来源标识不一致')
     const representation = snapshot.representations.find(item => item.id === representationId)
     if (!representation) throw new AttachmentError('representation-unavailable', snapshot.gaps[0]?.message ?? '附件表示不存在')
     if (representation.provenance.originalDigest !== snapshot.digest || representation.provenance.originalByteLength !== snapshot.byteLength) throw new AttachmentError('corrupt-snapshot', '附件来源不一致')

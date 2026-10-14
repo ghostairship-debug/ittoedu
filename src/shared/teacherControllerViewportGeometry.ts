@@ -3,6 +3,7 @@ import { componentDefinitionBuiltinKey } from './contracts/component-platform'
 import { multiplyMatrices } from '../core/components/geometry'
 import type { FlowSize } from './flowViewportGeometry'
 import { readTeacherControllerConfig } from './teacherControllerConfig'
+import { teacherControllerLayout } from './teacherControllerLayout'
 import { createStageGeometry, STAGE_VIEWPORT_WIDTH, STAGE_VIEWPORT_HEIGHT } from './stageViewport'
 
 export type TeacherControllerHudGeometry = ReturnType<typeof createTeacherControllerHudGeometry>
@@ -20,27 +21,30 @@ export function teacherControllerReferenceSize(project: CourseProjectV10): FlowS
 /** Direct HUD projection: no content fit, paper scroll, observation or world camera enters this matrix. */
 export function createTeacherControllerHudGeometry(input: {
   referenceSize: FlowSize; viewportRect: { x: number; y: number; width: number; height: number }
-}) { return createStageGeometry(input.referenceSize, input.viewportRect) }
+  controllerInsets?: { right: number; bottom: number }
+}) { return createStageGeometry(input.referenceSize, { ...input.viewportRect,
+  width: Math.max(0, input.viewportRect.width - (input.controllerInsets?.right ?? 0)),
+  height: Math.max(0, input.viewportRect.height - (input.controllerInsets?.bottom ?? 0)) }) }
 
-export type TeacherControllerDisplayPort = Pick<TeacherControllerPort, 'read' | 'subscribe' | 'setCollapsed'> & {
+export type TeacherControllerDisplayPort = Pick<TeacherControllerPort, 'read' | 'subscribe' | 'setCollapsed' | 'forInstance' | 'subscribePlacement'> & {
   placement?(): { x: number; y: number }
   canExecute?: TeacherControllerPort['canExecute']
   execute?: TeacherControllerPort['execute']
 }
 
-function collapsedTranslation(frame: ComponentFrame, collapsed: boolean) {
-  const x = collapsed ? Math.max(0, frame.width - 52) : 0, y = collapsed ? Math.max(0, frame.height - 52) : 0
+function collapsedTranslation(frame: ComponentFrame, collapsed: boolean, expandedWidth = frame.width) {
+  const x = Math.max(0, frame.width - (collapsed ? 52 : expandedWidth)), y = collapsed ? Math.max(0, frame.height - 52) : 0
   return { x: frame.transform[0] * x + frame.transform[2] * y, y: frame.transform[1] * x + frame.transform[3] * y }
 }
 
-export function teacherControllerFrameOrigin(frame: ComponentFrame, collapsed = false) {
-  const shift = collapsedTranslation(frame, collapsed)
+export function teacherControllerFrameOrigin(frame: ComponentFrame, collapsed = false, expandedWidth = frame.width) {
+  const shift = collapsedTranslation(frame, collapsed, expandedWidth)
   return { x: frame.transform[4] + shift.x, y: frame.transform[5] + shift.y }
 }
 
-export function teacherControllerViewportFrame(frame: ComponentFrame, viewport: FlowSize, offset = { x: 0, y: 0 }, collapsed = false): ComponentFrame {
-  const [a, b, c, d, x, y] = frame.transform, shift = collapsedTranslation(frame, collapsed)
-  let width = collapsed ? Math.min(52, frame.width) : frame.width, height = collapsed ? Math.min(52, frame.height) : frame.height
+export function teacherControllerViewportFrame(frame: ComponentFrame, viewport: FlowSize, offset = { x: 0, y: 0 }, collapsed = false, expandedWidth = frame.width): ComponentFrame {
+  const [a, b, c, d, x, y] = frame.transform, shift = collapsedTranslation(frame, collapsed, expandedWidth)
+  let width = collapsed ? Math.min(52, frame.width) : Math.min(frame.width, expandedWidth), height = collapsed ? Math.min(52, frame.height) : frame.height
   const bounds = () => {
     const xs = [0, a * width, c * height, a * width + c * height], ys = [0, b * width, d * height, b * width + d * height]
     return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) }
@@ -64,6 +68,12 @@ export function isGlobalTeacherController(project: CourseProjectV10, id: string)
     && componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.navigation')
 }
 
+/** Explicit placement is independent from the privileged teacher identity. */
+export function isViewportComponent(project: CourseProjectV10, id: string): boolean {
+  return Boolean((project.global.overlay.includes(id) || project.global.underlay.includes(id))
+    && (project.instances[id]?.viewportPinned ?? isGlobalTeacherController(project, id)))
+}
+
 function controllerConfigAt(project: CourseProjectV10, id: string, locationId: string) {
   const instance = project.instances[id]
   const data = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data : {}
@@ -72,15 +82,23 @@ function controllerConfigAt(project: CourseProjectV10, id: string, locationId: s
   return readTeacherControllerConfig({ ...data, ...(variant && typeof variant === 'object' && !Array.isArray(variant) ? variant : {}) })
 }
 
+/** Default controls adapt inside their saved frame; custom source owns its own layout. */
+export function teacherControllerExpandedWidth(project: CourseProjectV10, id: string, locationId: string): number {
+  const instance = project.instances[id], frame = instance?.frame
+  if (!frame) return 0
+  const implementation = instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation
+  return implementation?.kind === 'builtin' && implementation.key === 'guoling.navigation'
+    ? Math.min(frame.width, teacherControllerLayout(controllerConfigAt(project, id, locationId)).width) : frame.width
+}
+
 export function teacherControllerAuthoredCollapsed(project: CourseProjectV10, id: string, locationId: string): boolean {
   const config = controllerConfigAt(project, id, locationId)
   return Boolean(config.collapsible && config.defaultCollapsed)
 }
 
 export function teacherControllerIsCollapsed(project: CourseProjectV10, id: string, port?: TeacherControllerDisplayPort): boolean {
-  const instance = project.instances[id], definition = instance && project.definitions[instance.definitionId]
-  const implementation = instance?.implementationOverride ?? definition?.implementation
-  if (implementation?.kind !== 'builtin' || implementation.key !== 'guoling.navigation') return false
+  if (!isGlobalTeacherController(project, id)) return false
+  port = port?.forInstance?.(id) ?? port
   const config = controllerConfigAt(project, id, port?.read().locationId ?? '')
   return Boolean(config.collapsible && (port?.read().collapsed ?? config.defaultCollapsed))
 }
@@ -90,16 +108,17 @@ export function projectTeacherControllerInstances(project: CourseProjectV10, hud
   port?: TeacherControllerDisplayPort): CourseProjectV10 {
   const size = hud.viewportRect
   if (size.width <= 0 || size.height <= 0) return project
-  const offset = port?.placement?.() ?? { x: 0, y: 0 }
   let instances = project.instances
   for (const id of [...project.global.underlay, ...project.global.overlay]) {
     const instance = project.instances[id], frame = instance?.frame
-    if (!frame || !isGlobalTeacherController(project, id)) continue
+    if (!frame || !isViewportComponent(project, id)) continue
+    const instancePort = port?.forInstance?.(id) ?? port, offset = instancePort?.placement?.() ?? { x: 0, y: 0 }
     const origin = { x: hud.viewportRect.x, y: hud.viewportRect.y }
     const projected: ComponentFrame = { ...frame, transform: [...multiplyMatrices(hud.authorToViewport, frame.transform)] }
     const localFrame = { ...projected, transform: [...projected.transform] as ComponentFrame['transform'] }
     localFrame.transform[4] -= origin.x; localFrame.transform[5] -= origin.y
-    const shown = teacherControllerViewportFrame(localFrame, size, offset, teacherControllerIsCollapsed(project, id, port))
+    const shown = teacherControllerViewportFrame(localFrame, size, offset, teacherControllerIsCollapsed(project, id, port),
+      teacherControllerExpandedWidth(project, id, port?.read().locationId ?? ''))
     shown.transform[4] += origin.x; shown.transform[5] += origin.y
     if (instances === project.instances) instances = { ...instances }
     instances[id] = { ...instance, frame: shown }
@@ -111,19 +130,21 @@ export function projectTeacherControllerInstances(project: CourseProjectV10, hud
 export function restoreTeacherControllerFrameEdits(edits: ComponentEdit[], original: CourseProjectV10, display: CourseProjectV10,
   hud: TeacherControllerHudGeometry, offset = { x: 0, y: 0 }, port?: TeacherControllerDisplayPort): ComponentEdit[] {
   return edits.map(edit => {
-    if (edit.type !== 'frame.set' || !edit.frame || !isGlobalTeacherController(original, edit.instanceId)) return edit
+    if (edit.type !== 'frame.set' || !edit.frame || !isViewportComponent(original, edit.instanceId)) return edit
     const source = original.instances[edit.instanceId]?.frame, before = display.instances[edit.instanceId]?.frame
     if (!source || !before) return edit
     const matrix = hud.viewportToAuthor
     const start = multiplyMatrices(matrix, before.transform), next = multiplyMatrices(matrix, edit.frame.transform)
-    const authorOffset = { x: offset.x / hud.scale, y: offset.y / hud.scale }
+    const placement = (port?.forInstance?.(edit.instanceId) ?? port)?.placement?.() ?? offset
+    const authorOffset = { x: placement.x / hud.scale, y: placement.y / hud.scale }
     const transform = [...source.transform] as ComponentFrame['transform']
     const collapsed = teacherControllerIsCollapsed(original, edit.instanceId, port)
+    const expandedWidth = teacherControllerExpandedWidth(original, edit.instanceId, port?.read().locationId ?? '')
     const firstColumnChanged = Math.abs(next[0] - start[0]) > 0.000001 || Math.abs(next[1] - start[1]) > 0.000001
     const secondColumnChanged = Math.abs(next[2] - start[2]) > 0.000001 || Math.abs(next[3] - start[3]) > 0.000001
-    if (firstColumnChanged) { const ratio = collapsed ? 1 : before.width / source.width; transform[0] = next[0] * ratio; transform[1] = next[1] * ratio }
+    if (firstColumnChanged) { const ratio = collapsed ? 1 : before.width / expandedWidth; transform[0] = next[0] * ratio; transform[1] = next[1] * ratio }
     if (secondColumnChanged) { const ratio = collapsed ? 1 : before.height / source.height; transform[2] = next[2] * ratio; transform[3] = next[3] * ratio }
-    const shift = collapsedTranslation({ ...source, transform }, collapsed)
+    const shift = collapsedTranslation({ ...source, transform }, collapsed, expandedWidth)
     const changesX = Math.abs(next[0] - start[0]) > 0.000001 || Math.abs(next[2] - start[2]) > 0.000001
     const changesY = Math.abs(next[1] - start[1]) > 0.000001 || Math.abs(next[3] - start[3]) > 0.000001
     if (Math.abs(next[4] - start[4]) > 0.000001 || changesX) transform[4] = next[4] - authorOffset.x - shift.x

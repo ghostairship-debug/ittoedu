@@ -1,10 +1,8 @@
 import {
   ArrowLeft,
-  Box,
   ChevronDown,
   Eye,
   FilePlus2,
-  FileUp,
   FolderOpen,
   FileText,
   Pencil,
@@ -15,13 +13,16 @@ import {
   ShieldCheck,
   Undo2,
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useDismissableDetails } from './useDismissableDetails'
 import { ExportMenu, type ExportFormat } from './ExportMenu'
+import { CourseImportMenu } from './CourseImportMenu'
 import type { RecentProjectEntry } from '../../shared/ipcTypes'
 import type { CourseProjectHealthSummary } from '../../shared/courseProjectHealth'
 import { APP_NAME } from '../../shared/constants'
-import { useCourseEditorChrome } from '../documents/CourseEditorChromeContext'
+import { NutChimeMark } from './NutChimeMark'
+import { CourseNavigationToolbarHost, useCourseEditorChrome } from '../documents/CourseEditorChromeContext'
+import './workbenchChrome.css'
 import type { SingleHtmlExportMode } from '../export/course/coursePackagePreflight'
 import {
   selectActiveCourseProjectDocument,
@@ -33,6 +34,8 @@ import {
 } from '../store/editorStore'
 
 interface TopToolbarProps {
+  /** App supplies the workbench's existing tools, with the same captured command callbacks. */
+  commonTools?: ReactNode
   busy: boolean
   onNew(): void
   onNewSpatial?(): void
@@ -46,6 +49,8 @@ interface TopToolbarProps {
   onOpenRecipes?(): void
   onOpenProductivity?(): void
   onImportPptx?(): void
+  onImportFlow?(): void
+  onImportHtml?(): void
   onOpenMaterials?(): void
   onPreview(): void
   onExport(format: ExportFormat, singleHtmlMode?: SingleHtmlExportMode): void
@@ -81,12 +86,12 @@ function ToolButton({
       onClick={onClick}
     >
       {children}
-      <span>{label}</span>
     </button>
   )
 }
 
 export function TopToolbar({
+  commonTools,
   busy,
   onNew,
   onNewSpatial,
@@ -100,6 +105,7 @@ export function TopToolbar({
   onOpenRecipes,
   onOpenProductivity,
   onImportPptx,
+  onImportFlow, onImportHtml,
   onOpenMaterials,
   onPreview,
   onExport,
@@ -137,15 +143,16 @@ export function TopToolbar({
   )
 
   return (
-    <header className="toolbar" data-testid="top-toolbar">
+    <header className={`toolbar${commonTools ? ' toolbar--shared-tools' : ''}`} data-testid="top-toolbar">
+      <div className="toolbar__brand" aria-label="果铃" title={APP_NAME}>
+        <span className="toolbar__brand-mark"><NutChimeMark size={25} /></span>
+        <strong>果铃</strong><span className="toolbar__brand-divider" aria-hidden="true">｜</span>
+      </div>
       {editorChrome.workbench && editorChrome.mode === 'deep'
         ? <button type="button" className="toolbar__return-workbench" onClick={() => editorChrome.setMode('light')}>
             <ArrowLeft size={16} aria-hidden="true" />返回工作台
           </button>
-        : <div className="toolbar__brand" title={APP_NAME}>
-            <span className="toolbar__brand-mark"><Box size={18} strokeWidth={2.2} /></span>
-            <span>{APP_NAME}</span>
-          </div>}
+        : null}
 
       <div className="toolbar__group">
         <div className="new-project-split">
@@ -193,13 +200,9 @@ export function TopToolbar({
         <ToolButton label="打开" title="打开工程（Ctrl+O）" disabled={busy} onClick={onOpen}>
           <FolderOpen size={18} />
         </ToolButton>
-        {onImportPptx && <ToolButton label="导入 PPT" title="导入 PPT（.pptx）" disabled={busy} onClick={onImportPptx}>
-          <FileUp size={18} />
-        </ToolButton>}
         <details ref={recentMenuRef} className="recent-projects">
-          <summary className="tool-button" title="打开最近工程">
+          <summary className="tool-button" title="打开最近工程" aria-label="最近工程">
             <History size={18} />
-            <span>最近</span>
           </summary>
           <div className="recent-projects__menu">
             <div className="recent-projects__title">最近工程</div>
@@ -222,15 +225,15 @@ export function TopToolbar({
             ))}
           </div>
         </details>
-        <ToolButton label="保存" title="保存（Ctrl+S）" disabled={busy} onClick={() => onSave(false)}>
+        {!commonTools && <ToolButton label="保存" title="保存（Ctrl+S）" disabled={busy} onClick={() => onSave(false)}>
           <Save size={18} />
-        </ToolButton>
-        <ToolButton label="另存为" title="另存为" disabled={busy} onClick={() => onSave(true)}>
+        </ToolButton>}
+        {!commonTools && <ToolButton label="另存为" title="另存为" disabled={busy} onClick={() => onSave(true)}>
           <SaveAll size={18} />
-        </ToolButton>
+        </ToolButton>}
       </div>
 
-      <div className="toolbar__separator" />
+      {!commonTools && <><div className="toolbar__separator" />
 
       <div className="toolbar__group">
         <ToolButton
@@ -251,10 +254,10 @@ export function TopToolbar({
         </ToolButton>
       </div>
 
-      <div className="toolbar__separator" />
+      <div className="toolbar__separator" /></>}
 
       {(onOpenRecipes || onOpenProductivity || onOpenMaterials) && <details ref={moreMenuRef} className="toolbar-more-menu">
-        <summary className="tool-button" aria-label="创作工具"><FileText size={18} /><span>创作工具</span></summary>
+        <summary className="tool-button" aria-label="创作工具" title="创作工具"><FileText size={18} /></summary>
         <div className="toolbar-more-menu__panel" role="menu" aria-label="创作工具菜单">
           <button type="button" role="menuitem" disabled={busy} onClick={event => {
             event.currentTarget.closest('details')?.removeAttribute('open'); onOpenMaterials?.()
@@ -323,6 +326,8 @@ export function TopToolbar({
         </span>
       </ToolButton>
 
+      {!commonTools && <><CourseNavigationToolbarHost mode="deep" />
+      <div className="toolbar__delivery-actions" role="group" aria-label="预览与交付">
       <ToolButton
         label="整课预览"
         title="整课预览"
@@ -332,7 +337,10 @@ export function TopToolbar({
       >
         <Eye size={18} />
       </ToolButton>
+      <CourseImportMenu busy={busy} onPptx={onImportPptx} onFlow={onImportFlow} onHtml={onImportHtml} />
       <ExportMenu busy={busy} hasFlowSurface={hasFlowSurface} onExport={onExport} onExportSettings={onExportSettings} />
+      </div></>}
+      {commonTools && <div className="toolbar__common-tools">{commonTools}</div>}
     </header>
   )
 }

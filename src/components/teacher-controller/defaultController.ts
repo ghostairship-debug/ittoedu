@@ -1,12 +1,14 @@
 import type { ComponentInstance, MountedComponent } from '../../shared/contracts/component-platform'
 import type { TeacherControllerAction } from '../../shared/teacherControllerConfig'
 import type { TeacherControllerData, TeacherControllerRuntimeContext } from './types'
+import { teacherControllerButtonWidth, teacherControllerLayout } from '../../shared/teacherControllerLayout'
 
 /** The mature editable UI and the preloaded implementation share this module. */
 export function mount(context: TeacherControllerRuntimeContext): MountedComponent<TeacherControllerData> {
   if (!context.root) throw new Error('教师控制台需要全局 Overlay 容器')
   const root = context.root
   const doc = root.ownerDocument, host = context.teacherController
+  const pointerHost = host as typeof host & { movePointer?(phase: 'start' | 'move' | 'end', x: number, y: number): void }
   let current = context.instance, disposed = false, open: 'directory' | 'zoom' | null = null
   const css = doc.createElement('style'), panel = doc.createElement('nav')
   panel.setAttribute('aria-label', '教师控制台')
@@ -17,12 +19,13 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
     .guoling-controller button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.guoling-controller button:disabled{opacity:.32;cursor:default}.guoling-controller svg{width:19px;height:19px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
     .guoling-controller .launcher{width:46px;height:46px;padding:0;border-radius:50%;background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
     .guoling-controller .identity{display:flex;flex-direction:column;justify-content:center;gap:3px;min-width:90px;max-width:180px;cursor:grab;touch-action:none;pointer-events:auto}.guoling-controller .identity strong{font-size:13px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.guoling-controller .progress{font-size:11px;opacity:.65;font-variant-numeric:tabular-nums}.guoling-controller .track{height:2px;border-radius:2px;background:color-mix(in srgb,var(--ink) 12%,transparent);overflow:hidden}.guoling-controller .track i{display:block;height:100%;background:var(--accent);border-radius:2px}
-    .guoling-controller .group{display:flex;align-items:center;gap:4px}.guoling-controller .steps{margin-left:4px;padding-left:12px;border-left:1px solid color-mix(in srgb,var(--ink) 14%,transparent)}.guoling-controller .tools{margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
+    .guoling-controller .group{display:flex;align-items:center;gap:4px;flex-shrink:0}.guoling-controller .steps{margin-left:4px;padding-left:12px;border-left:1px solid color-mix(in srgb,var(--ink) 14%,transparent)}.guoling-controller .tools{margin-left:auto;flex-wrap:wrap;justify-content:flex-end}.guoling-controller button>span{overflow:hidden;text-overflow:ellipsis}.guoling-controller .group:empty{display:none}
     .guoling-controller .primary{background:var(--accent);color:var(--accent-ink);padding:0 18px;font-weight:650}.guoling-controller .primary:hover:not(:disabled){background:var(--accent);box-shadow:inset 0 0 0 100px #ffffff1f}.guoling-controller button[aria-expanded=true]{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent)}
     .guoling-controller .launcher{order:4;margin-left:auto}.guoling-controller.collapsed{width:52px;height:52px;min-height:52px;padding:2px;gap:0;border-radius:50%}.guoling-controller.collapsed .launcher{width:46px;height:46px}.guoling-controller.compact .identity{display:none}
     .guoling-controller .popover{position:absolute;bottom:calc(100% + 12px);right:0;width:320px;max-width:calc(100vw - 24px);padding:12px;border-radius:16px;border:1px solid color-mix(in srgb,var(--ink) 16%,transparent);background:var(--paper-solid);color:var(--ink);box-shadow:0 16px 48px #0f172a33;pointer-events:auto}.guoling-controller .popover header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 0 8px 8px;font-weight:650}.guoling-controller .popover header small{font-size:11px;opacity:.55;font-weight:400;margin-left:8px}.guoling-controller .popover header button{width:30px;min-width:30px;height:30px;padding:0}.guoling-controller .scene-list{display:flex;flex-direction:column;gap:3px;max-height:300px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}.guoling-controller .scene-row{width:100%;justify-content:flex-start;min-height:42px;height:auto;padding:9px 10px;white-space:normal;text-align:left}.guoling-controller .scene-row span{overflow:hidden;text-overflow:ellipsis}.guoling-controller .scene-row em{min-width:25px;font-style:normal;font-size:11px;opacity:.55;font-variant-numeric:tabular-nums}.guoling-controller .scene-row[aria-current=page]{background:color-mix(in srgb,var(--accent) 17%,transparent);color:var(--accent)}.guoling-controller .zoom-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.guoling-controller .zoom-value{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}.guoling-controller .reset{width:100%;margin-top:8px;background:color-mix(in srgb,var(--ink) 6%,transparent)}
     @container controller (max-width:760px){.guoling-controller{gap:6px}.guoling-controller .identity{max-width:110px}.guoling-controller .steps{padding-left:6px;margin-left:0}.guoling-controller .tools{gap:0}.guoling-controller button{padding:0 8px;min-width:36px}.guoling-controller .primary{padding:0 12px}}
-    @container controller (max-width:560px){.guoling-controller:not(.collapsed){flex-wrap:wrap}.guoling-controller .identity{max-width:none;flex:1}.guoling-controller .steps{border-left:0;margin-left:auto}.guoling-controller .tools{width:calc(100% - 58px);margin-left:0;justify-content:center;border-top:1px solid color-mix(in srgb,var(--ink) 12%,transparent);padding-top:5px}}
+    .guoling-controller .scene-children{display:flex;flex-direction:column;gap:2px;margin:2px 0 6px 28px;padding-left:8px;border-left:2px solid color-mix(in srgb,var(--accent) 30%,transparent)}.guoling-controller .scene-children[hidden]{display:none}.guoling-controller .scene-target{width:100%;height:auto;min-height:34px;justify-content:flex-start;white-space:normal;text-align:left;font-size:12px;padding:6px 10px}.guoling-controller .scene-row .scene-expand{margin-left:auto;opacity:.6;flex-shrink:0}
+    @container controller (max-width:560px){.guoling-controller:not(.collapsed):not(.fits){flex-wrap:wrap}.guoling-controller:not(.fits) .identity{max-width:none;flex:1}.guoling-controller:not(.fits) .steps{border-left:0;margin-left:auto}.guoling-controller:not(.fits) .tools{width:calc(100% - 58px);margin-left:0;justify-content:center;border-top:1px solid color-mix(in srgb,var(--ink) 12%,transparent);padding-top:5px}}
     @media(prefers-reduced-motion:reduce){.guoling-controller button{transition:none}}
   `
   root.append(css, panel)
@@ -71,12 +74,13 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
     if (list) list.style.maxHeight = `${Math.max(60, Math.min(300, (useBelow ? below : above) / Math.max(.01, scale) - 64))}px`
   }
   let drag: { pointerId: number; x: number; y: number; startX: number; startY: number; moved: boolean } | null = null, suppressClick = false
-  const endDrag = () => { drag = null }
+  const endDrag = () => { if (drag) pointerHost?.movePointer?.('end', drag.x, drag.y); drag = null }
   const down = (event: PointerEvent) => {
     if (!interactive() || event.button !== 0 || (event.target as Element | null)?.closest('.popover')) return
     suppressClick = false
     ;((event.target as Element | null)?.closest('button') ?? panel).setPointerCapture?.(event.pointerId)
     drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, moved: false }
+    pointerHost?.movePointer?.('start', event.clientX, event.clientY)
   }
   const move = (event: PointerEvent) => {
     if (!drag || event.pointerId !== drag.pointerId) return
@@ -84,7 +88,9 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
     if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return
     drag.moved = true; suppressClick = true; panel.setPointerCapture?.(event.pointerId)
     const dx = event.clientX - drag.x, dy = event.clientY - drag.y
-    drag.x = event.clientX; drag.y = event.clientY; host!.moveBy(dx, dy)
+    drag.x = event.clientX; drag.y = event.clientY
+    if (pointerHost?.movePointer) pointerHost.movePointer('move', event.clientX, event.clientY)
+    else host!.moveBy(dx, dy)
   }
   const suppressDragClick = (event: MouseEvent) => { if (suppressClick) { event.preventDefault(); event.stopImmediatePropagation(); suppressClick = false } }
   panel.addEventListener('pointerdown', down); panel.addEventListener('pointermove', move); panel.addEventListener('click', suppressDragClick, true)
@@ -98,8 +104,9 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
     const active = doc.activeElement?.shadowRoot?.activeElement ?? doc.activeElement, focus = panel.contains(active) ? (active as HTMLElement).dataset.control : undefined
     const variant = props.sceneStyles?.[state?.locationId ?? ''] ?? {}, data = { ...props, ...variant }, style = { ...props.style, ...variant.style }
     const collapsed = Boolean(data.collapsible && (state?.collapsed ?? data.defaultCollapsed))
+    const layout = teacherControllerLayout(data)
     if (collapsed) open = null
-    panel.className = `guoling-controller${collapsed ? ' collapsed' : ''}${data.compact ? ' compact' : ''}`
+    panel.className = `guoling-controller${collapsed ? ' collapsed' : ''}${data.compact ? ' compact' : ''}${layout.width <= (root.clientWidth || current.frame?.width || layout.width) + .5 ? ' fits' : ''}`
     const themed = (name: string, fallback: string) => doc.defaultView?.getComputedStyle(root).getPropertyValue(name).trim() || fallback
     const ink = style.textColor || themed('--color-text', '#f3eee0'), paper = style.backgroundColor || themed('--color-background', '#252c3d'), accent = style.accentColor || themed('--color-accent', '#d9bf73')
     panel.style.setProperty('--ink', ink); panel.style.setProperty('--paper-solid', paper); panel.style.setProperty('--accent', accent)
@@ -114,6 +121,7 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
     if (data.collapsible || collapsed) panel.append(launcher)
     if (collapsed) return
     const identity = doc.createElement('div'); identity.className = 'identity'; identity.title = '拖动教师控制台'
+    identity.style.width = `${layout.identityWidth}px`; identity.style.flexShrink = '1'
     const title = doc.createElement('strong'); title.textContent = data.title || '教师控制台'; identity.append(title)
     if (data.showSceneProgress && state?.progress) {
       const value = state.progress, progress = doc.createElement('span'); progress.className = 'progress'
@@ -128,6 +136,7 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
       if (!spec.visible) continue
       const type = spec.action.type, picker = type === 'scene.open-picker'
       const node = button(spec.label, glyphs[type] ?? null, () => picker ? toggle('directory') : perform(spec.action), type.startsWith('step.') ? spec.label : picker ? '目录' : !glyphs[type] ? spec.label : undefined, spec.id)
+      node.style.width = `${teacherControllerButtonWidth(spec)}px`
       node.dataset.controllerButtonId = spec.id; node.disabled ||= !host?.canExecute(spec.action)
       if (type === 'step.next') node.className = 'primary'
       if (picker) node.setAttribute('aria-expanded', String(open === 'directory'))
@@ -136,6 +145,7 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
       ;(type.startsWith('step.') ? steps : tools).append(node)
     }
     const zoom = button('缩放', null, () => toggle('zoom'), `${Math.round((state?.zoom ?? 1) * 100)}%`, 'zoom')
+    zoom.style.width = '80px'
     zoom.setAttribute('aria-expanded', String(open === 'zoom')); tools.append(zoom)
     if (open && host && state) {
       const popup = doc.createElement('section'); popup.className = 'popover'; popup.setAttribute('role', 'dialog'); popup.dataset.coursewareKeyboardCapture = 'true'
@@ -145,10 +155,26 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
         const count = doc.createElement('small'); count.textContent = `${state.scenes.length} 页`; caption.append(count)
         const list = doc.createElement('div'); list.className = 'scene-list'
         for (const [index, scene] of state.scenes.entries()) {
+          const group = doc.createElement('div'), children = doc.createElement('div'); group.className = 'scene-group'; children.className = 'scene-children'; children.hidden = true
           const node = button(scene.name, null, () => perform({ type: 'scene.go', sceneId: scene.id }), undefined, `scene-${scene.id}`); node.className = 'scene-row'; node.disabled ||= !host.canExecute({ type: 'scene.go', sceneId: scene.id })
           const number = doc.createElement('em'), label = doc.createElement('span'); number.textContent = String(index + 1).padStart(2, '0'); label.textContent = scene.name; node.append(number, label)
           if (scene.id === state.locationId) node.setAttribute('aria-current', 'page')
-          list.append(node)
+          group.append(node)
+          if (scene.targets?.length) {
+            const hint = doc.createElement('span'); hint.className = 'scene-expand'; hint.textContent = '▾'; node.append(hint)
+            node.title = `${scene.name} · 点击回到播放起点，悬停查看具体目标`; node.setAttribute('aria-expanded', 'false')
+            children.id = `teacher-scene-targets-${scene.id}`; node.setAttribute('aria-controls', children.id)
+            for (const target of scene.targets) {
+              const child = button(target.name, null, () => perform(target.action), target.name, `target-${scene.id}-${target.id}`)
+              child.className = 'scene-target'; child.style.paddingLeft = `${10 + (target.depth ?? 0) * 12}px`; child.disabled ||= !host.canExecute(target.action)
+              children.append(child)
+            }
+            const reveal = () => { children.hidden = false; node.setAttribute('aria-expanded', 'true') }
+            const hide = () => { if (group.contains(doc.activeElement)) return; children.hidden = true; node.setAttribute('aria-expanded', 'false') }
+            group.addEventListener('pointerenter', reveal); group.addEventListener('pointerleave', hide); group.addEventListener('focusin', reveal); group.addEventListener('focusout', () => queueMicrotask(hide))
+            group.append(children)
+          }
+          list.append(group)
         }
         popup.append(list)
       } else {
@@ -176,7 +202,7 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
   }
   context.scope.cleanup(dispose)
   render()
-  return { update(instance: ComponentInstance<TeacherControllerData>) { current = instance; render() }, updatePlacement() { render() }, dispose }
+  return { update(instance: ComponentInstance<TeacherControllerData>) { current = instance; render() }, updatePlacement(frame) { current = { ...current, frame }; fitPopup() }, dispose }
 }
 
 export default { mount }

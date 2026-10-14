@@ -18,11 +18,16 @@ export interface CapturedCourseTarget {
   readonly surfaceId: string | null
   readonly instanceIds: readonly string[]
   readonly instanceId: string | null
+  readonly activation?: number
 }
 
 export interface CapturedComponentOperation extends ComponentOperationBatch {
   readonly documentId: string
   readonly epoch: string
+}
+
+export class CourseComponentApplyError extends Error {
+  constructor(message: string, readonly operationId: string) { super(message) }
 }
 
 export interface CourseAgentUndoTarget {
@@ -49,6 +54,14 @@ export interface CourseV10ViewState {
   surfaceId: string | null
   pending: number
   error: string | null
+}
+
+export function capturedCourseViewIsCurrent(view: CourseV10ViewState, target: CapturedCourseTarget): boolean {
+  return view.activeDocumentId === target.documentId && view.snapshot?.epoch === target.epoch
+    && view.surfaceId === target.surfaceId && view.activeStateId === target.activeStateId
+    && (target.activation === undefined || target.activation === view.activation)
+    && view.selectedInstanceIds.length === target.instanceIds.length
+    && view.selectedInstanceIds.every((id, index) => id === target.instanceIds[index])
 }
 
 /** V10 domain binding and transient selection. Session and Projection retain their existing owners. */
@@ -129,9 +142,12 @@ export class CourseV10DocumentBridge {
         queueMicrotask(() => { if (this.api === api) this.detachClosed(event.documentId) })
     })
     const navigation = ++this.navigation
-    const pending = api.bootstrapCourse().then(async snapshot => {
+    // Connecting the workbench must not create a user document. An explicit
+    // New/Open action (including an AI file.create) owns course creation.
+    const pending = api.list().then(async documents => {
       if (api === this.api) this.connected = true
-      if (api === this.api && navigation === this.navigation) await this.activate(snapshot.documentId)
+      const snapshot = documents.find(document => document.model.kind === 'course-v10')
+      if (snapshot && api === this.api && navigation === this.navigation) await this.activate(snapshot.documentId)
     }).finally(() => { if (this.connecting === pending) this.connecting = undefined })
     this.connecting = pending
     return pending
@@ -144,6 +160,9 @@ export class CourseV10DocumentBridge {
   }
   async activate(documentId: string): Promise<void> {
     const navigation = ++this.navigation
+    await this.activateAtNavigation(documentId, navigation)
+  }
+  private async activateAtNavigation(documentId: string, navigation: number): Promise<void> {
     let projection = this.projections.get(documentId)
     if (!projection) {
       let pending = this.attaching.get(documentId)
@@ -160,27 +179,32 @@ export class CourseV10DocumentBridge {
       }
       projection = await pending
     }
-    if (navigation !== this.navigation) return
+    if (navigation !== this.navigation) { this.publish(); return }
     this.publish({ activeDocumentId: projection.documentId, activation: this.state.activation + 1 })
   }
   async create(model: Extract<DocumentModel, { kind: 'course-v10' }> = {
     kind: 'course-v10', project: createBlankCourseProjectV10(), resources: { assets: {}, components: {} },
   }): Promise<void> {
-    const snapshot = await this.host().create(model, `${model.project.title}.glx`)
-    await this.activate(snapshot.documentId)
+    const host = this.host(), navigation = ++this.navigation
+    const snapshot = await host.create(model, `${model.project.title}.glx`)
+    if (host === this.api) await this.activateAtNavigation(snapshot.documentId, navigation)
   }
-  async open(path: string): Promise<void> { const snapshot = await this.host().open(path); await this.activate(snapshot.documentId) }
+  async open(path: string): Promise<void> {
+    const host = this.host(), navigation = ++this.navigation
+    const snapshot = await host.open(path)
+    if (host === this.api) await this.activateAtNavigation(snapshot.documentId, navigation)
+  }
   async edit(edits: ComponentEdit[], historyGroup?: string, documentId?: string) {
     return this.editCaptured(this.capture(edits, this.captureTarget(documentId)), historyGroup)
   }
-  captureTarget(documentId = this.state.activeDocumentId ?? ''): CapturedCourseTarget {
-    const view = this.projection(documentId).read(), model = view.draft ?? view.committed?.model
+  captureTarget(documentId = this.state.activeDocumentId ?? '', committed = false): CapturedCourseTarget {
+    const view = this.projection(documentId).read(), model = committed ? view.committed?.model : view.draft ?? view.committed?.model
     if (model?.kind !== 'course-v10') throw new Error('课件文档尚未打开')
     const selection = this.selections.get(documentId)
     const project = structuredClone(model.project)
     const surfaceId = selection?.surfaceId ?? model.project.surfaces[0]?.id ?? null
     const activeStateId = selection?.presentationStates[surfaceId ?? ''] ?? null
-    return { documentId, epoch: view.committed!.epoch, project, resources: structuredClone(model.resources),
+    return { documentId, epoch: view.committed!.epoch, activation: this.state.activation, project, resources: structuredClone(model.resources),
       editingProject: resolveComponentPresentation(project, surfaceId, activeStateId), activeStateId, surfaceId,
       instanceIds: [...(selection?.instanceIds ?? [])], instanceId: selection?.instanceIds[0] ?? null }
   }
@@ -198,8 +222,13 @@ export class CourseV10DocumentBridge {
     const projection = this.projection(documentId)
     if (projection.read().committed?.epoch !== epoch) throw new Error('捕获的文档会话已关闭，请重新开始编辑')
     const result = await projection.edit(command, { historyGroup })
-    if (!('revision' in result)) throw new Error(result.message)
+    if (!('revision' in result)) throw new CourseComponentApplyError(result.message, result.operationId)
     return result
+  }
+  async releaseRejectedSourceOperation(documentId: string, epoch: string, operationId: string): Promise<void> {
+    const projection = this.projection(documentId)
+    if (projection.read().committed?.epoch !== epoch) throw new Error('捕获的文档会话已关闭，请重新开始编辑')
+    await projection.releaseRejectedOperation(operationId)
   }
   async undo(documentId?: string): Promise<void> { const result = await this.projection(documentId).undo(); if (!('revision' in result)) throw new Error(result.message) }
   async redo(documentId?: string): Promise<void> { const result = await this.projection(documentId).redo(); if (!('revision' in result)) throw new Error(result.message) }

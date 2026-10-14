@@ -1,12 +1,13 @@
 import { captureComponentOperation, equalComponentValue, presentationComponentEdits } from '../../../../core/drivers/courseV10Operations'
 import { componentDataEdits } from '../../../../core/course/componentDataEdits'
 import { frameCorners, translateFrame } from '../../../../core/components/geometry'
-import { containerChildIds, owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentDefinition, type ComponentEdit, type ComponentFrame, type ComponentInstance, type CourseProjectV10, type JsonObject } from '../../../../shared/contracts/component-platform'
+import { containerChildIds, owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentDefinition, type ComponentEdit, type ComponentFrame, type ComponentInstance, type CourseProjectV10, type JsonObject, type JsonValue } from '../../../../shared/contracts/component-platform'
 import type { ContentApplyDiagnostic, ContentApplyPlan, ContentChangeRequest, ContentObjectDraft } from './types'
+import { applyComponentStylePatch, cssStyleName, isOuterGeometryStyle } from '../../../../shared/componentStylePatch'
+import { WEB_DEFINITION } from '../../../../components/web/data'
+export { cssStyleName, isOuterGeometryStyle } from '../../../../shared/componentStylePatch'
 
 /** The outer frame remains the sole geometry owner. Internal Web CSS is handled by its component. */
-export const cssStyleName = (name: string): string => name.startsWith('--') ? name : name.replace(/[A-Z]/g, value => `-${value.toLowerCase()}`)
-export const isOuterGeometryStyle = (name: string): boolean => /^(?:position|inset(?:-.+)?|top|right|bottom|left|(?:min-|max-)?(?:width|height|inline-size|block-size)|margin(?:-.+)?|transform(?:-.+)?|translate|rotate|scale|zoom|z-index|float|clear|order|flex(?:-.+)?|grid(?:-.+)?|align-self|justify-self)$/i.test(cssStyleName(name))
 
 export function contentTargetIds(project: CourseProjectV10, request: Pick<ContentChangeRequest, 'target'>): string[] {
   const roots = request.target.kind === 'instance' ? [request.target.instanceId] : containerChildIds(project, request.target.container)
@@ -101,7 +102,6 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
       container = owner
       const position = containerChildIds(project, owner).indexOf(request.target.instanceId)
       index = request.intent === 'redo' ? position : position + 1
-      if (request.intent === 'redo') edits.push({ type: 'instance.remove', instanceId: request.target.instanceId })
     } else {
       container = request.target.container
       const children = containerChildIds(project, container)
@@ -121,6 +121,7 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
       const children = draft.children?.map(allocate)
       const style = draft.style ? Object.fromEntries(Object.entries(draft.style).filter(([name]) => !isOuterGeometryStyle(name)).map(([name, value]) => [cssStyleName(name), value])) : undefined
       instances.push({ id, definitionId: draft.definitionId, data: structuredClone(draft.data),
+        ...(draft.authoring ? { authoring: structuredClone(draft.authoring) } : {}),
         ...(style ? { style: structuredClone(style) } : {}), ...(draft.frame ? { frame: structuredClone(draft.frame) } : {}),
         ...(draft.implementationOverride ? { implementationOverride: structuredClone(draft.implementationOverride) } : {}),
         ...(children ? { childIds: children } : {}) })
@@ -133,7 +134,39 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
     for (const edit of edits) if (edit.type === 'definition.set') definitions[edit.definition.id] = edit.definition
     const placed = request.intent === 'insert' ? placeNewRoots(project, container, drafts, diagnostics, definitions)
       : flow ? drafts.map(draft => flowBodyDraft(draft, definitions)) : drafts
-    edits.push({ type: 'instance.insert', container, index, instances, rootIds: placed.map(allocate) })
+    if (request.intent === 'redo' && request.target.kind === 'instance') {
+      const target = project.instances[request.target.instanceId]!
+      const removed = new Set((target.childIds ?? []).flatMap(id => contentTargetIds(project, { target: { kind: 'instance', instanceId: id } })))
+      const detached = new Set<string>()
+      for (const childId of target.childIds ?? []) for (const expected of captureComponentOperation(project, [{ type: 'instance.remove', instanceId: childId }]).expected) {
+        const path = expected.path
+        if (path[0] === 'instances' && !removed.has(path[1]!) && ['data', 'attachments', 'flowPlacement'].includes(path[2]!)
+          || path[0] === '@surface' && ['presentation', 'spatial'].includes(path[2]!)) detached.add(path.join('.'))
+      }
+      for (const reference of detached) diagnostics.push({ level: 'warning', code: 'redo-internal-reference-detached', instanceId: target.id, reference,
+        message: `关联位置 ${reference} 引用已替换的旧内部对象，已沿正式删除规则解除；选定目标本身的身份、外框与关联保留。`, repairable: true })
+      for (const childId of target.childIds ?? []) edits.push({ type: 'instance.remove', instanceId: childId })
+      let root: ContentObjectDraft
+      if (placed.length === 1) root = placed[0]!
+      else {
+        let definitionId = WEB_DEFINITION.id
+        if (definitions[definitionId] && !equalComponentValue(definitions[definitionId], WEB_DEFINITION)) {
+          definitionId = input.createId()
+        }
+        if (!definitions[definitionId]) edits.push({ type: 'definition.set', definition: { ...WEB_DEFINITION, id: definitionId } })
+        root = { definitionId, data: { html: '<div style="width:100%;height:100%"></div>' }, children: placed }
+      }
+      edits.push({ type: 'instance.definition.set', instanceId: target.id, definitionId: root.definitionId },
+        { type: 'data.set', instanceId: target.id, path: [], value: structuredClone(root.data) },
+        { type: 'authoring.set', instanceId: target.id, path: [], value: structuredClone(root.authoring ?? {}) as unknown as JsonValue },
+        { type: 'style.set', instanceId: target.id, path: [], value: Object.fromEntries(Object.entries(root.style ?? {})
+          .filter(([name]) => !isOuterGeometryStyle(name)).map(([name, value]) => [cssStyleName(name), structuredClone(value)])) },
+        { type: 'implementation.set', instanceId: target.id, implementation: root.implementationOverride ?? null })
+      const childIds = (root.children ?? []).map(allocate)
+      if (childIds.length) edits.push({ type: 'instance.insert', container: { kind: 'instance', instanceId: target.id }, index: 0, instances, rootIds: childIds })
+      insertedIds.unshift(target.id)
+      // No frame edit: redo grants new internal content, not a move or resize of the selected object.
+    } else edits.push({ type: 'instance.insert', container, index, instances, rootIds: placed.map(allocate) })
   } else if (request.intent === 'style') {
     if (request.source.kind !== 'style') throw new Error('样式意图需要明确的样式字段')
     const style: JsonObject = {}
@@ -142,8 +175,9 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
       else if (value !== null && typeof value !== 'string' && typeof value !== 'number') diagnostics.push({ level: 'warning', code: 'unsupported-css-value', message: `${name} 不是当前 CSS consumer 支持的标量样式值，已保留其余样式。`, repairable: true })
       else style[cssStyleName(name)] = value
     }
-    for (const instanceId of contentTargetIds(project, request)) for (const [name, value] of Object.entries(style)) {
-      if (!equalComponentValue(project.instances[instanceId]?.style?.[name], value)) edits.push({ type: 'style.set', instanceId, path: [name], value })
+    for (const instanceId of contentTargetIds(project, request)) {
+      const next = applyComponentStylePatch(project.instances[instanceId]?.style, style)
+      if (!equalComponentValue(project.instances[instanceId]?.style ?? {}, next)) edits.push({ type: 'style.set', instanceId, path: [], value: next })
     }
   } else if (request.source.kind === 'data') {
     if (request.target.kind !== 'instance') throw new Error('专业字段修改需要一个确定对象')

@@ -92,11 +92,11 @@ it('commits the completed local gesture once through canonical History and undoe
   expect(session.read().undoDepth).toBe(1)
   const model = session.read().model
   if (model.kind !== 'course-v10') throw new Error('Expected course')
-  expect(model.project.instances.web.data).toMatchObject({ authoringRecords: { 'local-text': { overrides: { geometry: { translateX: 50, translateY: 20 } } } } })
+  expect(model.project.instances.web.authoring).toMatchObject({ records: { 'local-text': { overrides: { geometry: { translateX: 50, translateY: 20 } } } } })
   expect(model.project.instances.web.frame).toEqual(project.instances.web.frame)
   await session.execute({ documentId: 'doc', epoch: 'epoch', baseRevision: session.read().revision, operationId: 'undo', actor: 'human', mutation: { type: 'undo' } })
   const undone = session.read().model
-  expect(undone.kind === 'course-v10' && undone.project.instances.web.data).toEqual(project.instances.web.data)
+  expect(undone.kind === 'course-v10' && undone.project.instances.web).toEqual(project.instances.web)
 })
 
 it('anchors one static same-looking object in its source transaction and binds only that object after cold serialization', () => {
@@ -113,35 +113,45 @@ it('anchors one static same-looking object in its source transaction and binds o
   const next = applyComponentOperation(project, captureComponentOperation(project, edits))
   const driver = new CourseV10Driver(), cold = driver.load(driver.serialize({ kind: 'course-v10', project: next, resources: { assets: {}, components: {} } }))
   if (cold.kind !== 'course-v10') throw new Error('Expected course')
-  const data = cold.project.instances.web.data as { html: string; authoringRecords: Record<string, any> }, frame = document.createElement('iframe')
+  const data = cold.project.instances.web.data as { html: string }, frame = document.createElement('iframe')
+  let records = cold.project.instances.web.authoring!.records!
   document.body.append(frame)
   const doc = frame.contentDocument!
   doc.open(); doc.write(data.html); doc.close()
-  const runtime = createDomAuthoring(doc.documentElement, { records: () => data.authoringRecords })
+  const runtime = createDomAuthoring(doc.documentElement, { records: () => records })
   const paragraphs = doc.querySelectorAll('p')
   expect(paragraphs[0].style.getPropertyValue('translate')).toBe('')
   expect(paragraphs[1].style.getPropertyValue('translate')).toContain('42px')
   expect(paragraphs[0].textContent).toBe('same')
   expect(paragraphs[1].textContent).toBe('same')
   expect(paragraphs[1].getAttribute('data-cw-author-key')).toBe('second-same')
+  const boundSpot: ComponentAuthorSpot = { ...spot, binding: records['second-same'].binding, bindingStatus: 'bound' }
+  expect(() => authorSpotEdits(cold.project, boundSpot, 'Changed', { assets: {}, components: {} })).toThrow('此处HTML内容已变化')
+  // Cold observation addresses the current source; a geometry-only record does not take ownership of text.
+  const currentFrom = data.html.lastIndexOf('>same<') + 1
   const changed = applyComponentOperation(cold.project, captureComponentOperation(cold.project, authorSpotEdits(cold.project,
-    { ...spot, binding: data.authoringRecords['second-same'].binding, bindingStatus: 'bound' }, 'Changed', { assets: {}, components: {} })))
+    { ...boundSpot, sourceRegion: { ...spot.sourceRegion!, start: currentFrom, end: currentFrom + 4 } }, 'Changed', { assets: {}, components: {} })))
   const changedData = changed.instances.web.data as typeof data
-  expect(changedData.html).toBe(data.html)
-  data.authoringRecords = changedData.authoringRecords
-  runtime.refresh()
-  expect(paragraphs[0].textContent).toBe('same')
-  expect(paragraphs[1].textContent).toBe('Changed')
-  expect(paragraphs[1].style.getPropertyValue('translate')).toContain('42px')
-  runtime.dispose(); frame.remove()
+  expect(changedData.html).toBe(data.html.slice(0, currentFrom) + 'Changed' + data.html.slice(currentFrom + 4))
+  records = changed.instances.web.authoring!.records!
+  expect(records['second-same'].binding.baseline).toBe('Changed')
+  expect(records['second-same'].overrides.text).toBeUndefined()
+  runtime.dispose()
+  doc.open(); doc.write(changedData.html); doc.close()
+  const changedRuntime = createDomAuthoring(doc.documentElement, { records: () => records })
+  const changedParagraphs = doc.querySelectorAll('p')
+  expect(changedParagraphs[0].textContent).toBe('same')
+  expect(changedParagraphs[1].textContent).toBe('Changed')
+  expect(changedParagraphs[1].style.getPropertyValue('translate')).toContain('42px')
+  changedRuntime.dispose(); frame.remove()
 })
 
 it('prepares a frozen bound text reply from the current snapshot after remount without overwriting newer geometry or another object', async () => {
   const binding = { kind: 'dom' as const, path: [{ tag: 'p', index: 0, attributes: { id: 'title' } }], baseline: 'Original' }
   const project: CourseProjectV10 = { schemaVersion: 10, id: 'reply', revision: 0, title: 'Reply', assets: {},
     definitions: { web: { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } } },
-    instances: { web: { id: 'web', definitionId: 'web', data: { html: '<p id="title">Original</p><p id="other">Other</p>',
-      authoringRecords: { title: { kind: 'text', binding, overrides: { text: 'Original', geometry: { translateX: 0 } } },
+    instances: { web: { id: 'web', definitionId: 'web', data: { html: '<p id="title">Original</p><p id="other">Other</p>' },
+      authoring: { records: { title: { kind: 'text', binding, overrides: { text: 'Original', geometry: { translateX: 0 } } },
         other: { kind: 'text', binding: { kind: 'dom', path: [{ tag: 'p', index: 1, attributes: { id: 'other' } }], baseline: 'Other' }, overrides: { text: 'Other' } } } },
       frame: { width: 400, height: 300, transform: [1, 0, 0, 1, 0, 0] } } },
     surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['web'] }], global: { underlay: [], overlay: [] } }
@@ -165,12 +175,12 @@ it('prepares a frozen bound text reply from the current snapshot after remount w
   const captured = current(), spot: ComponentAuthorSpot = { id: 'retired-mount', instanceId: 'web', mountGeneration: 1, kind: 'text', authorKey: 'title', binding,
     bindingStatus: 'bound', initialValue: 'Original', localBounds: { width: 100, height: 30, transform: [1, 0, 0, 1, 0, 0] } }
   const stop = registerRuntimeLightEditDocument('doc', { authorSpots: () => [], subscribeAuthorSpots: () => () => {} } as unknown as ComponentPlatformRuntime, bridge)
-  const human = captureComponentOperation(project, [{ type: 'data.set', instanceId: 'web', path: ['authoringRecords', 'title', 'overrides', 'geometry', 'translateX'], value: 25 },
-    { type: 'data.set', instanceId: 'web', path: ['authoringRecords', 'other', 'overrides', 'text'], value: 'Other object changed' }])
+  const human = captureComponentOperation(project, [{ type: 'authoring.set', instanceId: 'web', path: ['records', 'title', 'overrides', 'geometry', 'translateX'], value: 25 },
+    { type: 'authoring.set', instanceId: 'web', path: ['records', 'other', 'overrides', 'text'], value: 'Other object changed' }])
   expect((await session.execute({ documentId: 'doc', epoch: 'epoch', baseRevision: 0, operationId: 'human', actor: 'human', mutation: { type: 'command', command: human } })).status).toBe('applied')
   try {
     expect(await runtimeLightEditCommands.setPageText({ target: captured, spot, bridge }, 'AI reply')).toEqual({ ok: true, changed: true })
-    expect(current().project.instances.web.data).toMatchObject({ authoringRecords: { title: { overrides: { text: 'AI reply', geometry: { translateX: 25 } } },
+    expect(current().project.instances.web.authoring).toMatchObject({ records: { title: { overrides: { text: 'AI reply', geometry: { translateX: 25 } } },
       other: { overrides: { text: 'Other object changed' } } } })
   } finally { stop() }
 })
@@ -184,7 +194,7 @@ it('creates the first dynamic author record from the exact registered record pat
   const spot: ComponentAuthorSpot = { id: 'observed', instanceId: 'web', mountGeneration: 1, kind: 'text', initialValue: 'Conversation 1', authorKey: key,
     scope: { 'react:conversation.id': 'conversation-1' }, bindingStatus: 'bound',
     binding: { kind: 'dom', path: [{ tag: 'body', index: 1 }, { tag: 'div', index: 0, attributes: { id: 'root' } }, { tag: 'h2', index: 1 }], textIndex: 0, baseline: 'Conversation 1' },
-    dataPath: ['authoringRecords', key, 'overrides', 'text'], localBounds: { width: 152, height: 25.5, transform: [1, 0, 0, 1, 925, 138] } }
+    fieldScope: 'authoring', dataPath: ['records', key, 'overrides', 'text'], localBounds: { width: 152, height: 25.5, transform: [1, 0, 0, 1, 925, 138] } }
   const driver = new CourseV10Driver(), resources = { assets: {}, components: {} }
   const session = await DocumentSession.create({ documentId: 'first-record', epoch: 'epoch', binding: { kind: 'untitled', suggestedName: 'first' },
     model: { kind: 'course-v10', project, resources } }, driver, { async append() {}, async save() { throw new Error('unused') } })
@@ -195,13 +205,14 @@ it('creates the first dynamic author record from the exact registered record pat
   expect(session.read().undoDepth).toBe(1)
   const reopened = await driver.load(await driver.serialize(session.read().model))
   if (reopened.kind !== 'course-v10') throw new Error('Expected course')
-  expect(reopened.project.instances.web.data).toEqual({ html, resourceBindings: {}, authoringRecords: { [key]: {
+  expect(reopened.project.instances.web.data).toEqual({ html, resourceBindings: {} })
+  expect(reopened.project.instances.web.authoring).toEqual({ records: { [key]: {
     kind: 'text', binding: spot.binding, scope: spot.scope, overrides: { text: 'Revised heading' },
   } } })
   await session.execute({ documentId: 'first-record', epoch: 'epoch', baseRevision: 1, operationId: 'undo', actor: 'human', mutation: { type: 'undo' } })
   const undone = session.read().model
   if (undone.kind !== 'course-v10') throw new Error('Expected course')
-  expect(undone.project.instances.web.data).toEqual(project.instances.web.data)
+  expect(undone.project.instances.web).toEqual(project.instances.web)
   const ordinary = { ...project, instances: { web: { ...project.instances.web, data: { html, label: 'Conversation 1' } } } }
-  expect(authorSpotEdits(ordinary, { ...spot, dataPath: ['label'] }, 'Ordinary field', resources)).toEqual([{ type: 'data.set', instanceId: 'web', path: ['label'], value: 'Ordinary field' }])
+  expect(authorSpotEdits(ordinary, { ...spot, fieldScope: 'data', dataPath: ['label'] }, 'Ordinary field', resources)).toEqual([{ type: 'data.set', instanceId: 'web', path: ['label'], value: 'Ordinary field' }])
 })

@@ -88,7 +88,8 @@ export function createImageRuntimeImplementation(
       image.onerror = () => { if (live()) diagnostic('image-resource-decode-failed', '图片无法显示，请修复资源；原引用已保留。') }
       const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(draw)
       observer?.observe(root)
-      const dispose = () => { if (disposed) return; disposed = true; observer?.disconnect(); image.onload = null; image.onerror = null; host.remove() }
+      const unsubscribeResources = scope.events.subscribe('__runtime.resources', () => update(current))
+      const dispose = () => { if (disposed) return; disposed = true; unsubscribeResources(); observer?.disconnect(); image.onload = null; image.onerror = null; host.remove() }
       scope.cleanup(dispose)
       update(instance)
       return { update, updatePlacement(next: ComponentFrame | undefined) { frame = next; draw() }, dispose }

@@ -49,9 +49,9 @@ export class ScopedSkillService implements SkillServicePort {
         source: root.source, directory, root }
     } finally { await file.close() }
   }
-  private async scan(runId: string): Promise<Index> {
+  private async scanRoots(roots: readonly SkillRoot[]): Promise<Index> {
     const entries: LocalSkill[] = [], warnings: string[] = []
-    for (const root of await this.rootsFor(runId)) {
+    for (const root of roots) {
       let folders
       try { folders = await fs.readdir(await this.allowedRoot(root), { withFileTypes: true }) }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') warnings.push(`${root.source}: 根目录未能读取或不在授权内`); continue }
@@ -71,13 +71,18 @@ export class ScopedSkillService implements SkillServicePort {
   }
   private index(runId: string, refresh = false): Promise<Index> {
     let index = this.indexes.get(runId)
-    if (!index || refresh) { index = this.scan(runId); this.indexes.set(runId, index) }
+    if (!index || refresh) { index = this.rootsFor(runId).then(roots => this.scanRoots(roots)); this.indexes.set(runId, index) }
     return index
   }
   async catalog(runId?: string) {
     const builtIn = await this.bundled.catalog()
     if (!runId) return builtIn
     return [...builtIn, ...(await this.index(runId)).entries.map(({ name, description, source }) => ({ name, description, source }))]
+  }
+  /** A menu does not create a run or obtain execution authority. */
+  async catalogForRoots(roots: readonly SkillRoot[]) {
+    const index = await this.scanRoots(roots)
+    return { entries: [...await this.bundled.catalog(), ...index.entries.map(({ name, description, source }) => ({ name, description, source }))], warnings: index.warnings }
   }
   async list(runId: string, refresh = false) {
     const index = await this.index(runId, refresh)

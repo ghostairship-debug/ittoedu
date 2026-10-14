@@ -73,6 +73,17 @@ export function commonsLicense(input: { key?: unknown; shortName?: unknown; url?
   return null
 }
 
+/** Reuse the same policy for image-specific CC metadata read from a source page. */
+export function webImageLicense(rawUrl: string | undefined, policy: LicensePolicy): OpenLicense | null {
+  const official = officialUrl(rawUrl)
+  if (!official) return null
+  const path = new URL(official).pathname
+  if (/^\/publicdomain\/zero\/1\.0(?:\/|$)/.test(path)) return openverseLicense('cc0', '1.0', official, policy)
+  if (/^\/publicdomain\/mark\/1\.0(?:\/|$)/.test(path)) return openverseLicense('pdm', '1.0', official, policy)
+  const license = /^\/licenses\/([a-z-]+)\/(\d{1,2}\.\d)(?:\/|$)/.exec(path)
+  return license ? openverseLicense(license[1], license[2], official, policy) : null
+}
+
 export interface OpenLibraryWork {
   title?: string
   author?: string

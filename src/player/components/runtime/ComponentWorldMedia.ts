@@ -30,8 +30,9 @@ class RealmMediaPlayback extends EventTarget implements ManagedMediaPlayback {
 
 /** Source controls participate in the document's existing AudioManager. */
 export class ComponentWorldMedia {
-  private readonly videos = new Map<string, Set<{ playback: RealmMediaPlayback; command(value: ComponentMediaCommand): Promise<boolean> }>>()
-  constructor(private readonly manager: () => AudioManager | undefined, private readonly report: (message: string) => void) {}
+  private readonly videos = new Map<string, Set<{ playback: RealmMediaPlayback; command(value: ComponentMediaCommand, signal?: AbortSignal): Promise<boolean> }>>()
+  constructor(private readonly manager: () => AudioManager | undefined, private readonly report: (message: string) => void,
+    private readonly playing: (instanceId: string) => boolean = () => true, private readonly playbackEpoch: () => number = () => 0) {}
 
   port(scope: ComponentRuntimeScope): ComponentMediaPort {
     return {
@@ -42,11 +43,14 @@ export class ComponentWorldMedia {
         if (options.kind === 'audio' && options.channel === 'video') throw new Error('音频组件需要声音通道')
         let active = true
         const pending = new Set<(value: boolean) => void>()
-        const command = (value: ComponentMediaCommand) => new Promise<boolean>(resolve => {
-          if (!active || !scope.isActive()) { resolve(false); return }
+        const command = (value: ComponentMediaCommand, signal?: AbortSignal) => new Promise<boolean>(resolve => {
+          const epoch = this.playbackEpoch()
+          const live = () => active && scope.isActive() && !signal?.aborted
+            && (value.type !== 'play' || this.playing(scope.instanceId) && epoch === this.playbackEpoch())
+          if (!live()) { resolve(false); return }
           pending.add(resolve)
-          void Promise.resolve().then(() => active && scope.isActive() ? onCommand(value) : false).then(result => {
-            pending.delete(resolve); resolve(active && scope.isActive() && result === true)
+          void Promise.resolve().then(() => live() ? onCommand(value) : false).then(result => {
+            pending.delete(resolve); resolve(live() && result === true)
           }, error => { pending.delete(resolve); resolve(false); if (active && scope.isActive()) this.report(`${scope.instanceId} 媒体：${String(error)}`) })
         })
         const playback = new RealmMediaPlayback(options.initial, command)
@@ -88,13 +92,13 @@ export class ComponentWorldMedia {
     const entry = this.videos.get(action.nodeId)?.values().next().value
     if (!entry) return undefined
     if (signal.aborted) return false
-    if (action.type === 'video.seek') return entry.command({ type: 'seek', seconds: action.seconds })
-    if (action.type === 'video.pause') return entry.command({ type: 'pause' })
-    if (action.type === 'video.stop') return await entry.command({ type: 'pause' }) && !signal.aborted && await entry.command({ type: 'seek', seconds: 0 })
-    if (action.type === 'video.toggle' && !entry.playback.paused) return entry.command({ type: 'pause' })
-    if (action.type === 'video.restart' && !await entry.command({ type: 'seek', seconds: 0 })) return false
+    if (action.type === 'video.seek') return entry.command({ type: 'seek', seconds: action.seconds }, signal)
+    if (action.type === 'video.pause') return entry.command({ type: 'pause' }, signal)
+    if (action.type === 'video.stop') return await entry.command({ type: 'pause' }, signal) && !signal.aborted && await entry.command({ type: 'seek', seconds: 0 }, signal)
+    if (action.type === 'video.toggle' && !entry.playback.paused) return entry.command({ type: 'pause' }, signal)
+    if (action.type === 'video.restart' && !await entry.command({ type: 'seek', seconds: 0 }, signal)) return false
     if (signal.aborted) return false
-    const result = await entry.command({ type: 'play' })
+    const result = await entry.command({ type: 'play' }, signal)
     if (signal.aborted) { await entry.command({ type: 'pause' }); return false }
     return result
   }

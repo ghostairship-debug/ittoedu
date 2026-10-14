@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { capturedCourseViewIsCurrent } from '../documents/CourseV10DocumentBridge'
 import { isEditorTextInputEvent } from '../course/editorActionRouting'
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
@@ -52,7 +53,7 @@ export async function pasteCanvasPayload(ports: CourseCanvasPastePorts, target: 
   // not move a user who has navigated or changed selection in the meantime.
   const kernel: EditorStoreKernel = { ...ports.kernel, selectInstances: (ids, surfaceId, documentId) => {
     const current = ports.kernel.readView()
-    if (current.activeDocumentId === target.documentId && current.snapshot?.epoch === target.epoch && current.surfaceId === target.surfaceId) {
+    if (capturedCourseViewIsCurrent(current, target)) {
       ports.kernel.selectInstances(ids, surfaceId, documentId)
     }
   } }

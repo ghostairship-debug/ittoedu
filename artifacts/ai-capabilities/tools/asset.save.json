@@ -1,8 +1,12 @@
 {
-  "description": "仅在用户要求时调用：把任务开始时选中的全部对象、子对象、源码依赖与素材一起保存到我的资产库。软件维护选区和身份，无需列举对象 ID；省略 path 使用任务绑定的多选范围，指定 project.list/read 对象路径则只提炼该对象。可附 title、说明、学科、学段与标签；之后用 asset.search 检索及 asset.use 插入。",
+  "description": "用户要求复用时将当前内容提炼到我的资产库。scope:objects(默认)取绑定多选或 path 对象；scope:page取 path 页面；scope:structure以 pages 指定 project.list/read 实际页面路径，省略取已授权工程全部页面。保留布局、状态、Flow/Spatial、内部导航及必需主题/资源，软件处理身份与依赖；外部关联给出诊断。可附 title/description/标签，之后 asset.search/use复用，无需手列对象身份。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema1": {
         "items": {
           "minLength": 1,
           "type": "string"
@@ -16,6 +20,13 @@
       "description": {
         "type": "string"
       },
+      "pages": {
+        "items": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "minItems": 1,
+        "type": "array"
+      },
       "path": {
         "minLength": 1,
         "type": "string"
@@ -25,13 +36,21 @@
         "type": "string"
       },
       "schoolStage": {
-        "$ref": "#/$defs/__schema0"
+        "$ref": "#/$defs/__schema1"
+      },
+      "scope": {
+        "enum": [
+          "objects",
+          "page",
+          "structure"
+        ],
+        "type": "string"
       },
       "subject": {
-        "$ref": "#/$defs/__schema0"
+        "$ref": "#/$defs/__schema1"
       },
       "tags": {
-        "$ref": "#/$defs/__schema0"
+        "$ref": "#/$defs/__schema1"
       },
       "title": {
         "minLength": 1,

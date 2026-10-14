@@ -1,8 +1,12 @@
 import { isNativeProjectFilename } from '../shared/nativeProjectFile'
+import { installDocumentExportBuildListeners } from './workbench/delivery/DocumentExportBuildListeners'
 import { saveDocumentWithDialog } from './workbench/documentSaveDialog'
 import { acceptWorkbenchExportBuildReply, acceptWorkbenchExportBuildProgress, disposeWorkbenchExportPort, installWorkbenchToolServices, workbenchImageService, workbenchImageSelection, setWorkbenchHtmlPreview, workbenchHtmlActions, releaseWorkbenchHtmlDocument } from './workbench/workbenchToolServices'
 import { ImageResultsDesktopService } from './workbench/images/ImageResultsDesktopService'
 import { HtmlImportDesktopService } from './workbench/htmlImport/HtmlImportDesktopService'
+import { importFlowDocument } from './workbench/office/flowDocumentImport'
+import { flowImportRequestSchema } from '../shared/workbench/flowImportDesktop'
+import { promises as fs } from 'node:fs'
 import { closeDocumentWithDialog } from './workbench/documentCloseDialog'
 import { trashWorkspaceWithDialog } from './workbench/workspaceTrashDialog'
 import { workspaceFilesRequestSchema } from '../shared/workbench/workspaceFiles'
@@ -14,7 +18,9 @@ import { operatePixabaySettings } from './workbench/assetSources/pixabayDesktopS
 import { executionDesktopService } from './workbench/execution/ExecutionDesktopService'
 import { installDocumentSaveEvents } from './workbench/execution/DocumentSaveEvents'
 import { attachmentsDesktopService } from './workbench/attachments/attachmentsDesktopService'
-import { attachHtmlPreviewHost, operateWorkspaceFiles, subscribeWorkspaceFilesChanges } from './workbench/workspaceFilesDesktopService'
+import { attachHtmlPreviewHost, operateWorkspaceFiles, subscribeWorkspaceFilesChanges, authorizeWorkspaceFilesRoot, assertAuthorizedWorkspacePath } from './workbench/workspaceFilesDesktopService'
+import { workbenchSkillCatalog } from './workbench/workbenchToolServices'
+import { skillCatalogRequestSchema } from '../shared/workbench/skillCatalogDesktop'
 import { HtmlPreviewService } from './workbench/htmlPreview/HtmlPreviewService'
 import { HtmlSourceEditService } from './workbench/htmlPreview/HtmlSourceEditService'
 import { ViewObservationDesktopService } from './workbench/observation/ViewObservationDesktopService'
@@ -23,7 +29,7 @@ import { setHtmlPreviewProtocolHandler } from './protocols'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent } from 'electron'
-import { app, dialog, ipcMain } from 'electron'
+import { app, dialog, ipcMain, shell } from 'electron'
 import { documentHost } from './workbench/documentHost'
 import { componentCompilationInputSchema } from '../shared/workbench/componentCompilation'
 import { documentHostRequestSchema } from '../shared/workbench/desktop'
@@ -31,6 +37,7 @@ import { spatialViewportCaptureSchema } from '../shared/workbench/spatialViewpor
 import { z } from 'zod'
 import {
   IPC_CHANNELS,
+  COURSE_OBJECT_CLIPBOARD_COMMAND_EVENT,
   type SaveBinaryFileInput,
 } from '../shared/ipcTypes'
 import type { AppState } from './appState'
@@ -116,7 +123,7 @@ const saveProjectSchema = z
   .object({
     suggestedDirectory: z.string().min(1).max(32767).refine(value => path.isAbsolute(value)).optional(),
     path: z.string().min(1).max(32_767).optional(),
-    suggestedName: z.string().trim().min(1).max(160),
+    suggestedName: z.string().trim().min(1),
     bytes: bytesSchema,
   })
   .strict()
@@ -157,20 +164,23 @@ const recoveryProjectSchema = z
 
 const htmlSchema = z
   .object({
-    suggestedName: z.string().trim().min(1).max(160),
+    suggestedName: z.string().trim().min(1),
     html: z.string().min(1),
+    projectPath: projectPathSchema.optional(),
   })
   .strict()
 
 const binaryExportSchema = z.object({
-  suggestedName: z.string().trim().min(1).max(160),
+  suggestedName: z.string().trim().min(1),
   extension: z.enum(['pptx', 'json', 'docx', 'h5component']),
   bytes: bytesSchema,
+  projectPath: projectPathSchema.optional(),
 }).strict()
 
 const webPackageSchema = z
   .object({
-    suggestedName: z.string().trim().min(1).max(160),
+    suggestedName: z.string().trim().min(1),
+    projectPath: projectPathSchema.optional(),
     bytes: bytesSchema.refine(
       (bytes) => bytes.byteLength > 0,
       '网页包大小无效',
@@ -200,6 +210,7 @@ const diagnosticSchema = z.object({
   source: z.enum(['renderer', 'preview', 'component']),
   message: z.string().min(1).max(8_000),
   stack: z.string().max(24_000).optional(),
+  details: z.record(z.string(), z.unknown()).optional(),
 }).strict()
 
 const componentCatalogSourceTrustSchema = z.object({
@@ -300,6 +311,7 @@ let documentSaveEvents: ReturnType<typeof installDocumentSaveEvents> | undefined
 let elementCardCleanup: (() => void) | undefined
 let imageResults: ImageResultsDesktopService | undefined
 let workspaceFileEventGeneration = 0
+let stopExportBuildListeners: (() => void) | undefined
 let htmlPreview: HtmlPreviewService | undefined
 let htmlPreviewClosedCleanup: (() => void) | undefined
 export function releaseAllHtmlPreviewLeases(): void { htmlPreview?.releaseAll() }
@@ -338,21 +350,19 @@ function requestRendererInput<T>(window: BrowserWindow, requestChannel: string, 
 
 export function registerIpcHandlers(context: IpcContext): void {
   installWorkbenchToolServices(context)
-  ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildProgress)
-  ipcMain.on(IPC_CHANNELS.documentExportBuildProgress, (event: IpcMainEvent, raw: unknown) => {
+  stopExportBuildListeners?.()
+  stopExportBuildListeners = installDocumentExportBuildListeners(ipcMain, { progress: (event: IpcMainEvent, raw: unknown) => {
     try {
       assertTrustedIpcSender(event, context.getMainWindow(), context.getRendererEntryUrl())
       acceptWorkbenchExportBuildProgress(documentExportBuildProgressSchema.parse(raw), event.sender.id)
     } catch { /* Foreign or stale progress cannot keep an export alive. */ }
-  })
-  ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildReply)
-  ipcMain.on(IPC_CHANNELS.documentExportBuildReply, (event: IpcMainEvent, raw: unknown) => {
+  }, reply: (event: IpcMainEvent, raw: unknown) => {
     try {
       assertTrustedIpcSender(event, context.getMainWindow(), context.getRendererEntryUrl())
       const reply = documentExportBuildReplySchema.parse(raw)
       acceptWorkbenchExportBuildReply(reply, event.sender.id)
     } catch { /* A foreign, malformed, stale or duplicate export reply cannot write a file. */ }
-  })
+  } })
   const generation = ++workspaceFileEventGeneration
   const imageResultsReady = executionDesktopService().then(execution => {
     if (generation !== workspaceFileEventGeneration) throw new Error('图片结果服务已关闭')
@@ -508,12 +518,42 @@ export function registerIpcHandlers(context: IpcContext): void {
     const input = workspaceFilesRequestSchema.parse(requireSingleArgument(args))
     return input.type === 'trash' ? trashWorkspaceWithDialog(requireWindow(context), documents, input) : operateWorkspaceFiles(input)
   })
+  registerSafeHandler(IPC_CHANNELS.flowImport, context, {
+    code: 'FLOW_IMPORT_FAILED', title: '文档导入未完成', message: '正文未能导入，原文件仍保留。', suggestion: '请核对文件格式，并查看诊断报告。',
+  }, async (_event, args) => {
+    const input = flowImportRequestSchema.parse(requireSingleArgument(args))
+    let filename: string
+    if (input.sourceEntryId) {
+      if (!input.directory) throw new Error('导入来源缺少授权的工作空间')
+      const source = await operateWorkspaceFiles({ type: 'resolve', workspaceId: input.directory.workspaceId, entryId: input.sourceEntryId })
+      if (source.kind !== 'file') throw new Error('导入来源必须是文件')
+      filename = source.resolvedPath
+    } else {
+      const picked = await dialog.showOpenDialog(requireWindow(context), { title: '导入到可编辑 Flow', properties: ['openFile'], filters: [{ name: 'Word、Markdown 与文本', extensions: ['docx', 'md', 'markdown', 'txt'] }] })
+      if (picked.canceled || !picked.filePaths[0]) return null
+      filename = picked.filePaths[0]
+    }
+    return importFlowDocument(filename, new Uint8Array(await fs.readFile(filename)))
+  })
+  registerSafeHandler(IPC_CHANNELS.skillCatalog, context, {
+    code: 'SKILL_CATALOG_FAILED', title: 'Skill目录未能读取', message: 'Skill目录未能读取。', suggestion: '请检查当前工作空间后重试。',
+  }, async (_event, args) => {
+    const input = skillCatalogRequestSchema.parse(requireSingleArgument(args))
+    const root = input.workspaceDirectory ? await assertAuthorizedWorkspacePath(input.workspaceDirectory) : undefined
+    return workbenchSkillCatalog(root)
+  })
   registerSafeHandler(IPC_CHANNELS.documents, context, {
     code: 'DOCUMENT_OPERATION_FAILED', title: '文档操作未完成',
     message: '当前更改尚未完成，请保留编辑内容。', suggestion: '请查看具体原因后重试或另存。',
   }, async (_event, args) => {
     await saveEventsReady
     const input = documentHostRequestSchema.parse(requireSingleArgument(args))
+    if (input.type === 'reveal') {
+      const snapshot = await documents.internalAPI.read(input.documentId)
+      if (snapshot.binding.kind !== 'file') throw new Error('文档尚未保存，没有所在文件夹')
+      shell.showItemInFolder(snapshot.binding.path)
+      return
+    }
     if (input.type === 'close-dialog') return closeDocumentWithDialog(requireWindow(context), documents, input.documentId, input.suggestedDirectory, input.discardOnly)
     if (input.type !== 'save-dialog') return documents.operate(input)
     return saveDocumentWithDialog(requireWindow(context), documents, input.documentId, input.saveAs, input.suggestedDirectory)
@@ -550,7 +590,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       z.object({ x: z.number().finite().nonnegative(), y: z.number().finite().nonnegative(),
         width: z.number().finite().positive().max(16384), height: z.number().finite().positive().max(16384) }).strict(),
       z.object({ kind: z.literal('published'), published: publishedCourseV3Schema, surfaceId: z.string().min(1),
-        stateId: z.string().min(1).nullable().optional(), instanceId: z.string().min(1).optional(), spatialFrameId: z.string().min(1).optional() }).strict(),
+        stateId: z.string().min(1).nullable().optional(), instanceId: z.string().min(1).optional(), spatialFrameId: z.string().min(1).optional(), staticExport: z.literal(true).optional() }).strict(),
     ]).parse(requireSingleArgument(args))
     if ('published' in input) {
       const entry = context.getRendererEntryUrl()
@@ -561,6 +601,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         const result = await new ViewObservationDesktopService({ rendererEntryUrl: entry }).capturePublished({
           published: input.published, locationId: input.surfaceId, stateId: input.stateId,
           instanceId: input.instanceId, spatialFrameId: input.spatialFrameId, signal: controller.signal,
+          staticExport: input.staticExport,
         })
         return { dataUrl: `data:image/png;base64,${Buffer.from(result.png).toString('base64')}`,
           capturedAt: Date.now(), width: result.width, height: result.height }
@@ -955,7 +996,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     },
     async (_event, args) => {
       const input = htmlSchema.parse(requireSingleArgument(args))
-      return writeHtmlFile(requireWindow(context), input.suggestedName, input.html)
+      return writeHtmlFile(requireWindow(context), input.suggestedName, input.html, input.projectPath)
     },
   )
 
@@ -975,6 +1016,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         input.suggestedName,
         input.extension,
         input.bytes,
+        input.projectPath,
       )
     },
   )
@@ -994,6 +1036,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         requireWindow(context),
         input.suggestedName,
         input.bytes,
+        input.projectPath,
       )
     },
   )
@@ -1009,7 +1052,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     },
     async (_event, args) => {
       const input = htmlSchema.parse(requireSingleArgument(args))
-      return exportPdfFromHtml(requireWindow(context), input.suggestedName, input.html)
+      return exportPdfFromHtml(requireWindow(context), input.suggestedName, input.html, input.projectPath)
     },
   )
 
@@ -1073,11 +1116,26 @@ export function registerIpcHandlers(context: IpcContext): void {
       message: '剪贴板操作未完成。',
       suggestion: '请聚焦主编辑窗口后重试。',
     },
-    (event, args) => {
-      const command = z.enum(['cut', 'copy', 'paste', 'paste-plain']).parse(requireSingleArgument(args))
+    async (event, args) => {
+      const command = z.union([
+        z.enum(['cut', 'copy', 'paste', 'paste-plain']),
+        z.object({ command: z.enum(['cut', 'copy']), requestId: z.string().min(1) }),
+      ]).parse(requireSingleArgument(args))
       const window = requireWindow(context)
       if (event.sender !== window.webContents || !window.isFocused() || !event.sender.isFocused()) {
         throw new Error('主编辑窗口未获得焦点。')
+      }
+      if (typeof command !== 'string') {
+        // Copy/cut events emitted by execCommand finish in this same renderer
+        // stack. The initiating owner validates its target immediately before
+        // execution and always releases its event listener, including no-event.
+        await event.sender.executeJavaScript(`(() => {
+          const detail = { command: ${JSON.stringify(command.command)}, requestId: ${JSON.stringify(command.requestId)}, handled: false, ok: false, reason: '' };
+          window.dispatchEvent(new CustomEvent(${JSON.stringify(COURSE_OBJECT_CLIPBOARD_COMMAND_EVENT)}, { detail }));
+          if (!detail.handled) throw new Error('剪贴板命令的发起窗口已失效，请重试');
+          if (!detail.ok) throw new Error(detail.reason || '系统剪贴板命令未完成，请重试');
+        })()`, true)
+        return
       }
       switch (command) {
         case 'cut': event.sender.cut(); break
@@ -1121,8 +1179,7 @@ export function registerIpcHandlers(context: IpcContext): void {
 
 export function unregisterIpcHandlers(): void {
   workspaceFileEventGeneration++
-  ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildReply)
-  ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildProgress)
+  stopExportBuildListeners?.(); stopExportBuildListeners = undefined
   disposeWorkbenchExportPort()
   htmlPreviewClosedCleanup?.(); htmlPreviewClosedCleanup = undefined
   htmlPreview?.dispose(); htmlPreview = undefined

@@ -72,6 +72,13 @@
                 "$ref": "#/$defs/__schema1",
                 "exclusiveMinimum": 0
               },
+              "toc": {
+                "enum": [
+                  "auto",
+                  "hidden"
+                ],
+                "type": "string"
+              },
               "wideContentWidth": {
                 "$ref": "#/$defs/__schema1",
                 "exclusiveMinimum": 0

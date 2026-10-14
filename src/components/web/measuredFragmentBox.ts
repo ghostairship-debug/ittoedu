@@ -1,4 +1,5 @@
-import type { ComponentDefinition, ComponentInstance, ComponentLayoutInput } from '../../shared/contracts/component-platform'
+import type { ComponentDefinition, ComponentInstance, ComponentLayoutInput, CourseProjectV10 } from '../../shared/contracts/component-platform'
+import { allDocumentTextSlots, inlineComponentIds } from '../../shared/document/textInteraction'
 
 interface MeasuredWebBoxInput {
   definitionId: string
@@ -131,7 +132,7 @@ function instanceWebUsesFixedViewport(instance: ComponentInstance, html: string,
 
 /** Software derives Surface input; the returned height is never a formal edit. */
 export function componentLayoutInput(instance: ComponentInstance, host: {
-  kind: 'free-frame' | 'flow'; inlineSize: number; viewport?: { width: number; height: number }; definition?: ComponentDefinition
+  project: Pick<CourseProjectV10, 'instances' | 'definitions'>; kind: 'free-frame' | 'flow'; inlineSize: number; viewport?: { width: number; height: number }; definition?: ComponentDefinition
 }, fixedViewport?: boolean): ComponentLayoutInput {
   const width = instance.frame?.width ?? host.viewport?.width ?? host.inlineSize
   const height = instance.frame?.height ?? host.viewport?.height ?? 0
@@ -140,8 +141,29 @@ export function componentLayoutInput(instance: ComponentInstance, host: {
   const key = declared?.kind === 'builtin' ? declared.key : instance.definitionId
   const data = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data : null
   const web = ['guoling.web', 'guoling.html-program'].includes(key)
-  const viewport = fixedViewport ?? (Boolean(instance.frame) && ['guoling.image', 'guoling.video', 'guoling.audio'].includes(key)
-    || key !== 'guoling.document-block' && Boolean(instance.childIds?.length) || (web && typeof data?.html === 'string' ? instanceWebUsesFixedViewport(instance, data.html, typeof data.css === 'string' ? data.css : '')
-    : key !== 'guoling.document-block' && (instance.implementationOverride ?? declared)?.kind === 'source' && Boolean(instance.frame)))
+  // Inline slots and attached behaviors own their internal layout. Only actual
+  // free child geometry turns a reading block into a local viewport assembly.
+  const childGeometry = (owner: ComponentInstance): boolean => {
+    const inline = new Set(allDocumentTextSlots(owner.data).flatMap(slot => inlineComponentIds(slot.content)))
+    return (owner.childIds ?? []).some(id => {
+      const child = host.project.instances[id]
+      if (!child || inline.has(id) || host.project.definitions[child.definitionId]?.role === 'behavior') return false
+      return Boolean(child.frame || child.flowPlacement) || childGeometry(child)
+    })
+  }
+  const viewport = Boolean(instance.frame) && ['guoling.image', 'guoling.video', 'guoling.audio'].includes(key)
+    || key !== 'guoling.document-block' && childGeometry(instance)
+    || (web && typeof data?.html === 'string' ? fixedViewport ?? instanceWebUsesFixedViewport(instance, data.html, typeof data.css === 'string' ? data.css : '')
+      : key !== 'guoling.document-block' && (instance.implementationOverride ?? declared)?.kind === 'source' && Boolean(instance.frame))
   return viewport ? { mode: 'flow-viewport', inlineSize: width, blockSize: height } : { mode: 'flow-content', inlineSize: host.inlineSize }
+}
+
+/** A software selector marks the single measured outer root; descendants retain authored CSS. */
+export function measuredFragmentRootCss(selector: string, flowContent = false): string {
+  return `${selector}{position:relative!important;inset:auto!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;margin:0!important;transform:none!important;transform-origin:0 0!important;translate:none!important;rotate:none!important;scale:none!important;zoom:1!important;width:100%!important;height:${flowContent ? 'auto' : '100%'}!important;min-width:0!important;max-width:none!important;min-height:0!important;max-height:none!important;box-sizing:border-box!important;float:none!important;clear:none!important;z-index:auto!important;order:0!important;flex-basis:auto!important;flex-grow:0!important;flex-shrink:1!important;grid-area:auto!important;align-self:auto!important;justify-self:auto!important}`
+}
+
+/** A detached measured fragment uses its formal frame, not the original page's body box. */
+export function measuredFragmentDocumentCss(flowContent = false): string {
+  return `html,body{margin:0!important;padding:0!important;border:0!important;background:transparent!important;min-width:0!important;min-height:0!important;width:100%!important;height:${flowContent ? 'auto' : '100%'}!important;box-sizing:border-box!important}`
 }

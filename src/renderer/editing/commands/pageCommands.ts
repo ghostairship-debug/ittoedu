@@ -28,7 +28,7 @@ export function pageCardCommands(input: PageCardCommandInput, ports: PageCardCom
   const scene = input.kind === 'scene'
   const noun = scene ? '场景' : '页面'
   return [
-    ...(scene ? [{ id: 'page.new-scene', label: '新建场景', group: 'create', run: ports.addScene }] : []),
+    ...(scene ? [{ id: 'page.new-scene', label: '在此页后新建演示页', group: 'create', run: ports.addScene }] : []),
     { id: 'page.duplicate', label: '创建副本', group: 'create', run: ports.duplicate, disabledReason: scene ? null : '目前只能复制演示页的场景' },
     { id: 'page.rename', label: '重命名', group: 'edit', run: ports.rename },
     { id: 'page.move-before', label: '前移', group: 'order', run: () => ports.move(-1), disabledReason: input.index <= 0 ? `已是${scene ? '本页第一个场景' : '第一个页面'}` : null },
@@ -37,13 +37,12 @@ export function pageCardCommands(input: PageCardCommandInput, ports: PageCardCom
   ]
 }
 
-/** The page bar's "+": a scene of the current Slide page first, then new pages of each kind. */
-export function newPageCommands(add: (kind: NewPageKind) => void, sceneReason: string | null): MenuCommand[] {
+/** One "new page" menu for both workbench and editor, with the three supported page types. */
+export function newPageCommands(add: (kind: Exclude<NewPageKind, 'scene'>) => void): MenuCommand[] {
   return [
-    { id: 'page.add.scene', label: '新建场景', group: 'scene', run: () => add('scene'), disabledReason: sceneReason },
-    { id: 'page.add.slide', label: '新建演示页', group: 'page', run: () => add('slide-page') },
-    { id: 'page.add.flow', label: '新建流式布局', group: 'page', run: () => add('flow-page') },
-    { id: 'page.add.spatial', label: '新建无限画布', group: 'page', run: () => add('spatial-page') },
+    { id: 'page.add.slide', label: '演示页', group: 'page', run: () => add('slide-page') },
+    { id: 'page.add.flow', label: '流式页面', group: 'page', run: () => add('flow-page') },
+    { id: 'page.add.spatial', label: '无限画布', group: 'page', run: () => add('spatial-page') },
   ]
 }
 

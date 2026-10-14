@@ -50,7 +50,14 @@ export async function writeComponentBuiltinSources(root = projectRoot): Promise<
   const sources = await generateComponentBuiltinSources(root)
   const target = path.join(root, 'src/shared/generated/componentBuiltinSources.json')
   await fs.mkdir(path.dirname(target), { recursive: true })
-  await fs.writeFile(target, `${JSON.stringify(sources, null, 2)}\n`, 'utf8')
+  const content = `${JSON.stringify(sources, null, 2)}\n`
+  const previous = await fs.readFile(target, 'utf8').catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') throw error
+    return null
+  })
+  // The source launcher watches modification times; unchanged generated sources
+  // must not invalidate earlier build groups on every subsequent launch.
+  if (previous !== content) await fs.writeFile(target, content, 'utf8')
   process.stdout.write(`Generated default component source closures: ${Object.keys(sources).length}\n`)
 }
 

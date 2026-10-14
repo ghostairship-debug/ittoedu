@@ -20,6 +20,8 @@ export interface MeasuredHtmlElement {
   namespace?: string
   attributes: Record<string, string>
   sourceHtml: string
+  sourceStyle?: Record<string, string>
+  inheritedStyle?: Record<string, string>
   style: Record<string, string>
   /** Measured parent layout, needed to distinguish flex/grid z-index and order. */
   parentDisplay?: string
@@ -38,6 +40,7 @@ export interface HtmlDesignCapture {
   body: number
   pageStyle: Record<string, string>
   /** Font faces and keyframes needed by retained internal content, without page layout rules. */
+  sourceCss?: string
   supportCss?: string
   /** Actual DOM relationships, resolved before descendants can become separate objects. */
   sourceScopes?: { index: number; reason: string; html?: string }[]
@@ -49,7 +52,9 @@ export interface HtmlDesignCapture {
 export type HtmlObjectContent =
   | { kind: 'text' | 'comment'; text: string }
   | { kind: 'element'; tagName: string; namespace?: string; attributes: Record<string, string>;
-      style: Record<string, string>; pseudoElements: Record<string, Record<string, string>>; children: HtmlObjectContent[] }
+      sourceStyle?: Record<string, string>
+  inheritedStyle?: Record<string, string>
+  style: Record<string, string>; pseudoElements: Record<string, Record<string, string>>; children: HtmlObjectContent[] }
 
 export interface HtmlSourceRegion {
   sourcePath: readonly number[]
@@ -63,6 +68,8 @@ export interface HtmlAssemblyObject {
   sourcePath: readonly number[]
   frame: AffineFrame
   /** Outer layout declarations are removed. The frame is its only position owner. */
+  sourceStyle?: Record<string, string>
+  inheritedStyle?: Record<string, string>
   style: Record<string, string>
   pseudoElements: Record<string, Record<string, string>>
   /** Browser ordering inputs for L19 to assign one formal parent order. */
@@ -84,6 +91,7 @@ export interface HtmlAssembly {
   viewport: { width: number; height: number }
   root: HtmlAssemblyObject
   diagnostics: HtmlAssemblyDiagnostic[]
+  sourceCss?: string
   supportCss?: string
   /** The body has a shared internal layout that a Flow reading list must retain. */
   flowCoupled?: boolean
@@ -159,6 +167,7 @@ export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAss
     // and cannot reintroduce a second positioning owner through the style attribute.
     const attributes = Object.fromEntries(Object.entries(value.attributes).filter(([name]) => name !== 'style'))
     return { kind: 'element', tagName: value.tagName, namespace: value.namespace, attributes,
+      sourceStyle: value.sourceStyle && (outer ? htmlObjectStyle(value.sourceStyle) : { ...value.sourceStyle }), inheritedStyle: outer ? value.inheritedStyle : undefined,
       style: outer ? htmlObjectStyle(value.style) : { ...value.style }, pseudoElements: value.pseudoElements,
       children: value.children.map(child => child.kind === 'element' ? contentOf(child.index) : { ...child }) }
   }
@@ -193,7 +202,7 @@ export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAss
   if (framing === 'content' && !bounds) diagnostics.push({ level: 'warning', code: 'html-content-bounds-unavailable',
     message: '片段没有可测的初始内容边界；保留设计视口及源码。' })
   const root: HtmlAssemblyObject = { kind: 'group', label: framing === 'content' ? '内容' : '页面', sourcePath: [],
-    frame: rootFrame, style: htmlObjectStyle(capture.pageStyle, true),
+    frame: rootFrame, sourceStyle:capture.elements[capture.body]?.sourceStyle?htmlObjectStyle(capture.elements[capture.body]!.sourceStyle!,true):undefined,inheritedStyle:capture.elements[capture.body]?.inheritedStyle, style: htmlObjectStyle(capture.pageStyle, true),
     pseudoElements: element(capture.body).pseudoElements, children: [], decorations: [], sourceRegions: [] }
   const bodyContent = contentOf(capture.body, true)
   if (bodyContent.kind === 'element') root.content = { ...bodyContent, children: [], style: root.style }
@@ -229,6 +238,7 @@ export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAss
     const label = value.attributes['aria-label'] || value.attributes.title || value.attributes.alt
       || textOf(index).trim().replace(/\s+/g, ' ').slice(0, 80) || value.attributes.id || value.tagName
     const object: HtmlAssemblyObject = { kind, label, sourcePath: value.sourcePath, frame,
+      sourceStyle: value.sourceStyle && htmlObjectStyle(value.sourceStyle, kind === 'group'), inheritedStyle: value.inheritedStyle,
       style: htmlObjectStyle(value.style, kind === 'group'), pseudoElements: value.pseudoElements,
       stacking: { ...stackingOf(value), positioned: hasStackingContext(value) || ['relative', 'absolute', 'fixed', 'sticky'].includes(value.style.position ?? '') },
       children: [], decorations: [], sourceRegions: [] }
@@ -268,7 +278,7 @@ export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAss
       || Boolean(value.style['column-width'] && value.style['column-width'] !== 'auto'))
     || root.children.some(child => child.kind === 'group' || child.content?.kind === 'element' && child.content.tagName === 'details')
     || Boolean(root.decorations.length || root.sourceRegions.length)
-  return { viewport: { ...capture.viewport }, root, diagnostics, supportCss: capture.supportCss, source, flowCoupled: coupled }
+  return { viewport: { ...capture.viewport }, root, diagnostics, supportCss: capture.supportCss, sourceCss: capture.sourceCss, source, flowCoupled: coupled }
 }
 
 export function sourceProgramAssembly(viewport: HtmlAssembly['viewport'], source: HtmlAssembly['source'], reason: string,

@@ -3,7 +3,7 @@ import type { DocumentSnapshot } from '../../shared/workbench/document'
 import type { ToolResult, ToolTarget, ToolRunGrant, ToolResultImage, PreparedToolImage } from '../../shared/workbench/tools'
 import type { ImageGenerationRequest, ImageJobSnapshot, ImageModelSelection } from '../../shared/workbench/images'
 import { parseGeneratedImageReference } from '../../shared/workbench/images'
-import type { HostImageInput } from './imageResource'
+import type { HostImageInput, HostImageReference, HostImageRunOptions } from './imageResource'
 import type { HostMediaInput } from './mediaResource'
 import type { AssetSource } from '../../shared/contracts/media-v1'
 import type { ComponentLibraryEntry } from '../../shared/contracts/component-platform/library'
@@ -90,6 +90,7 @@ export interface HostToolServices {
     cancelRun(runId: string): Promise<void>
   }
   web?: {
+    describe?(runId: string): { mode: 'auto' | 'openai' | 'deepseek' | 'independent' | 'off'; backend: 'openai-native' | 'deepseek-official' | 'exa-mcp' | 'searxng' | 'off'; configured: boolean; detail: string }
     search(input: { runId: string; query: string; limit?: number; cursor?: string; signal?: AbortSignal }): Promise<unknown>
     open(input: { runId: string; url?: string; sourceId?: string; version?: string; offset?: number; limit?: number; signal?: AbortSignal }): Promise<unknown>
   }
@@ -106,7 +107,7 @@ export interface HostToolServices {
   }
   /** Open-license image libraries; candidates and previews belong to one run. */
   openImages?: {
-    search(input: { runId: string; query: string; limit?: number; page?: number; allowShareAlike?: boolean; signal?: AbortSignal }): Promise<unknown>
+    search(input: { runId: string; query?: string; source?: string; limit?: number; page?: number; allowShareAlike?: boolean; signal?: AbortSignal }): Promise<unknown>
     preview(input: { runId: string; images: readonly string[]; signal?: AbortSignal }): Promise<unknown>
     readPreview(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array }
     fetch(input: { runId: string; image: string; format?: 'jpeg' | 'png' | 'webp'; signal?: AbortSignal }): Promise<
@@ -129,7 +130,7 @@ export interface HostToolServices {
   stopRun?(runId: string): Promise<void> | void
   images?: {
     selection(runId: string, documentId: string, operation: 'generate' | 'edit'): ImageModelSelection | Promise<ImageModelSelection>
-    run(request: ImageGenerationRequest, options?: { signal?: AbortSignal }): Promise<ImageJobSnapshot>
+    run(request: ImageGenerationRequest, options?: HostImageRunOptions): Promise<ImageJobSnapshot>
     read(jobId: string): Promise<ImageJobSnapshot>
     stop(jobId: string): Promise<ImageJobSnapshot>
     readResource(resourceId: string): Promise<HostImageInput>
@@ -150,7 +151,8 @@ const handle = z.string().min(1)
 // common request options; decoding still preserves the actual raster format.
 const output = z.object({ size: z.union([z.literal('auto'), z.string().regex(/^\d{2,5}x\d{2,5}$/)]).optional(), quality: z.enum(['auto', 'low', 'medium', 'high']).optional(), format: z.literal('png').optional(), background: z.enum(['auto', 'opaque', 'transparent']).optional() }).strict()
 // Document work binds resources to its captured target; workspace work needs no empty course.
-const imageInput = z.object({ target: handle.optional(), prompt: z.string().min(1), output: output.optional() }).strict()
+export const imageInput = z.object({ target: handle.optional(), prompt: z.string().min(1), output: output.optional(),
+  application: z.object({ mode: z.enum(['insert', 'replace']), target: handle }).strict().optional() }).strict()
 const schema = {
   'image.generate': imageInput,
   'image.edit': imageInput.extend({ references: z.array(handle).min(1) }).strict(),
@@ -158,8 +160,8 @@ const schema = {
 } as const
 export type HostToolName = keyof typeof schema
 const descriptions: Record<HostToolName, string> = {
-  'image.generate': '通过任务开始时冻结的 GPT OAuth 或已显式启用的 OpenAI Images API 连接生成图片。target 绑定当前获授权的课件或对象，省略时生成独立工作空间资源。ready 返回本任务资源，可用 project.apply from 插入或 media.apply 原位替换，也可直接把 htmlSource 用作 HTML 图片 src 或 CSS 图片 URL；软件读取已授权字节并存入工程，勿自造资源地址。ready 本身未写入工程。当前请求 PNG、auto/low/medium/high 画质。',
-  'image.edit': '编辑已有图片。references 原样传入返回的 source/resource，或当前文档的整张专业图片/图片素材句柄。宿主读取原字节并使用冻结连接。返回资源须经 project.apply 或 media.apply 正式应用；未知结果不自动重发。',
+  'image.generate': '通过任务开始时冻结的 GPT OAuth 或已显式启用的 OpenAI Images API 连接生成图片。target 只绑定获授权文档，不代表应用；省略返回工作空间候选。用户明确生成并插入或替换时，传 application:{mode:insert|replace,target:已观察句柄}，软件冻结目标，生成后一次正式应用并返回独立 generation/application/save 结果；人工同目标变更或停止不覆盖，图片保留，无需再生成。候选可用 project.apply from 或 media.apply，也可将 htmlSource 用作局部 HTML 图片/CSS URL。当前请求 PNG、auto/low/medium/high 画质。',
+  'image.edit': '编辑图片，或用一张/多张真实参考图创作下一幅。references 原样传已授权的 source/resource、材料或工程整张图片句柄；参考与 target 独立。省略 application 返回候选；用户明确编辑并插入/替换时传 application:{mode:insert|replace,target:已观察句柄}，软件冻结目标并正式应用，保全同期人工修改与晚到候选。宿主读取原字节并使用冻结图片连接，不承诺绝对一致，未知结果不自动重发。',
   'image.status': '查询本任务图片状态；ready 返回已校验的本任务图片资源身份，不返回 base64 或临时 URL。',
 }
 interface HostImageToolHandler {
@@ -171,7 +173,8 @@ export const hostToolCatalog = (Object.keys(schema) as HostToolName[]).map(name 
 }, {
   capability: name === 'image.status' ? 'read' : 'resource', effect: name === 'image.status' ? null : 'image-generation',
   supports: context => context.images !== false && (context.standaloneImage === true || hasRunWrite(context, ['course-instance'], 'course-v10')),
-  targets: (input, resolver) => 'target' in input && input.target ? handleToolTarget({ target: input.target }, resolver) : [],
+  targets: (input, resolver) => 'application' in input && input.application ? handleToolTarget({ target: input.application.target }, resolver)
+    : 'target' in input && input.target ? handleToolTarget({ target: input.target }, resolver) : [],
   handler: (context, input) => context.run(name, input),
 }))
 export function hostToolRegistration(name: string) { return hostToolCatalog.find(tool => tool.name === name) }
@@ -186,7 +189,7 @@ interface HostAuthority {
   ownsReceiptDocument?(runId: string, documentId: string): boolean
   provideImage(runId: string, documentId: string, source: HostImageInput): Promise<string>
   readImage(runId: string, documentId: string, resource: string): Promise<HostImageInput>
-  /** The Gateway resolves its own current-run resource handle; absent means this is another image source. */
+  /** The Gateway resolves its current-run resource or whole-image handle; absent means another image source. */
   readRunImage?(runId: string, resource: string): Promise<HostImageInput | null>
 }
 interface Job { runId: string; documentId: string; epoch: string; jobId: string }
@@ -241,11 +244,6 @@ export class HostToolCoordinator {
   }
   parseStandaloneImageReference(value: string): { jobId: string; resourceId: string } | null {
     return parseGeneratedImageReference(value)
-  }
-  private parseStandaloneReference(value: string): { jobId: string; resourceId: string } {
-    const reference = this.parseStandaloneImageReference(value)
-    if (!reference) throw new Error('独立参考图句柄无效；请使用本任务已完成图片的 resource 字段')
-    return reference
   }
   projectFileServices() { return this.services.projectFiles }
   authorizeOperationPaths(runId: string, operationId: string, paths: readonly string[]): void {
@@ -313,6 +311,7 @@ export class HostToolCoordinator {
       compute: !!this.services.compute, delegation: !!this.services.delegation, web: !!this.services.web,
       mcp: !!this.services.mcp, media: !!this.services.media, openImages: !!this.services.openImages, assetLibrary: !!this.services.assetLibrary }
   }
+  describeSearch(runId: string) { return this.services.web?.describe?.(runId) }
   async observePage(context: ViewObserveToolContext, input: unknown): Promise<ToolResult> {
     if (!this.services.observations) return { kind: 'error', code: 'service-unavailable', message: '画面观察服务尚未就绪' }
     return this.observationImageResult(await executeViewObserveTool(this.services.observations, context, input))
@@ -697,7 +696,7 @@ export class HostToolCoordinator {
     return this.services.media ? { kind: 'read', data: await this.services.media.start(runId, input, { signal }) }
       : this.serviceUnavailable('媒体生成服务尚未配置')
   }
-  async imageSearch(runId: string, input: { query: string; limit?: number; page?: number; allowShareAlike?: boolean }, signal?: AbortSignal): Promise<ToolResult> {
+  async imageSearch(runId: string, input: { query?: string; source?: string; limit?: number; page?: number; allowShareAlike?: boolean }, signal?: AbortSignal): Promise<ToolResult> {
     this.builtInRun(runId)
     return this.services.openImages ? { kind: 'read', data: await this.services.openImages.search({ runId, ...input, signal }) }
       : this.serviceUnavailable('开放图库服务尚未配置')
@@ -818,10 +817,18 @@ export class HostToolCoordinator {
     this.builtInRun(runId)
     return resource
   }
-  async assetSearch(runId: string, input: { query: string; limit?: number }): Promise<ToolResult> {
+  async assetSearch(runId: string, input: { query: string; limit?: number } | { packageId: string; version?: string }): Promise<ToolResult> {
     this.builtInRun(runId)
-    return this.services.assetLibrary ? { kind: 'read', data: await this.services.assetLibrary.search({ runId, ...input }) }
-      : this.serviceUnavailable('资产库检索服务尚未配置')
+    if (!this.services.assetLibrary) return this.serviceUnavailable('资产库检索服务尚未配置')
+    if ('query' in input) return { kind: 'read', data: await this.services.assetLibrary.search({ runId, ...input }) }
+    const result = await this.services.assetLibrary.read({ runId, ...input })
+    if (result.status !== 'ready') return { kind: 'read', data: result }
+    const { entry } = result
+    return { kind: 'read', data: { status: 'entry', packageId: result.packageId, version: result.version, title: entry.title,
+      kind: entry.kind ?? 'objects', rootIds: entry.example.rootIds, objects: Object.values(entry.example.instances).map(instance => ({
+        id: instance.id, title: instance.name ?? entry.definitions[instance.definitionId]?.title, definitionId: instance.definitionId,
+        childIds: instance.childIds ?? [], data: instance.data })), pages: entry.surfaces?.map(surface => ({ id: surface.id, kind: surface.kind,
+          title: surface.title, childIds: surface.childIds })), inputs: entry.inputs ?? [] } }
   }
   /** One complete API 5 example for the canonical project writer. */
   libraryComponent(runId: string, packageId: string, version?: string) {
@@ -995,6 +1002,10 @@ export class HostToolCoordinator {
   }
   private async imageResult(job: ImageJob, snapshot: ImageJobSnapshot): Promise<ToolResult> {
     if (snapshot.jobId !== job.jobId || snapshot.runId !== (job.sourceRunId ?? job.runId) || snapshot.documentId !== (job.sourceDocumentId ?? job.documentId)) throw new Error('图像服务返回了不同任务的结果')
+    // A stopped operation may finish remotely. Retain its immutable candidate
+    // references without recreating handles or document write authority.
+    if (job.controller.signal.aborted) return { kind: 'read', data: { job: job.jobId, status: snapshot.status, stopped: true,
+      resources: this.imageSources(snapshot), provenance: snapshot.provenance, ...(snapshot.failure ? { failure: snapshot.failure } : {}) } }
     if (job.scope === 'workspace') this.workspaceImageScope(job.runId)
     else this.authority.active(job.runId, job.documentId, job.epoch)
     const resources = []
@@ -1019,14 +1030,19 @@ export class HostToolCoordinator {
       const value = schema[name].parse(input)
       const operation = name === 'image.edit' ? 'edit' : 'generate'
       const references = name === 'image.edit' ? schema['image.edit'].parse(input).references : undefined
-      const target = value.target ? await this.authority.resolveImage(runId, value.target) : undefined
+      const targetHandle = value.application?.target ?? value.target
+      const target = targetHandle ? await this.authority.resolveImage(runId, targetHandle) : undefined
+      if (value.target && value.application && value.target !== value.application.target) {
+        const binding = await this.authority.resolveImage(runId, value.target)
+        if (binding.snapshot.documentId !== target!.snapshot.documentId) throw new Error('图片应用目标与绑定文档不同')
+      }
       if (!target) this.writableRun(runId)
       const documentId = target?.snapshot.documentId ?? this.workspaceImageScope(runId)
-      if (target) for (const reference of references ?? []) await this.authority.readImage(runId, documentId, reference)
-      else for (const reference of references ?? []) {
-        if (await this.readImageSource(runId, reference)) continue
-        const source = this.parseStandaloneReference(reference)
-        await this.readStandaloneImage(runId, source.jobId, source.resourceId)
+      const admittedReferences: HostImageReference[] = []
+      for (const referenceId of references ?? []) {
+        const image = await this.readImageReference(runId, referenceId)
+        if (!image) throw new Error('参考图句柄无效；请使用本任务可读取的图片 source/resource 或整张图片句柄')
+        admittedReferences.push({ ...image, referenceId })
       }
       const selection = structuredClone(await this.services.images!.selection(runId, documentId, operation))
       if (target) this.authority.active(runId, documentId, target.snapshot.epoch)
@@ -1035,7 +1051,8 @@ export class HostToolCoordinator {
       const request: ImageGenerationRequest = { jobId, runId, documentId, operation, prompt: value.prompt, selection, ...(references ? { referenceIds: references } : {}), ...(value.output ? { output: value.output } : {}) }
       const job: ImageJob = { kind: 'image', scope: target ? 'document' : 'workspace', jobId, runId, documentId, epoch: target?.snapshot.epoch ?? '', controller: new AbortController(), resources: new Map() }
       this.jobs.set(jobId, job)
-      const result = await this.services.images!.run(request, { signal: job.controller.signal })
+      const result = await this.services.images!.run(request, { signal: job.controller.signal,
+        ...(references ? { admittedReferences } : {}) })
       return this.imageResult(job, result)
     }
     if (name === 'image.status') {

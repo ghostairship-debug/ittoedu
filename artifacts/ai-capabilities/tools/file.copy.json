@@ -12,6 +12,13 @@
       "flushFirst": {
         "type": "boolean"
       },
+      "resourcePolicy": {
+        "enum": [
+          "copy",
+          "cancel"
+        ],
+        "type": "string"
+      },
       "sources": {
         "items": {
           "maxLength": 32767,

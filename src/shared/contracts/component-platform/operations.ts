@@ -26,18 +26,21 @@ export type ComponentEdit =
   | { type: 'surface.presentation.set'; surfaceId: string; presentation: ComponentPresentation | null }
   | { type: 'flow.set'; surfaceId: string; flow: ComponentFlowAuthoring }
   | { type: 'spatial.set'; surfaceId: string; spatial: ComponentSpatialAuthoring }
-  | { type: 'definition.set'; definition: ComponentDefinition }
+  | { type: 'definition.set'; definition: ComponentDefinition; sourceOriginId?: string }
   | { type: 'definition.remove'; definitionId: string }
   | { type: 'asset.remove'; assetId: string }
   | { type: 'asset.add'; asset: ComponentAsset; bytes: Uint8Array }
   /** Preserve asset identity and references while replacing its metadata and bytes together. */
   | { type: 'asset.replace'; asset: ComponentAsset; bytes: Uint8Array; expectedBytes: Uint8Array }
   /** Files and their implementation reference commit in the same document transaction. */
-  | { type: 'component.files.set'; ownerId: string; files: Record<string, Uint8Array> | null; expectedFiles: Record<string, Uint8Array> | null }
+  | { type: 'component.files.set'; ownerId: string; files: Record<string, Uint8Array> | null; expectedFiles: Record<string, Uint8Array> | null;
+      /** Final source owner must retain this author scope if references changed after capture. */
+      sourceScope?: { kind: 'instance'; instanceId: string } | { kind: 'definition'; definitionId: string }; forkOwnerId?: string }
   | { type: 'data.set'; instanceId: string; path: string[]; value: JsonValue }
+  | { type: 'authoring.set'; instanceId: string; path: string[]; value: JsonValue }
   | { type: 'style.set'; instanceId: string; path: string[]; value: JsonValue }
   | { type: 'frame.set'; instanceId: string; frame: ComponentFrame | null }
-  | { type: 'instance.patch'; instanceId: string; patch: { name?: string | null; visible?: boolean; locked?: boolean; playbackInitialVisibility?: 'inherit' | 'hidden'; visibility?: ComponentInstance['visibility'] | null } }
+  | { type: 'instance.patch'; instanceId: string; patch: { name?: string | null; visible?: boolean; locked?: boolean; viewportPinned?: boolean | null; playbackInitialVisibility?: 'inherit' | 'hidden'; visibility?: ComponentInstance['visibility'] | null } }
   | { type: 'instance.definition.set'; instanceId: string; definitionId: string }
   | { type: 'instance.flowLayout.set'; instanceId: string; flowLayout: ComponentFlowBodyLayout | null }
   | { type: 'instance.flowPlacement.set'; instanceId: string; flowPlacement: ComponentFlowPlacement | null }

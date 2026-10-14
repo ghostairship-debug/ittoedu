@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import type { HostImageInput } from '../../../core/tools/imageResource'
+import type { HostImageInput, HostImageRunOptions } from '../../../core/tools/imageResource'
 import type { ImageGenerationRequest, ImageJobSnapshot, ImageJobTimingMark, ImageResourceReference } from '../../../shared/workbench/images'
 import { parseGeneratedImageReference } from '../../../shared/workbench/images'
 import { prepareImageResource } from '../admittedImageResource'
@@ -106,7 +106,7 @@ export class ImageGenerationService {
       return job ? structuredClone({ jobId: job.jobId, runId: job.runId, documentId: job.documentId, timing: job.timing }) : null
     })
   }
-  run(input: ImageGenerationRequest, options: { signal?: AbortSignal } = {}): Promise<ImageJobSnapshot> {
+  run(input: ImageGenerationRequest, options: HostImageRunOptions = {}): Promise<ImageJobSnapshot> {
     try { return this.launch(input, options).promise.then(value => structuredClone(value)) } catch (error) { return Promise.reject(error) }
   }
   /** Main result cards prove conversation ownership before admitting an exact parent result. */
@@ -115,19 +115,21 @@ export class ImageGenerationService {
     const image = await this.readOwnedResultResourceFromJob({ jobId: parent.jobId, sourceRunId: parent.runId,
       sourceDocumentId: input.documentId, resourceId: parent.resourceId })
     const referenceId = `${parent.jobId}@${parent.resourceId}`
-    return structuredClone(await this.launch({ ...input, operation: 'edit', referenceIds: [referenceId] }, {},
-      [{ ...image, referenceId }]).promise)
+    return structuredClone(await this.launch({ ...input, operation: 'edit', referenceIds: [referenceId] },
+      { admittedReferences: [{ ...image, referenceId }] }).promise)
   }
   /** Returns only after the existing job owner durably creates or recovers its receipt. */
-  start(input: ImageGenerationRequest, options: { signal?: AbortSignal } = {}): Promise<ImageJobSnapshot> {
+  start(input: ImageGenerationRequest, options: HostImageRunOptions = {}): Promise<ImageJobSnapshot> {
     try { return this.launch(input, options).started.then(value => structuredClone(value)) } catch (error) { return Promise.reject(error) }
   }
-  private launch(input: ImageGenerationRequest, options: { signal?: AbortSignal }, admittedReferences?: readonly ImageProviderReference[]) {
+  private launch(input: ImageGenerationRequest, options: HostImageRunOptions) {
     const request = structuredClone(input), key = this.key(request.jobId), requestDigest = hash(JSON.stringify(request)), existing = active.get(key)
     if (existing) {
       if (existing.requestDigest !== requestDigest) throw new ImageGenerationError('image-job-conflict', '此图片任务身份已绑定其他请求。')
       return existing
     }
+    // Capture admitted pixels before scheduling I/O; the source owner can change independently of this job.
+    const admittedReferences = options.admittedReferences ? structuredClone(options.admittedReferences) : undefined
     const controller = new AbortController(), abort = () => { controller.abort(); void this.stop(request.jobId).catch(() => undefined) }
     options.signal?.addEventListener('abort', abort, { once: true }); if (options.signal?.aborted) controller.abort()
     const sequence = ++this.runSequence

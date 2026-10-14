@@ -23,7 +23,7 @@ it('S14 image result updates preserve edit focus and previews never start image 
   Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:preview') })
   Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
   render(<ImageResultCard api={api} owner={owner} documents={documents} />)
-  expect(await screen.findByText('已生成，尚未应用')).toBeVisible()
+  expect(await screen.findByText('图片已生成')).toBeVisible()
   expect(screen.getByText(/实际图片模型：供应商未报告/)).toBeVisible()
   const prompt = screen.getByLabelText('继续编辑图片'); fireEvent.change(prompt, { target: { value: '保留这段未发送要求' } }); prompt.focus()
   view = { ...view, job: { ...view.job, status: 'unapplied', stopped: true } }

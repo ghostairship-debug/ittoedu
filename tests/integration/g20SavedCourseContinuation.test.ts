@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -21,7 +22,7 @@ afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.spl
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
 
 async function fixture(mode: 'surface' | 'range' = 'surface', saveProjection = true,
-  heldContinuation?: { next: ReturnType<typeof deferred>; finish: ReturnType<typeof deferred> }) {
+  heldContinuation?: { next: ReturnType<typeof deferred>; finish: ReturnType<typeof deferred> }, automaticReference = false) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-saved-course-'))
   const documents = new DocumentHostService(path.join(root, 'documents'))
   const project = createBlankCourseProjectV10('Original work', randomUUID)
@@ -47,10 +48,10 @@ async function fixture(mode: 'surface' | 'range' = 'surface', saveProjection = t
     if (calls === 1) return new Response('', { status: 401 })
     if (mode === 'range' && calls === 2) {
       const advertised = z.object({ tools: z.array(z.object({ function: z.object({ name: z.string() }) })) }).parse(JSON.parse(String(init?.body)))
-      expect(advertised.tools.map(tool => tool.function.name)).toContain('text_replace')
+      expect(advertised.tools.map(tool => tool.function.name)).toContain(modelToolWireName('text.replace'))
     }
     const boundCalls = mode === 'range' && calls === 2 ? [{ index: 0, id: 'continue-bound-range', type: 'function',
-      function: { name: 'text_replace', arguments: JSON.stringify({ content: 'continued' }) } }] : []
+      function: { name: modelToolWireName('text.replace'), arguments: JSON.stringify({ content: 'continued' }) } }] : []
     const chunk = { id: `response-${calls}`, model: 'fixture-model', choices: [{ index: 0,
       delta: { role: 'assistant', content: boundCalls.length ? '' : 'continued', ...(boundCalls.length ? { tool_calls: boundCalls } : {}) }, finish_reason: boundCalls.length ? 'tool_calls' : 'stop' }] }
     if (heldContinuation && calls === 2) {
@@ -83,10 +84,10 @@ async function fixture(mode: 'surface' | 'range' = 'surface', saveProjection = t
   const target = mode === 'range' ? { kind: 'course-instance' as const, surfaceId, instanceId, dataPath: ['content'], from: 2, to: 4 }
     : { kind: 'course-surface' as const, surfaceId }
   const reference: ExecutionDocumentReference = { documentId: document.documentId, epoch: document.epoch,
-    revision: document.revision, writable: [target], selection: [target] }
+    revision: document.revision, writable: [target], selection: [target], ...(automaticReference ? { pinned: false } : {}) }
   const send = { type: 'send', workspaceId: conversation.workspaceId, conversationId: conversation.conversationId,
     submissionId: randomUUID(), expectedRevision: conversation.revision, text: 'Continue the selected content', documents: [reference],
-    ...(target.kind === 'course-instance' ? { contentOutput: { kind: 'replace-text' as const, documentId: document.documentId, target } } : {}),
+    ...(target.kind === 'course-instance' ? { contentOutput: { kind: 'content' as const, documentId: document.documentId, target } } : {}),
     attachments: [], permission: 'workspace' as const }
   const sent = await service.operate(send) as ExecutionSendResult
   const failed = await service.engine.wait(sent.run!.runId)
@@ -112,6 +113,60 @@ async function fixture(mode: 'surface' | 'range' = 'surface', saveProjection = t
   return { root, documents, document, project, service, projection, diagnostics, failed, send, reference, restart,
     filename, edit, retry, calls: () => calls, surfaceId, instanceId }
 }
+
+it('continues the original frozen task after cold reopen changes only the automatic current document', async () => {
+  const f = await fixture('surface', true, undefined, true)
+  await f.documents.saveToPath(f.document.documentId, f.filename)
+  await f.documents.settleSaveObservations()
+  await f.service.engine.settleDocumentBindings()
+  await f.service.events.flushPending()
+  await f.documents.operate({ type: 'close', documentId: f.document.documentId })
+  const cold = f.restart(), reopened = await cold.documents.open(f.filename)
+  const currentDocument = await cold.documents.internalAPI.create({ kind: 'course-v10',
+    project: createBlankCourseProjectV10('Another current document', randomUUID),
+    resources: { assets: {}, components: {} } }, 'another.h5lesson')
+  const currentReference: ExecutionDocumentReference = { documentId: currentDocument.documentId, epoch: currentDocument.epoch,
+    revision: currentDocument.revision, writable: [{ kind: 'document' }], pinned: false }
+  const current = await cold.service.operate({ type: 'conversation', workspaceId: f.send.workspaceId,
+    conversationId: f.send.conversationId }) as ConversationRecord
+  const draft = await cold.service.operate({ type: 'draft', workspaceId: f.send.workspaceId, conversationId: f.send.conversationId,
+    expectedRevision: current.revision, text: f.send.text, attachments: f.send.attachments, documents: [currentReference] }) as ConversationRecord
+  const retried = await cold.service.operate({ ...f.send, submissionId: randomUUID(), expectedRevision: draft.revision,
+    retryOfRunId: f.failed.runId }) as ExecutionSendResult
+  const completed = await cold.service.engine.wait(retried.run!.runId)
+  expect(completed.status, JSON.stringify(completed.failure)).toBe('completed')
+  expect(completed.input.documents).toEqual([{ documentId: reopened.documentId, epoch: reopened.epoch,
+    revision: reopened.revision, writable: f.reference.writable, selection: f.reference.selection }])
+  expect(completed.input.permission).toBe(f.send.permission)
+  expect(completed.input.inputContext?.attachments).toEqual(f.send.attachments)
+  expect((await cold.service.submissions.read(retried.submission.submissionId))?.documents).toEqual(f.send.documents)
+  expect(await cold.documents.internalAPI.read(currentDocument.documentId)).toMatchObject({ revision: currentDocument.revision,
+    undoDepth: 0, model: { project: { title: 'Another current document' } } })
+  expect(completed.tools).toEqual([])
+  expect(f.calls()).toBe(2)
+})
+
+it.each(['text', 'attachment', 'pinned reference'] as const)('preserves a newer %s draft when continuing the original task', async change => {
+  const f = await fixture('surface', true, undefined, true)
+  await f.service.events.flushPending()
+  const current = await f.service.operate({ type: 'conversation', workspaceId: f.send.workspaceId,
+    conversationId: f.send.conversationId }) as ConversationRecord
+  const added = change === 'attachment' ? await f.service.attachments.receiveBytes({ name: 'new-draft.txt',
+    bytes: Buffer.from('New draft attachment'), source: { kind: 'paste' } }) : null
+  const draft = await f.service.operate({ type: 'draft', workspaceId: f.send.workspaceId, conversationId: f.send.conversationId,
+    expectedRevision: current.revision, text: change === 'text' ? 'A different task' : f.send.text,
+    attachments: added ? [{ attachmentId: added.id, representationId: 'original-text' }] : f.send.attachments,
+    documents: [{ ...f.reference, ...(change === 'pinned reference' ? { pinned: true } : {}) }] }) as ConversationRecord
+  const submissionId = randomUUID()
+  await expect(f.service.operate({ ...f.send, submissionId, expectedRevision: draft.revision,
+    retryOfRunId: f.failed.runId })).rejects.toThrow('输入框已有另一份草稿')
+  expect(await f.service.operate({ type: 'conversation', workspaceId: f.send.workspaceId,
+    conversationId: f.send.conversationId })).toEqual(draft)
+  expect(await f.service.submissions.read(submissionId)).toBeNull()
+  expect((await f.service.submissions.read(f.send.submissionId))?.documents).toEqual(f.send.documents)
+  expect(await f.documents.internalAPI.read(f.document.documentId)).toMatchObject({ revision: f.document.revision, undoDepth: 0 })
+  expect(f.calls()).toBe(1)
+})
 
 it('retries a normally saved and reopened V10 work with the original scope and fresh session, waiting for the emitted save binding', async () => {
   const f = await fixture(), entered = deferred(), release = deferred()

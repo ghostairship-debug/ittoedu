@@ -16,6 +16,8 @@ import {
   type ReleasedConversationReferences,
   type WorkspaceRecord,
   rebaseHome,
+  executionAdvancementModeSchema,
+  type ExecutionAdvancementMode,
   validConversationElement,
   validConversationHome,
 } from '../../../shared/workbench/conversations'
@@ -67,6 +69,7 @@ function validConversation(value: unknown, conversationId: string): value is Con
     && new Set(item.frozenContextRefs.map(reference => reference.contextRefId)).size === item.frozenContextRefs.length
     && (item.home === undefined || validConversationHome(item.home))
     && (item.element === undefined || validConversationElement(item.element))
+    && (item.advancementMode === undefined || executionAdvancementModeSchema.safeParse(item.advancementMode).success)
     && validRevision(item.revision) && validTime(item.createdAt) && validTime(item.updatedAt)
 }
 function emptyState(): ConversationStoreState { return { schemaVersion: CONVERSATION_STORE_SCHEMA_VERSION, workspaces: {}, conversations: {} } }
@@ -252,6 +255,18 @@ export class ConversationStore {
         revision: previous.revision + 1, updatedAt: this.now(),
       }
       if (!validConversation(next, next.conversationId)) throw new TypeError('会话更新不符合合同')
+      state.conversations[next.conversationId] = next
+      await this.writeState(state)
+      return clone(next)
+    })
+  }
+  /** Single preference writer. Like home metadata, it does not invalidate an unrelated draft CAS. */
+  setAdvancementMode(input: { workspaceId: string; conversationId: string; advancementMode: ExecutionAdvancementMode }): Promise<ConversationRecord> {
+    return this.serial(async () => {
+      const mode = executionAdvancementModeSchema.parse(input.advancementMode)
+      const state = await this.readState(), previous = this.conversation(state, input.workspaceId, input.conversationId)
+      if (previous.advancementMode === mode) return clone(previous)
+      const next = { ...previous, advancementMode: mode, updatedAt: this.now() }
       state.conversations[next.conversationId] = next
       await this.writeState(state)
       return clone(next)

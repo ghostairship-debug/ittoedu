@@ -1,3 +1,5 @@
+import { createProfessionalDocumentIdentityCopy } from '../../../../core/components/library/professionalCopy'
+import { componentDefinitionBuiltinKey } from '../../../../shared/contracts/component-platform/project'
 import { composeMatrices, frameCorners, invertMatrix, reparentFrame, transformVector, translationMatrix } from '../../../../core/components/geometry'
 import type { ComponentEdit } from '../../../../shared/contracts/component-platform/operations'
 import { containerChildIds, type ComponentInstance, type CourseProjectV10 } from '../../../../shared/contracts/component-platform/project'
@@ -124,14 +126,16 @@ export function duplicateFreeObjects(project: CourseProjectV10, targets: readonl
   const ids = new Map<string, string>(), clones: ComponentInstance[] = []
   const collect = (id: string) => { ids.set(id, allocateId()); for (const child of project.instances[id]?.childIds ?? []) collect(child) }
   for (const target of targets) collect(target.instanceId)
+  const professionalCopy = createProfessionalDocumentIdentityCopy(ids)
+  for (const id of ids.keys()) professionalCopy(structuredClone(project.instances[id].data), componentDefinitionBuiltinKey(project.definitions[project.instances[id].definitionId]), id, true)
   for (const [id, nextId] of ids) {
     const instance = structuredClone(project.instances[id]!)
     const { id: _oldId, ...fields } = instance
-    const clone: ComponentInstance = { ...fields, id: nextId }
+    const clone: ComponentInstance = { ...fields, id: nextId, data: professionalCopy(fields.data, componentDefinitionBuiltinKey(project.definitions[instance.definitionId]), id) }
     if (clone.childIds) clone.childIds = clone.childIds.map(child => ids.get(child)!)
     if (clone.attachments) clone.attachments = clone.attachments.map(attachment => ({ ...attachment,
       instanceId: ids.get(attachment.instanceId) ?? attachment.instanceId,
-      target: attachment.target.kind === 'instance' ? { kind: 'instance', instanceId: ids.get(attachment.target.instanceId) ?? attachment.target.instanceId } : attachment.target }))
+      target: attachment.target.kind === 'text-range' ? { ...attachment.target, instanceId: ids.get(attachment.target.instanceId) ?? attachment.target.instanceId, rangeId: professionalCopy.identity(attachment.target.rangeId), dataPath: professionalCopy.path(attachment.target.dataPath) } : attachment.target.kind === 'instance' ? { kind: 'instance', instanceId: ids.get(attachment.target.instanceId) ?? attachment.target.instanceId } : attachment.target }))
     if (targets.some(target => target.instanceId === id) && clone.frame) {
       const target = targets.find(value => value.instanceId === id)!
       const edit = nudgeFreeObjects([target], { x: 16, y: 16 })[0]!

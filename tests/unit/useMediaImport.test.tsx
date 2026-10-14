@@ -14,6 +14,27 @@ vi.mock('../../src/renderer/project/assetManager', async importOriginal => ({
 }))
 import { useMediaImport } from '../../src/renderer/app/useMediaImport'
 
+it.each(['image', 'video', 'audio'] as const)('prepares %s inside one serialized insertion and leaves later save runnable', async kind => {
+  const h = await harness(), selected = { ...h.selected, name: kind === 'image' ? 'photo.png' : kind === 'video' ? 'movie.mp4' : 'voice.mp3',
+    mimeType: kind === 'image' ? 'image/png' : kind === 'video' ? 'video/mp4' : 'audio/mpeg' }
+  h.ports.selectImage = vi.fn(async () => selected)
+  h.ports.selectVideo = vi.fn(async () => selected)
+  h.ports.selectAudio = vi.fn(async () => selected)
+  let tail: Promise<unknown> = Promise.resolve()
+  h.ports.runBusy = operation => {
+    const result = tail.then(operation)
+    tail = result.then(() => undefined, () => undefined)
+    return result
+  }
+  const hook = renderHook(() => useMediaImport(h.ports)), saved = vi.fn()
+  let inserted!: Promise<unknown>
+  act(() => { inserted = h.ports.runBusy(() => hook.result.current.selectMediaAsset(kind), 'insert') })
+  await vi.waitFor(() => expect(kind === 'image' ? h.ports.selectImage : kind === 'video' ? h.ports.selectVideo : h.ports.selectAudio).toHaveBeenCalledOnce())
+  await expect(inserted).resolves.toMatchObject({ meta: { kind } })
+  await h.ports.runBusy(async () => saved(), 'save')
+  expect(saved).toHaveBeenCalledOnce()
+})
+
 const dispose: (() => void)[] = []
 beforeEach(() => { vi.stubGlobal('Uint8Array', new NodeTextEncoder().encode('').constructor) })
 afterEach(() => { cleanup(); for (const action of dispose.splice(0)) action(); decode.calls = 0; decode.gate = null; vi.unstubAllGlobals() })

@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest'
-import { NodeSelection } from 'prosemirror-state'
+import { NodeSelection, TextSelection } from 'prosemirror-state'
 import { createLayoutEditor, DOCUMENT_OBJECT_CONTEXT_MENU_EVENT } from '../../src/renderer/document/editorSession'
 import type { DocumentContent } from '../../src/shared/document/content'
 import { emptyDocumentResources } from '../../src/shared/document/resources'
@@ -48,5 +48,27 @@ it('M21 a right-click on a document picture selects it and asks for its menu', (
     expect(menu.defaultPrevented).toBe(true)
     expect((editor.view.state.selection as NodeSelection).node.attrs.id).toBe('figure')
     expect(requests).toEqual([{ x: 120, y: 80, blockId: 'figure' }])
+  } finally { editor.destroy(); element.remove() }
+})
+
+it('publishes the current same caret on native click without a document or selection transaction', () => {
+  const element = document.createElement('div'); document.body.append(element)
+  const selection = vi.fn(), change = vi.fn()
+  const editor = createLayoutEditor(element, {
+    document: { content, resources: emptyDocumentResources() }, revision: 'r1', presentation: 'flow',
+    change, diagnostic: vi.fn(), undo: vi.fn(), redo: vi.fn(), selection,
+  })
+  try {
+    editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 2)))
+    const state = editor.view.state, current = editor.readSelection()
+    selection.mockClear()
+    editor.view.focus()
+    expect(selection).not.toHaveBeenCalled()
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    element.querySelector('[data-document-id="intro"] [data-flow-idle-rich-text]')!.dispatchEvent(click)
+    expect(selection).toHaveBeenCalledExactlyOnceWith(current)
+    expect(click.defaultPrevented).toBe(false)
+    expect(editor.view.state).toBe(state)
+    expect(change).not.toHaveBeenCalled()
   } finally { editor.destroy(); element.remove() }
 })

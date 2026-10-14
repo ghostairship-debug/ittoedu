@@ -1,3 +1,4 @@
+import type { DocumentRangeProjection } from '../../shared/document/textInteraction'
 import type { ComponentEdit, CourseProjectV10 } from '../../shared/contracts/component-platform'
 import type { DocumentBlock } from '../../shared/document/content'
 import { walkDocument } from '../../shared/document/content'
@@ -94,7 +95,7 @@ export function createFlowDocumentResourcePort(input: {
       }), components: [] }
       const prepared: FlowPreparedDocumentResources = { target: previous[0]?.target ?? target, edits: plan.edits }
       staged.add(prepared); input.onPrepared?.(prepared)
-      return { resources: mapped, assetIds, components: [], identities: Object.fromEntries(plan.idMap), prepared }
+      return { resources: mapped, assetIds, components: [], identities: { ...Object.fromEntries('professionalIdentities' in plan ? plan.professionalIdentities ?? [] : []), ...Object.fromEntries(plan.idMap) }, prepared }
     },
     async discard(prepared) { staged.delete(prepared); input.onDiscard?.(prepared) },
   }
@@ -107,13 +108,13 @@ export function projectFlowPreparedResources(target: CapturedCourseTarget, value
 }
 
 /** One formal operation contains every resource edit and the complete body projection. */
-export function prepareFlowDocumentResourceTransaction(target: CapturedCourseTarget, surfaceId: string, blocks: DocumentBlock[], values: readonly unknown[]): {
+export function prepareFlowDocumentResourceTransaction(target: CapturedCourseTarget, surfaceId: string, blocks: DocumentBlock[], values: readonly unknown[], rangeProjection?: readonly DocumentRangeProjection[]): {
   target: CapturedCourseTarget; edits: ComponentEdit[]; prepared: readonly FlowPreparedDocumentResources[]
 } {
   const batches = preparedBatches(values), captured = batches[0]?.target ?? target
   if (!sameOwner(captured, target) || captured.surfaceId !== surfaceId) throw new Error('正文资源目标已变化，请回到原稿后继续')
   const project = batches.length ? preparedProject(captured, batches) : captured.editingProject
-  const edits = [...batches.flatMap(batch => [...batch.edits]), ...flowDocumentEdits(project, surfaceId, blocks, captured.editingProject)]
+  const edits = [...batches.flatMap(batch => [...batch.edits]), ...flowDocumentEdits(project, surfaceId, blocks, captured.editingProject, rangeProjection)]
   // Resource copy batches are canonical already. Flow has no persisted named states;
   // the final capture must not reinterpret a complete clone as a presentation edit.
   return { target: batches.length ? { ...captured, activeStateId: null, editingProject: captured.project } : captured, edits, prepared: batches }

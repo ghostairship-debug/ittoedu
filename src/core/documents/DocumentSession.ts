@@ -1,10 +1,12 @@
 import type {
   DocumentBinding, DocumentDriver, DocumentEvent, DocumentModel, DocumentOperation,
   DocumentOperationResult, DocumentPersistence, DocumentSnapshot, DurableDocumentState,
-  DocumentSourceChange,
+  DocumentSourceChange, DocumentVersionEvent, DocumentCommand,
 } from '../../shared/workbench/document'
 import { isSourceDocumentModel } from '../../shared/workbench/document'
 import { documentDigest } from './documentDigest'
+import { documentEqual } from './documentEqual'
+import { documentSourceEdits } from '../../shared/document/sourceMerge'
 import { DocumentSaveFailure, type DocumentSaveIdentity, type DocumentSaveProof } from '../../shared/workbench/documentSave'
 import { retainDocumentResourceBytes } from '../drivers/resources'
 
@@ -35,9 +37,11 @@ function operationDigest(operation: DocumentOperation): string {
     actor: operation.actor, runId: operation.runId, requestDigest: operation.requestDigest })
 }
 
-function sourceChange(before: DocumentModel, after: DocumentModel): DocumentSourceChange | undefined {
+function sourceChange(before: DocumentModel, after: DocumentModel, command?: Extract<DocumentCommand, { type: 'markdown.splice' }>): DocumentSourceChange | undefined {
   if (before.kind !== after.kind || !isSourceDocumentModel(before) || !isSourceDocumentModel(after)) return
-  return before.source === after.source ? { kind: 'unchanged' } : { kind: 'changed', before: before.source, after: after.source }
+  return { kind: 'edits', documentKind: before.kind,
+    edits: (command ? [command] : documentSourceEdits(before.source, after.source)).map(edit => ({ from: edit.from, removed: before.source.slice(edit.from, edit.to), text: edit.text })),
+    beforeResources: before.resources, afterResources: after.resources }
 }
 
 /** Models and receipts are immutable inside the Session; only the queue's next containers change. */
@@ -46,10 +50,23 @@ function nextState(state: DurableDocumentState): DurableDocumentState {
     operations: [...state.operations], stoppedRuns: [...state.stoppedRuns] }
 }
 
+function capturedResources(current: DocumentModel, original: DocumentModel, captured: DocumentModel) {
+  const resources = { assets: { ...current.resources.assets }, components: { ...current.resources.components } }
+  for (const [key, bytes] of Object.entries(captured.resources.assets))
+    if (resources.assets[key] === original.resources.assets[key]) resources.assets[key] = bytes
+  for (const [key, files] of Object.entries(captured.resources.components)) {
+    const published = { ...resources.components[key] }
+    for (const [filename, bytes] of Object.entries(files))
+      if (published[filename] === original.resources.components[key]?.[filename]) published[filename] = bytes
+    resources.components[key] = published
+  }
+  return resources
+}
+
 
 /** Host-only notification of one durable operation. Never exposed as an IPC write capability. */
 export interface CommittedDocumentOperation {
-  operation: DocumentOperation
+  operation: DocumentOperation | (Omit<DocumentOperation, 'mutation'> & { mutation: { type: 'reconcile' } })
   result: Extract<DocumentOperationResult, { revision: number }>
   before: DocumentModel
   after: DocumentModel
@@ -60,6 +77,7 @@ export class DocumentSession {
   private tail: Promise<unknown> = Promise.resolve()
   private saveTail: Promise<unknown> = Promise.resolve()
   private listeners = new Set<(event: DocumentEvent) => void>()
+  private versionListeners = new Set<(event: DocumentVersionEvent) => void>()
   private readonly commitListeners = new Set<(commit: CommittedDocumentOperation) => void>()
   private saving = false
   private saveError: string | null = null
@@ -82,13 +100,14 @@ export class DocumentSession {
       binding: structuredClone(input.binding), model: structuredClone(input.model),
       past: [], future: [], operations: [], stoppedRuns: [],
     }
+    if (input.saved) state.savedModel = state.model
     await persistence.append(structuredClone(state))
     return new DocumentSession(state, driver, persistence)
   }
 
   static async restore(input: DurableDocumentState, epoch: string, driver: DocumentDriver, persistence: DocumentPersistence): Promise<DocumentSession> {
     if (!epoch || input.schemaVersion !== 1 || input.model.kind !== driver.kind) throw new Error('无法恢复文档版本或 Driver')
-    const models = new Set([input.model, ...[...input.past, ...input.future].flatMap(entry => [entry.before, entry.after])])
+    const models = new Set([input.model, ...(input.savedModel ? [input.savedModel] : []), ...[...input.past, ...input.future].flatMap(entry => [entry.before, entry.after])])
     for (const model of models) driver.validate(model)
     const state = structuredClone(input)
     state.epoch = epoch
@@ -100,6 +119,27 @@ export class DocumentSession {
   }
 
   get documentId(): string { return this.state.documentId }
+
+  private modelAtRevision(revision: number): DocumentModel | undefined {
+    if (revision === this.state.revision) return this.state.model
+    const pairs = this.operationPairs()
+    const receipt = this.state.operations.find(item => 'revision' in item.result && item.result.revision === revision && pairs.has(item.operationId))
+    if (receipt) return pairs.get(receipt.operationId)?.after
+    for (const entry of [...this.state.past, ...this.state.future]) {
+      if (entry.revision === revision) return entry.after
+      if (entry.beforeRevision === revision) return entry.before
+    }
+  }
+
+  readSavedModel(): DocumentModel | undefined {
+    const model = this.state.savedModel ?? (this.state.savedRevision !== null ? this.modelAtRevision(this.state.savedRevision) : undefined)
+    return model ? structuredClone(model) : undefined
+  }
+
+  readSavedSource(): string | undefined {
+    const model = this.state.savedModel ?? (this.state.savedRevision !== null ? this.modelAtRevision(this.state.savedRevision) : undefined)
+    return model && isSourceDocumentModel(model) ? model.source : undefined
+  }
 
   read(): DocumentSnapshot {
     return structuredClone({
@@ -124,10 +164,27 @@ export class DocumentSession {
     return () => { this.commitListeners.delete(listener) }
   }
 
+  subscribeVersion(listener: (event: DocumentVersionEvent) => void): () => void {
+    if (this.closed) throw new Error('文档已关闭')
+    this.versionListeners.add(listener)
+    return () => { this.versionListeners.delete(listener) }
+  }
+
   private notify(operationId?: string, appliedChanges?: Extract<DocumentOperationResult, { revision: number }>['appliedChanges']): void {
+    for (const listener of this.versionListeners) {
+      try { listener({ type: 'changed', documentId: this.documentId, epoch: this.state.epoch, revision: this.state.revision }) } catch { /* Durable success cannot become a replay. */ }
+    }
     for (const listener of this.listeners) {
       // A disconnected/throwing view cannot turn a durable success into a retry.
       try { listener({ type: 'changed', snapshot: this.read(), ...(operationId ? { operationId } : {}), ...(appliedChanges ? { appliedChanges } : {}) }) } catch { /* view owns its failure */ }
+    }
+  }
+
+  private notifyCommit(commit: CommittedDocumentOperation): void {
+    if (!this.commitListeners.size) return
+    const detached = structuredClone(commit)
+    for (const listener of this.commitListeners) {
+      try { listener(detached) } catch { /* Durable success cannot become a replay. */ }
     }
   }
 
@@ -211,7 +268,7 @@ export class DocumentSession {
           }
           candidate = { ...candidate, resources: retainDocumentResourceBytes(candidate.resources, next.model.resources) }
         }
-        changed = documentDigest(candidate) !== documentDigest(this.state.model)
+        changed = !documentEqual(candidate, this.state.model)
         if (operation.mutation.type === 'command' && changed) {
           const previous = next.past.at(-1)
           if (amendment || (operation.historyGroup && previous?.historyGroup === operation.historyGroup
@@ -244,20 +301,15 @@ export class DocumentSession {
       const sourceCommand = operation.mutation.type === 'command' && operation.mutation.command.type === 'markdown.splice'
         ? operation.mutation.command : null
       const textChanges = operation.textChanges ?? (sourceCommand ? { source: [{ from: sourceCommand.from, to: sourceCommand.to, inserted: sourceCommand.text.length }], flow: [] } : undefined)
-      const source = changed ? sourceChange(this.state.model, next.model) : undefined
+      const source = changed ? sourceChange(this.state.model, next.model, sourceCommand ?? undefined) : undefined
       next.operations.push({ operationId: id, digest, result, actor: operation.actor, ...(operation.runId ? { runId: operation.runId } : {}),
+        ...(changed && source?.kind !== 'edits' ? { before: this.state.model, after: next.model } : {}),
         ...(textChanges ? { textChanges: structuredClone(textChanges) } : {}), ...(source ? { sourceChange: source } : {}) })
       try { await this.persistence.append(structuredClone(next)) }
       catch (error) { return this.reject(id, 'failed', 'recovery-write-failed', error instanceof Error ? error.message : '恢复稿写入失败，修改未提交') }
       const before = this.state.model
       this.state = next
-      if (changed && this.commitListeners.size) {
-        // One detached, read-only host event, not a full clone per open card.
-        const commit = structuredClone({ operation, result, before, after: next.model })
-        for (const listener of this.commitListeners) {
-          try { listener(commit) } catch { /* Observer failures never turn a durable success into a replay. */ }
-        }
-      }
+      if (changed) this.notifyCommit({ operation, result, before, after: next.model })
       this.notify(id, result.appliedChanges)
       return structuredClone(result)
     })
@@ -266,20 +318,56 @@ export class DocumentSession {
   /** Read the existing canonical receipt/history chain; no second undo log or model-derived identity. */
   committedChangesSince(revision: number) {
     if (!Number.isSafeInteger(revision) || revision < 0 || revision > this.state.revision) throw new Error('原文档版本不可定位')
-    const entries = new Map([...this.state.past, ...this.state.future].map(entry => [entry.operationId, entry]))
+    const pairs = this.operationPairs()
     let next = revision
     const changes = this.state.operations.flatMap(receipt => {
       const result = receipt.result
       if (result.status !== 'applied' || result.revision <= revision) return []
       if (result.beforeRevision !== next) throw new Error('原修改到当前版本之间存在无法定位的历史，请重新选择')
       next = result.revision
-      const entry = entries.get(receipt.operationId)
-      const pair = entry && (entry.beforeRevision === result.beforeRevision || entry.beforeRevision === undefined && !entry.historyGroup)
-        ? { before: entry.before, after: entry.after } : {}
-      return [{ ...receipt, ...pair, result }]
+      const pair = pairs.get(receipt.operationId)
+      const materializedSource: Exclude<DocumentSourceChange, { kind: 'edits' }> | undefined = receipt.sourceChange?.kind === 'edits'
+        ? pair && isSourceDocumentModel(pair.before) && isSourceDocumentModel(pair.after)
+          ? pair.before.source === pair.after.source ? { kind: 'unchanged' } : { kind: 'changed', before: pair.before.source, after: pair.after.source }
+          : undefined
+        : receipt.sourceChange
+      return [{ ...receipt, ...pair, sourceChange: materializedSource, result }]
     })
     if (next !== this.state.revision) throw new Error('原修改的历史已改变，请重新选择')
     return structuredClone(changes)
+  }
+
+  /** Rebuild source pairs only when a continuation needs them; receipts retain the exact small edits. */
+  private operationPairs(): Map<string, { before: DocumentModel; after: DocumentModel }> {
+    const pairs = new Map<string, { before: DocumentModel; after: DocumentModel }>()
+    const history = new Map([...this.state.past, ...this.state.future].map(entry => [entry.operationId, entry]))
+    let current = this.state.model
+    for (const receipt of [...this.state.operations].reverse()) {
+      if (receipt.result.status !== 'applied') continue
+      let pair: { before: DocumentModel; after: DocumentModel } | undefined
+      const source = receipt.sourceChange
+      if (source?.kind === 'edits') {
+        if (!isSourceDocumentModel(current) || current.kind !== source.documentKind) throw new Error('源文回执类型与当前文档不一致')
+        let prior = current.source, offset = 0
+        const edits = source.edits.map(edit => { const at = edit.from + offset; offset += edit.text.length - edit.removed.length; return { ...edit, at } })
+        for (const edit of edits.reverse()) {
+          if (prior.slice(edit.at, edit.at + edit.text.length) !== edit.text) throw new Error('源文回执无法还原当前版本')
+          prior = prior.slice(0, edit.at) + edit.removed + prior.slice(edit.at + edit.text.length)
+        }
+        pair = { before: { kind: source.documentKind, source: prior, resources: source.beforeResources },
+          after: { kind: source.documentKind, source: current.source, resources: source.afterResources } }
+      } else if (receipt.before && receipt.after) pair = { before: receipt.before, after: receipt.after }
+      else {
+        const entry = history.get(receipt.operationId)
+        if (entry && (entry.beforeRevision === receipt.result.beforeRevision || entry.beforeRevision === undefined && !entry.historyGroup))
+          pair = { before: entry.before, after: entry.after }
+        else if (source?.kind === 'changed' && isSourceDocumentModel(current)) pair = {
+          before: { ...current, source: source.before }, after: { ...current, source: source.after },
+        }
+      }
+      if (pair) { pairs.set(receipt.operationId, pair); current = pair.before }
+    }
+    return pairs
   }
 
   stopRun(runId: string): Promise<DocumentSnapshot> {
@@ -298,7 +386,7 @@ export class DocumentSession {
 
   /** Main-only disk reconciliation. Binding and content share the durable boundary. */
   reconcileFile(input: { epoch: string; baseRevision: number; bindingVersion: number },
-    load: (current: DocumentSnapshot) => Promise<{ model: DocumentModel; version: string | null; matchesDisk: boolean }>): Promise<DocumentSnapshot> {
+    load: (current: DocumentSnapshot) => Promise<{ model: DocumentModel; version: string | null; matchesDisk: boolean; diskModel?: DocumentModel }>): Promise<DocumentSnapshot> {
     const operation = this.saveTail.then(() => this.serial(async () => {
       if (this.closed || this.state.epoch !== input.epoch || this.state.revision !== input.baseRevision) throw new Error('文档已改变，请重新比较当前稿')
       if (this.state.binding.kind !== 'file' || this.state.binding.bindingVersion !== input.bindingVersion) throw new Error('文件位置已改变，请重新读取')
@@ -306,25 +394,35 @@ export class DocumentSession {
       this.driver.validate(loaded.model)
       const next = nextState(this.state)
       const candidate = { ...structuredClone(loaded.model), resources: retainDocumentResourceBytes(loaded.model.resources, next.model.resources) }
+      const before = this.state.model
+      let commit: CommittedDocumentOperation | undefined
       if (documentDigest(candidate) !== documentDigest(next.model)) {
         const operationId = `disk:${next.documentId}:${next.sequence + 1}`
         const beforeRevision = next.revision
-        next.past.push({ operationId, actor: 'external', beforeRevision, revision: beforeRevision + 1,
-          before: next.model, after: candidate })
-        next.future = []
-        next.revision += 1
+        const diskRevision = candidate.kind === 'course-v9' || candidate.kind === 'course-v10' ? candidate.project.revision : 0
+        next.revision = Math.max(beforeRevision + 1, diskRevision)
         next.model = this.driver.withRevision(candidate, next.revision)
+        next.past.push({ operationId, actor: 'external', beforeRevision, revision: next.revision,
+          before: this.state.model, after: next.model })
+        next.future = []
         const source = sourceChange(this.state.model, next.model)
         next.operations.push({ operationId, actor: 'external',
+          ...(source?.kind !== 'edits' ? { before: this.state.model, after: next.model } : {}),
           digest: documentDigest({ operationId, beforeRevision, revision: next.revision, bindingVersion: input.bindingVersion, version: loaded.version }),
           result: { status: 'applied', documentId: next.documentId, operationId, beforeRevision, revision: next.revision, persistence: 'recoverable' },
           ...(source ? { sourceChange: source } : {}) })
+        commit = { operation: { documentId: next.documentId, epoch: next.epoch, operationId, baseRevision: beforeRevision,
+          actor: 'external', mutation: { type: 'reconcile' } },
+          result: { status: 'applied', documentId: next.documentId, operationId, beforeRevision, revision: next.revision, persistence: 'recoverable' }, before, after: next.model }
       }
       next.binding = { ...this.state.binding, version: loaded.version }
-      next.savedRevision = loaded.matchesDisk ? next.revision : null
+      if (loaded.diskModel || loaded.matchesDisk) next.savedModel = structuredClone(loaded.diskModel ?? loaded.model)
+      // Rebased course revisions are recoverable drafts until those exact bytes are saved.
+      next.savedRevision = loaded.matchesDisk && documentDigest(next.model) === documentDigest(loaded.model) ? next.revision : null
       next.sequence += 1
       await this.persistence.append(structuredClone(next))
       this.state = next
+      if (commit) this.notifyCommit(commit)
       this.notify()
       return this.read()
     }))
@@ -350,7 +448,14 @@ export class DocumentSession {
             if (documentDigest(binding) !== documentDigest(proof.sourceBinding)
               && documentDigest(binding) !== documentDigest(proof.binding)) throw new Error('保存后文件绑定已改变，未回退当前绑定')
             const next = nextState(this.state)
-            next.binding = structuredClone(proof.binding); next.savedRevision = proof.savedRevision; next.sequence++
+            next.binding = structuredClone(proof.binding); next.savedRevision = proof.savedRevision
+            const original = this.modelAtRevision(proof.savedRevision)
+            const savedModel = proof.savedModel ?? (this.persistence.prepareSaveModel ? undefined : original)
+            if (!savedModel) throw new Error('保存查证缺少实际保存模型，已保留当前稿')
+            next.savedModel = structuredClone(savedModel)
+            next.model = { ...next.model, resources: next.revision === proof.savedRevision ? next.savedModel.resources
+              : original ? capturedResources(next.model, original, next.savedModel) : next.model.resources }
+            next.sequence++
             await this.persistence.append(structuredClone(next))
             this.state = next; this.saveError = null
             if (next.savedRevision === next.revision) this.recovered = false
@@ -360,7 +465,7 @@ export class DocumentSession {
             assertActive()
             const next = nextState(this.state)
             next.binding = structuredClone(binding)
-            if (binding.kind === 'untitled') next.savedRevision = null
+            if (binding.kind === 'untitled') { next.savedRevision = null; delete next.savedModel }
             next.sequence += 1
             await this.persistence.append(structuredClone(next))
             this.state = next
@@ -379,8 +484,12 @@ export class DocumentSession {
     const observe = (progress: DocumentSaveProgress) => { try { observer?.(progress) } catch { /* Observation cannot change document persistence. */ } }
     const target = binding ? structuredClone(binding) : undefined
     const save = this.saveTail.then(async () => {
+      let sourceBinding: DocumentBinding
+      let originalModel: DocumentModel
       const captured = await this.serial(async () => {
         if (this.closed) throw new Error('文档已关闭')
+        sourceBinding = structuredClone(this.state.binding)
+        originalModel = this.state.model
         const snapshot = this.read()
         if (target) snapshot.binding = target
         if (snapshot.binding.kind !== 'file') throw new Error('未保存文档需要选择保存路径')
@@ -392,6 +501,7 @@ export class DocumentSession {
       })
       let persistenceCalled = false
       try {
+        if (this.persistence.prepareSaveModel) captured.model = await this.persistence.prepareSaveModel({ model: captured.model, sourceBinding: sourceBinding!, targetBinding: captured.binding })
         const bytes = await this.driver.serialize(captured.model)
         persistenceCalled = true
         const savedBinding = await this.persistence.save({ documentId: captured.documentId, revision: captured.revision, model: captured.model, binding: captured.binding, bytes, ...(saveIdentity ? { saveIdentity } : {}) })
@@ -399,6 +509,12 @@ export class DocumentSession {
           const next = nextState(this.state)
           next.binding = structuredClone(savedBinding)
           next.savedRevision = captured.revision
+          next.savedModel = captured.model
+          if (this.persistence.prepareSaveModel) {
+            // Only the Session publishes these captured dependencies. A later edit owns its changed resources.
+            if (next.revision === captured.revision) next.model = { ...next.model, resources: captured.model.resources }
+            else next.model = { ...next.model, resources: capturedResources(next.model, originalModel!, captured.model) }
+          }
           next.sequence += 1
           await this.persistence.append(structuredClone(next))
           this.state = next
@@ -432,6 +548,10 @@ export class DocumentSession {
         try { listener({ type: 'closed', documentId: this.state.documentId, epoch: this.state.epoch }) } catch { /* detached view */ }
       }
       this.listeners.clear()
+      for (const listener of this.versionListeners) {
+        try { listener({ type: 'closed', documentId: this.documentId }) } catch { /* detached observer */ }
+      }
+      this.versionListeners.clear()
       this.commitListeners.clear()
     })
   }

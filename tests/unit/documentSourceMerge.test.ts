@@ -18,4 +18,27 @@ describe('documentSourceMerge', () => {
     expect(mergedDocumentSource(planDocumentSourceMerge('ABC', 'AXBC', 'AXBC'))).toBe('AXBC')
     expect(planDocumentSourceMerge('ABC', 'AXBC', 'AYBC').conflicts).toHaveLength(1)
   })
+  it('preserves the Myers edit locations when a common suffix has another possible match', () => {
+    expect(documentSourceEdits('aba', 'baa')).toEqual([
+      { from: 0, to: 1, text: '' },
+      { from: 3, to: 3, text: 'a' },
+    ])
+  })
+  it('keeps the suffix insertion independent of the other side deletion', () => {
+    const plan = planDocumentSourceMerge('aba', 'baa', 'aa')
+    expect(plan.conflicts).toEqual([])
+    expect(mergedDocumentSource(plan)).toBe('aa')
+  })
+  it.each(['😃', '🈀'])('returns complete UTF-16 ranges when replacing an emoji with %s', replacement => {
+    expect(documentSourceEdits('a😀b', `a${replacement}b`)).toEqual([{ from: 1, to: 3, text: replacement }])
+  })
+  it('keeps both edit ranges around an anchor and a long unchanged tail beyond distance 512', () => {
+    const middle = ' | unchanged middle | ', tail = '\nunchanged body'.repeat(4000)
+    const base = `${'a'.repeat(160)}${middle}${'b'.repeat(160)}${tail}`
+    const next = `${'c'.repeat(160)}${middle}${'d'.repeat(160)}${tail}`
+    expect(documentSourceEdits(base, next)).toEqual([
+      { from: 0, to: 160, text: 'c'.repeat(160) },
+      { from: 160 + middle.length, to: 320 + middle.length, text: 'd'.repeat(160) },
+    ])
+  })
 })

@@ -19,9 +19,13 @@ export interface DocumentHtmlTextOptions {
   onMedia?(element: DocumentHtmlElement): void
   /** Opt-in browser normal projection; the existing Flow source rules remain the default. */
   normalWhitespace?: boolean
+  initialStyle?: TextRunStyle
+  blockSeparators?: boolean
 }
-interface InlineContext { style: TextRunStyle; code?: boolean; link?: InlineLink; math?: { accessibleText?: string; style?: MathStyle } }
-interface RawInline { text: string; br?: boolean; context: InlineContext }
+interface InlineContext {
+  rangeIds?: string[]; style: TextRunStyle; code?: boolean; link?: InlineLink; math?: { accessibleText?: string; style?: MathStyle } }
+interface RawInline {
+  component?: Extract<FlowInline, {type:'component'}>; text: string; br?: boolean; context: InlineContext }
 const tagOf = (node: DocumentHtmlNode) => node.kind === 'element' ? node.tagName.toLowerCase() : ''
 const CJK = /[⺀-鿿豈-﫿＀-￯　-〿]/
 const HIGHLIGHT = '#fef08a'
@@ -49,20 +53,20 @@ export function htmlDeclarations(css: string | undefined): [string, string][] {
   return result
 }
 
-export function htmlCssLength(value: string): number | undefined {
+export function htmlCssLength(value: string, fontSize = 16, rootFontSize = 16): number | undefined {
   const match = /^(-?[\d.]+)(px|pt|em|rem)?$/.exec(value.trim())
   if (!match) return undefined
   const number = Number(match[1])
-  return !Number.isFinite(number) ? undefined : match[2] === 'pt' ? number * 4 / 3 : match[2] === 'em' || match[2] === 'rem' ? number * 16 : number
+  return !Number.isFinite(number) ? undefined : match[2] === 'pt' ? number * 4 / 3 : match[2] === 'em' ? number * fontSize : match[2] === 'rem' ? number * rootFontSize : number
 }
 
-export function htmlTextStyle(style: TextRunStyle, element: Pick<DocumentHtmlElement, 'attributes'>): TextRunStyle {
+export function htmlTextStyle(style: TextRunStyle, element: Pick<DocumentHtmlElement, 'attributes'>, warn?: (code: string, message: string) => void): TextRunStyle {
   const next: TextRunStyle = { ...style }
   for (const [name, value] of htmlDeclarations(element.attributes.style)) {
     const lower = value.toLowerCase()
-    if (name === 'color') { const color = normalizeDocumentColor(value); if (color) next.color = color }
+    if (name === 'color') { const color = normalizeDocumentColor(value); if (color) next.color = color; else if (!['inherit', 'unset'].includes(lower)) warn?.('flow-color', `正文颜色暂不能等价承载：${value}；原文保留供修复`) }
     else if (name === 'font-family' && value) next.fontFamily = value
-    else if (name === 'font-size') { const size = htmlCssLength(value); if (size !== undefined) next.fontSize = Math.min(400, Math.max(8, Math.round(size * 100) / 100)) }
+    else if (name === 'font-size') { const size = htmlCssLength(value, style.fontSize); if (size !== undefined) next.fontSize = Math.min(400, Math.max(8, Math.round(size * 100) / 100)) }
     else if (name === 'vertical-align') {
       const em = /^(-?[\d.]+)em$/.exec(lower)
       if (em) next.baseline = Math.min(1, Math.max(-1, Number(em[1])))
@@ -75,7 +79,7 @@ export function htmlTextStyle(style: TextRunStyle, element: Pick<DocumentHtmlEle
       if (lower.includes('line-through')) next.strike = true
     } else if (name === 'background-color' || name === 'background') {
       if (lower === 'transparent') next.highlightColor = null
-      else { const color = normalizeDocumentColor(value); if (color) next.highlightColor = color }
+      else { const color = normalizeDocumentColor(value); if (color) next.highlightColor = color; else if (!['inherit', 'unset'].includes(lower)) warn?.('flow-color', `正文背景色暂不能等价承载：${value}；原文保留供修复`) }
     } else if (name === 'text-emphasis' || name === 'text-emphasis-style' || name === '-webkit-text-emphasis-style') next.emphasis = lower !== 'none'
   }
   if (element.attributes['data-style']) {
@@ -90,6 +94,7 @@ export function readHtmlDocumentText(nodes: readonly DocumentHtmlNode[], options
       if (node.kind === 'text') { out.push({ text: node.text, context }); continue }
       if (node.kind !== 'element') continue
       const tag = tagOf(node)
+      if (node.attributes['data-inline-instance']) { out.push({ text: '\uFFFC', context, component: { type: 'component', instanceId: node.attributes['data-inline-instance'], accessibleText: node.attributes['aria-label'] ?? '' } }); continue }
       if (tag === 'br') { out.push({ text: '\n', br: true, context }); continue }
       if (tag === 'img' || tag === 'video' || tag === 'audio' || tag === 'figure' || tag === 'iframe') { options.onMedia?.(node); continue }
       if (tag === 'svg' || tag === 'canvas') {
@@ -98,7 +103,8 @@ export function readHtmlDocumentText(nodes: readonly DocumentHtmlNode[], options
         continue
       }
       if (tag === 'script' || tag === 'style' || tag === 'template') continue
-      let next: InlineContext = { ...context, style: htmlTextStyle(context.style, node) }
+      let next: InlineContext = { ...context, style: { ...context.style } }
+      if (node.attributes['data-document-range']) next.rangeIds = [...new Set([...(context.rangeIds ?? []), node.attributes['data-document-range']])]
       if (tag === 'strong' || tag === 'b') next.style = { ...next.style, bold: true }
       else if (tag === 'em' || tag === 'i' || tag === 'cite' || tag === 'var' || tag === 'dfn') next.style = { ...next.style, italic: true }
       else if (tag === 'u' || tag === 'ins') next.style = { ...next.style, underline: true }
@@ -108,14 +114,18 @@ export function readHtmlDocumentText(nodes: readonly DocumentHtmlNode[], options
       else if (tag === 'sub') next.style = { ...next.style, baseline: next.style.baseline ?? -0.2 }
       else if (tag === 'code' || tag === 'kbd' || tag === 'samp' || tag === 'tt') next.code = true
       else if (tag === 'a' && node.attributes.href) next.link = { href: node.attributes.href, ...(node.attributes.title !== undefined ? { title: node.attributes.title } : {}) }
+      next.style = htmlTextStyle(next.style, node, options.warn)
       if ((node.attributes.class ?? '').split(/\s+/).includes('math')) {
         // A math wrapper's style describes its formulas, not surrounding text.
         const mathStyle: MathStyle = {}
-        if (next.style.fontSize !== undefined && next.style.fontSize !== context.style.fontSize) mathStyle.fontSize = next.style.fontSize
-        if (next.style.color !== undefined && next.style.color !== context.style.color) mathStyle.color = next.style.color
-        next = { ...next, style: context.style, math: { ...(node.attributes['aria-label'] ? { accessibleText: node.attributes['aria-label'] } : {}), ...(Object.keys(mathStyle).length ? { style: mathStyle } : {}) } }
+        if (next.style.fontSize !== undefined) mathStyle.fontSize = next.style.fontSize
+        if (next.style.color !== undefined) mathStyle.color = next.style.color
+        next = { ...next, math: { ...(node.attributes['aria-label'] ? { accessibleText: node.attributes['aria-label'] } : {}), ...(Object.keys(mathStyle).length ? { style: mathStyle } : {}) } }
       }
+      const separated = options.blockSeparators && ['p', 'div'].includes(tag)
+      if (separated && out.length && out.at(-1)?.text !== '\n') out.push({ text: '\n', br: true, context })
       collectInlines(node.children, next, out)
+      if (separated && out.length && out.at(-1)?.text !== '\n') out.push({ text: '\n', br: true, context })
     }
   }
 
@@ -145,10 +155,11 @@ export function readHtmlDocumentText(nodes: readonly DocumentHtmlNode[], options
     }
     const inlines: FlowInline[] = []
     parts.forEach((part, index) => {
+      if (part.component) { inlines.push({ ...part.component, ...(part.context.rangeIds?.length ? { rangeIds: part.context.rangeIds } : {}) }); return }
       const text = collapsed[index]!
       if (!text) return
       const { context } = part
-      const base = { ...(Object.keys(context.style).length ? { style: context.style } : {}), ...(context.link ? { link: context.link } : {}) }
+      const base = { ...(context.rangeIds?.length ? { rangeIds: context.rangeIds } : {}), ...(Object.keys(context.style).length ? { style: context.style } : {}), ...(context.link ? { link: context.link } : {}) }
       if (context.code || part.br) { inlines.push({ type: 'text', text, ...(context.code ? { code: true } : {}), ...base }); return }
       let rest = text
       // Tool responses may retain an extra escape on both math delimiters. Accept
@@ -158,8 +169,9 @@ export function readHtmlDocumentText(nodes: readonly DocumentHtmlNode[], options
         if (match.index) inlines.push({ type: 'text', text: rest.slice(0, match.index), ...base })
         const latex = match[2]!.trim()
         const accessibleText = context.math?.accessibleText ?? documentHtmlMathAccessibleText(latex)
+        const mathStyle = context.math?.style ?? { ...(context.style.fontSize !== undefined ? { fontSize: context.style.fontSize } : {}), ...(context.style.color ? { color: context.style.color } : {}) }
         if (accessibleText) inlines.push({ type: 'math', formulaId: options.createFormulaId(), latex, accessibleText,
-          ...(context.math?.style ? { style: context.math.style } : {}), ...(context.link ? { link: context.link } : {}) })
+          ...(Object.keys(mathStyle).length ? { style: mathStyle } : {}), ...(context.link ? { link: context.link } : {}), ...(context.rangeIds?.length ? { rangeIds: context.rangeIds } : {}) })
         else { options.warn?.('flow-math', `公式无法识别，已按文字保留：${latex.slice(0, 60)}`); inlines.push({ type: 'text', text: match[0], ...base }) }
         rest = rest.slice(match.index + match[0].length)
       }
@@ -169,7 +181,8 @@ export function readHtmlDocumentText(nodes: readonly DocumentHtmlNode[], options
   }
 
   const raw: RawInline[] = []
-  collectInlines(nodes, { style: {} }, raw)
+  collectInlines(nodes, { style: options.initialStyle ?? {} }, raw)
+  if (options.blockSeparators && raw.at(-1)?.br) raw.pop()
   if (!options.normalWhitespace) return finishInlines(raw)
   const projected: RawInline[] = []
   let pendingSpace: InlineContext | undefined
@@ -180,6 +193,7 @@ export function readHtmlDocumentText(nodes: readonly DocumentHtmlNode[], options
     else projected.push({ text, context })
   }
   for (const part of raw) {
+    if (part.component) { projected.push(part); lineStart = false; continue }
     if (part.br) {
       pendingSpace = undefined
       projected.push({ ...part })

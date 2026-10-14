@@ -12,7 +12,8 @@ export interface ProductivityPreview { projectId: string; revision: number; targ
 export type ProductivityApplyResult = { ok: true; step: DesignProductionStep | null } | { ok: false; reason: string }
 
 export function createProductivityPreview(context: ProductivityContext, request: ProductivityRequest): ProductivityPreview {
-  const { surfaceId: _surfaceId, ...preview } = createCourseProductivityPreview(context.document, context.target.surfaceId, request)
+  const document=request.scope==='course' ? context.target.project : context.document
+  const { surfaceId: _surfaceId, ...preview } = createCourseProductivityPreview(document, context.target.surfaceId, request)
   return { ...preview, target: context.target }
 }
 export function createTextReplacePreview(context: ProductivityContext, request: Omit<Extract<ProductivityRequest, { kind: 'text' }>, 'kind'>) { return createProductivityPreview(context, { ...request, kind: 'text' }) }
@@ -27,7 +28,9 @@ export function applyProductivityPreview(context: ProductivityContext, preview: 
     if (context.target.documentId !== preview.target.documentId || context.target.epoch !== preview.target.epoch || context.target.surfaceId !== preview.target.surfaceId || context.target.activeStateId !== preview.target.activeStateId) throw new Error('预览目标已改变，请重新预览')
     const fresh = createProductivityPreview(context, preview.request)
     if (!equalComponentValue(fresh.items, preview.items)) throw new Error('内容已变化，请重新预览')
-    const result = planCourseProductivityEdits(context.document, context.target.surfaceId, preview.request, { selectedIds })
-    return { ok: true, step: result.edits.length ? designProductionStep(context, result.edits) : null }
+    const document=preview.request.scope==='course' ? context.target.project : context.document
+    const result = planCourseProductivityEdits(document, context.target.surfaceId, preview.request, { selectedIds })
+    const step=preview.request.scope==='course' ? {...captureComponentOperation(context.target.project,result.edits),documentId:context.target.documentId,epoch:context.target.epoch,originSurfaceId:context.target.surfaceId} : designProductionStep(context,result.edits)
+    return { ok: true, step: result.edits.length ? step : null }
   } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : '批量修改失败' } }
 }

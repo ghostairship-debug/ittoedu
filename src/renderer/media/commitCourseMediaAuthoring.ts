@@ -7,6 +7,7 @@ import { flowBodyLayoutEdits } from '../../core/course/courseFlowEdits'
 import { equalComponentValue } from '../../core/drivers/courseV10Operations'
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import type { CapturedCourseTarget, CourseV10ViewState } from '../documents/CourseV10DocumentBridge'
+import { capturedCourseViewIsCurrent } from '../documents/CourseV10DocumentBridge'
 import { IMAGE_DEFINITION, createImageData, imageDataSchema, planImageTransform, replaceImageSource } from '../../components/image'
 import type { ImageTransformOperation } from '../../shared/imageTransformContract'
 import { readImageDimensions } from '../project/assetManager'
@@ -37,14 +38,14 @@ export async function commitCourseInsertion(kernel: EditorStoreKernel, target: C
   const edits: ComponentEdit[] = [...definitionInsertionEdits(target, definition), ...additional,
     { type: 'instance.insert', container: placement.container, index: placement.index, instances, rootIds: ids }, ...placement.edits]
   await kernel.editCaptured(kernel.capture(edits, target))
-  kernel.selectInstances(ids, target.surfaceId, target.documentId)
+  if (capturedCourseViewIsCurrent(kernel.readView(), target)) kernel.selectInstances(ids, target.surfaceId, target.documentId)
   return { instanceIds: ids, documentId: target.documentId, surfaceId: surface.id }
 }
 export async function insertCourseElement(kernel: EditorStoreKernel, target: CapturedCourseTarget,
   kind: CourseElementKind, options: CourseInsertionOptions = {}): Promise<CourseInsertionResult> {
   const { edits, instanceIds } = prepareCourseElementEdits(target.project, target.surfaceId, target.instanceId, kind, options)
   await kernel.editCaptured(kernel.capture(edits, target))
-  kernel.selectInstances(instanceIds, target.surfaceId, target.documentId)
+  if (capturedCourseViewIsCurrent(kernel.readView(), target)) kernel.selectInstances(instanceIds, target.surfaceId, target.documentId)
   return { instanceIds, documentId: target.documentId, surfaceId: target.surfaceId! }
 }
 
@@ -198,6 +199,6 @@ export async function removeCourseAsset(kernel: EditorStoreKernel, assetId: stri
 export async function ensureCourseTeacherController(kernel: EditorStoreKernel, target = captureCourseInsertionTarget(kernel), origin?: 'slide-authoring'): Promise<CourseInsertionResult> {
   const { edits, instanceIds } = prepareCourseTeacherControllerEdits(target.project, target.surfaceId, origin, target.instanceId)
   if (edits.length) await kernel.editCaptured(kernel.capture(edits, target))
-  kernel.selectInstances(instanceIds, target.surfaceId, target.documentId)
+  if (capturedCourseViewIsCurrent(kernel.readView(), target)) kernel.selectInstances(instanceIds, target.surfaceId, target.documentId)
   return { instanceIds, documentId: target.documentId, surfaceId: target.surfaceId! }
 }

@@ -19,7 +19,10 @@ export const inputRuntimeImplementation: ComponentRuntimeImplementation = {
     input.value = typeof saved === 'object' && saved && !Array.isArray(saved) && typeof saved.value === 'string' ? saved.value : data.initialValue
     input.defaultValue = input.value
     const paint = () => {
-      caption.textContent = data.label; input.setAttribute('aria-label', data.label); input.placeholder = data.placeholder; button.textContent = data.submitLabel
+      form.style.display = data.presentation === 'inline' ? 'inline-flex' : ''
+      form.style.alignItems = 'baseline'; form.style.gap = '4px'; form.style.maxWidth = '100%'
+      input.style.width = data.presentation === 'inline' ? '8em' : ''
+      caption.textContent = data.presentation === 'inline' ? '' : data.label; input.setAttribute('aria-label', data.label); input.placeholder = data.placeholder; button.textContent = data.submitLabel
       input.inputMode = data.answer?.type === 'number' ? 'decimal' : 'text'
       const style = data.style
       Object.assign(input.style, { fontFamily: style.fontFamily, fontSize: `${style.fontSize}px`, color: style.textColor,

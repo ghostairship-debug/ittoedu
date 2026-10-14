@@ -19,7 +19,7 @@ internal static class Program {
       var paths = new List<string>();
       if (IsClipboardFormatAvailable(15)) {
         IntPtr drop = GetClipboardData(15); if (drop == IntPtr.Zero) return 4;
-        uint count = DragQueryFileW(drop, 0xffffffff, null, 0); if (count > 200) return 5;
+        uint count = DragQueryFileW(drop, 0xffffffff, null, 0);
         for (uint index = 0; index < count; index++) {
           uint length = DragQueryFileW(drop, index, null, 0); if (length == 0 || length > 32767) return 6;
           var path = new StringBuilder((int)length + 1);

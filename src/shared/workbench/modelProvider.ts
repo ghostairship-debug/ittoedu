@@ -47,6 +47,8 @@ export interface ModelRequest {
   selection: ModelSelection
   messages: readonly ModelChatMessage[]
   tools?: readonly ModelToolDefinition[]
+  /** Host-owned search subrequest only; model parameters cannot declare native tools. */
+  nativeSearch?: { contextSize?: 'low' | 'medium' | 'high' }
 }
 export interface ModelUsage {
   inputTokens?: number
@@ -65,9 +67,12 @@ export interface ModelFailure {
   httpStatus?: number
   retryAfterMs?: number
   providerRequestId?: string
+  providerCode?: string
+  providerType?: string
 }
 export type ModelEvent = { requestId: string; sequence: number } & (
   | { type: 'response.started'; responseId: string; /** Only provider-reported, never inferred from selection. */ actualModel?: string; providerRequestId?: string }
+  | { type: 'response.activity'; receivedAt: number; source: 'data' | 'heartbeat' }
   | { type: 'usage.reported'; usage: ModelUsage }
   | { type: 'text.delta'; text: string }
   | { type: 'reasoning.delta'; text: string }

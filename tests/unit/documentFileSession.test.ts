@@ -26,8 +26,136 @@ async function fixture(source = 'old\n\nnotes', name = 'notes.md') {
   await session.open()
   return { root, filename, ref, journal, metadata, host, documents, files, port, session }
 }
+async function observeNow(f: Awaited<ReturnType<typeof fixture>>) {
+  const observed = await f.documents.observeFile(f.session.documentId!)
+  await (f.session as unknown as { observe(observation: typeof observed): Promise<void> }).observe(observed)
+}
 
 describe('Markdown projection on the main document owner', () => {
+  it('keeps the save ACK source as merge base when a later disk version arrives before observation', async () => {
+    const f = await fixture('A base\nB base\nC base')
+    f.session.edit('A base\nB saved\nC base'); await f.session.drain()
+    const save = f.documents.save.bind(f.documents)
+    let saved = false
+    vi.spyOn(f.documents, 'save').mockImplementation(async id => {
+      const snapshot = await save(id)
+      await fs.writeFile(f.filename, 'A base\nB saved\nC external')
+      saved = true
+      return snapshot
+    })
+    const observe = f.documents.observeFile.bind(f.documents)
+    vi.spyOn(f.documents, 'observeFile').mockImplementation(async id => {
+      const observation = await observe(id)
+      if (saved) { saved = false; f.session.edit('A teacher\nB saved\nC base'); await f.session.drain() }
+      return observation
+    })
+    expect(await f.session.flush()).toBe(true)
+    expect(f.session.getSnapshot().source).toBe('A teacher\nB saved\nC external')
+    expect(f.session.getSnapshot().conflictHunks).toHaveLength(0)
+  })
+
+  it('uses the actual Main save capture when the ACK already contains a newer teacher edit', async () => {
+    const f = await fixture('A base\nB base\nC base')
+    f.session.edit('A base\nB saved\nC base'); await f.session.drain()
+    let edited = false
+    const stop = f.documents.subscribe(event => {
+      if (event.type === 'changed' && event.snapshot.saving && !edited) {
+        edited = true; f.session.edit('A teacher\nB saved\nC base')
+      }
+    })
+    const save = f.documents.save.bind(f.documents)
+    vi.spyOn(f.documents, 'save').mockImplementation(async id => {
+      const snapshot = await save(id)
+      expect(snapshot.dirty).toBe(true)
+      await fs.writeFile(f.filename, 'A base\nB saved\nC external')
+      return snapshot
+    })
+    try {
+      expect(await f.session.flush()).toBe(true)
+      expect(f.session.getSnapshot().source).toBe('A teacher\nB saved\nC external')
+    } finally { stop() }
+  })
+
+  it('keeps the Save As ACK source as base when the new location is externally edited before its observation', async () => {
+    const f = await fixture('A\nB\nC')
+    f.session.edit('A\nB saved\nC'); await f.session.drain()
+    const target = path.join(f.root, 'copy.md')
+    vi.spyOn(f.documents, 'saveWithDialog').mockImplementation(async id => {
+      const saved = await f.documents.save(id, target)
+      await fs.writeFile(target, 'A\nB saved\nC external')
+      return saved
+    })
+    const observe = f.documents.observeFile.bind(f.documents)
+    let edited = false
+    vi.spyOn(f.documents, 'observeFile').mockImplementation(async id => {
+      const observation = await observe(id)
+      if (!edited) { edited = true; f.session.edit('A teacher\nB saved\nC'); await f.session.drain() }
+      return observation
+    })
+    expect(await f.session.saveAs()).toBe(true)
+    expect(f.session.ref).toEqual({ kind: 'file', path: target })
+    await observeNow(f)
+    expect(f.session.getSnapshot().source).toBe('A teacher\nB saved\nC external')
+  })
+
+  it('rebases a merge on the teacher input acknowledged while its second drain is waiting', async () => {
+    const f = await fixture('A base\nB base\nC base')
+    f.session.edit('A teacher\nB base\nC base'); await f.session.drain()
+    await fs.writeFile(f.filename, 'A base\nB base\nC external')
+    const read = f.documents.read.bind(f.documents)
+    let reads = 0, release!: () => void, entered!: () => void
+    const paused = new Promise<void>(resolve => { release = resolve })
+    const waiting = new Promise<void>(resolve => { entered = resolve })
+    vi.spyOn(f.documents, 'read').mockImplementation(async id => {
+      if (++reads === 2) { entered(); await paused }
+      return read(id)
+    })
+    const coordination = observeNow(f)
+    await waiting
+    f.session.edit('A teacher\nB teacher\nC base')
+    await vi.waitFor(async () => expect((await read(f.session.documentId!)).model).toMatchObject({ source: 'A teacher\nB teacher\nC base' }))
+    release(); await coordination
+    expect(f.session.getSnapshot().source).toBe('A teacher\nB teacher\nC external')
+    expect(await f.session.flush()).toBe(true)
+    expect(await fs.readFile(f.filename, 'utf8')).toBe('A teacher\nB teacher\nC external')
+  })
+
+  it('recomputes each disk version from the real local source instead of its previous remote preview', async () => {
+    const f = await fixture('A\nB\nC')
+    f.session.edit('A local\nB\nC'); await f.session.drain()
+    await fs.writeFile(f.filename, 'A remote1\nB\nC remote1'); await observeNow(f)
+    expect(f.session.getSnapshot().source).toContain('C remote1')
+    expect(f.session.getSnapshot().conflictHunks).toHaveLength(1)
+    await fs.writeFile(f.filename, 'A remote2\nB\nC'); await observeNow(f)
+    expect(f.session.getSnapshot().conflictHunks).toHaveLength(1)
+    expect(f.session.getSnapshot().source).toBe('A local\nB\nC')
+    await f.session.resolveConflictHunk(f.session.getSnapshot().conflictHunks[0]!.id, 'remote')
+    expect(await fs.readFile(f.filename, 'utf8')).toBe('A remote2\nB\nC')
+  })
+  it('allows a repaired Undo draft to mention the removed filename as ordinary text', async () => {
+    const f = await fixture('base')
+    f.session.prepareAttachments([{ relativePath: 'assets/image.png', bytes: new Uint8Array([1, 2]) }])
+    f.session.edit('![图](assets/image.png)'); await f.session.drain()
+    const dispatch = f.documents.dispatch.bind(f.documents)
+    let release!: () => void, entered!: () => void
+    const paused = new Promise<void>(resolve => { release = resolve })
+    const waiting = new Promise<void>(resolve => { entered = resolve })
+    vi.spyOn(f.documents, 'dispatch').mockImplementation(async operation => {
+      const result = await dispatch(operation)
+      if (operation.mutation.type === 'undo') { entered(); await paused }
+      return result
+    })
+    const undo = f.session.undo()
+    await waiting
+    f.session.edit('![教师](assets/image.png)')
+    release(); await undo
+    expect(f.session.getSnapshot().error).toContain('重叠')
+    f.session.edit('assets/image.png 已被撤销')
+    expect(await f.session.drain()).toBe(true)
+    expect(await f.session.flush()).toBe(true)
+    expect(await fs.readFile(f.filename, 'utf8')).toBe('assets/image.png 已被撤销')
+    await expect(f.session.readResource('assets/image.png')).rejects.toThrow('未包含')
+  })
   it('follows a renamed main binding without mutating an already frozen task reference or losing History', async () => {
     const f = await fixture()
     const originalRef = f.session.ref

@@ -31,7 +31,7 @@ export function WorkspaceGrid({ layout, editorFocus, proPanel = null, mobilePane
    <div className="lesson-workspace-pane-switcher" role="tablist" aria-label="工作台区域">
      {(['navigation', 'workbench', 'chat'] as const).map((id, index) => <button key={id} type="button" role="tab" aria-selected={pane === id}
        onClick={() => { selectPane(id); if (id === 'navigation') layout.setNavCollapsed(false); if (id === 'workbench') layout.setContentClosed(false); if (id === 'chat') layout.setChatClosed(false) }}>
-       {['资源管理器与会话列表', '内容', 'AI 助手'][index]}</button>)}
+       {['资源管理器与会话列表', '内容', '果铃AI'][index]}</button>)}
    </div>
    <div className="workspace-region workspace-region--resources">{resources}</div>
    <div className="workspace-grid-splitter workspace-grid-splitter--resources" hidden={!navSplitter}

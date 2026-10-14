@@ -35,6 +35,48 @@ async function fixture() {
   return { root, from, to, source, target, body, put }
 }
 describe('Markdown move resource preparation', () => {
+  it('CA-101 a queued stopped Markdown move does not publish attachments before its document check', async () => {
+    const f = await fixture(), host = new DocumentHostService(path.join(f.root, 'journal'))
+    const workspace = await host.files.registerRoot(f.root)
+    const directories = await host.files.listChildren({ workspaceId: workspace.workspaceId, directoryEntryId: workspace.rootEntryId })
+    const from = directories.entries.find(entry => entry.status === 'accessible' && entry.name === 'from')!
+    const to = directories.entries.find(entry => entry.status === 'accessible' && entry.name === 'to')!
+    if (from.status !== 'accessible' || to.status !== 'accessible') throw new Error('Missing fixture directory handles')
+    const children = await host.files.listChildren({ workspaceId: workspace.workspaceId, directoryEntryId: from.entryId })
+    const source = children.entries.find(entry => entry.status === 'accessible' && entry.name === 'lesson.md')!
+    if (source.status !== 'accessible') throw new Error('Missing fixture source handle')
+    let entered!: () => void, release!: () => void, stopped = false
+    const acquired = new Promise<void>(resolve => { entered = resolve }), held = new Promise<void>(resolve => { release = resolve })
+    const blocker = host.fileCoordinator.withFileOperation(async () => { entered(); await held })
+    await acquired
+    const link = vi.spyOn(fs, 'link')
+    const pending = host.files.move({ operationId: 'stopped-resource-move', workspaceId: workspace.workspaceId,
+      sourceEntryIds: [source.entryId], targetDirectoryId: to.entryId, resourcePolicy: 'copy' }, () => { if (stopped) throw new Error('任务已停止') })
+    try {
+      stopped = true; release()
+      expect(await pending).toMatchObject({ status: 'failed' })
+      expect(link).not.toHaveBeenCalled()
+      expect(await fs.readdir(f.to)).toEqual([])
+      expect(await fs.readFile(f.source, 'utf8')).toBe(f.body)
+    } finally { release(); await blocker }
+  })
+
+  it('CA-101 rechecks Stop after resource preparation awaits and before attachment publication', async () => {
+    const f = await fixture(), realpath = fs.realpath.bind(fs)
+    let stopped = false
+    vi.spyOn(fs, 'realpath').mockImplementation(async filename => {
+      const result = await realpath(filename)
+      if (String(filename) === path.join(f.to, 'assets')) stopped = true
+      return result
+    })
+    const link = vi.spyOn(fs, 'link')
+    await expect(prepareMarkdownMoveResources(f.source, f.target, undefined, () => { if (stopped) throw new Error('任务已停止') })).rejects.toThrow('任务已停止')
+    expect(stopped).toBe(true)
+    expect(link).not.toHaveBeenCalled()
+    expect(await fs.readdir(f.to)).toEqual([])
+    expect(await fs.readFile(f.source, 'utf8')).toBe(f.body)
+  })
+
   it('prepares relative images and complete packages, preserves sources and reopens after the caller moves only Markdown', async () => {
     const f = await fixture()
     await f.put('assets/a.png', 'image-a', f.to) // Existing identical resources are reused.

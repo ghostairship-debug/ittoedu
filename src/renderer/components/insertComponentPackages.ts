@@ -40,7 +40,7 @@ export async function insertComponentPackagesAtTarget(kernel: EditorStoreKernel,
       diagnostics.push(...insertion.diagnostics)
       const roots = new Set(insertion.rootIds)
       const inserted = insertion.command.edits.find(edit => edit.type === 'instance.insert')
-      if (inserted?.type === 'instance.insert') {
+      if (!entry.surfaces?.length && inserted?.type === 'instance.insert') {
         const frames = inserted.instances.filter(instance => roots.has(instance.id) && instance.frame).map(instance => instance.frame!)
         const originX = frames.length ? Math.min(...frames.map(frame => frame.transform[4])) : 0
         const originY = frames.length ? Math.min(...frames.map(frame => frame.transform[5])) : 0
@@ -60,7 +60,7 @@ export async function insertComponentPackagesAtTarget(kernel: EditorStoreKernel,
         })
       }
       edits.push(...insertion.command.edits); rootIds.push(...insertion.rootIds)
-      nextIndex += insertion.rootIds.length
+      if (!entry.surfaces?.length) nextIndex += insertion.rootIds.length
       working = applyComponentOperation(working, insertion.command)
     }
     edits.push(...resolveCourseInsertionPlacement(target, options, rootIds).edits)

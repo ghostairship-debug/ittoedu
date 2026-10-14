@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { TextRangeProjection } from '../../../shared/document/textInteraction'
 import type { CourseProjectV10 } from '../../../shared/contracts/component-platform'
 import type { GeometryPoint } from '../../../core/components/geometry'
 import { frameToSpaceMatrix, invertMatrix, transformPoint } from '../../../core/components/geometry'
@@ -20,7 +21,7 @@ interface Ports {
   surfaceId: string
   edit: SlideContentEdit | null
   begin(instanceId: string): SlideContentEdit | null
-  update(data: unknown, composing?: boolean, height?: number): void
+  update(data: unknown, composing?: boolean, height?: number, width?: number, rangeProjection?: TextRangeProjection[]): void
   updateSpot?(value: string, composing?: boolean): void
   setComposing?(active: boolean): void
   commit(): Promise<void>
@@ -129,10 +130,12 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
     const current = latest.current.edit
     if (!current || !field || field.kind !== 'table-cell') return
     let data = editTableData(parseTableData(current.data), { kind: 'cell-text', cellId: field.childId, text })
-    let cells = layoutTable(data).cells, index = cells.findIndex(cell => cell.id === field.childId)
+    const target=freeSurfaceTargets(latest.current.project,latest.current.surfaceId).find(value=>value.instanceId===current.instanceId)
+    const dimensions=current.frame ?? target?.frame
+    let cells = layoutTable(data,dimensions ? {width:dimensions.width,height:dimensions.height}:undefined).cells, index = cells.findIndex(cell => cell.id === field.childId)
     if (direction === 1 && index === cells.length - 1) {
       data = editTableData(data, { kind: 'insert-row', referenceRowId: data.rows.at(-1)!.id, position: 'after' })
-      cells = layoutTable(data).cells
+      cells = layoutTable(data,dimensions ? {width:dimensions.width,height:dimensions.height}:undefined).cells
     }
     const next = cells[Math.max(0, Math.min(cells.length - 1, index + direction))]
     latest.current.update(data, false)
@@ -145,15 +148,15 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
   }
   const kind = draft && componentDefinitionPresentation(ports.project.definitions[draft.definitionId]).builtinKey
   const rich = !draft?.authorSpot && kind === 'guoling.text' && draft ? <TextComponentEditor editorRef={richEditor} data={textComponentDataSchema.parse(draft.data)}
-    revision={draft.target.epoch + ':' + draft.instanceId} toolbarHost={toolbarHost} onChange={data => {
+    revision={draft.target.epoch + ':' + draft.instanceId} toolbarHost={toolbarHost} onChange={(data, operation) => {
       const layout = authoredFrame && measureTextComponent(renderTextComponent(document, data), authoredFrame, data.sizing)
-      ports.update(data, undefined, layout?.height)
+      ports.update(data, undefined, layout?.height, layout?.width, operation.dataRangeProjection)
     }}
     onUndo={ports.undo} onRedo={ports.redo} onDiagnostic={ports.report} />
     : !draft?.authorSpot && kind === 'guoling.formula' && draft ? <FormulaComponentEditor data={formulaComponentDataSchema.parse(draft.data)}
       revision={draft.target.epoch + ':' + draft.instanceId} toolbarHost={toolbarHost} onChange={data => {
         const layout = authoredFrame && measureTextComponent(renderFormulaComponent(document, data), authoredFrame, data.sizing)
-        ports.update(data, undefined, layout?.height)
+        ports.update(data, undefined, layout?.height, layout?.width)
       }}
       onUndo={ports.undo} onRedo={ports.redo} onDiagnostic={ports.report} /> : null
   useLayoutEffect(() => {

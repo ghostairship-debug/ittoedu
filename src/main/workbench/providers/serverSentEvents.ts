@@ -1,5 +1,5 @@
 /** Decode SSE framing without imposing a content or generation quota. */
-export async function* serverSentEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+export async function* serverSentEvents(body: ReadableStream<Uint8Array>, options: { onBytes?: () => void; yieldActivity?: boolean } = {}): AsyncGenerator<string> {
   const reader = body.getReader()
   const decoder = new TextDecoder('utf-8', { fatal: true })
   let pending: string[] = [], pendingCR = false
@@ -28,6 +28,9 @@ export async function* serverSentEvents(body: ReadableStream<Uint8Array>): Async
     for (;;) {
       const chunk = await reader.read()
       if (chunk.done) { append(decoder.decode()); break }
+      options.onBytes?.()
+      // Opt-in empty event wakes a transport consumer even for SSE comments/heartbeats.
+      if (options.yieldActivity) yield ''
       const text = decoder.decode(chunk.value, { stream: true })
       let start = 0
       if (pendingCR && text.length) {

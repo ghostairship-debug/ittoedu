@@ -38,7 +38,10 @@ export function createCourseProjectContent(surface: 'slide' | 'flow' | 'spatial'
   if (surface === 'slide') {
     page.designSize = canvas ?? page.designSize
     for (const id of project.global.overlay) if (project.instances[id].definitionId === 'guoling.navigation') project.instances[id].frame = createTeacherControllerFrame(page.designSize)
-  } else if (surface === 'flow') delete page.designSize
+  } else if (surface === 'flow') {
+    const width = page.designSize?.width ?? 1280
+    page.flow = { layout: { widthMode: 'reading', readingWidth: width, wideContentWidth: width, paperBackgroundColor: '#ffffff' } }
+  }
   else page.spatial = { home: { x: 0, y: 0, zoom: 1 }, frames: [] }
   return { project, resources: { assets: {}, components: {} } }
 }

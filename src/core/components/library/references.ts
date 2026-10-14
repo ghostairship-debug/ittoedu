@@ -1,11 +1,81 @@
-import type { ComponentDefinition, ComponentImplementation, ComponentInstance, JsonValue } from '../../../shared/contracts/component-platform/project'
+import type { ComponentDefinition, ComponentImplementation, ComponentInstance, CourseProjectV10, JsonValue } from '../../../shared/contracts/component-platform/project'
+import type { DocumentResources } from '../../../shared/workbench/document'
+import { liveSourceOwners } from '../compilation/liveSourceReferences'
 import { componentDefinitionBuiltinKey } from '../../../shared/contracts/component-platform/project'
 import { componentInteractionDataSchema, remapComponentInteractionData } from '../../../shared/componentInteractionData'
+import type { InteractionRule } from '../../../shared/interactionTypes'
 import type { LibraryIdentityMap } from './types'
+import { parse } from '@babel/parser'
+import { isWebDocumentDeclaration } from '../source/sourceDocumentDeclaration'
+
+/** Literal resource lookups are closed; computed/aliased API access keeps its existing fallback range. */
+export function sourceResourceReferences(implementation: ComponentImplementation, project: CourseProjectV10, resources?: DocumentResources): { assetIds: string[]; dynamic: boolean } {
+  if (implementation.kind !== 'source') return { assetIds: [], dynamic: false }
+  const ids = new Set<string>(), owners = liveSourceOwners(project, implementation, resources)
+  let dynamic = !owners.sources.has(implementation)
+  type Node = { type: string; [key: string]: unknown }
+  const isNode = (value: unknown): value is Node => !!value && typeof value === 'object' && typeof (value as Node).type === 'string'
+  const member = (node: Node, key: string) => node.type === 'MemberExpression' || node.type === 'OptionalMemberExpression'
+    ? isNode(node.property) && (node.computed ? node.property.value === key : node.property.name === key) : false
+  const resourceObject = (node: Node) => node.type === 'Identifier' && node.name === 'resources' || member(node, 'resources')
+  for (const [owner, texts] of owners.sources) {
+    Object.values(owner.resourceBindings ?? {}).forEach(id => ids.add(id))
+    for (const text of texts) {
+      let ast: unknown
+      try { ast = parse(text, { sourceType: 'unambiguous', plugins: ['typescript', 'jsx'], allowReturnOutsideFunction: true }) }
+      catch { dynamic = true; continue }
+      const visit = (node: Node, parent?: Node) => {
+        // The explicit document consumer may resolve HTML assets through the host,
+        // even when the author's mount never calls resources.url itself.
+        if (isWebDocumentDeclaration(node)) dynamic = true
+        if (['ObjectProperty', 'Property'].includes(node.type) && isNode(node.key)
+          && (node.key.name === 'resources' || node.key.value === 'resources')
+          && (!isNode(node.value) || node.value.type !== 'Identifier' || node.value.name !== 'resources')) dynamic = true
+        if (member(node, 'url') && isNode(node.object) && resourceObject(node.object)
+          && !(parent && ['CallExpression', 'OptionalCallExpression'].includes(parent.type) && parent.callee === node)) dynamic = true
+        if ((node.type === 'CallExpression' || node.type === 'OptionalCallExpression') && isNode(node.callee)
+          && member(node.callee, 'url') && isNode(node.callee.object) && resourceObject(node.callee.object)) {
+          const argument = (node.arguments as unknown[])[0]
+          const name = isNode(argument) && (argument.type === 'StringLiteral' || argument.type === 'Literal') && typeof argument.value === 'string' ? argument.value
+            : isNode(argument) && argument.type === 'TemplateLiteral' && !(argument.expressions as unknown[]).length
+              ? ((argument.quasis as Node[])[0]?.value as { cooked?: string })?.cooked : undefined
+          if (name === undefined) dynamic = true
+          else ids.add(owner.resourceBindings?.[name] ?? name)
+        }
+        if (member(node, 'resources') && !(parent && member(parent, 'url') && parent.object === node)) dynamic = true
+        // An aliased or destructured resources capability cannot be closed by literal-call inspection.
+        if (node.type === 'Identifier' && node.name === 'resources' && parent
+          && !(member(parent, 'url') && parent.object === node) && !(member(parent, 'resources') && parent.property === node)
+          && !['ObjectProperty', 'Property', 'FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(parent.type)) dynamic = true
+        for (const value of Object.values(node)) {
+          if (isNode(value)) visit(value, node)
+          else if (Array.isArray(value)) for (const child of value) if (isNode(child)) visit(child, node)
+        }
+      }
+      if (isNode(ast)) visit(ast)
+    }
+  }
+  if (dynamic) Object.keys(project.assets).forEach(id => ids.add(id))
+  return { assetIds: [...ids], dynamic }
+}
 
 function isWebInstance(instance: ComponentInstance, definition: ComponentDefinition): boolean {
   const implementation = instance.implementationOverride ?? definition.implementation
-  return implementation.kind === 'builtin' && ['guoling.web', 'guoling.html-program'].includes(implementation.key)
+  // A Web-derived source still consumes its formal Web data bindings. Its
+  // professional identity does not replace the effective custom renderer.
+  const key = implementation.kind === 'builtin' ? implementation.key : componentDefinitionBuiltinKey(definition)
+  return key === 'guoling.web' || key === 'guoling.html-program'
+}
+
+/** Author records keep tokens; only the author's declared binding values are identities. */
+export function authoringAssetIds(authoring: ComponentInstance['authoring']): string[] {
+  return Object.values(authoring?.resourceBindings ?? {})
+}
+
+export function rebindAuthoringAssets(authoring: ComponentInstance['authoring'], identities: LibraryIdentityMap): ComponentInstance['authoring'] {
+  if (!authoring?.resourceBindings) return authoring
+  return { ...authoring, resourceBindings: Object.fromEntries(Object.entries(authoring.resourceBindings)
+    .map(([token, id]) => [token, identities.assets.get(id) ?? id])) }
 }
 
 export function webAssetIds(instance: ComponentInstance, definition: ComponentDefinition): string[] {
@@ -19,6 +89,7 @@ export function webAssetIds(instance: ComponentInstance, definition: ComponentDe
 
 /** The reference token stays in HTML/CSS. Only the formal binding value is an asset identity. */
 export function rebindWebAssets(instance: ComponentInstance, definition: ComponentDefinition, identities: LibraryIdentityMap): ComponentInstance {
+  if (instance.authoring) instance = { ...instance, authoring: rebindAuthoringAssets(instance.authoring, identities) }
   if (!isWebInstance(instance, definition)) return instance
   const data = instance.data
   if (!data || typeof data !== 'object' || Array.isArray(data)) return instance
@@ -34,9 +105,11 @@ export function sourceAssetIds(implementation: ComponentImplementation): string[
 }
 
 /** Shared by library/clipboard closure and the Driver's live resource consumer. */
-export function componentAssetIds(instance: ComponentInstance, definition: ComponentDefinition): string[] {
-  return [...new Set([...professionalAssetIds(instance.data), ...webAssetIds(instance, definition),
-    ...sourceAssetIds(instance.implementationOverride ?? definition.implementation)])]
+export function componentAssetIds(instance: ComponentInstance, definition: ComponentDefinition,project?:CourseProjectV10,resources?:DocumentResources): string[] {
+  const implementation=instance.implementationOverride ?? definition.implementation,key=componentDefinitionBuiltinKey(definition)
+  const dependencies=project ? [...liveSourceOwners(project,implementation,resources).definitions].flatMap(id=>Object.hasOwn(project.definitions,id) ? sourceAssetIds(project.definitions[id].implementation):[]):[]
+  return [...new Set([...(key ? professionalAssetIds(instance.data,key):[]), ...webAssetIds(instance, definition), ...authoringAssetIds(instance.authoring),
+    ...sourceAssetIds(implementation),...dependencies, ...(project ? sourceResourceReferences(implementation, project, resources).assetIds : [])])]
 }
 
 /** Declared native interaction fields use the professional rule parser, never string substitution. */
@@ -58,22 +131,23 @@ export function interactionReferenceTargets(instance: ComponentInstance, definit
 }
 
 export function rebindInteractionReferences(instance: ComponentInstance, definition: ComponentDefinition,
-  instanceTarget: (id: string) => string, surfaceTarget: (id: string) => string): ComponentInstance {
+  instanceTarget: (id: string) => string, surfaceTarget: (id: string) => string,
+  ruleIdentities?: { rules?: ReadonlyMap<string, string>; actions?: ReadonlyMap<string, string>; stateKeys?: ReadonlyMap<string, string> }): ComponentInstance {
   if (componentDefinitionBuiltinKey(definition) !== 'guoling.interactions') return instance
   const references = interactionReferenceTargets(instance, definition)
   const instances = new Map(references.filter(target => target.kind === 'instance').map(target => [target.instanceId, instanceTarget(target.instanceId)]))
   const surfaces = new Map(references.filter(target => target.kind === 'surface').map(target => [target.surfaceId, surfaceTarget(target.surfaceId)]))
-  return { ...instance, data: remapComponentInteractionData(instance.data, { instances, surfaces }) }
+  return { ...instance, data: remapComponentInteractionData(instance.data, { instances, surfaces, ...ruleIdentities }) }
 }
 
 /** Declared professional asset fields only; ordinary strings are never identity references. */
-export function professionalAssetIds(value: JsonValue): string[] {
+export function professionalAssetIds(value: JsonValue,builtinKey?:string): string[] {
   const ids = new Set<string>()
   const visit = (current: JsonValue) => {
     if (Array.isArray(current)) { current.forEach(visit); return }
     if (!current || typeof current !== 'object') return
     for (const [key, item] of Object.entries(current)) {
-      if ((key === 'assetId' || key === 'originalAssetId') && typeof item === 'string' && item.length > 0) ids.add(item)
+      if ((key === 'assetId' || key === 'originalAssetId' || builtinKey==='guoling.navigation' && key==='backgroundAssetId') && typeof item === 'string' && item.length > 0) ids.add(item)
       else visit(item)
     }
   }
@@ -81,12 +155,12 @@ export function professionalAssetIds(value: JsonValue): string[] {
   return [...ids]
 }
 
-export function rebindProfessionalAssets(value: JsonValue, identities: LibraryIdentityMap): JsonValue {
-  if (Array.isArray(value)) return value.map(item => rebindProfessionalAssets(item, identities))
+export function rebindProfessionalAssets(value: JsonValue, identities: LibraryIdentityMap,builtinKey?:string): JsonValue {
+  if (Array.isArray(value)) return value.map(item => rebindProfessionalAssets(item, identities,builtinKey))
   if (!value || typeof value !== 'object') return value
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key,
-    (key === 'assetId' || key === 'originalAssetId') && typeof item === 'string'
-      ? identities.assets.get(item) ?? item : rebindProfessionalAssets(item, identities)]))
+    (key === 'assetId' || key === 'originalAssetId' || builtinKey==='guoling.navigation' && key==='backgroundAssetId') && typeof item === 'string'
+      ? identities.assets.get(item) ?? item : rebindProfessionalAssets(item, identities,builtinKey)]))
 }
 
 export function declaredTargets(value: JsonValue): Array<{ kind: 'instance'; instanceId: string } | { kind: 'surface'; surfaceId: string }> {
@@ -113,4 +187,11 @@ export function sourceDependencyIds(instance: ComponentInstance): string[] {
 /** Author specifiers are scoped to this source owner; only values are software identities. */
 export function sourceModuleBindings(implementation: Extract<ComponentImplementation, { kind: 'source' }>): Record<string, string> {
   return implementation.moduleBindings ?? Object.fromEntries((implementation.dependencies ?? []).map(id => [id, id]))
+}
+/** The clicked/input object and its action-completion chain own this rule family. */
+export function associatedInteractionRules(rules:readonly InteractionRule[],instances:ReadonlySet<string>,explicit:ReadonlySet<string>=new Set()):InteractionRule[] {
+  const selected=new Set(rules.filter(rule=>explicit.has(rule.id) || 'nodeId' in rule.trigger && instances.has(rule.trigger.nodeId)).map(rule=>rule.id))
+  let changed=true;while(changed){changed=false;const actions=new Set(rules.filter(rule=>selected.has(rule.id)).flatMap(rule=>rule.actions.map(action=>action.id)))
+    for(const rule of rules)if(!selected.has(rule.id) && rule.trigger.type==='animation.completed' && actions.has(rule.trigger.actionId)){selected.add(rule.id);changed=true}}
+  return rules.filter(rule=>selected.has(rule.id))
 }

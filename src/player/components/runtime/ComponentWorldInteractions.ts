@@ -1,4 +1,4 @@
-import type { ComponentRuntimeContext, ComponentPresentationPort, CourseProjectV10, JsonValue, TeacherControllerPort } from '../../../shared/contracts/component-platform'
+import type { ComponentRuntimeContext, ComponentPresentationPort, CourseProjectV10, JsonValue, TeacherControllerPort, TeacherControllerSnapshot } from '../../../shared/contracts/component-platform'
 import type { InteractionAction, InteractionTrigger, NodeMotionAction } from '../../../shared/interactionTypes'
 import type { ComponentInteractionPorts } from '../../../renderer/interactions/componentInteractionRuntime'
 import { runComponentNodeMotion } from '../../../renderer/runtime/componentMotionAuthoring'
@@ -8,6 +8,7 @@ import { isComponentVisibleAtSurface, owningContainer } from '../../../shared/co
 import { spatialSemanticVisible } from '../../surfaces/spatial/componentPlatform/graph'
 import type { ComponentMotionPort, ComponentMotionTask } from '../../../shared/contracts/component-platform/motion'
 import { isGlobalTeacherController } from '../../../shared/teacherControllerViewportGeometry'
+import { componentAudioSounds } from '../../../shared/componentAudioSounds'
 
 type ActionContext = Parameters<ComponentInteractionPorts['executeAction']>[1]
 type TriggerListener = Parameters<ComponentInteractionPorts['subscribeTrigger']>[1]
@@ -20,7 +21,11 @@ export interface ComponentInteractionWorld {
   navigation?: TeacherControllerPort & { currentStateId?(): string | null }
   report(message: string): void
   active(): boolean
+  instanceActive?(id: string): boolean
   playback(): boolean
+  waitForAsset?(assetId: string, signal: AbortSignal): Promise<boolean>
+  notifyVisibility?(id?: string): void
+  activated?(instanceId: string): void
   controlsInitiallyVisible?(): boolean
 }
 
@@ -32,21 +37,34 @@ export class ComponentWorldInteractions {
   private readonly presentationVisibility = new Map<string, Map<symbol, { element: HTMLElement; visible: boolean }>>()
   private readonly presentationCleanup = new Map<string, Set<() => void>>()
   private readonly presenterListeners = new Map<'next' | 'previous', Set<() => ReturnType<TriggerListener>>>()
+  private readonly videoThresholds = new Set<{ nodeId: string; seconds: number; previous: number; crossed: boolean; scope: ComponentRuntimeContext['scope']; listener: TriggerListener }>()
+  private readonly videoSamples = new WeakSet<object>()
+  private readonly stableVisibility = new Map<string, { element: HTMLElement; visible: boolean }>()
+  private ownershipProject?: CourseProjectV10
+  private readonly surfaceOwners = new Map<string, string | null>()
   constructor(private readonly world: ComponentInteractionWorld) {}
-  currentSurfaceId(): string { return this.world.navigation?.read().locationId ?? '' }
-  private canPresent(id: string): boolean {
-    const project = this.world.project(), instance = project?.instances[id]
-    if (!project || !instance) return false
-    if (!this.world.navigation) return true
-    const surfaceId = this.currentSurfaceId()
+  currentSurfaceId(): string { return this.world.navigation?.readLocation() ?? '' }
+  private surfaceOwner(project: CourseProjectV10, id: string): string | null | undefined {
+    if (this.ownershipProject !== project) { this.ownershipProject = project; this.surfaceOwners.clear() }
+    if (this.surfaceOwners.has(id)) return this.surfaceOwners.get(id)
     let owner = owningContainer(project, id)
     while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
-    return (owner?.kind === 'global' || owner?.kind === 'surface' && owner.surfaceId === surfaceId)
+    const surface = owner?.kind === 'surface' ? owner.surfaceId : owner?.kind === 'global' ? null : undefined
+    if (surface !== undefined) this.surfaceOwners.set(id, surface)
+    return surface
+  }
+  private canPresent(id: string, surfaceId = this.currentSurfaceId()): boolean {
+    const project = this.world.project(), instance = project?.instances[id]
+    if (!project) return false
+    if (!instance) return Boolean(project.surfaces.some(surface => surface.id === id) && surfaceId === id)
+    if (!this.world.navigation) return true
+    const owner = this.surfaceOwner(project, id)
+    return (owner === null || owner === surfaceId)
       && isComponentVisibleAtSurface(instance, surfaceId)
   }
   surfaceChanged(): void {
     for (const id of this.motions.keys()) if (!this.canPresent(id)) this.cancelMotions(id)
-    for (const id of this.presentationCleanup.keys()) if (!this.canPresent(id)) this.retirePresentation(id)
+    // Feedback belongs to the retained wrapper. Hiding a cached surface keeps its live handle.
   }
 
   motionPort(id: string): ComponentMotionPort {
@@ -94,13 +112,13 @@ export class ComponentWorldInteractions {
           if (!current() || !element) return false
           const leases = this.presentationVisibility.get(id) ?? new Map()
           leases.delete(lease); leases.set(lease, { element, visible: value }); this.presentationVisibility.set(id, leases)
-          this.applyVisibility(id); return true
+          this.applyVisibility(id); this.publishStableVisibility(); return true
         }
         const dispose = () => {
           if (disposed) return; disposed = true
           const leases = this.presentationVisibility.get(id); leases?.delete(lease)
           if (!leases?.size) this.presentationVisibility.delete(id)
-          forget(); this.applyVisibility(id)
+          forget(); this.applyVisibility(id); this.publishStableVisibility()
         }
         const forget = own(dispose); set(visible)
         return { setVisible: async value => { if (!set(value)) { dispose(); return false } return true }, dispose }
@@ -112,17 +130,47 @@ export class ComponentWorldInteractions {
     this.presentationCleanup.delete(id); this.presentationVisibility.delete(id)
   }
 
-  applyVisibility(id: string, snapshot = this.world.navigation?.read()): void {
+  applyVisibility(id: string, snapshot = this.world.navigation?.read(), notify = true): boolean {
     const element = this.world.element(id), project = this.world.project(), instance = project?.instances[id]
     const surfaceId = snapshot?.locationId ?? '', surface = project?.surfaces.find(value => value.id === surfaceId)
     const presentation = [...(this.presentationVisibility.get(id)?.values() ?? [])].filter(value => value.element === element).at(-1)?.visible
     const initial = Boolean(instance && project && (!this.world.playback() || instance.playbackInitialVisibility !== 'hidden')
       && (this.world.controlsInitiallyVisible?.() !== false || !isGlobalTeacherController(project, id)))
-    if (element && instance) element.hidden = !isComponentVisibleAtSurface(instance, surfaceId)
+    const teacherDisabled = Boolean(project && instance && isGlobalTeacherController(project, id) && instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && instance.data.enabled === false)
+    const hidden = !instance || !isComponentVisibleAtSurface(instance, surfaceId)
+      || teacherDisabled
       || !spatialSemanticVisible(surface?.spatial, id, snapshot?.zoom ?? 1)
       || !(presentation ?? (this.leases.has(id) ? true : undefined) ?? this.visibility.get(id) ?? initial)
+    if (!element || !instance || element.hidden === hidden) return false
+    element.hidden = hidden
+    if (notify) this.world.notifyVisibility?.(id)
+    return true
   }
-  applyAllVisibility(): void { const state = this.world.navigation?.read(); for (const id of Object.keys(this.world.project()?.instances ?? {})) this.applyVisibility(id, state) }
+  applyAllVisibility(state = this.world.navigation?.read(), surfaces?: ReadonlySet<string>): void {
+    const project = this.world.project()
+    if (!project) return
+    const ids = Object.keys(project.instances).filter(id => !surfaces || this.surfaceOwner(project, id) === null || surfaces.has(this.surfaceOwner(project, id) ?? ''))
+    let changed = false
+    for (const id of ids) changed = this.applyVisibility(id, state, false) || changed
+    if (changed) this.world.notifyVisibility?.()
+    this.publishStableVisibility(state?.locationId ?? '', ids)
+  }
+  private publishStableVisibility(surfaceId = this.currentSurfaceId(), ids = Object.keys(this.world.project()?.instances ?? {})): void {
+    const project = this.world.project()
+    for (const id of ids) {
+      const element = this.world.element(id)
+      if (!element) continue
+      let visible = this.world.active() && element.isConnected
+      for (let ancestor: HTMLElement | null = element; ancestor && visible; ancestor = ancestor.parentElement) if (ancestor.hidden) visible = false
+      if (visible) visible = this.canPresent(id, surfaceId)
+      let owner = visible && project ? owningContainer(project, id) : undefined
+      if (this.leases.has(id)) visible = false
+      while (owner?.kind === 'instance') { if (this.leases.has(owner.instanceId)) visible = false; owner = owningContainer(this.world.project()!, owner.instanceId) }
+      const previous = this.stableVisibility.get(id)
+      this.stableVisibility.set(id, { element, visible })
+      if (visible && (previous?.element !== element || !previous.visible)) this.world.activated?.(id)
+    }
+  }
   async motion(action: NodeMotionAction, context: ActionContext, preview = false): Promise<boolean> {
     const element = this.world.element(action.nodeId)
     if (!element || !element.isConnected || !this.canPresent(action.nodeId) || context.signal.aborted) return false
@@ -139,13 +187,14 @@ export class ComponentWorldInteractions {
       else this.visibility.set(action.nodeId, previous)
     } else this.visibility.set(action.nodeId, action.type === 'node.enter')
     this.applyVisibility(action.nodeId)
+    if (!preview) this.publishStableVisibility()
     return success
   }
   reset(): void {
     for (const id of [...this.presentationCleanup.keys()]) this.retirePresentation(id)
     this.leases.clear()
     for (const motion of this.motions.values()) motion.dispose()
-    this.motions.clear(); this.visibility.clear()
+    this.motions.clear(); this.visibility.clear(); this.stableVisibility.clear()
     for (const id of Object.keys(this.world.project()?.instances ?? {})) this.applyVisibility(id)
   }
   resetSurface(surfaceId: string): void {
@@ -155,10 +204,10 @@ export class ComponentWorldInteractions {
       let owner = owningContainer(project, id)
       while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
       if (owner?.kind !== 'surface' || owner.surfaceId !== surfaceId) continue
-      this.retire(id); this.applyVisibility(id)
+      this.leases.delete(id); this.motions.get(id)?.dispose(); this.motions.delete(id); this.visibility.delete(id); this.stableVisibility.delete(id); this.applyVisibility(id)
     }
   }
-  retire(id: string): void { this.retirePresentation(id); this.leases.delete(id); this.motions.get(id)?.dispose(); this.motions.delete(id); this.visibility.delete(id) }
+  retire(id: string): void { this.retirePresentation(id); this.leases.delete(id); this.motions.get(id)?.dispose(); this.motions.delete(id); this.visibility.delete(id); this.stableVisibility.delete(id) }
   pause(): void {
     this.leases.clear()
     for (const [id, motion] of this.motions) { motion.dispose(); this.applyVisibility(id) }
@@ -177,19 +226,23 @@ export class ComponentWorldInteractions {
 
   ports(context: ComponentRuntimeContext): ComponentInteractionPorts {
     const { scope } = context, world = this.world
-    const currentSurfaceId = () => world.navigation?.read().locationId ?? null
+    const active = () => scope.isActive() && world.active() && world.instanceActive?.(scope.instanceId) !== false
+    const currentSurfaceId = () => world.navigation?.readLocation() ?? null
     const currentStateId = () => world.navigation?.currentStateId?.() ?? null
     const subscribeTrigger = (trigger: InteractionTrigger, listener: TriggerListener): (() => void) => {
       if (trigger.type === 'animation.completed') return () => {}
       if (trigger.type === 'scene.enter' || trigger.type === 'presentation.enter') {
-        let last = trigger.type === 'scene.enter' ? currentSurfaceId() : currentStateId()
+        const identity = () => trigger.type === 'scene.enter' ? currentSurfaceId() : JSON.stringify([currentSurfaceId(), currentStateId()])
+        let last = identity()
         let stopped = false, initialized = false
         const initialize = () => {
-          if (stopped || initialized || !scope.isActive() || !world.active() || trigger.type === 'presentation.enter' && last !== trigger.stateId) return
+          const project = world.project(), instance = project?.instances[scope.instanceId]
+          const documentBehavior = instance && project?.definitions[instance.definitionId]?.role === 'behavior'
+          if (stopped || initialized || !scope.isActive() || !world.active() || !documentBehavior && !this.canPresent(scope.instanceId) || trigger.type === 'presentation.enter' && currentStateId() !== trigger.stateId) return
           initialized = true; void listener()
         }
         const notify = () => {
-          const value = trigger.type === 'scene.enter' ? currentSurfaceId() : currentStateId()
+          const value = identity()
           if (value === last) return
           last = value; initialized = false
           initialize()
@@ -215,8 +268,10 @@ export class ComponentWorldInteractions {
           if (trigger.type === 'component.event' && value.instanceId !== trigger.nodeId) return
           if (trigger.type === 'runtime.event') {
             const project = world.project(), id = String(value.instanceId)
-            const global = project?.global.underlay.includes(id) || project?.global.overlay.includes(id)
-            if ((trigger.scope === 'global') !== Boolean(global)) return
+            if (!project) return
+            let owner = owningContainer(project, id)
+            while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
+            if (trigger.scope === 'global' ? owner?.kind !== 'global' : owner?.kind !== 'surface' || owner.surfaceId !== currentSurfaceId()) return
           }
           listener(value.value)
         })
@@ -240,50 +295,67 @@ export class ComponentWorldInteractions {
           const element = world.element(trigger.nodeId)
           if (world.active() && this.canPresent(trigger.nodeId) && element && !element.hidden && event.composedPath().includes(element)) listener()
         }
-        document?.addEventListener('click', click)
+        document?.addEventListener('click', click, true)
         const off = scope.events.subscribe('__runtime.node-click', value => {
           const element = world.element(trigger.nodeId)
           if (world.active() && this.canPresent(trigger.nodeId) && element && !element.hidden && value && typeof value === 'object' && !Array.isArray(value) && value.instanceId === trigger.nodeId) listener()
         })
-        return () => { document?.removeEventListener('click', click); off() }
+        return () => { document?.removeEventListener('click', click, true); off() }
       }
       // Media controls emit into the same R0 event port, including programmatic playback.
+      if (trigger.type === 'video.time') {
+        const threshold = { nodeId: trigger.nodeId, seconds: trigger.seconds, previous: 0, crossed: false, scope, listener }
+        this.videoThresholds.add(threshold)
+        const reset = scope.events.subscribe('__runtime.scene.reset', surfaceId => {
+          if (surfaceId === currentSurfaceId() && this.canPresent(trigger.nodeId)) { threshold.previous = 0; threshold.crossed = false }
+        })
+        const stop = scope.events.subscribe('video.time', value => {
+          if (!value || typeof value !== 'object' || Array.isArray(value) || this.videoSamples.has(value)) return
+          this.videoSamples.add(value)
+          if (typeof value.seconds !== 'number' || !Number.isFinite(value.seconds)) return
+          for (const target of [...this.videoThresholds].filter(target => target.nodeId === value.instanceId).sort((a, b) => a.seconds - b.seconds)) {
+            if (!world.active() || !target.scope.isActive() || !this.canPresent(target.nodeId)) continue
+            if (value.seconds < target.previous && value.seconds < target.seconds) target.crossed = false
+            target.previous = value.seconds
+            if (target.crossed || value.seconds < target.seconds) continue
+            target.crossed = true; void target.listener(value)
+          }
+        })
+        return () => { this.videoThresholds.delete(threshold); stop(); reset() }
+      }
       const name = trigger.type
-      let previousSeconds = 0, crossed = false
-      const rearm = trigger.type === 'video.time' ? scope.events.subscribe('__runtime.scene.reset', surfaceId => {
-        if (surfaceId === currentSurfaceId() && this.canPresent(trigger.nodeId)) { previousSeconds = 0; crossed = false }
-      }) : () => {}
       const stop = scope.events.subscribe(name, value => {
         if (!scope.isActive() || !world.active() || !value || typeof value !== 'object' || Array.isArray(value)) return
         if (trigger.type === 'audio.ended') {
           if (value.soundId !== trigger.soundId) return
         } else if (value.instanceId !== trigger.nodeId || !this.canPresent(trigger.nodeId)) return
-        if (trigger.type === 'video.time') {
-          const seconds = value.seconds
-          if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return
-          if (seconds < previousSeconds && seconds < trigger.seconds) crossed = false
-          previousSeconds = seconds
-          if (crossed || seconds < trigger.seconds) return
-          crossed = true
-        }
         listener(value)
       })
-      return () => { stop(); rearm() }
+      return stop
     }
     return { currentSurfaceId, currentStateId,
       courseState: { get: key => scope.state.get(key), set: (key, value) => scope.state.set(key, structuredClone(value) as JsonValue) },
       subscribeTrigger, report: world.report,
       executeAction: async (action: InteractionAction, actionContext: ActionContext) => {
-        if (actionContext.signal.aborted || !scope.isActive() || !world.active()) return false
+        if (actionContext.signal.aborted || !active()) return false
         if (action.type === 'course-state.set') { scope.state.set(action.key, action.value); return true }
         if (action.type === 'node.enter' || action.type === 'node.exit') return this.motion(action, actionContext)
-        if (action.type.startsWith('audio.')) return world.audio()?.execute(action as Extract<InteractionAction, { type: `audio.${string}` }>) ?? false
+        if (action.type.startsWith('audio.')) {
+          const audio = world.audio()
+          if (!audio) return false
+          if (action.type === 'audio.play') {
+            const project = world.project(), assetId = project && componentAudioSounds(project)[action.soundId]?.assetId
+            if (assetId && world.waitForAsset && !await world.waitForAsset(assetId, actionContext.signal)) return false
+          }
+          if (actionContext.signal.aborted || !active()) return false
+          return audio.execute(action as Extract<InteractionAction, { type: `audio.${string}` }> )
+        }
         if (action.type.startsWith('video.')) {
           const videoAction = action as Extract<InteractionAction, { type: `video.${string}` }>
           if (!this.canPresent(videoAction.nodeId)) return false
           const remote = await world.video?.(videoAction, actionContext.signal)
           if (remote !== undefined) return remote
-          if (actionContext.signal.aborted || !scope.isActive() || !world.active()) return false
+          if (actionContext.signal.aborted || !active()) return false
           const video = world.element(videoAction.nodeId)?.querySelector('video')
           if (!video) return false
           if (videoAction.type === 'video.seek') video.currentTime = videoAction.seconds
@@ -293,22 +365,32 @@ export class ComponentWorldInteractions {
           else {
             if (videoAction.type === 'video.restart') video.currentTime = 0
             await video.play()
-            if (actionContext.signal.aborted || !scope.isActive()) { video.pause(); return false }
+            if (actionContext.signal.aborted || !active()) { video.pause(); return false }
           }
           return true
         }
         if (action.type === 'location.go') {
           const surface = world.project()?.surfaces.find(value => value.id === action.locationId)
-          return surface ? world.navigation?.execute({ type: 'scene.go', sceneId: surface.id }) ?? false : false
+          return surface ? world.navigation?.execute({ type: 'scene.go', sceneId: surface.id }, actionContext.signal, actionContext.onNavigationCommit) ?? false : false
         }
         if (action.type === 'presentation.set') {
-          const switched = await (world.navigation?.execute({ type: 'scene.go', sceneId: currentSurfaceId() ?? '', targetStateId: action.stateId }) ?? false)
-          if (switched && (action.transition?.duration ?? 0) > 0 && !actionContext.signal.aborted && scope.isActive() && world.active())
-            world.report('状态已立即切换，指定过渡尚未执行')
-          return switched
+          const duration = action.transition?.duration ?? 0
+          let easing = action.transition?.ease
+          const css = world.document()?.defaultView?.CSS
+          if (duration > 0 && easing && !css?.supports('animation-timing-function', easing)) {
+            const Phaser = await import('phaser'), curve = Phaser.Tweens.Builders.GetEaseFunction(easing)
+            easing = `linear(${Array.from({ length: 101 }, (_, index) => curve(index / 100)).join(',')})`
+          }
+          if (actionContext.signal.aborted || !active()) return false
+          // Both state snapshots are handled by the same navigation owner as page changes.
+          return world.navigation?.execute({ type: 'scene.go', sceneId: currentSurfaceId() ?? '', targetStateId: action.stateId,
+            ...(duration > 0 ? { transition: {
+              outgoing: { keyframes: [{ opacity: 1 }, { opacity: 0 }], timing: { duration, easing } },
+              incoming: { keyframes: [{ opacity: 0 }, { opacity: 1 }], timing: { duration, easing } },
+            } } : {}) }, actionContext.signal, actionContext.onNavigationCommit) ?? false
         }
         if (action.type === 'course.restart') this.reset()
-        return world.navigation?.execute(action as Parameters<TeacherControllerPort['execute']>[0]) ?? false
+        return world.navigation?.execute(action as Parameters<TeacherControllerPort['execute']>[0], actionContext.signal, actionContext.onNavigationCommit) ?? false
       },
     }
   }

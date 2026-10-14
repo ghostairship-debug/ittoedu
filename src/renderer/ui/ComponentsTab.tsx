@@ -4,7 +4,7 @@ import type { AvailableComponentCatalogPackage, AvailableHtmlComponent, Componen
 import type { ComponentDefinition } from '../../shared/contracts/component-platform/project'
 import type { FlowDeepInsertPort } from './RightSidebar'
 import { collectCourseComponentPackageUsage, type CourseComponentPackageUsage } from '../components/courseComponentPackageTransactions'
-import { collectComponentLibrarySubjects, filterComponentLibraryPackages, filterHtmlComponents, selectCurrentCatalogPackages, selectCurrentHtmlComponents, componentCatalogInstallStatus, selectProjectLibraryDefinitions } from '../components/componentLibraryModel'
+import { collectComponentLibrarySubjects, filterComponentLibraryPackages, filterHtmlComponents, selectCurrentCatalogPackages, selectCurrentHtmlComponents, componentCatalogInstallStatus, selectProjectLibraryDefinitions,projectLibraryDefinition } from '../components/componentLibraryModel'
 import { componentDefinitionEntry, insertComponentDefinitionAtTarget } from '../components/insertComponentPackages'
 import { createComponentAuthoringActions } from '../components/commitComponentPackageAuthoring'
 import { extractComponentLibraryEntry } from '../../core/components/library'
@@ -18,7 +18,7 @@ interface ComponentsTabProps {
   onAddCatalogComponents?(entries: AvailableComponentCatalogPackage[]): boolean | Promise<boolean>
   onUpdateCatalogComponent?(entry: AvailableComponentCatalogPackage): void
   onReplaceComponent?(definitionId: string): void
-  onExtractSelection?(title: string): Promise<void>
+  onExtractSelection?(title: string, kind?: 'objects' | 'page' | 'structure', surfaceIds?: readonly string[]): Promise<void>
   onDeleteCatalogComponent?(entry: AvailableComponentCatalogPackage): Promise<void>
 }
 const EMPTY_CATALOG: ComponentCatalogSnapshot = { sources: [], packages: [], issues: [] }
@@ -30,11 +30,11 @@ function ComponentDetailsDialog({data,entry,usage,onClose}: {data?: ComponentDef
   useEffect(() => { const close=(event:KeyboardEvent)=>{if(event.key==='Escape')onClose()};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close) },[onClose])
   return <div className="modal-backdrop" data-testid="component-details-dialog"><section className="modal component-details-dialog" role="dialog" aria-modal="true" aria-labelledby="component-details-title">
     <div className="component-details-dialog__header"><div><span>组件详情</span><h2 id="component-details-title">{data?.title ?? entry?.name ?? data?.id}</h2></div><button type="button" className="icon-button" aria-label="关闭组件详情" onClick={onClose}><X size={17}/></button></div>
-    <dl className="component-details-dialog__list"><div><dt>组件 ID</dt><dd>{data?.id ?? entry?.packageId}</dd></div><div><dt>版本</dt><dd>{data?.version ?? entry?.version ?? '未标版本'}</dd></div><div><dt>来源</dt><dd>{entry?.sourceLabel ?? (data?.implementation.kind==='builtin'?'内置实现':'工程源码')}</dd></div>{usage&&<div><dt>工程实例</dt><dd>页面 {usage.sceneInstanceCount} · 全局 {usage.globalInstanceCount}</dd></div>}</dl>
+    <dl className="component-details-dialog__list"><div><dt>组件 ID</dt><dd>{data?.id ?? entry?.packageId}</dd></div><div><dt>版本</dt><dd>{data?.library?.version ?? data?.version ?? entry?.version ?? '未标版本'}</dd></div><div><dt>来源</dt><dd>{entry?.sourceLabel ?? (data?.implementation.kind==='builtin'?'内置实现':'工程源码')}</dd></div>{usage&&<div><dt>工程实例</dt><dd>页面 {usage.sceneInstanceCount} · 全局 {usage.globalInstanceCount}</dd></div>}</dl>
     {entry?.description&&<p className="component-details-dialog__description">{entry.description}</p>}<div className="modal__actions"><button type="button" className="primary-button" onClick={onClose}>完成</button></div>
   </section></div>
 }
-/** HTML components saved from courses; AI reuses them by name, the panel only lists and deletes them. */
+/** Legacy HTML assets remain available for listing and deletion; AI reuse uses API5 packages. */
 function HtmlComponentLibrarySection({ entries, onRefresh }: { entries: AvailableHtmlComponent[]; onRefresh?(): void }) {
   const [confirming, setConfirming] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -59,7 +59,7 @@ function HtmlComponentLibrarySection({ entries, onRefresh }: { entries: Availabl
       <div className="component-library__results-heading">
         <div><strong>HTML 组件</strong><span>{entries.length} 个结果</span></div>
       </div>
-      <p className="component-library__html-note">从课件存入资产库的组件，AI 可按名称检索并放进页面；这里可以查看和删除“我的资产库”中的条目。</p>
+      <p className="component-library__html-note">这里保留旧 HTML 资产，可查看条目信息，并删除“我的资产库”中的条目；这些条目暂不支持 AI 检索和插入。</p>
       {error && <div className="component-library__issues" role="alert"><ShieldAlert size={16} /><span>{error}</span></div>}
       <div className="component-library__grid">
         {entries.map((entry) => {
@@ -248,7 +248,7 @@ export function ComponentLibraryDialog({
           ) : (
             <div className="component-library__grid">
               {visibleEntries.map((entry) => {
-                const status = componentCatalogInstallStatus(entry, components[entry.packageId])
+                const status = componentCatalogInstallStatus(entry, projectLibraryDefinition(components,entry.packageId))
                 const selectable = true
                 const selected = selectedIds.has(entry.packageId)
                 return (
@@ -336,9 +336,12 @@ export function ComponentLibraryDialog({
 export function ComponentsTab({componentCatalog=EMPTY_CATALOG,onImportExternalComponents,onRefreshComponentCatalog,onAddCatalogComponents,onUpdateCatalogComponent,onReplaceComponent,onExtractSelection,onDeleteCatalogComponent}:ComponentsTabProps) {
   const project=useEditorStore(selectActiveCourseProjectDocument), kernel=useEditorStore(state=>state.courseKernel), view=useEditorStore(state=>state.courseView)
   const [libraryOpen,setLibraryOpen]=useState(false), [searchQuery,setSearchQuery]=useState(''),[detailsId,setDetailsId]=useState<string|null>(null),[extractName,setExtractName]=useState(''),[extracting,setExtracting]=useState(false)
+  const [extractKind, setExtractKind] = useState<'objects' | 'page' | 'structure'>('objects')
+  const [extractPages, setExtractPages] = useState<string[] | null>(null)
+  const selectedTemplatePages = extractPages ?? (view.surfaceId ? [view.surfaceId] : [])
   const components=project?.definitions ?? {}, packages=selectProjectLibraryDefinitions(components)
   const current=selectCurrentCatalogPackages(componentCatalog.packages), query=searchQuery.trim().toLocaleLowerCase()
-  const visible=packages.filter(data=>[data.title,data.id,data.version].join(' ').toLocaleLowerCase().includes(query))
+  const visible=packages.filter(data=>[data.title,data.id,data.library?.version ?? data.version].join(' ').toLocaleLowerCase().includes(query))
   const report=(error:unknown)=>kernel.setFeedback({errorMessage:error instanceof Error?error.message:String(error)})
   const insert=(id:string,destination:'document'|'paper'='document')=>{
     const target=kernel.captureTarget(),state=useEditorStore.getState()
@@ -346,9 +349,10 @@ export function ComponentsTab({componentCatalog=EMPTY_CATALOG,onImportExternalCo
       ? state.readSpatialView(target.surfaceId??'',target.documentId).camera:null
     void insertComponentDefinitionAtTarget(kernel,target,id,undefined,{destination,...(camera?{center:{x:camera.x,y:camera.y}}:{})}).then(result=>{if(!result.ok)report(result.reason)})
   }
-  const extract=async()=>{setExtracting(true);try {if(onExtractSelection)await onExtractSelection(extractName);else {
-    const target=kernel.captureTarget();if(!extractName.trim()||!target.instanceIds.length)throw new Error('请填写名称并选择对象。')
-    const {entry,diagnostics}=extractComponentLibraryEntry(target.project,target.resources,{id:`library_${crypto.randomUUID()}`,title:extractName.trim(),rootIds:[...target.instanceIds]})
+  const extract=async()=>{setExtracting(true);try {if(onExtractSelection)await onExtractSelection(extractName,extractKind,selectedTemplatePages);else {
+    const target=kernel.captureTarget();if(!extractName.trim()||extractKind==='objects'&&!target.instanceIds.length)throw new Error('请填写名称并选择对象。')
+    const {entry,diagnostics}=extractComponentLibraryEntry(target.project,target.resources,{id:`library_${crypto.randomUUID()}`,title:extractName.trim(),kind:extractKind,
+      ...(extractKind==='objects'?{rootIds:[...target.instanceIds]}:{surfaceIds:extractKind==='page'&&target.surfaceId?[target.surfaceId]:selectedTemplatePages})})
     if(!window.desktopAPI?.installComponentLibraryEntry)throw new Error('当前环境没有组件库保存入口。')
     await window.desktopAPI.installComponentLibraryEntry({bytes:exportComponentLibraryArchive(entry)});onRefreshComponentCatalog?.()
     kernel.setFeedback({statusMessage:'已存入我的资产库',errorMessage:diagnostics.length?diagnostics.map(item=>item.message).join('\n'):null})
@@ -356,12 +360,13 @@ export function ComponentsTab({componentCatalog=EMPTY_CATALOG,onImportExternalCo
   return <div className="components-tab" data-testid="components-tab">
     <div className="component-entry-actions"><button type="button" className="component-entry-action" data-testid="open-component-library" onClick={()=>setLibraryOpen(true)}><Library size={20}/><span><strong>打开组件与资产库</strong><small>按通用和学科浏览，可多选添加到画布</small></span></button><button type="button" className="component-entry-action" data-testid="import-external-components" disabled={!onImportExternalComponents} onClick={onImportExternalComponents}><Upload size={20}/><span><strong>导入外部组件</strong><small>保留源码与资源，可继续编辑</small></span></button></div>
     <div className="section-heading section-heading--spaced"><span>工程组件</span><span>{packages.length}</span></div>
-    <div className="composition-fragment-actions"><input aria-label="资产名称" placeholder="为所选对象命名" value={extractName} onChange={event=>setExtractName(event.currentTarget.value)}/><button type="button" disabled={!view.selectedInstanceIds.length||!extractName.trim()||extracting} onClick={()=>void extract()}>提炼到我的资产库</button></div>
+    <div className="composition-fragment-actions"><select aria-label="提炼范围" value={extractKind} onChange={event=>{setExtractKind(event.currentTarget.value as typeof extractKind);setExtractPages(null)}}><option value="objects">所选对象组合</option><option value="page">当前页面模板</option><option value="structure">所选课程结构</option></select><input aria-label="资产名称" placeholder="为资产命名" value={extractName} onChange={event=>setExtractName(event.currentTarget.value)}/><button type="button" disabled={(extractKind==='objects'?!view.selectedInstanceIds.length:extractKind==='page'?!view.surfaceId:!selectedTemplatePages.length)||!extractName.trim()||extracting} onClick={()=>void extract()}>提炼到我的资产库</button></div>
+    {extractKind==='structure'&&<fieldset><legend>保留顺序的页面</legend>{project?.surfaces.map(surface=><label key={surface.id}><input type="checkbox" checked={selectedTemplatePages.includes(surface.id)} onChange={event=>setExtractPages(event.currentTarget.checked?[...selectedTemplatePages,surface.id]:selectedTemplatePages.filter(id=>id!==surface.id))}/>{surface.title}</label>)}</fieldset>}
     <label className="component-project-search"><Search size={15}/><input type="search" aria-label="搜索工程组件" placeholder="搜索工程组件" value={searchQuery} onChange={event=>setSearchQuery(event.currentTarget.value)}/></label>
     {!visible.length?<div className="empty-state">{packages.length?'没有符合条件的组件。':'工程中还没有组件。请从组件库加入，或导入外部组件。'}</div>:<div className="project-component-list">{visible.map(data=>{
-      const id=data.id, usage=collectCourseComponentPackageUsage(project!,id),entry=current.find(value=>value.packageId===id),status=entry?componentCatalogInstallStatus(entry,data):null
+      const id=data.id, usage=collectCourseComponentPackageUsage(project!,id),entry=current.find(value=>value.packageId===(data.library?.packageId ?? id)),status=entry?componentCatalogInstallStatus(entry,data):null
       return <article className="project-component-card" key={id} data-testid={`component-package-${id}`}><div className="project-component-card__main">
-        <button type="button" className="component-card" data-testid={`component-${id}`} draggable={usage.totalInstanceCount>0} onDragStart={event=>{event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData('application/x-courseware-element',`component:${id}`);event.dataTransfer.setData('text/plain',data.title??id)}} onClick={()=>insert(id)}><span className="component-card__thumbnail"><Box size={20}/></span><span><strong>{data.title??id}</strong><small>{data.version??'工程定义'} · {usage.totalInstanceCount} 个实例</small></span><Box size={15}/></button>
+        <button type="button" className="component-card" data-testid={`component-${id}`} draggable={usage.totalInstanceCount>0} onDragStart={event=>{event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData('application/x-courseware-element',`component:${id}`);event.dataTransfer.setData('text/plain',data.title??id)}} onClick={()=>insert(id)}><span className="component-card__thumbnail"><Box size={20}/></span><span><strong>{data.title??id}</strong><small>{data.library?.version ?? data.version ?? '工程定义'} · {usage.totalInstanceCount} 个实例</small></span><Box size={15}/></button>
         {project?.surfaces.find(surface=>surface.id===view.surfaceId)?.kind==='flow'&&<button type="button" aria-label={`将${data.title??id}放到纸面上`} onClick={()=>insert(id,'paper')}>放到纸面上</button>}
         <details className="project-component-menu"><summary aria-label={`管理${data.title??id}`}><MoreVertical size={17}/></summary><div className="project-component-menu__panel" role="menu">
           <button type="button" role="menuitem" onClick={event=>{closeContainingMenu(event.currentTarget);setDetailsId(id)}}><Info size={14}/>查看详情</button>
@@ -373,6 +378,6 @@ export function ComponentsTab({componentCatalog=EMPTY_CATALOG,onImportExternalCo
         </div></details></div></article>
     })}</div>}
     {libraryOpen&&<ComponentLibraryDialog catalog={componentCatalog} components={components} onClose={()=>setLibraryOpen(false)} onRefresh={onRefreshComponentCatalog} onAdd={onAddCatalogComponents} onUpdate={onUpdateCatalogComponent} onDelete={onDeleteCatalogComponent}/>}
-    {detailsId&&components[detailsId]&&<ComponentDetailsDialog data={components[detailsId]} entry={current.find(entry=>entry.packageId===detailsId)} usage={collectCourseComponentPackageUsage(project!,detailsId)} onClose={()=>setDetailsId(null)}/>}
+    {detailsId&&components[detailsId]&&<ComponentDetailsDialog data={components[detailsId]} entry={current.find(entry=>entry.packageId===(components[detailsId].library?.packageId ?? detailsId))} usage={collectCourseComponentPackageUsage(project!,detailsId)} onClose={()=>setDetailsId(null)}/>}
   </div>
 }

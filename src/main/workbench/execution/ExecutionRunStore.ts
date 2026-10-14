@@ -11,6 +11,7 @@ const fileKey = (value: string) => process.platform === 'win32' ? path.resolve(v
 /** Engine checkpoints only; an unavailable record never becomes an empty replacement run. */
 export class ExecutionRunStore {
   private readonly unavailable = new Map<string, string>()
+  private readonly activity = new Map<string, ExecutionRunRecord['status']>()
   constructor(private readonly directory: string) {}
   get recoveryIssues(): string[] { return [...this.unavailable.values()] }
   private file(runId: string): string {
@@ -24,6 +25,7 @@ export class ExecutionRunStore {
       || !Array.isArray(value.messages) || !Array.isArray(value.tools) || !Array.isArray(value.requests)
       || path.basename(this.file(value.runId)) !== path.basename(filename)) throw new Error('运行恢复记录无效')
     if (value.input.contentOutput) value.input.contentOutput = restoreStoredContentOutput(value.input.contentOutput)
+    this.activity.set(value.runId, value.status)
     return value
   }
   save(record: ExecutionRunRecord): Promise<void> {
@@ -48,6 +50,7 @@ export class ExecutionRunStore {
           }
         }
         this.unavailable.delete(filename)
+        this.activity.set(copy.runId, copy.status)
       } finally {
         // A failed publication keeps its complete candidate and native error
         // path for diagnosis; the previous authoritative JSON remains intact.
@@ -59,6 +62,8 @@ export class ExecutionRunStore {
     void tail.finally(() => { if (writes.get(key) === tail) writes.delete(key) })
     return operation
   }
+  /** Current process facts from the existing checkpoint owner; no history body reads for a close prompt. */
+  activeRunIds(): string[] { return [...this.activity].filter(([, status]) => ['queued', 'running', 'stopping'].includes(status)).map(([id]) => id) }
   async read(runId: string): Promise<ExecutionRunRecord | null> {
     const filename = this.file(runId)
     await writes.get(fileKey(filename))

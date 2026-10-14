@@ -6,7 +6,9 @@ import { strToU8, zipSync } from 'fflate'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const catalogPath = path.join(repositoryRoot, 'catalog.json')
-const reproducibleTimestamp = new Date('2026-08-10T00:00:00.000Z')
+// ZIP stores local calendar fields without a timezone. Keep those fields fixed
+// so UTC and Windows checkouts produce the same archive and catalog digest.
+const reproducibleTimestamp = new Date(2026, 7, 10, 0, 0, 0)
 const checkOnly = process.argv.includes('--check')
 const specs = [
   ['components/language/reading-annotation', 'packages/reading-annotation.h5component'],

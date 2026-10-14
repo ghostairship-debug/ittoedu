@@ -19,6 +19,7 @@ import { remapComponentInputData } from '../../components/input/authoring'
 import { inputDataSchema } from '../../components/input/data'
 import type { InteractionRule } from '../../shared/interactionTypes'
 import { componentParentMatrix, equalComponentValue } from '../../core/drivers/courseV10Operations'
+import { COURSE_OBJECT_CLIPBOARD_COMMAND_EVENT } from '../../shared/ipcTypes'
 export { componentParentMatrix } from '../../core/drivers/courseV10Operations'
 
 /** Surface-owned content commands; generic objects use the common canonical writer below. */
@@ -46,14 +47,16 @@ export interface CrossSurfaceCommandPorts {
   structure: ReturnType<typeof createCourseStructureSlice>
   lifecycle: ReturnType<typeof createCourseLifecycleSlice>
   /** Existing desktop editorClipboard bridge; commands and shortcuts share native events. */
-  requestClipboard?(command: 'copy' | 'cut' | 'paste'): Promise<void> | void
+  requestClipboard?(command: 'copy' | 'cut' | 'paste', requestId?: string): Promise<void> | void
 }
 import { prepareCourseObjectPaste, selectedRoots, courseObjectDescendants as descendants, sameContainer, courseObjectRemovalEdits, courseObjectOrderEdits, courseObjectMoveEdits, type CourseObjectClipboardSource } from '../../core/course/courseObjectEdits'
 import { courseSettingsEdits } from '../../core/course/courseSemanticEdits'
 import { componentDataEdits } from '../../core/course/componentDataEdits'
 import { courseGeometryEdits } from '../../core/course/courseGeometryEdits'
+import { requestMixedGlobalGeometry } from '../ui/workspaces/mixedGlobalGeometry'
 export { prepareCourseObjectPaste, type CourseObjectClipboardSource, type CourseObjectPasteDestination, type CourseObjectPastePlan } from '../../core/course/courseObjectEdits'
 export { componentIsLocked } from '../../shared/contracts/component-platform/project'
+import { capturedCourseViewIsCurrent } from '../documents/CourseV10DocumentBridge'
 interface ObjectClipboard extends CourseObjectClipboardSource {
   matrices: Record<string, AffineMatrix>
   moveAvailable?: boolean
@@ -82,7 +85,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
   const write = async (edits: ComponentEdit[], target = kernel.captureTarget(), selectedIds?: readonly string[]) => {
     if (!edits.length) return
     await kernel.editCaptured(kernel.capture(edits, target))
-    if (selectedIds) kernel.selectInstances(selectedIds, target.surfaceId, target.documentId)
+    if (selectedIds && capturedCourseViewIsCurrent(kernel.readView(), target)) kernel.selectInstances(selectedIds, target.surfaceId, target.documentId)
   }
   const flush = async () => {
     if (await content().commitTextEdit?.() === false) throw new Error('当前编辑未能应用，请完成编辑后重试')
@@ -100,17 +103,58 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     } catch (error) { report(error); return false }
   }
   const requestClipboard = (command: 'copy' | 'cut' | 'paste') => run(async () => {
+    if (command === 'paste') {
+      await flush()
+      if (ports.requestClipboard) await ports.requestClipboard(command)
+      else if (!document.execCommand(command)) throw new Error('当前环境无法执行系统剪贴板命令，请使用画布快捷键')
+      return
+    }
+    const requested = kernel.captureTarget(), activation = kernel.readView().activation, requestedScope = scope()
+    const sameIntent = () => {
+      const view = kernel.readView()
+      return view.activeDocumentId === requested.documentId && view.snapshot?.epoch === requested.epoch
+        && view.activation === activation && view.surfaceId === requested.surfaceId && view.activeStateId === requested.activeStateId
+        && scope() === requestedScope && view.selectedInstanceIds.length === requested.instanceIds.length
+        && view.selectedInstanceIds.every((id, index) => id === requested.instanceIds[index])
+    }
+    const requireIntent = () => { if (!sameIntent()) throw new Error('剪贴板命令的文档或选择已改变，已取消操作') }
     await flush()
-    if (ports.requestClipboard) await ports.requestClipboard(command)
-    else if (!document.execCommand(command)) throw new Error('当前环境无法执行系统剪贴板命令，请使用画布快捷键')
+    requireIntent()
+    // Input ACK may update this course. The intent stays bound to the original
+    // session and selection; copied content includes the admitted input.
+    const target = kernel.captureTarget(requested.documentId)
+    const execute = () => {
+      requireIntent()
+      let seen = false
+      const copy = (event: ClipboardEvent) => {
+        seen = true
+        if (commands.copyCourseClipboard(event.clipboardData, command === 'cut', target)) event.preventDefault()
+      }
+      window.addEventListener(command, copy, true)
+      try {
+        if (!document.execCommand(command) || !seen) throw new Error('系统剪贴板命令未完成，请重试')
+      } finally { window.removeEventListener(command, copy, true) }
+    }
+    if (!ports.requestClipboard) { execute(); return }
+    const requestId = crypto.randomUUID()
+    const dispatch = (event: Event) => {
+      const detail = (event as CustomEvent<{ command: string; requestId: string; handled: boolean; ok: boolean; reason: string }>).detail
+      if (detail?.requestId !== requestId || detail.command !== command) return
+      detail.handled = true
+      try { execute(); detail.ok = true }
+      catch (error) { detail.reason = error instanceof Error ? error.message : String(error) }
+    }
+    window.addEventListener(COURSE_OBJECT_CLIPBOARD_COMMAND_EVENT, dispatch)
+    try { await ports.requestClipboard(command, requestId) }
+    finally { window.removeEventListener(COURSE_OBJECT_CLIPBOARD_COMMAND_EVENT, dispatch) }
   })
-  const remove = async (ids: readonly string[]) => {
-    const target = kernel.captureTarget(), roots = selectedRoots(target.project, ids)
+  const remove = async (ids: readonly string[], target = kernel.captureTarget()) => {
+    const roots = selectedRoots(target.project, ids)
     await write(courseObjectRemovalEdits(target.project, roots), target, target.instanceIds.filter(id => !descendants(target.project, roots, false).includes(id)))
   }
-  const captureClipboard = (ids: readonly string[]): ObjectClipboard => {
-    const project = structuredClone(kernel.readDocument()), roots = selectedRoots(project, ids)
-    return { documentId: kernel.readView().activeDocumentId ?? undefined, project, roots, resources: structuredClone(kernel.readResources()), matrices: Object.fromEntries(roots.map(id => [id, componentParentMatrix(project, id)])) }
+  const captureClipboard = (ids: readonly string[], target = kernel.captureTarget()): ObjectClipboard => {
+    const project = structuredClone(target.project), roots = selectedRoots(project, ids)
+    return { documentId: target.documentId, project, roots, resources: structuredClone(target.resources), matrices: Object.fromEntries(roots.map(id => [id, componentParentMatrix(project, id)])) }
   }
   const paste = async (source: ObjectClipboard, keepOwner: boolean) => {
     if (!source.roots.length) throw new Error('请先复制对象')
@@ -126,14 +170,17 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
       await source.removal
       const { edits, rootIds: selected, diagnostics } = prepareCourseObjectPaste(source, { capturedTarget: target, container: destination,
         index: containerChildIds(project, destination).length, offset: { x: 20, y: 20 }, keepOwner, identity: moving ? 'move' : 'copy' })
-      await write(edits, { ...target, activeStateId: null, editingProject: target.project }, selected)
+      await write(edits, { ...target, activeStateId: null, editingProject: target.project })
+      if (capturedCourseViewIsCurrent(kernel.readView(), target)) kernel.selectInstances(selected, target.surfaceId, target.documentId)
       if (diagnostics.length) kernel.setFeedback({ errorMessage: [...new Set(diagnostics.map(item => item.message))].join('\n') })
     } catch (error) { if (moving) source.moveAvailable = true; throw error }
   }
   const layout = async (kind: 'left'|'center'|'right'|'top'|'middle'|'bottom'|'horizontal'|'vertical') => {
     const target = kernel.captureTarget()
-    await write(courseGeometryEdits(target.editingProject, target.instanceIds, kind === 'horizontal' || kind === 'vertical'
-      ? { kind: 'distribute', axis: kind } : { kind: 'align', alignment: kind }), target)
+    const intent = kind === 'horizontal' || kind === 'vertical' ? { kind: 'distribute' as const, axis: kind } : { kind: 'align' as const, alignment: kind }
+    const shown = requestMixedGlobalGeometry({ documentId: target.documentId, surfaceId: target.surfaceId,
+      project: target.editingProject, instanceIds: target.instanceIds, intent })
+    await write(shown ?? courseGeometryEdits(target.editingProject, target.instanceIds, intent), target)
   }
   const commands = {
     setCanvasMode(canvasMode: 'edit' | 'run') { run(async () => { await flush(); ports.shell.patch({ canvasMode, editingTextNodeId: null }) }) },
@@ -204,13 +251,13 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     copySelectedNodes() { requestClipboard('copy') },
     cutSelectedNodes() { requestClipboard('cut') },
     pasteNodes() { requestClipboard('paste') },
-    copyCourseClipboard(data: DataTransfer | null, cut = false): boolean {
+    copyCourseClipboard(data: DataTransfer | null, cut = false, target = kernel.captureTarget()): boolean {
       if (!data) return false
-      const ids = kernel.readView().selectedInstanceIds
+      const ids = target.instanceIds
       if (!ids.length) return false
-      if (cut && ids.some(id => componentIsLocked(current(), id))) { report(new Error('锁定元素不能剪切')); return true }
+      if (cut && ids.some(id => componentIsLocked(target.editingProject, id))) { report(new Error('锁定元素不能剪切')); return true }
       try {
-        const copied = captureClipboard(ids)
+        const copied = captureClipboard(ids, target)
         if (!copied.roots.length) return false
         const token = crypto.randomUUID()
         data.clearData()
@@ -218,7 +265,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
         clipboard = copied; clipboardToken = token
         if (cut) {
           copied.moveAvailable = true
-          copied.removal = remove(ids)
+          copied.removal = remove(ids, target)
           // ClipboardEvent is synchronous; retain the ACK for paste and report
           // a rejection without leaving an unhandled promise.
           void copied.removal.catch(report)

@@ -8,6 +8,7 @@ import type { DocumentOperation, DocumentSnapshot } from '../shared/workbench/do
 import { markdownRefPath, markdownSnapshotDocument, markdownSnapshotVersion } from '../shared/workbench/markdownFileAdapter'
 import { parseDocumentMarkdown } from '../shared/document/markdown'
 import { resolveFileDocumentImage } from '../shared/document/fileImageReference'
+import { fileResourceMime } from '../shared/document/fileResourceMime'
 
 const hash = (data: string) => createHash('sha256').update(data).digest('hex')
 const same = (a: DocumentFileVersion | null, b: DocumentFileVersion | null) => JSON.stringify(a) === JSON.stringify(b)
@@ -98,7 +99,7 @@ export function createLessonDocumentFiles(options: LessonDocumentFilesOptions) {
     openDocument: async ref => {
       const document = markdownSnapshotDocument(ref, await snapshot(ref))
       document.diagnostics = parseDocumentMarkdown(document.source, { target: 'file', createId: () => randomUUID(),
-        resolveImage: href => resolveFileDocumentImage(path.basename(markdownRefPath(ref)), href) }).diagnostics
+        resolveImage: resolveFileDocumentImage }).diagnostics
       return document
     },
     saveDocument: request => serial(request.ref, () => save(request)),
@@ -126,13 +127,12 @@ export function createLessonDocumentFiles(options: LessonDocumentFilesOptions) {
         // Clipboard may read a user-selected local resource before its destination document exists.
         // This is read-only; imported bytes still enter content through the canonical command.
         await options.validateTarget(ref)
-        const root = await fs.realpath(ref.kind === 'lesson' ? ref.lessonDirectory : path.dirname(ref.path))
+        const root = await fs.realpath(path.dirname(markdownRefPath(ref)))
         const filename = await fs.realpath(path.resolve(root, relativePath)), localPath = path.relative(root, filename)
         if (localPath === '..' || localPath.startsWith(`..${path.sep}`) || path.isAbsolute(localPath)) throw new Error('素材引用越出文档目录')
         bytes = new Uint8Array(await fs.readFile(filename))
       }
-      const types: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.mp4': 'video/mp4', '.webm': 'video/webm', '.pdf': 'application/pdf', '.zip': 'application/zip', '.woff2': 'font/woff2' }
-      return { bytes: new Uint8Array(bytes), mime: types[path.extname(relativePath).toLowerCase()] ?? 'application/octet-stream', filename: path.basename(relativePath) }
+      return { bytes: new Uint8Array(bytes), mime: fileResourceMime(relativePath), filename: path.basename(relativePath) }
     },
     async readRecovery(ref: DocumentFileRef): Promise<{ source: string; expectedVersion: DocumentFileVersion | null; baseSource?: string; attachments?: DocumentSaveRequest['attachments'] } | null> {
       let current: DocumentSnapshot

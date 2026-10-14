@@ -5,7 +5,7 @@ import { IDENTITY_MATRIX, multiplyMatrices, type AffineMatrix } from '../../../.
 import { imageDataSchema } from '../../../../components/image/data'
 import { applyPptxShapeExtensions, type PptxShapeExtensions } from '../../pptxShapeGeometry'
 import { pptxColor, pptxRotation, pptxTransparency, type PptxDrawingTarget } from '../../pptxShared'
-import { resolveComponentBackground, isComponentVisibleAtSurface } from '../../../../shared/contracts/component-platform/project'
+import { resolveComponentBackground, isComponentVisibleAtSurface, componentDefinitionBuiltinKey } from '../../../../shared/contracts/component-platform/project'
 import { componentOutputPresentation } from '../presentation'
 import { drawContainerStyle, drawImage, drawProfessional, instanceOpacity } from './drawings'
 import { officeFrame } from './frame'
@@ -14,6 +14,7 @@ import { applyPptxEditableGroups, type PptxEditableGroup, type PptxGroupChild, t
 import type { BuildComponentPptxOptions, ComponentPptxDiagnostic, ComponentPptxInput, ComponentPptxPage, ComponentPptxResult } from './types'
 import { componentDeliveryPages } from '../deliveryPages'
 import { resolvePrintPageSize } from '../../flowPageBox'
+import { affineOutputPicture, isShearedOutputMatrix } from '../../outputImage'
 export type * from './types'
 
 /** Builds a real PPTX from the current author model or its P0 projection. */
@@ -41,8 +42,9 @@ export async function buildComponentPptx(input: ComponentPptxInput, options: Bui
     const instance = inheritedOpacity === 1 ? authorInstance : { ...authorInstance,
       style: { ...authorInstance.style, opacity: instanceOpacity(authorInstance) * inheritedOpacity } }
     if (!isComponentVisibleAtSurface(instance, surface.id)) return
+    if (instanceOpacity(instance) === 0) return
     const implementation = instance.implementationOverride ?? definition.implementation
-    if (['guoling.navigation', 'guoling.teacher-controller'].includes(definition.id) || (implementation.kind === 'builtin' && ['guoling.navigation', 'guoling.teacher-controller'].includes(implementation.key))) {
+    if (['guoling.navigation', 'guoling.teacher-controller'].includes(componentDefinitionBuiltinKey(definition) ?? definition.id)) {
       if (instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && instance.data.includeInStaticExports === true) {
         // Explicit inclusion uses the real visual capture below.
       } else {
@@ -69,6 +71,16 @@ export async function buildComponentPptx(input: ComponentPptxInput, options: Bui
     let frame: ReturnType<typeof officeFrame> | undefined
     let drawingChildren = children, childParent = matrix
     try {
+      if (instance.frame && isShearedOutputMatrix(matrix)) {
+        const capture = await options.captureInstance?.({ input, surface, instance })
+        if (!capture?.startsWith('data:image/')) throw new Error('此仿射倾斜需要实际运行图面；未使用另一矩形代替')
+        const picture = await affineOutputPicture(capture, instance.frame, matrix)
+        const box = picture.bounds
+        slide.addImage({ data: picture.dataUrl, x: box.x / 96, y: box.y / 96, w: box.width / 96, h: box.height / 96,
+          objectName: instance.id, transparency: pptxTransparency(inheritedOpacity) })
+        children.push(instance.id)
+        warn(surface, instance, '此仿射倾斜使用实际本地图面按正式矩阵投影到外接框；源码和专业数据保留在工程。', 'runtime-affine-capture')
+      } else {
       if (instance.frame) frame = officeFrame(instance.frame, matrix)
       else if (isGroup) frame = officeFrame({ width: 1, height: 1, transform: [1, 0, 0, 1, 0, 0] }, parent)
       else throw new Error('此内容缺少可导出的自由 frame')
@@ -116,9 +128,12 @@ export async function buildComponentPptx(input: ComponentPptxInput, options: Bui
           if (!capture?.startsWith('data:image/')) throw new Error('此源码或专业内容需实际运行捕获；未替换为默认实现或静态占位')
           target.addImage({ data: capture, x: frame.x / 96, y: frame.y / 96, w: frame.width / 96, h: frame.height / 96,
             rotate: pptxRotation(frame.rotation), flipV: frame.flipY, objectName: instance.id,
-            transparency: pptxTransparency(instanceOpacity(instance)) })
+            // Instance opacity is already painted into the local capture. Its
+            // former ancestors are removed by isolation, so consume only those.
+            transparency: pptxTransparency(inheritedOpacity) })
           warn(surface, instance, '已使用宿主提供的实际运行图面；PPTX 中为静态图片，源码和专业数据保留在工程中。', 'runtime-static-capture')
         }
+      }
       }
       if (instance.attachments?.length) warn(surface, instance, '附着行为和运行状态不带入 PPTX。', 'attachments-omitted')
     } catch (error) {

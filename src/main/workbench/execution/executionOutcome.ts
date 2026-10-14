@@ -89,7 +89,9 @@ type PendingJob = { kind: 'image' | 'compute' | 'delegation'; id: string; requir
 const pendingJob = (tool: ExecutionToolRecord): PendingJob | null => {
   if (serviceToolOutcome(tool.call.name, tool.result)?.status !== 'pending' || tool.result?.kind !== 'read') return null
   const data = tool.result.data as { job?: unknown }
-  return (tool.call.name === 'image.generate' || tool.call.name === 'image.edit'
+  // A status read is also a dated observation of this same job. Its pending
+  // result must settle from later owner receipts, rather than remain current forever.
+  return (tool.call.name === 'image.generate' || tool.call.name === 'image.edit' || tool.call.name === 'image.status'
     || tool.call.name === 'compute.run' || ['delegate.start', 'local.run', 'delegate.readonly'].includes(tool.call.name))
     && typeof data.job === 'string' ? { kind: tool.call.name === 'compute.run' ? 'compute'
       : ['delegate.start', 'local.run', 'delegate.readonly'].includes(tool.call.name) ? 'delegation' : 'image', id: data.job,
@@ -113,6 +115,7 @@ const terminalJobReceipt = (tool: ExecutionToolRecord, pending: PendingJob): boo
 /** Actual running owner jobs only. A ready candidate may still need reading, but
  * it has no background operation to await and must not cause wait polling. */
 export function runningExecutionJobs(record: ExecutionRunRecord): Array<{ kind: PendingJob['kind']; job: string; callId: string }> {
+  const running = new Set<string>()
   return executionCompletionIssues(record).flatMap(issue => {
     if (issue.status !== 'pending' || !issue.job || !issue.kind || !issue.callId) return []
     const producer = record.tools.find(tool => tool.callId === issue.callId)
@@ -122,8 +125,11 @@ export function runningExecutionJobs(record: ExecutionRunRecord): Array<{ kind: 
     const latest = record.tools.slice(record.tools.indexOf(producer) + 1).reverse()
       .map(tool => completionJobObservation(tool, pending)).find(data => data !== null)
     const data = latest ?? (producer.result?.kind === 'read' ? producer.result.data as { status?: unknown; terminal?: unknown } : null)
-    return data && data.terminal !== true && ['preparing', 'running'].includes(String(data.status))
-      ? [{ kind: issue.kind, job: issue.job, callId: issue.callId }] : []
+    if (!data || data.terminal === true || !['preparing', 'running'].includes(String(data.status))) return []
+    const key = `${issue.kind}:${issue.job}`
+    if (running.has(key)) return []
+    running.add(key)
+    return [{ kind: issue.kind, job: issue.job, callId: issue.callId }]
   })
 }
 
@@ -404,6 +410,13 @@ export function executionExitDecision(record:ExecutionRunRecord):{
   return {status:continuable.length?'continue':remaining.length?'partial':'completed',remaining,continuable,warnings}
 }
 
+/** A terminal generation failure requires explicit recovery after the Engine's policy is exhausted.
+ * Queue and UI consume this fact rather than maintaining a second provider-kind allowlist. */
+export function terminalModelFailure(record: ExecutionRunRecord) {
+  if (!['failed', 'partial', 'interrupted'].includes(record.status)) return undefined
+  return record.requests.filter(request => request.kind === undefined).at(-1)?.failure
+}
+
 function completionJobObservation(tool: ExecutionToolRecord, pending: NonNullable<ReturnType<typeof pendingJob>>) {
   if (tool.state !== 'returned' || tool.result?.kind !== 'read') return null
   const data = tool.result.data as { job?: unknown; jobId?: unknown; kind?: unknown; status?: unknown; terminal?: unknown;
@@ -492,6 +505,7 @@ export function runEndSummary(record: ExecutionRunRecord): string | undefined {
   const auditWarning=auditWarnings.length?'中间操作警告 '+auditWarnings.length+' 项，完整失败与诊断已保留在运行记录':undefined
   if (record.status === 'completed') return [record.failure?.message, diagnosticWarning, noteWarning,auditWarning].filter(Boolean).join('；') || undefined
   const parts: string[] = []
+  if (record.remainingGoal?.length) parts.push('剩余工作：' + record.remainingGoal.join('；'))
   if (record.status === 'stopped') parts.push('任务已停止')
   else if (record.failure?.message) parts.push(record.failure.message)
   else if (record.status === 'partial') {

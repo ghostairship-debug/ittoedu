@@ -1,19 +1,7 @@
 import type { EditorView, NodeView } from 'prosemirror-view'
 import type { Node as PMNode } from 'prosemirror-model'
 
-type MermaidApi = import('mermaid').Mermaid
-let mermaidPromise: Promise<MermaidApi> | null = null
-
-function loadMermaid(): Promise<MermaidApi> {
-  if (!mermaidPromise) {
-    mermaidPromise = import('mermaid').then(api => {
-      const mermaid = api.default
-      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' })
-      return mermaid
-    }).catch(error => { mermaidPromise = null; throw error })
-  }
-  return mermaidPromise
-}
+import { createMermaidPreview } from '../../shared/document/mermaidPreview'
 
 /**
  * ProseMirror NodeView for `code_block`. When the block's language marks it as
@@ -31,7 +19,7 @@ export class MermaidCodeBlockView implements NodeView {
   dom: HTMLElement
   contentDOM: HTMLElement
   private preview: HTMLElement | null = null
-  private renderToken = 0
+  private diagram: ReturnType<typeof createMermaidPreview> | null = null
   private lastSource = ''
   private mermaid = false
   private disposed = false
@@ -52,7 +40,7 @@ export class MermaidCodeBlockView implements NodeView {
   }
   destroy() {
     this.disposed = true
-    this.renderToken++
+    this.diagram?.destroy()
   }
   ignoreMutation(mutation: MutationRecord | { type: 'selection'; target: globalThis.Node }): boolean {
     if ('type' in mutation && mutation.type === 'selection') return false
@@ -72,6 +60,7 @@ export class MermaidCodeBlockView implements NodeView {
         this.preview.setAttribute('aria-label', 'Mermaid 图示预览')
         this.preview.style.cssText = 'display:block;user-select:none;'
         this.dom.append(this.preview)
+        this.diagram = createMermaidPreview(this.preview)
       }
       return
     }
@@ -85,9 +74,11 @@ export class MermaidCodeBlockView implements NodeView {
       this.preview.setAttribute('aria-label', 'Mermaid 图示预览')
       this.preview.style.cssText = 'display:block;user-select:none;'
       this.dom.insertBefore(this.preview, this.dom.firstChild)
+      this.diagram = createMermaidPreview(this.preview)
       this.lastSource = ''
     } else {
       delete this.dom.dataset.codeLanguage
+      this.diagram?.destroy(); this.diagram = null
       this.preview?.remove()
       this.preview = null
       this.lastSource = ''
@@ -96,47 +87,6 @@ export class MermaidCodeBlockView implements NodeView {
   private render(source: string) {
     if (this.disposed || !this.preview || source === this.lastSource) return
     this.lastSource = source
-    const token = ++this.renderToken
-    const preview = this.preview
-    if (!source.trim()) {
-      preview.replaceChildren()
-      preview.dataset.state = 'empty'
-      return
-    }
-    preview.dataset.state = 'loading'
-    void loadMermaid().then(async mermaid => {
-      if (this.disposed || token !== this.renderToken || !this.preview) return
-      const id = `mermaid-${Math.random().toString(36).slice(2)}`
-      try {
-        const { svg } = await mermaid.render(id, source)
-        if (this.disposed || token !== this.renderToken || !this.preview) return
-        this.preview.dataset.state = 'ready'
-        this.preview.replaceChildren()
-        const frame = document.createElement('div')
-        frame.className = 'mermaid-preview__svg'
-        frame.innerHTML = svg
-        this.preview.append(frame)
-      } catch (error) {
-        if (this.disposed || token !== this.renderToken || !this.preview) return
-        this.preview.dataset.state = 'error'
-        const message = error instanceof Error ? error.message : String(error)
-        const box = document.createElement('div')
-        box.className = 'mermaid-preview__error'
-        box.textContent = `Mermaid 暂无法渲染：${message}`
-        this.preview.replaceChildren(box)
-        // mermaid.render() appends its failed scratch element to document.body; remove it.
-        document.getElementById(`d${id}`)?.remove()
-        document.getElementById(id)?.remove()
-      }
-    }).catch(error => {
-      if (this.disposed || token !== this.renderToken || !this.preview) return
-      this.preview.dataset.state = 'error'
-      const message = document.createElement('div')
-      message.className = 'mermaid-preview__error'
-      message.textContent = `Mermaid 加载失败：${error instanceof Error ? error.message : String(error)}`
-      const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = '重试'
-      retry.addEventListener('click', () => { this.lastSource = ''; this.render(source) })
-      this.preview.replaceChildren(message, retry)
-    })
+    void this.diagram?.render(source)
   }
 }

@@ -132,6 +132,29 @@ it('keeps the insertion target and placement captured while pending input is dra
   expect(h.selected).toHaveBeenLastCalledWith([id], 'world', 'a')
 })
 
+it('fixes the free preview pose only on Add and preserves it through later view movement and saved reopen', async () => {
+  const h = await harness(), original = structuredClone(h.project()), pose = { x: 720, y: -180, zoom: 1.7, rotation: 25 }
+  h.spatial.setSpatialSessionCamera(pose)
+  h.spatial.setSpatialViewport({ width: 800, height: 400 })
+  expect(h.project()).toEqual(original)
+  expect(h.project().surfaces[0].spatial!.frames).toEqual([])
+  expect(h.sessions.get('a')!.read().undoDepth).toBe(0)
+  await h.spatial.addSpatialCameraFrameFromSession('world')
+  const frame = structuredClone(h.project().surfaces[0].spatial!.frames[0])
+  expect(frame.pose).toEqual(pose)
+  expect(h.spatial.readSpatialView().activeCameraFrameId).toBe(frame.id)
+  expect(h.sessions.get('a')!.read().undoDepth).toBe(1)
+  h.spatial.setSpatialSessionCamera({ x: -600, y: 400, zoom: .6, rotation: -15 })
+  expect(h.project().surfaces[0].spatial!.frames).toEqual([frame])
+  expect(h.project().surfaces[0].spatial!.home).toEqual(original.surfaces[0].spatial!.home)
+  await h.sessions.get('a')!.save(h.binding)
+  await h.sessions.get('a')!.close()
+  const reopened = await DocumentSession.create({ documentId: 'saved-preview', epoch: 'fresh', binding: h.binding,
+    model: h.driver.load(h.saved()) }, h.driver, h.persistence)
+  expect(course(reopened.read().model).surfaces[0].spatial!.frames).toEqual([frame])
+  expect(course(reopened.read().model).instances).toEqual(original.instances)
+})
+
 it('uses camera follow and ordered frame paths from the mature forms, preserving author pose and station fragments in save data', async () => {
   const h = await harness()
   await h.commands.addTextNode(1000, 1000)
@@ -212,11 +235,15 @@ it('keeps a rejected path draft visible and clears it only after a successful re
 it('saves the current camera as a fixed frame, keeps explicit following, and exposes authored names and both fit scopes', async () => {
   const seed = sample(); seed.instances.neighbor.name = '远处的观察对象'; seed.instances.neighbor.data = { title: '旧数据标题' }
   const h = await harness(seed), pose = { x: 21, y: 42, zoom: 1.5 }
+  h.spatial.setSpatialViewport({ width: 1200, height: 900 })
+  h.spatial.setSpatialShowCameraFrames(false)
   await h.spatial.addSpatialCameraFrameFromSession('world')
+  expect(h.spatial.readSpatialView().showCameraFrames).toBe(true)
   const frameId = h.project().surfaces[0].spatial!.frames[0].id
   await h.spatial.updateSpatialCameraFrameTarget('world', frameId, 'neighbor')
   h.spatial.activateSpatialCameraFrame('world', frameId)
   expect(h.spatial.readSpatialView().camera.x).toBe(3040)
+  expect(h.spatial.readSpatialView().camera.zoom).toBe(400 / 60)
   h.spatial.setSpatialSessionCamera(pose)
   const spatial = h.project().surfaces[0].spatial!, save = vi.fn(() => h.spatial.updateActiveSpatialCameraFrameFromSession('world')), fit = vi.fn()
   const before = h.sessions.get('a')!.read().undoDepth

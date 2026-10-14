@@ -41,7 +41,7 @@ interface RightSidebarProps {
     entries: AvailableComponentCatalogPackage[],
   ): boolean | Promise<boolean>
   onUpdateCatalogComponent?(entry: AvailableComponentCatalogPackage): void
-  onExtractSelection?(title: string): Promise<void>
+  onExtractSelection?(title: string, kind?: 'objects' | 'page' | 'structure', surfaceIds?: readonly string[]): Promise<void>
   onDeleteCatalogComponent?(entry: AvailableComponentCatalogPackage): Promise<void>
 }
 
@@ -55,7 +55,7 @@ const sidebarTabs = [
 ] as const satisfies ReadonlyArray<{ id: SidebarTab; label: string; icon: typeof MousePointer2 }>
 
 const workspaceButtons = [
-  { id: 'ai', label: 'AI 助手', icon: Sparkles },
+  { id: 'ai', label: '果铃AI', icon: Sparkles },
   { id: 'resources', label: '资源管理器', icon: FolderTree },
   { id: 'conversations', label: '会话列表', icon: MessagesSquare },
 ] as const

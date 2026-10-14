@@ -27,8 +27,8 @@ async function fixture() {
   const spots: ComponentAuthorSpot[] = ['first', 'second'].map((id, index) => ({ id, instanceId: 'web', kind: 'text', mountGeneration: 1,
     authorKey: id, bindingStatus: 'bound', binding: { kind: 'dom', path: [{ tag: 'p', index, attributes: { id } }], baseline: '同一文字' },
     initialValue: '同一文字', localBounds: { width: 200, height: 30, transform: [1, 0, 0, 1, 0, index * 40] } }))
-  project.instances.web = { id: 'web', definitionId: WEB_DEFINITION.id, data: JSON.parse(JSON.stringify({ html,
-    authoringRecords: Object.fromEntries(spots.map(spot => [spot.authorKey!, { kind: 'text', binding: spot.binding!, overrides: { text: '同一文字' } }])) })) }
+  project.instances.web = { id: 'web', definitionId: WEB_DEFINITION.id, data: { html }, authoring: {
+    records: Object.fromEntries(spots.map(spot => [spot.authorKey!, { kind: 'text' as const, binding: spot.binding!, overrides: { text: '同一文字' } }])) } }
   project.surfaces[0].childIds = ['web']
   const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'text.h5lesson')
   let release = () => {}, entered = () => {}, delayed = false
@@ -48,8 +48,8 @@ async function fixture() {
   const world = { authorSpots: () => {
     const model = host.registry.get(snapshot.documentId).read().model
     if (model.kind !== 'course-v10') throw new Error('Expected V10')
-    const records = (model.project.instances.web.data as { authoringRecords: Record<string, { overrides: { text: string } }> }).authoringRecords
-    return spots.map(spot => ({ ...spot, initialValue: records[spot.authorKey!].overrides.text }))
+    const records = model.project.instances.web.authoring!.records!
+    return spots.map(spot => ({ ...spot, initialValue: records[spot.authorKey!].overrides.text! }))
   }, subscribeAuthorSpots: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } } } as unknown as ComponentPlatformRuntime
   dispose.push(registerRuntimeLightEditDocument(snapshot.documentId, world, bridge))
   dispose.push(host.subscribeEvents(() => { for (const listener of listeners) listener() }))
@@ -60,7 +60,9 @@ async function fixture() {
 }
 
 it('connects the live Runtime page-copy panel to source states and one real rule ACK/Undo without rewriting its source', async () => {
-  const value = await fixture(), fields = screen.getAllByRole('textbox', { name: '页面文字：同一文字' })
+  const value = await fixture()
+  fireEvent.click(screen.getByText('同文批量替换'))
+  const fields = screen.getAllByRole('textbox', { name: '页面文字：同一文字' })
   expect(fields).toHaveLength(1)
   expect(screen.getByRole('textbox', { name: '页面文字：后来出现' })).toHaveValue('后来出现')
   fireEvent.focus(fields[0]); fireEvent.change(fields[0], { target: { value: '全部同文修改' } })
@@ -75,18 +77,22 @@ it('connects the live Runtime page-copy panel to source states and one real rule
   expect(saved.undoDepth).toBe(1)
   if (saved.model.kind !== 'course-v10') throw new Error('Expected V10')
   expect(saved.model.project.instances.web.data).toMatchObject({ html: value.html,
-    textOverrides: [{ original: '同一文字', text: '全部同文修改' }],
-    authoringRecords: { first: { overrides: { text: '同一文字' } }, second: { overrides: { text: '同一文字' } } } })
+    textOverrides: [{ original: '同一文字', text: '全部同文修改' }] })
+  expect(saved.model.project.instances.web.authoring).toMatchObject({
+    records: { first: { overrides: { text: '同一文字' } }, second: { overrides: { text: '同一文字' } } } })
   expect(value.onError).not.toHaveBeenCalled()
   await act(async () => value.bridge.undo(value.snapshot.documentId))
   const restored = value.host.registry.get(value.snapshot.documentId).read()
   if (restored.model.kind !== 'course-v10') throw new Error('Expected V10')
-  expect(restored.model.project.instances.web.data).toMatchObject({ html: value.html,
-    authoringRecords: { first: { overrides: { text: '同一文字' } }, second: { overrides: { text: '同一文字' } } } })
+  expect(restored.model.project.instances.web.data).toMatchObject({ html: value.html })
+  expect(restored.model.project.instances.web.authoring).toMatchObject({
+    records: { first: { overrides: { text: '同一文字' } }, second: { overrides: { text: '同一文字' } } } })
 })
 
 it('retains the frozen page-copy draft when a human changes that exact rule before blur, with no stale write or extra History', async () => {
-  const value = await fixture(), field = screen.getByRole('textbox', { name: '页面文字：同一文字' })
+  const value = await fixture()
+  fireEvent.click(screen.getByText('同文批量替换'))
+  const field = screen.getByRole('textbox', { name: '页面文字：同一文字' })
   fireEvent.focus(field); fireEvent.change(field, { target: { value: '迟到的草稿' } })
   await act(async () => value.bridge.edit([{ type: 'data.set', instanceId: 'web', path: ['textOverrides'], value: [{ original: '同一文字', text: '人工更新' }] }]))
   fireEvent.blur(field)

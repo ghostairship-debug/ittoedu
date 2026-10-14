@@ -49,8 +49,8 @@ describe('open image service', () => {
     expect(searches.commons.mock.calls[0]![1]).toMatchObject({ query: 'earth axial tilt', limit: 4, page: 1, allowShareAlike: false })
     expect(result).toEqual({ status: 'results', query: 'earth axial tilt', licenses: 'CC0、公有领域、CC BY', excluded: 3, nextPage: 2, candidates: [
       { image: 'img1', title: 'AxialTiltObliquity', author: 'Dna-webmaster', license: 'CC BY 3.0', source: 'Wikimedia Commons', width: 2400, height: 1200,
-        description: 'Axial tilt and the ecliptic' },
-      { image: 'img2', title: 'Winter: solstice / dusk', author: 'Terry Kearney', license: 'CC0 1.0', source: 'Flickr', width: 1024, height: 683 },
+        description: 'Axial tilt and the ecliptic', pageUrl: commonsDiagram.pageUrl, licenseUrl: by.url },
+      { image: 'img2', title: 'Winter: solstice / dusk', author: 'Terry Kearney', license: 'CC0 1.0', source: 'Flickr', width: 1024, height: 683, pageUrl: flickrPhoto.pageUrl, licenseUrl: cc0.url },
     ] })
     await open.search({ runId: 'run', query: 'x', allowShareAlike: true, page: 3 })
     expect(searches.openverse.mock.calls[1]![1]).toMatchObject({ allowShareAlike: true, page: 3, limit: 6 })

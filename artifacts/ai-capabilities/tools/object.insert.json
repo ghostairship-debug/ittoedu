@@ -1,9 +1,55 @@
 {
-  "description": "在已观察页面或容器内插入文字、公式、图形、表格、图表或填空。只提供类型、正文及所需位置尺寸；软件复用人工插入默认、准备容器、专业数据和身份，正式事务可撤销。Flow destination=document 为正文，paper 为纸张浮层。",
+  "description": "在已观察页面或容器内插入文字、公式、图形、表格、图表或填空。提供类型、正文及所需位置尺寸，可用 appearance 同次设置文字/公式/图形/表格/图表的初始专业外观，语义同 object.update；省略时保留人工插入默认，input 当前不支持 appearance。软件准备容器、专业数据和身份，正式事务可撤销。Flow destination=document 为正文，paper 为纸张浮层。",
   "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "additionalProperties": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "propertyNames": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "__schema1": {
+        "anyOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        ]
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
+      "appearance": {
+        "$ref": "#/$defs/__schema0",
+        "description": "可选初始专业外观，和 object.update 的 appearance 同义；只覆盖提供字段，省略时保留人工插入默认。文字/公式支持 fontSize、color、bold、lineHeight、shadows 等；图形、表格、图表使用其公开专业 style 字段，图形使用 fillColor、borderColor 等实际字段。input 当前不支持 appearance。"
+      },
       "center": {
         "additionalProperties": false,
         "properties": {

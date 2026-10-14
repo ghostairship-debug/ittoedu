@@ -44,8 +44,23 @@ async function setup(warning = false) {
     runBusy: async action => { try { return await action() } catch (error) { errors.push(error); return undefined } }, commitStatus: vi.fn(), reportError: vi.fn(), navigateFinding: vi.fn(),
     exportHtml: vi.fn(async () => ({ path: 'generated.html' })), exportWebPackage: vi.fn(async () => null), exportPdf: vi.fn(async () => null), exportBinary: vi.fn(async () => null) }
   const hook = renderHook(() => useCourseDelivery(ports, { documentTrigger: null, sidecarTrigger: null, componentPackagesTrigger: null }))
-  return { host, a, b, ports, errors, hook, setActive: (id: string) => { active = id } }
+  return { directory, host, a, b, ports, errors, hook, setActive: (id: string) => { active = id } }
 }
+it('keeps the export default directory bound to the captured GLX when the active document changes', async () => {
+  const f = await setup()
+  const projectPath = path.join(f.directory, 'source.glx')
+  await f.host.internalAPI.save(f.a.documentId, projectPath)
+  await f.host.internalAPI.save(f.b.documentId, path.join(f.directory, 'other.glx'))
+  let release!: () => void
+  fonts.gate = new Promise<void>(resolve => { release = resolve })
+  act(() => f.hook.result.current.exportCourse('single-html'))
+  await waitFor(() => expect(f.hook.result.current.exportProgress).toBe('generating'))
+  f.setActive(f.b.documentId)
+  await act(async () => { release(); await fonts.gate })
+  await waitFor(() => expect(f.ports.exportHtml).toHaveBeenCalledTimes(1))
+  expect(vi.mocked(f.ports.exportHtml).mock.calls[0][0].projectPath).toBe(projectPath)
+  expect(f.errors).toEqual([])
+})
 it('keeps a pending output notice bound to its document and cancels a delayed continuation before any write', async () => {
   const f = await setup(true)
   await act(async () => f.hook.result.current.exportCourse('single-html'))

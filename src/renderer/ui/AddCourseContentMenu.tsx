@@ -1,23 +1,8 @@
 import { ChevronDown, Plus } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
-import type {
-  CourseEditorDropdownAction,
-  CourseEditorLayoutResult,
-  CourseEditorPrimaryAction,
-} from '../course/courseEditorLayout'
-
-const DROPDOWN_LABELS: Record<CourseEditorDropdownAction, string> = {
-  'slide-page': '新增演示页面',
-  'flow-page': '新增流式布局',
-  'spatial-page': '新增无限画布',
-}
-
-const PRIMARY_LABELS: Record<CourseEditorPrimaryAction, string> = {
-  scene: '新建场景',
-  'slide-page': '新增演示页面',
-  'flow-page': '新增流式布局',
-  'spatial-page': '新增无限画布',
-}
+import type { CourseEditorDropdownAction, CourseEditorLayoutResult } from '../course/courseEditorLayout'
+import { CommandMenuItems, moveMenuFocus } from '../editing/commands/CommandMenu'
+import { newPageCommands } from '../editing/commands/pageCommands'
 
 export interface AddCourseContentMenuProps {
   layout: CourseEditorLayoutResult
@@ -27,17 +12,18 @@ export interface AddCourseContentMenuProps {
   onAddSpatialPage?(): void
 }
 
-export function AddCourseContentMenu({
-  layout,
-  onPrimary,
-  onAddSlidePage,
-  onAddFlowPage,
-  onAddSpatialPage,
-}: AddCourseContentMenuProps) {
+export function AddCourseContentMenu({ layout, onPrimary, onAddSlidePage, onAddFlowPage, onAddSpatialPage }: AddCourseContentMenuProps) {
   const menuId = useId()
-  const panelRef = useRef<HTMLDivElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null), panelRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   const [placement, setPlacement] = useState<'bottom' | 'top'>('bottom')
+  const primaryKind = layout.primary.action === 'scene' ? 'slide-page' : layout.primary.action
+  const handlers: Record<CourseEditorDropdownAction, (() => void) | undefined> = {
+    'slide-page': primaryKind === 'slide-page' ? onPrimary : onAddSlidePage,
+    'flow-page': primaryKind === 'flow-page' ? onPrimary : onAddFlowPage,
+    'spatial-page': primaryKind === 'spatial-page' ? onPrimary : onAddSpatialPage,
+  }
+  const items = newPageCommands(kind => handlers[kind]?.())
 
   useEffect(() => {
     if (!open || !panelRef.current) return
@@ -46,21 +32,16 @@ export function AddCourseContentMenu({
     const viewportPadding = 8
     const overflowBottom = rect.bottom > window.innerHeight - viewportPadding
     const overflowTop = rect.top < viewportPadding
-    if (overflowBottom && !overflowTop) setPlacement('top')
-    else setPlacement('bottom')
+    setPlacement(overflowBottom && !overflowTop ? 'top' : 'bottom')
+    panel.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus({ preventScroll: true })
   }, [open])
 
   useEffect(() => {
     if (!open) return
     const onPointerDown = (event: MouseEvent) => {
-      const target = event.target
-      if (!(target instanceof Node)) return
-      if (panelRef.current?.contains(target)) return
-      setOpen(false)
+      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false)
     }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
     window.addEventListener('mousedown', onPointerDown)
     window.addEventListener('keydown', onKeyDown)
     return () => {
@@ -69,73 +50,15 @@ export function AddCourseContentMenu({
     }
   }, [open])
 
-  const dropdownHandlers: Record<CourseEditorDropdownAction, (() => void) | undefined> = {
-    'slide-page': onAddSlidePage,
-    'flow-page': onAddFlowPage,
-    'spatial-page': onAddSpatialPage,
-  }
-
-  const primaryAlias = layout.primary.action === 'scene'
-    ? 'add-scene'
-    : layout.primary.action === 'flow-page'
-      ? 'add-flow-page'
-      : undefined
-
-  return (
-    <div className="add-content-menu__cluster">
-      <button
-        type="button"
-        className="secondary-button"
-        data-testid="add-content-primary"
-        {...(primaryAlias ? { 'data-alias-testid': primaryAlias } : {})}
-        onClick={onPrimary}
-      >
-        <Plus size={14} />
-        {PRIMARY_LABELS[layout.primary.action]}
-      </button>
-      {layout.dropdown.length > 0 ? (
-        <div className="add-content-menu" data-testid="add-content-menu">
-          <button
-            type="button"
-            className="secondary-button add-content-menu__toggle"
-            aria-haspopup="menu"
-            aria-expanded={open}
-            aria-controls={menuId}
-            title="新增其他类型页面"
-            onClick={() => setOpen((value) => !value)}
-          >
-            <ChevronDown size={14} />
-          </button>
-          {open ? (
-            <div
-              ref={panelRef}
-              id={menuId}
-              className={`add-content-menu__panel add-content-menu__panel--${placement}`}
-              role="menu"
-              aria-label="新增内容"
-            >
-              {layout.dropdown.map((action) => {
-                const handler = dropdownHandlers[action]
-                if (!handler) return null
-                return (
-                  <button
-                    key={action}
-                    type="button"
-                    role="menuitem"
-                    data-testid={`add-${action}`}
-                    onClick={() => {
-                      setOpen(false)
-                      handler()
-                    }}
-                  >
-                    {DROPDOWN_LABELS[action]}
-                  </button>
-                )
-              })}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+  return <div ref={rootRef} className="add-content-menu__cluster">
+    <div className="add-content-menu" data-testid="add-content-menu">
+      <button type="button" className="secondary-button add-content-menu__toggle" data-testid="add-content-primary"
+        aria-label="新建页面" aria-haspopup="menu" aria-expanded={open} aria-controls={menuId} title="新建页面"
+        onClick={() => setOpen(value => !value)}><Plus size={14} aria-hidden="true" />新建页面<ChevronDown size={14} aria-hidden="true" /></button>
+      {open && <div ref={panelRef} id={menuId} className={`add-content-menu__panel add-content-menu__panel--${placement}`}
+        role="menu" aria-label="新建页面" onKeyDown={moveMenuFocus}>
+        <CommandMenuItems items={items} onRun={item => { setOpen(false); item.run() }} />
+      </div>}
     </div>
-  )
+  </div>
 }

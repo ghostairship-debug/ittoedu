@@ -39,11 +39,11 @@ export function htmlPreviewContentSecurityPolicy(mediaOrigins: readonly string[]
   const sources = (base: string, remote: readonly string[]) => `${base}${remote.length ? ` ${[...new Set(remote)].sort().join(' ')}` : ''}`
   return [
     ...BASE_CSP.slice(0, 2),
-    sources("style-src 'self' 'unsafe-inline'", origins('stylesheet')),
-    sources("img-src 'self' data: blob:", [...allowed, ...origins('image')]),
+    sources("style-src 'self' 'unsafe-inline' data:", origins('stylesheet')),
+    sources("img-src 'self' data: blob:", [...allowed, ...origins('image'), ...origins('stylesheet')]),
     sources("media-src 'self' data: blob:", [...allowed, ...origins('media')]),
     ...BASE_CSP.slice(3).map(directive => directive === "font-src 'self' data:"
-      ? sources(directive, origins('font')) : directive === "connect-src 'self'"
+      ? sources(directive, [...origins('font'), ...origins('stylesheet')]) : directive === "connect-src 'self'"
       ? `${directive}${connections.length ? ` ${connections.join(' ')}` : ''}` : directive),
   ].join('; ')
 }

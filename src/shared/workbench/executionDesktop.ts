@@ -1,6 +1,6 @@
 import { documentSlotSchema } from '../document/selectionSchema'
 import { z } from 'zod'
-import { validHomePath, type ConversationElementScope, type ConversationRecord, type WorkspaceRecord } from './conversations'
+import { validHomePath, executionAdvancementModeSchema, type ExecutionAdvancementMode, type ConversationElementScope, type ConversationRecord, type WorkspaceRecord } from './conversations'
 import type { ExecutionContentOutput, ExecutionRunRecord } from './execution'
 import type { ExecutionEventSearchInput, ExecutionEventSearchPage, ExecutionBlobRef, ExecutionEvent, ExecutionEventPage, ExecutionProjection } from './executionEvents'
 import type { EditEvent, EditSessionSnapshot } from './editSession'
@@ -9,13 +9,21 @@ import { executionRoles, type ExecutionRole, type ExecutionSelectionSnapshot, ty
 import { userAnswerSchema, type UserAnswer } from './userQuestion'
 import { approvalDecisionSchema, executionPermissionModeSchema, type ApprovalDecision, type ExecutionPermissionMode } from './executionPermission'
 import { lessonAuthoringMaterialSelectionSchema } from '../lessonAuthoring'
-import { componentAuthorRecordSchema } from '../contracts/component-platform/schema'
+import { componentAuthorRecordSchema, jsonValueSchema } from '../contracts/component-platform/schema'
+import type { ComponentAuthorField } from '../contracts/component-platform/runtime'
 
 const id = z.string().min(1), index = z.number().int().nonnegative()
+const componentAuthorFieldSchema: z.ZodType<Omit<ComponentAuthorField, 'initialValue'> & { initialValue: string }> = z.object({
+  kind: z.enum(['text', 'image']), authorKey: id.optional(), scope: componentAuthorRecordSchema.shape.scope,
+  binding: componentAuthorRecordSchema.shape.binding.optional(), bindingStatus: z.enum(['bound', 'unmounted', 'unresolved', 'source-required']).optional(),
+  fieldScope: z.enum(['data', 'authoring']).optional(), dataPath: z.array(id).optional(), initialValue: z.string(),
+  sourceRegion: z.object({ kind: z.enum(['implementation', 'data']), path: z.array(id).optional(), start: index, end: index,
+    encoding: z.enum(['html-text', 'html-attribute']).optional() }).strict().refine(value => value.end >= value.start).optional(),
+}).strict().refine(value => Boolean(value.sourceRegion || value.dataPath?.length || value.authorKey && value.binding), '作者字段需要真实地址')
 const textFragmentSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('markdown-range'), from: index, to: index }).strict().refine(value => value.to >= value.from),
   z.object({ kind: z.literal('course-instance'), surfaceId: id, instanceId: id, stateId: id.nullable().optional(),
-    fieldScope: z.enum(['data', 'flowLayout']).optional(), dataPath: z.array(id), from: index, to: index }).strict().refine(value => value.to >= value.from),
+    fieldScope: z.enum(['data', 'flowLayout', 'authoring']).optional(), dataPath: z.array(id), from: index, to: index }).strict().refine(value => value.to >= value.from),
 ])
 const executionEditTargetSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('markdown-range'), from: index, to: index }).strict().refine(value => value.to > value.from),
@@ -24,10 +32,10 @@ const executionEditTargetSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('html-author-field'), authorKey: id, field: z.enum(['text', 'src']), record: componentAuthorRecordSchema,
     source: z.object({ from: index, to: index, quote: z.enum(['"', "'", '']).optional() }).strict().refine(value => value.to >= value.from).optional() }).strict(),
   z.object({ kind: z.literal('course-instance'), surfaceId: id, instanceId: id, stateId: id.nullable().optional(),
-    fieldScope: z.enum(['data', 'flowLayout']).optional(), dataPath: z.array(id).optional(), from: index.optional(), to: index.optional(),
+    fieldScope: z.enum(['data', 'flowLayout', 'authoring']).optional(), dataPath: z.array(id).optional(), authorField: componentAuthorFieldSchema.optional(), from: index.optional(), to: index.optional(),
   }).strict().refine(value => value.from === undefined && value.to === undefined
     || value.dataPath !== undefined && value.from !== undefined && value.to !== undefined && value.to > value.from,
-  '文字范围需要真实字段和非空范围'),
+  '文字范围需要真实字段和非空范围').refine(value => !value.authorField || value.from === undefined && value.to === undefined, '作者字段使用其完整精确地址'),
   z.object({ kind: z.literal('course-object'), locationId: id, itemId: id, stateId: id.optional(), compositionNodeId: id.optional() }).strict(),
   z.object({ kind: z.literal('flow-block'), surfaceId: id, blockId: id, parentId: id.nullable() }).strict(),
   z.object({ kind: z.literal('flow-range'), surfaceId: id, blockId: id, parentId: id.nullable(), slot: documentSlotSchema, from: index, to: index }).strict().refine(value => value.to > value.from),
@@ -97,13 +105,14 @@ export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('create-conversation'), workspaceId: id, title: z.string().optional(), home: conversationHomeSchema.optional(),
     element: z.object({ kind: z.literal('element'), documentId: id, label: z.string().min(1) }).strict().optional() }).strict(),
   z.object({ type: z.literal('set-conversation-home'), ...identity, home: conversationHomeSchema.nullable() }).strict(),
+  z.object({ type: z.literal('set-advancement-mode'), ...identity, advancementMode: executionAdvancementModeSchema }).strict(),
   z.object({ type: z.literal('conversation'), ...identity }).strict(),
   z.object({ type: z.literal('prepare-documents'), ...identity, documents: z.array(executionDocumentReferenceSchema), permission: executionPermissionModeSchema.optional() }).strict(),
   z.object({ type: z.literal('draft'), ...identity, expectedRevision: index, text: z.string(), documents: z.array(executionDocumentReferenceSchema), attachments: z.array(inputAttachmentReferenceSchema).default([]) }).strict(),
   z.object({ type: z.literal('rename-conversation'), ...identity, expectedRevision: index, title: z.string().min(1) }).strict(),
   z.object({ type: z.literal('delete-conversation'), ...identity, expectedRevision: index }).strict(),
   z.object({ type: z.literal('send'), ...identity, submissionId: z.uuid(), expectedRevision: index, text: z.string(), documents: z.array(executionDocumentReferenceSchema), attachments: z.array(inputAttachmentReferenceSchema).default([]), mode: executionSubmissionModeSchema.default('queue'), retryOfRunId: id.optional(), disclosedSettings: disclosedSettingsSchema.optional(), permission: executionPermissionModeSchema.optional(),
-    contentOutput: executionContentOutputSchema.optional(),
+    advancementMode: executionAdvancementModeSchema.optional(), contentOutput: executionContentOutputSchema.optional(),
     materials: executionMaterialsSchema.optional(), webAuthorization: webTaskAuthorizationSchema.optional(),
     clientTiming: z.object({ click: rendererTimingStampSchema, invoke: rendererTimingStampSchema }).strict().optional() }).strict(),
   z.object({ type: z.literal('timing'), ...identity, submissionId: z.uuid(), stage: z.literal('renderer.first-visible'),
@@ -141,6 +150,7 @@ export interface ExecutionSendInput {
   clientTiming?: { click: RendererTimingStamp; invoke: RendererTimingStamp }
   expectedRevision: number
   text: string
+  advancementMode?: ExecutionAdvancementMode
   documents: ExecutionDocumentReference[]
   contentOutput?: ExecutionContentOutput
   materials?: ExecutionMaterials
@@ -163,6 +173,7 @@ export interface ExecutionSubmissionRecord {
   state: ExecutionSubmissionState
   mode: ExecutionSubmissionMode
   text: string
+  advancementMode?: ExecutionAdvancementMode
   documents: ExecutionDocumentReference[]
   contentOutput?: ExecutionContentOutput
   materials?: ExecutionMaterials
@@ -212,8 +223,9 @@ export interface ExecutionDesktopAPI {
   createConversation(workspaceId: string, title?: string, home?: ConversationHomeInput, element?: ConversationElementScope): Promise<ConversationRecord>
   /** Where a conversation belongs (Owner 2026-09-24); advisory metadata that never changes its revision. */
   setConversationHome?(input: { workspaceId: string; conversationId: string; home: ConversationHomeInput | null }): Promise<ConversationRecord>
+  setAdvancementMode?(input: { workspaceId: string; conversationId: string; advancementMode: ExecutionAdvancementMode }): Promise<ConversationRecord>
   conversation(workspaceId: string, conversationId: string): Promise<ConversationRecord | null>
-  draft(input: Omit<ExecutionSendInput, 'submissionId' | 'mode'>): Promise<ConversationRecord>
+  draft(input: Omit<ExecutionSendInput, 'submissionId' | 'mode' | 'advancementMode'>): Promise<ConversationRecord>
   renameConversation(input: { workspaceId: string; conversationId: string; expectedRevision: number; title: string }): Promise<ConversationRecord>
   deleteConversation(input: { workspaceId: string; conversationId: string; expectedRevision: number }): Promise<void>
   prepareDocuments?(input: Pick<ExecutionSendInput, 'workspaceId' | 'conversationId' | 'documents' | 'permission'>): Promise<ExecutionDocumentReference[]>

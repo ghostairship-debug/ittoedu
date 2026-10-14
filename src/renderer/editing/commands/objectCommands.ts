@@ -13,6 +13,7 @@ export interface ObjectCommandPorts {
 
 export interface SingleObjectState {
   locked: boolean
+  ownLocked?: boolean
   visible: boolean
   /** Why this object cannot be edited here; copying and pasting stay available. */
   disabledReason?: string | null
@@ -74,7 +75,7 @@ export function singleObjectCommands(state: SingleObjectState, ports: ObjectComm
       id: `object.order.${move}`, label, group: 'order', run: () => ports.reorder(move),
       disabledReason: editable ?? (ports.canReorder(move) ? null : move === 'forward' || move === 'front' ? '已在最上层' : '已在最下层'),
     })),
-    state.locked
+    (state.ownLocked ?? state.locked)
       ? { id: 'object.unlock', label: '解锁', group: 'state', run: () => state.setLocked(false), disabledReason: blocked }
       : { id: 'object.lock', label: '锁定', group: 'state', run: () => state.setLocked(true), disabledReason: blocked },
     state.visible

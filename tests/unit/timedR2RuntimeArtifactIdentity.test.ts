@@ -11,6 +11,7 @@ import { InMemoryComponentCompilation } from '../../src/core/components/compilat
 import { createEsbuildComponentCompiler } from '../../src/main/workbench/contentApply/compilation/esbuildComponentCompiler'
 import type { CourseProjectV10, ComponentImplementation, ComponentRuntimeContext, ComponentRuntimeImplementation } from '../../src/shared/contracts/component-platform'
 import type { DocumentResources } from '../../src/shared/workbench/document'
+import { mountWebContent } from '../../src/components/web/contentRealmImplementation'
 
 it('retains the UI6 clicked generation for an unused opaque edit, visibly and while hidden, but replaces changed helper/environment', async () => {
   // esbuild executes in Node; use its real typed-array realm before loading the native compiler.
@@ -122,4 +123,25 @@ it('retains the UI6 clicked generation for an unused opaque edit, visibly and wh
     expect({ project, resources }).toEqual(authorBefore)
   } finally { await hidden?.disposeScope('ui6-hidden'); await world.dispose(); a.remove(); b.remove(); hiddenRoot.remove(); vi.unstubAllGlobals() }
   expect(live.size).toBe(0)
+})
+
+it('keeps the inner Web DOM and its clicked state when only unused author modules change', async () => {
+  const root = document.createElement('div'); document.body.append(root)
+  const instance = { id: 'web-unused', definitionId: 'guoling.web', data: { html: '<button>Count</button>',
+    modules: { 'unused.js': 'export const unfinished =' }, moduleGraph: { modules: {}, entries: {} } } }
+  const scope: ComponentRuntimeContext['scope'] = { runScopeId: 'web-unused', instanceId: instance.id, generation: 1,
+    signal: new AbortController().signal, isActive: () => true, cleanup() {}, target: () => null,
+    events: { emit() {}, subscribe: () => () => {} }, state: { get: () => undefined, set() {}, subscribe: () => () => {} } }
+  const mounted = await mountWebContent({ root, scope, instance })
+  try {
+    const button = root.querySelector('button')!
+    let clicks = 0; button.addEventListener('click', () => { button.textContent = String(++clicks) })
+    button.click(); expect(button.textContent).toBe('1')
+    await mounted.update({ ...instance, data: { ...instance.data, modules: { 'unused.js': 'export const unfinished = still(' } } })
+    expect(root.querySelector('button')).toBe(button)
+    button.click(); expect(button.textContent).toBe('2')
+    await mounted.update({ ...instance, data: { ...instance.data, html: '<button>Changed HTML</button>' } })
+    expect(root.querySelector('button')).not.toBe(button)
+    expect(root.querySelector('button')!.textContent).toBe('Changed HTML')
+  } finally { mounted.dispose(); root.remove() }
 })

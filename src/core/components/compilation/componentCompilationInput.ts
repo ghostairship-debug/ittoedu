@@ -7,8 +7,7 @@ type SourceImplementation = Extract<ComponentImplementation, { kind: 'source' }>
 /** Editing projects text only; opaque files keep their canonical bytes. */
 export function componentSourceFileText(bytes: Uint8Array): string | null {
   try {
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-    return text.includes('\0') ? null : text
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
   } catch { return null }
 }
 
@@ -19,7 +18,7 @@ function sourceModule(implementation: SourceImplementation, resources: DocumentR
     const { ownerId, entry } = implementation.workspace
     const files = resources?.components[ownerId]
     if (requireEntry && (!files || !Object.hasOwn(files, entry))) throw new Error(`组件源码入口尚未提供：${ownerId}/${entry}`)
-    const text: Record<string, string> = {}, binaryFiles: Record<string, Uint8Array> = {}
+    const text: Record<string, string> = Object.create(null), binaryFiles: Record<string, Uint8Array> = Object.create(null)
     for (const [name, bytes] of Object.entries(files ?? {})) {
       const value = componentSourceFileText(bytes)
       if (value === null) binaryFiles[name] = Uint8Array.from(bytes)
@@ -42,12 +41,12 @@ export function componentCompilationInput(
   project: CourseProjectV10, implementation: SourceImplementation, resources?: DocumentResources,
 ): ComponentCompilationInput {
   const source = componentModuleSource(implementation, resources)
-  const dependencies: Record<string, ComponentModuleDependency> = {}
+  const dependencies: Record<string, ComponentModuleDependency> = Object.create(null)
   const pending = [...Object.values(source.moduleBindings ?? {})]
   while (pending.length) {
     const id = pending.shift()!
     if (Object.hasOwn(dependencies, id)) continue
-    const definition = project.definitions[id]
+    const definition = Object.hasOwn(project.definitions,id) ? project.definitions[id] : undefined
     // A dormant binding must not reject a usable module. The compiler reports an
     // absent definition/entry at the actual import, with the original spelling intact.
     if (!definition || definition.implementation.kind !== 'source') continue
@@ -55,5 +54,6 @@ export function componentCompilationInput(
     dependencies[id] = { version: definition.version ?? '', ...dependency }
     pending.push(...Object.values(dependency.moduleBindings ?? {}))
   }
-  return { ...source, dependencies }
+  const rootDefinitionId = Object.values(project.definitions).find(definition => definition.implementation === implementation)?.id
+  return { ...source, dependencies, ...(rootDefinitionId ? { rootDefinitionId } : {}) }
 }

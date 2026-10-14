@@ -1,11 +1,11 @@
 import { useSyncExternalStore } from 'react'
-import { resolveComponentPresentation, type ComponentAuthorSpot } from '../../../shared/contracts/component-platform'
+import { componentDefinitionBuiltinKey, resolveComponentPresentation, type ComponentAuthorSpot } from '../../../shared/contracts/component-platform'
 import { documentTextContentSchema, plainDocumentText } from '../../../shared/document/content'
 import { replaceCourseInstanceText } from '../../../core/tools/ToolTargets'
 import type { ComponentPlatformRuntime } from '../../../player/components/ComponentPlatformRuntime'
 import type { CapturedCourseTarget, CourseV10DocumentBridge } from '../../documents/CourseV10DocumentBridge'
 import { componentIsLocked } from '../crossSurfaceCommands'
-import { authorSpotEdits } from '../../componentPlatform/surfaces/slide/authorSpots'
+import { authorSpotEdits, authorSpotValue } from '../../componentPlatform/surfaces/slide/authorSpots'
 import { useEditorStore } from '../../store/editorStore'
 import { webDataSchema } from '../../../components/web/data'
 import { scanPageText } from '../../../shared/runtimeText/scanPageText'
@@ -28,7 +28,7 @@ export function registerRuntimeLightEditDocument(documentId: string, world: Comp
   return () => { stop(); if (documents.get(documentId) === entry) { documents.delete(documentId); changed() } }
 }
 
-export interface RuntimePageTextEntry { spot: ComponentAuthorSpot; text: string }
+export interface RuntimePageTextEntry { id: string; spot: ComponentAuthorSpot; text: string }
 export interface RuntimeLightEditView { documentId: string; entries: readonly RuntimePageTextEntry[]; locked: boolean;
   pageCopy: readonly string[]; overrides: readonly LightEditTextOverride[] }
 export interface CapturedRuntimePageText { target: CapturedCourseTarget; spot: ComponentAuthorSpot; bridge: CourseV10DocumentBridge }
@@ -38,8 +38,8 @@ export type RuntimePageTextResult = { readonly ok: true; readonly changed: boole
 
 function pageCopy(target: CapturedCourseTarget, itemId: string) {
   const instance = target.editingProject.instances[itemId]
-  const implementation = instance?.implementationOverride ?? target.editingProject.definitions[instance?.definitionId]?.implementation
-  if (implementation?.kind !== 'builtin' || !['guoling.web', 'guoling.html-program'].includes(implementation.key)) return null
+  const key = componentDefinitionBuiltinKey(target.editingProject.definitions[instance?.definitionId])
+  if (!instance || !['guoling.web', 'guoling.html-program'].includes(key ?? '')) return null
   const parsed = webDataSchema.safeParse(instance.data)
   if (!parsed.success) return null
   const data = parsed.data
@@ -48,17 +48,32 @@ function pageCopy(target: CapturedCourseTarget, itemId: string) {
   return { texts, overrides: data.textOverrides ?? [] }
 }
 
+/** An author field can be rendered more than once; matching text does not imply matching identity. */
+function pageTextIdentity(spot: ComponentAuthorSpot): string {
+  const address = spot.sourceRegion ? ['source', spot.sourceRegion]
+    : spot.dataPath ? [spot.fieldScope ?? 'data', spot.dataPath]
+      : spot.authorKey ? ['author', spot.authorKey] : ['spot', spot.id]
+  return JSON.stringify([spot.instanceId, address])
+}
+
 function read(itemId: string, documentId = useEditorStore.getState().courseView.activeDocumentId): RuntimeLightEditView | null {
   if (!documentId) return null
-  const entry = documents.get(documentId), project = entry?.bridge.read().views.find(view => view.documentId === documentId)?.model.project
-  if (!entry || !project?.instances[itemId]) return null
+  const entry = documents.get(documentId)
+  if (!entry) return null
+  const target = entry.bridge.captureTarget(documentId), project = target.editingProject
+  if (!project.instances[itemId]) return null
+  const seen = new Set<string>()
   const entries = entry.world.authorSpots().flatMap(spot => {
     if (spot.instanceId !== itemId || spot.kind !== 'text') return []
     const rich = documentTextContentSchema.safeParse(spot.initialValue)
     const text = typeof spot.initialValue === 'string' ? spot.initialValue : rich.success ? plainDocumentText(rich.data) : null
-    return text === null ? [] : [{ spot, text }]
+    if (text === null) return []
+    const id = pageTextIdentity(spot)
+    if (seen.has(id)) return []
+    seen.add(id)
+    return [{ id, spot, text }]
   })
-  const copy = pageCopy(entry.bridge.captureTarget(documentId), itemId)
+  const copy = pageCopy(target, itemId)
   return { documentId, entries, locked: componentIsLocked(project, itemId), pageCopy: copy?.texts ?? [], overrides: copy?.overrides ?? [] }
 }
 
@@ -107,7 +122,9 @@ export const runtimeLightEditCommands = {
     const target = entry.bridge.captureTarget(documentId)
     if (componentIsLocked(target.editingProject, spot.instanceId)) throw new Error('这个对象已锁定，请先解锁')
     const current = entry.world.authorSpots().find(value => value.id === spot.id && value.mountGeneration === spot.mountGeneration)
-    if (!current) throw new Error('此处运行内容已更换，请重新打开文字编辑')
+    if (!current || pageTextIdentity(current) !== pageTextIdentity(spot)
+      || JSON.stringify(current.initialValue) !== JSON.stringify(spot.initialValue))
+      throw new Error('此处运行内容已更换，请重新打开文字编辑')
     return { target, spot: structuredClone(current), bridge: entry.bridge }
   },
   async setPageText(captured: CapturedRuntimePageText, text: string): Promise<RuntimePageTextResult> {
@@ -123,9 +140,15 @@ export const runtimeLightEditCommands = {
         editingProject: resolveComponentPresentation(latest.project, target.surfaceId, target.activeStateId) }
       if (componentIsLocked(current.editingProject, spot.instanceId)) throw new Error('这个对象已锁定，文字草稿已保留')
       const rich = documentTextContentSchema.safeParse(spot.initialValue)
+      if (rich.success && spot.dataPath && !spot.sourceRegion) {
+        const instance = current.editingProject.instances[spot.instanceId]
+        const owner = spot.fieldScope === 'authoring' ? instance?.authoring as unknown as JsonValue : instance?.data
+        if (JSON.stringify(authorSpotValue(owner, spot.dataPath)) !== JSON.stringify(spot.initialValue))
+          throw new Error('此处可编辑内容已变化，请重新打开编辑')
+      }
       const edits = rich.success && spot.dataPath && !spot.sourceRegion
         ? [replaceCourseInstanceText({ kind: 'course-v10', project: current.editingProject, resources: current.resources },
-          { kind: 'course-instance', surfaceId: target.surfaceId ?? '', instanceId: spot.instanceId, dataPath: spot.dataPath }, text)]
+          { kind: 'course-instance', surfaceId: target.surfaceId ?? '', instanceId: spot.instanceId, dataPath: spot.dataPath, ...(spot.fieldScope ? { fieldScope: spot.fieldScope } : {}) }, text)]
         : authorSpotEdits(current.editingProject, spot, text, current.resources)
       const previous = rich.success ? plainDocumentText(rich.data) : spot.initialValue
       if (text === previous) return { ok: true, changed: false }

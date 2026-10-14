@@ -84,6 +84,23 @@ it('generates one real raster resource through the direct Images endpoint and re
   expect(durable).not.toContain(image.toString('base64'))
 })
 
+it.each(['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'])('sends the frozen OAuth image model %s unchanged on the existing billing route', async model => {
+  const image = await fixture(), requests: string[] = []
+  const transport = await server((raw, res, url) => {
+    expect(url).toBe('/backend-api/codex/images/generations')
+    requests.push(raw)
+    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(response(image))
+  })
+  const input = request('new-image-model')
+  input.selection.imageModel = model
+  const result = await new ChatGPTImageProvider({ credentialResolver: resolver, fetch: transport }).generate(input, [])
+  expect(result.status).toBe('completed')
+  expect(requests).toHaveLength(1)
+  expect(JSON.parse(requests[0]!)).toEqual({ model, prompt: input.prompt })
+  expect(result.provenance).toMatchObject({ requestedImageModel: model, executor: 'guoling-direct-chatgpt-images',
+    connectionId: connection.id, accountId: connection.accountId, authKind: 'oauth', billing: { kind: 'subscription' } })
+})
+
 it('edits with the original bytes in an independent request and keeps the original intact', async () => {
   const original = await fixture(), changed = await sharp(original).flop().linear(0.7).png().toBuffer(), root = await directory()
   const transport = await server((raw, res, url) => {

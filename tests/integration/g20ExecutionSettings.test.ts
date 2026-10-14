@@ -52,6 +52,24 @@ function roles(connectionId: string): ExecutionProfile['roles'] {
     vision: { connectionId, model: 'vision-model' }, imageGenerate: null, imageEdit: null }
 }
 
+it('R01 protocol changes preserve explicit caps, clear stale managed reasoning and revise the profile once', async () => {
+  const { store, options } = await setup()
+  const entry = await store.saveConnection({ connection: config(), apiKey: 'fixture' })
+  const selected = roles(entry.connection.id)
+  selected.conversation!.parameters = { max_completion_tokens: 1200, reasoning_effort: 'high', temperature: 0.6 }
+  const profile = await store.saveProfile({ roles: selected })
+  await store.saveConnection({ id: entry.connection.id, expectedRevision: 1, connection: { ...config(), protocol: 'openai-responses' }, apiKey: 'fixture' })
+  const current = await store.read()
+  expect(current.profile.revision).toBe(profile.revision + 1)
+  expect(current.profile.roles.conversation!.parameters).toEqual({ max_output_tokens: 1200, temperature: 0.6 })
+  await expect(store.saveProfile({ roles: selected, expectedRevision: profile.revision })).rejects.toMatchObject({ code: 'stale-profile' })
+  expect((await new ExecutionSettingsStore(options).snapshot('conversation')).parameters).toEqual({ max_output_tokens: 1200, temperature: 0.6 })
+  const relay = await store.saveConnection({ connection: { ...config('relay'), baseURL: 'https://api.teamorouter.com/v1' }, apiKey: 'fixture' })
+  const routed = roles(relay.connection.id)
+  routed.conversation = { connectionId: relay.connection.id, model: 'gpt-6.1-sol', parameters: { max_tokens: 2400 } }
+  expect((await store.saveProfile({ roles: routed })).roles.conversation!.parameters).toEqual({ max_output_tokens: 2400 })
+})
+
 it('NI05 compression is an explicit optional role and keeps its own immutable connection/model selection', async () => {
   const { store, options } = await setup()
   const main = await store.saveConnection({ connection: config('main'), apiKey: 'main-fixture' })
@@ -153,7 +171,7 @@ it('applies persisted capability facts only to the exact connection revision, mo
   expect((await reopened.read()).capabilityRecords).toHaveLength(1)
 })
 
-it('isolates account changes, serializes competing updates and revokes all old revisions without reviving them on login', async () => {
+it('preserves the key when the API account display name changes, serializes updates and revokes old revisions without reviving them', async () => {
   const { store, options } = await setup()
   const first = await store.saveConnection({ connection: config(), apiKey: 'fixture-original' })
   await store.saveProfile({ roles: roles(first.connection.id) })
@@ -164,9 +182,9 @@ it('isolates account changes, serializes competing updates and revokes all old r
   ])
   expect(updated.status).toBe('fulfilled')
   if (updated.status !== 'fulfilled') throw new Error('update failed')
-  expect(updated.value).toMatchObject({ hasCredential: false, connection: { revision: 2, accountId: 'account-two' } })
+  expect(updated.value).toMatchObject({ hasCredential: true, connection: { revision: 2, accountId: 'account-two' } })
   expect(stale).toMatchObject({ status: 'rejected', reason: { code: 'stale-connection' } })
-  await expect(store.snapshot('conversation')).rejects.toMatchObject({ code: 'credential-unavailable' })
+  expect(await store.resolveCredential((await store.snapshot('conversation')).connection)).toBe('fixture-original')
   expect(await store.resolveCredential(original.connection)).toBe('fixture-original')
   await expect(store.resolveCredential({ ...original.connection, baseURL: 'https://wrong.invalid/v1' })).rejects.toMatchObject({ code: 'stale-credential-reference' })
   const second = await store.saveConnection({ id: first.connection.id, expectedRevision: 2, connection: config('account-two'), apiKey: 'fixture-second' })
@@ -217,7 +235,8 @@ it('preserves prior settings when secure storage/encryption/disk writes fail, wh
   expect(await fs.readFile(filename, 'utf8')).toBe(before)
   const obstructed = path.join(directory, 'blocked-parent')
   await fs.writeFile(obstructed, 'ordinary file')
-  await expect(new ExecutionSettingsStore({ ...options, directory: obstructed }).saveConnection({ connection: config(), apiKey: 'fixture-private' })).rejects.toMatchObject({ code: 'settings-read-failed' })
+  // A file as parent produces ENOTDIR during read on some hosts and ENOENT followed by a write failure on Windows.
+  await expect(new ExecutionSettingsStore({ ...options, directory: obstructed }).saveConnection({ connection: config(), apiKey: 'fixture-private' })).rejects.toMatchObject({ code: expect.stringMatching(/^settings-(read|write)-failed$/) })
   expect(await fs.readFile(filename, 'utf8')).toBe(before)
   cipher.state.available = false
   await store.revokeConnection(first.connection.id)

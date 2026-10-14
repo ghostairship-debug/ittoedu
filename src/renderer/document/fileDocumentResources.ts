@@ -17,7 +17,7 @@ export function createFileDocumentResourcePort(input: {
       documentResourcesSchema.parse(resources)
       const prepared: FilePreparedDocumentResources = { attachments: [] }
       const mapped: DocumentResources = { assets: [], components: [] }
-      const assetIds: Record<string, string> = {}
+      const assetIds: Record<string, string> = Object.create(null)
       const components: { from: { packageId: string; version: string }; to: { packageId: string; version: string } }[] = []
       const paths = new Set<string>()
       const attach = (suffix: string, bytes: Uint8Array) => {

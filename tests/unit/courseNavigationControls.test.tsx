@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { ComponentNavigationOwner } from '../../src/renderer/components/ComponentNavigationOwner'
 import { CourseNavigationControls } from '../../src/renderer/ui/workspaces/CourseNavigationControls'
+import { CourseAdvancedChrome, CourseEditorChromeContext, CourseEditorFrame, CourseNavigationToolbarHost } from '../../src/renderer/documents/CourseEditorChromeContext'
 import { createCrossSurfaceCommands, type CrossSurfaceCommandPorts } from '../../src/renderer/composition/crossSurfaceCommands'
 
 afterEach(cleanup)
@@ -31,9 +32,9 @@ it('keeps five controls in edit/run, advances actual steps before pages, and res
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     await waitFor(() => expect(owner.currentStateId()).toBe('first-step'))
     expect(current).toBe(first.id); expect(playing).toBe(false)
-    fireEvent.click(screen.getByRole('button', { name: '当前位置试运行' }))
+    fireEvent.click(screen.getByRole('button', { name: '试运行' }))
     expect(owner.currentStateId()).toBe('first-step'); expect(playing).toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: '编辑状态' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     expect(owner.currentStateId()).toBe('first-step'); expect(playing).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     await waitFor(() => expect(owner.currentStateId()).toBe('last-step'))
@@ -47,6 +48,41 @@ it('keeps five controls in edit/run, advances actual steps before pages, and res
     expect(replay).toHaveBeenCalledExactlyOnceWith(first.id); expect(restart).not.toHaveBeenCalled()
     expect(applyDraft).toHaveBeenCalledTimes(4); expect(report).not.toHaveBeenCalled()
     expect(project).toEqual(before)
+  } finally { owner.dispose() }
+})
+
+it('moves the same live navigation to the active toolbar without duplicating controls or losing the current state', async () => {
+  const project = createBlankCourseProjectV10('工具栏导航'), first = project.surfaces[0]
+  first.presentation = { states: [{ id: 'first', title: '第一步', overrides: {} }, { id: 'second', title: '第二步', overrides: {} }] }
+  const owner = new ComponentNavigationOwner({ project: () => project, surfaceId: () => first.id, interactive: () => false, select: () => {} })
+  const report = vi.fn()
+  function Frame() {
+    const [mode, setMode] = useState<'light' | 'deep'>('light')
+    return <CourseEditorChromeContext.Provider value={{ documentId: 'current', mode, setMode }}>
+      <button onClick={() => setMode(mode === 'light' ? 'deep' : 'light')}>切换工具栏</button>
+      <CourseEditorFrame lightTools={<CourseNavigationToolbarHost mode="light" />}>
+        <CourseAdvancedChrome><CourseNavigationToolbarHost mode="deep" /></CourseAdvancedChrome>
+        <main aria-label="作品画布"><CourseNavigationControls canvasMode="edit" onCanvasModeChange={() => {}}
+          navigation={owner.editorPort()} report={report} /></main>
+      </CourseEditorFrame>
+    </CourseEditorChromeContext.Provider>
+  }
+  try {
+    render(<Frame />)
+    await waitFor(() => expect(screen.getByTestId('course-try-run-chrome').parentElement).toHaveAttribute('data-toolbar-mode', 'light'))
+    expect(screen.getByRole('main', { name: '作品画布' })).not.toContainElement(screen.getByTestId('course-try-run-chrome'))
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    await waitFor(() => expect(owner.currentStateId()).toBe('first'))
+    fireEvent.click(screen.getByRole('button', { name: '切换工具栏' }))
+    await waitFor(() => expect(screen.getByTestId('course-try-run-chrome').parentElement).toHaveAttribute('data-toolbar-mode', 'deep'))
+    expect(screen.getAllByTestId('course-try-run-chrome')).toHaveLength(1)
+    expect(owner.currentStateId()).toBe('first')
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    await waitFor(() => expect(owner.currentStateId()).toBe('second'))
+    fireEvent.click(screen.getByRole('button', { name: '切换工具栏' }))
+    await waitFor(() => expect(screen.getByTestId('course-try-run-chrome').parentElement).toHaveAttribute('data-toolbar-mode', 'light'))
+    expect(owner.currentStateId()).toBe('second')
+    expect(report).not.toHaveBeenCalled()
   } finally { owner.dispose() }
 })
 

@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { compileHtmlModules } from './compileHtmlModules'
+import { compileHtmlModules, retainedNativeModuleSyntaxSupport } from './compileHtmlModules'
 import type { Loader, Message, Plugin } from 'esbuild'
 import { loadRuntimeEsbuild, runtimeEsbuildVersion } from '../../componentCompilerRuntime'
 import { componentModuleFileExtensions, componentModuleSpecifier } from '../../../../core/components/source/moduleSpecifier'
@@ -34,7 +34,7 @@ function diagnostics(messages: readonly Message[], severity: 'error' | 'warning'
 /** esbuild reads only supplied virtual files and returns bytes; it never runs candidate code. */
 export function createEsbuildComponentCompiler(): ComponentCompiler {
   return {
-    identity: `esbuild:${runtimeEsbuildVersion}:component-memory-esm-7`,
+    identity: `esbuild:${runtimeEsbuildVersion}:component-memory-esm-11`,
     async compile(input: ComponentCompilationInput) {
       if (input.options?.preserveModules) {
         const { transform } = await loadRuntimeEsbuild()
@@ -66,6 +66,7 @@ export function createEsbuildComponentCompiler(): ComponentCompiler {
       addFiles('/source', input.files, input.moduleBindings, undefined, input.binaryFiles)
       declareEntry('/source', input.entry, input.entryLanguage)
       for (const [specifier, dependency] of Object.entries(input.dependencies ?? {})) {
+        if (specifier === input.rootDefinitionId) { entries.set(specifier, `/source/${relativeFile(input.entry)}`); continue }
         const root = `/dependencies/${encodeURIComponent(specifier)}`
         addFiles(root, dependency.files, dependency.moduleBindings, specifier, dependency.binaryFiles)
         declareEntry(root, dependency.entry, dependency.entryLanguage)
@@ -80,6 +81,16 @@ export function createEsbuildComponentCompiler(): ComponentCompiler {
             // are not ambient filesystem modules and grant no network origin.
             if ((args.kind === 'url-token' || args.kind === 'import-rule') && /^(?:data:|https?:|\/\/|cw-resource:|#)/i.test(args.path))
               return { path: args.path, external: true }
+            // Exact bindings already supply their loading implementation, including
+            // alternate-loader spellings such as ?raw. Consume them before URL rules.
+            const bindings = owners.get(args.importer)?.bindings
+            const exactIdentity = args.kind !== 'entry-point' && bindings && Object.hasOwn(bindings, args.path)
+              ? bindings[args.path] : undefined
+            if (exactIdentity !== undefined) {
+              const requested = entries.get(exactIdentity), resolved = requested && resolveFile(requested)
+              return resolved ? { path: resolved, namespace }
+                : { errors: [{ text: `无法解析组件依赖 ${JSON.stringify(args.path)}；请由资源服务提供该模块及其实际版本` }] }
+            }
             // Entry is a supplied physical filename, not an authored URL reference.
             const specifier = args.kind === 'entry-point' ? { pathname: input.entry, suffix: '' }
               : componentModuleSpecifier(args.path, args.kind === 'url-token' ? 'resource' : 'module')
@@ -91,9 +102,7 @@ export function createEsbuildComponentCompiler(): ComponentCompiler {
               const relative = path.posix.join(path.posix.dirname(args.importer), specifier.pathname)
               if (owner && relative.startsWith(`${owner.root}/`)) requested = relative
             } else {
-              const bindings = owners.get(args.importer)?.bindings
-              const identity = bindings ? (Object.hasOwn(bindings, args.path) ? bindings[args.path]
-                : Object.hasOwn(bindings, specifier.pathname) ? bindings[specifier.pathname] : undefined) : specifier.pathname
+              const identity = bindings ? (Object.hasOwn(bindings, specifier.pathname) ? bindings[specifier.pathname] : undefined) : specifier.pathname
               if (identity !== undefined) requested = entries.get(identity)
             }
             const resolved = requested && resolveFile(requested)
@@ -103,7 +112,7 @@ export function createEsbuildComponentCompiler(): ComponentCompiler {
           builder.onLoad({ filter: /.*/, namespace }, args => {
             if (args.pluginData?.asset) return { contents: binaryFiles.get(args.path) ?? files.get(args.path)!, loader: 'dataurl' }
             if (binaryFiles.has(args.path)) return { errors: [{ text: `非文本组件依赖不能作为程序执行：${names.get(args.path) ?? args.path}` }] }
-            const loader = entryLoaders.get(args.path) ?? loaders[path.posix.extname(args.path)]
+            const loader = entryLoaders.get(args.path) ?? loaders[path.posix.extname(args.path).toLowerCase()]
             if (!loader) return { errors: [{ text: `组件源码类型不支持：${names.get(args.path) ?? args.path}` }] }
             return { contents: files.get(args.path)!, loader }
           })
@@ -114,7 +123,7 @@ export function createEsbuildComponentCompiler(): ComponentCompiler {
         const result = await build({
           entryPoints: [input.entry], plugins: [plugin], bundle: true, write: false,
           outfile: 'component.js', format: 'esm', platform: 'browser',
-          target: input.options?.target ?? 'es2022', jsx: input.options?.jsx ?? 'automatic',
+          target: input.options?.target ?? 'es2022', supported: retainedNativeModuleSyntaxSupport, jsx: input.options?.jsx ?? 'automatic',
           jsxImportSource: input.options?.jsxImportSource ?? 'react', minify: input.options?.minify ?? false,
           sourcemap: (input.options?.sourceMap ?? true) ? 'inline' : false,
           logLevel: 'silent', metafile: false,

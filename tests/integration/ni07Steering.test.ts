@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -43,10 +44,10 @@ async function fixture(boundary: 'provider' | 'approval' | 'question' | 'finish'
     }
     let tools: { name: string; input: unknown }[]
     if (turn === 1) tools = boundary === 'finish'
-      ? [{ name: 'text_replace', input: { target: handle, content: 'FIRST' } }, { name: 'task_finish', input: {} }]
+      ? [{ name: modelToolWireName('text.replace'), input: { target: handle, content: 'FIRST' } }, { name: modelToolWireName('task.finish'), input: {} }]
       : boundary === 'question'
-      ? [{ name: 'ask_user', input: { question: '是否继续旧方案？', options: [{ label: '继续' }, { label: '停止' }] } }]
-      : [{ name: 'text_replace', input: { target: handle, content: 'FIRST' } }]
+      ? [{ name: modelToolWireName('ask_user'), input: { question: '是否继续旧方案？', options: [{ label: '继续' }, { label: '停止' }] } }]
+      : [{ name: modelToolWireName('text.replace'), input: { target: handle, content: 'FIRST' } }]
     else if (['approval', 'question'].includes(boundary) && turn === 2) {
       expect(payload.messages.some((message: { role: string; content: unknown }) => message.role === 'user' && message.content === '后续改为 STEER，保留人工前缀')).toBe(true)
       const previous = JSON.parse(payload.messages.findLast((message: { role: string }) => message.role === 'tool').content)
@@ -55,9 +56,9 @@ async function fixture(boundary: 'provider' | 'approval' | 'question' | 'finish'
       tools = [{ name: 'read', input: { target: handle } }]
     } else if (['approval', 'question'].includes(boundary) && turn === 3) {
       expect(JSON.parse(payload.messages.findLast((message: { role: string }) => message.role === 'tool').content).data.text).toBe('OLD')
-      tools = [{ name: 'text_replace', input: { target: handle, content: 'STEER' } }, { name: 'task_finish', input: {} }]
+      tools = [{ name: modelToolWireName('text.replace'), input: { target: handle, content: 'STEER' } }, { name: modelToolWireName('task.finish'), input: {} }]
     }
-    else if (turn === 2) tools = [{ name: 'text_replace', input: { target: handle, content: 'STALE' } }, { name: 'task_finish', input: {} }]
+    else if (turn === 2) tools = [{ name: modelToolWireName('text.replace'), input: { target: handle, content: 'STALE' } }, { name: modelToolWireName('task.finish'), input: {} }]
     else if (turn === 3) {
       expect(boundary === 'finish' ? JSON.stringify(payload.messages).includes('后续改为 STEER，保留人工前缀')
         : payload.messages.some((message: { role: string; content: unknown }) => message.role === 'user' && message.content === '后续改为 STEER，保留人工前缀')).toBe(true)
@@ -66,7 +67,7 @@ async function fixture(boundary: 'provider' | 'approval' | 'question' | 'finish'
     } else {
       const result = JSON.parse(payload.messages.findLast((message: { role: string }) => message.role === 'tool').content)
       expect(result.data.text).toBe('FIRST')
-      tools = [{ name: 'text_replace', input: { target: handle, content: 'STEER' } }, { name: 'task_finish', input: {} }]
+      tools = [{ name: modelToolWireName('text.replace'), input: { target: handle, content: 'STEER' } }, { name: modelToolWireName('task.finish'), input: {} }]
     }
     const body = { id: `response-${turn}`, model: payload.model, choices: [{ index: 0, delta: { role: 'assistant', content: turn === 1 ? '第一项已执行' : '继续处理',
       tool_calls: tools.map((tool, index) => ({ index, id: `tool-${turn}-${index}`, type: 'function', function: { name: tool.name, arguments: JSON.stringify(tool.input) } })) }, finish_reason: 'tool_calls' }] }

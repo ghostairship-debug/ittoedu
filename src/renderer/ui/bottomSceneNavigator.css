@@ -70,6 +70,7 @@
   font-weight: 700;
 }
 .bottom-scene-card__identity { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.bottom-scene-card__empty { align-self: center; color: var(--ink-muted, #746659); font-size: 12px; padding: 0 5px; }
 .bottom-scene-card__identity small { color: var(--ink-muted, #66706a); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bottom-scene-card__identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .bottom-scene-card__states, .bottom-scene-card__children {

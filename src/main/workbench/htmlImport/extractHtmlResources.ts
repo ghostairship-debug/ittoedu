@@ -1,6 +1,9 @@
 import { parseHtmlStartTag, readHtmlRawText } from '../../../shared/html/htmlSourceScanner'
 import { createHash } from 'node:crypto'
 import { parse } from 'acorn'
+import { parse as parseHtml, type DefaultTreeAdapterTypes } from 'parse5'
+import { decodeCssReference } from '../../../shared/composition/projectReferences'
+import { decodeHtmlSource } from '../../../shared/html/sourceEncoding'
 import { analyzeJavaScriptClosure, CSS_RESOURCE_PROPERTIES, nonResourceStyle } from './javascriptClosureProof'
 import type { RemoteReference as Remote } from './types'
 import type {
@@ -40,6 +43,8 @@ type Sink = {
   modules: Map<string, string>
   cssStack: Set<string>
   htmlStack: Set<string>
+  domElements: Map<string, Usage>
+  moduleAliases: Map<string, string>
 }
 type Flags = { url: boolean; remote: boolean }
 type DataHit = {
@@ -81,7 +86,7 @@ export const MODULE_BASE_ATTRIBUTE = 'data-guoling-module-base'
 const clip = (value: string, max = 64) => value.length <= max ? value : value.slice(0, max)
 const copyBytes = (bytes: Uint8Array) => new Uint8Array(bytes)
 const placeholder = (key: string) => `cw-resource:${key}`
-const createSink = (): Sink => ({ resources: new Map(), remoteReferences: [], diagnostics: [], modules: new Map(), cssStack: new Set(), htmlStack: new Set() })
+const createSink = (): Sink => ({ resources: new Map(), remoteReferences: [], diagnostics: [], modules: new Map(), cssStack: new Set(), htmlStack: new Set(), domElements: new Map(), moduleAliases: new Map() })
 
 function addDiagnostic(sink: Sink, level: ImportDiagnostic['level'], code: string, message: string, reference?: string) {
   sink.diagnostics.push(reference === undefined ? { level, code, message } : { level, code, message, reference })
@@ -236,7 +241,7 @@ function resolveRelative(baseDir: string, reference: string): string | null {
   const out: string[] = []
   for (const part of parts) {
     if (!part || part === '.') continue
-    if (part === '..') { if (out.length === 0) return null; out.pop(); continue }
+    if (part === '..') { if (out.length && out.at(-1) !== '..') out.pop(); else out.push('..'); continue }
     out.push(part)
   }
   return out.join('/')
@@ -265,6 +270,11 @@ function rewriteSingleUrl(rawUrl: string, context: Context, baseDir: string, sin
   const trail = rawUrl.match(/[\t\n\f\r ]*$/)?.[0] ?? ''
   const core = rawUrl.slice(lead.length, rawUrl.length - trail.length)
   if (!core || core.startsWith('#')) return { value: rawUrl, changed: false }
+  if (/^https?:\/\//i.test(baseDir) && !/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(core)) {
+    const absolute = new URL(core, baseDir).href
+    const result = rewriteSingleUrl(absolute, context, '', sink, siblings, allowWhitespace, usage)
+    return { value: lead + result.value + trail, changed: true }
+  }
   if (core.startsWith('//')) {
     const normalized = `https:${core}`
     sink.remoteReferences.push({ url: normalized, context, usage })
@@ -334,7 +344,12 @@ function readUrlCall(text: string, index: number): { inner: string; quote: '"' |
     if (text[j] === ')') j++
     return { inner: text.slice(innerStart, innerEnd), quote, end: j }
   }
-  while (j < text.length && text[j] !== ')' && !/[\t\n\f\r ]/.test(text[j])) j++
+  while (j < text.length && text[j] !== ')' && !/[\t\n\f\r ]/.test(text[j])) {
+    if (text[j] === '\\') {
+      const escape = /^\\(?:[\da-f]{1,6}(?:\r\n|[\t\n\f\r ])?|[^\r\n\f])/i.exec(text.slice(j))
+      j += escape?.[0].length ?? 1
+    } else j++
+  }
   const innerEnd = j
   while (j < text.length && /[\t\n\f\r ]/.test(text[j])) j++
   if (text[j] === ')') j++
@@ -482,6 +497,18 @@ function importConditions(value: string): { layer?: string; supports?: string; m
   return { layer, supports, media: rest }
 }
 
+export function wrapCssImport(source: string, value: string): string | undefined {
+  const conditions = importConditions(value)
+  if (!conditions) return undefined
+  let result = source
+  if (conditions.media) result = `@media ${conditions.media}{${result}}`
+  if (conditions.supports !== undefined) {
+    const condition = /^[\w-]+\s*:/.test(conditions.supports) ? `(${conditions.supports})` : conditions.supports
+    result = `@supports ${condition}{${result}}`
+  }
+  return conditions.layer === undefined ? result : `@layer${conditions.layer ? ` ${conditions.layer}` : ''}{${result}}`
+}
+
 function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>, propertyHint?: string): string {
   const lower = folded(css)
   const parts: string[] = []
@@ -546,15 +573,10 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
       else if (!conditions) addDiagnostic(sink, 'warning', 'unsupported-css-import', 'CSS @import 条件无法解析，已保留原文；本地样式不能加载，请内联对应样式', reference)
       else {
         sink.cssStack.add(key)
-        let imported = rewriteCss(decodeText(bytes), directoryOf(key), sink, siblings)
+        let imported = rewriteCss(decodeText(bytes, false, sink, key), directoryOf(key), sink, siblings)
         sink.cssStack.delete(key)
         changed = true
-        if (conditions.media) imported = `@media ${conditions.media}{${imported}}`
-        if (conditions.supports !== undefined) {
-          const condition = /^[\w-]+\s*:/.test(conditions.supports) ? `(${conditions.supports})` : conditions.supports
-          imported = `@supports ${condition}{${imported}}`
-        }
-        if (conditions.layer !== undefined) imported = `@layer${conditions.layer ? ' ' + conditions.layer : ''}{${imported}}`
+        imported = wrapCssImport(imported, match[5] ?? '')!
         parts.push(css.slice(cursor, next), imported)
         cursor = next + match[0].length
       }
@@ -564,7 +586,7 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
     if (lower.startsWith('url', next)) {
       const call = readUrlCall(css, next)
       if (!call) { i = next + 3; continue }
-      const inner = rewriteSingleUrl(call.inner, 'css-url', baseDir, sink, siblings, Boolean(call.quote), cssUrlUsage(css, next, propertyHint))
+      const inner = rewriteSingleUrl(decodeCssReference(call.inner), 'css-url', baseDir, sink, siblings, Boolean(call.quote), cssUrlUsage(css, next, propertyHint))
       if (inner.changed) {
         changed = true
         parts.push(css.slice(cursor, next), renderUrl(call.quote, inner.value.trim()))
@@ -623,7 +645,7 @@ function collectModule(reference: string, baseDir: string, sink: Sink, siblings:
     addDiagnostic(sink, 'warning', 'missing-relative-resource', `找不到本地模块 ${key}；原引用与其他内容已保留`, key)
     return
   }
-  const source = decodeText(bytes)
+  const source = decodeText(bytes, false, sink, key)
   sink.modules.set(key, source)
   sink.modules.set(key, extensionOf(key) === 'css' ? rewriteCss(source, directoryOf(key), sink, siblings)
     : rewriteJavaScript(source, 'module', directoryOf(key), sink, siblings, `模块 ${key}`))
@@ -651,9 +673,8 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
   if (preserveScript) {
     addDiagnostic(sink, 'warning', closureProof.frameworkError ? 'unsupported-framework-resource-input' : 'unsupported-dynamic-url-sink',
       '无法静态证明该脚本的资源引用闭合，已原样保留；脚本里的本地文件引用不会被打包，请内联资源或改为可解析的静态媒体引用')
-    // Still diagnose explicit bad inputs using the existing traversal, but do not
-    // publish any resources or partial rewrites from an unproven script.
-    sink = createSink()
+    // Unknown operations remain diagnostic. Independent literal resource sinks
+    // still have a concrete closure and are captured by the traversal below.
   }
   const edits = new Map<string, { start: number; end: number; value: string }>()
   let conflictingEdits = false
@@ -720,6 +741,14 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       && !declarations.has('document')
   }
   const mediaBindings = new Map<string, Usage>()
+  const domLookupUsage = (call: Node | undefined): Usage => {
+    if (call?.type !== 'CallExpression') return 'unknown'
+    const callee = call.callee as Node
+    if (callee.type !== 'MemberExpression' || (callee.object as Node)?.type !== 'Identifier' || (callee.object as Node).name !== 'document' || declarations.has('document')) return 'unknown'
+    const method = closureProof.memberName(callee), argument = (call.arguments as Node[])[0], id = argument && staticString(argument)
+    return id && method === 'getElementById' ? sink.domElements.get(id) ?? 'unknown'
+      : id?.startsWith('#') && method === 'querySelector' ? sink.domElements.get(id.slice(1)) ?? 'unknown' : 'unknown'
+  }
   const collectMediaBindings = (node: Node): void => {
     if (node.type === 'VariableDeclarator' && (node.id as Node).type === 'Identifier') {
       const name = String((node.id as Node).name)
@@ -732,6 +761,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
         const value = tag && staticString(tag)?.toLowerCase()
         usage = value === 'img' ? 'image' : value === 'audio' || value === 'video' ? 'media' : value === 'script' ? 'script' : 'unknown'
       }
+      if (usage === 'unknown') usage = domLookupUsage(init)
       if (usage !== 'unknown' && declarations.get(name) === 1 && !ambiguous.has(name)) mediaBindings.set(name, usage)
     }
     for (const [key, value] of Object.entries(node)) {
@@ -754,6 +784,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       return value === 'img' ? 'image' : name === 'src' && (value === 'audio' || value === 'video') ? 'media'
         : name === 'src' && value === 'script' ? 'script' : 'unknown'
     }
+    if (receiver) return domLookupUsage(receiver)
     return 'unknown'
   }
   for (const name of constants.keys()) if (declarations.get(name) !== 1 || ambiguous.has(name)) constants.delete(name)
@@ -762,7 +793,9 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     if (['ImportDeclaration', 'ExportAllDeclaration', 'ImportExpression'].includes(node.type) || (node.type === 'ExportNamedDeclaration' && node.source)) {
       const source = node.source as Node | undefined
       const reference = source && staticString(source)
-      if (reference && /^(?:\.{1,2}\/)/.test(reference)) collectModule(reference, baseDir, outputSink, siblings)
+      const alias = reference && sink.moduleAliases.get(reference)
+      if (alias) collectModule(alias, '', outputSink, siblings)
+      else if (reference && /^(?:\.{1,2}\/)/.test(reference)) collectModule(reference, baseDir, outputSink, siblings)
       else {
         addDiagnostic(outputSink, 'warning', 'unresolved-module-reference',
           `模块引用 ${reference ? clip(reference, 100) : '（运行时动态表达式）'} 已保留；仅可静态读取的本地模块进入工程，其他依赖在运行时报告`, reference ?? undefined)
@@ -936,11 +969,6 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     }
   }
   visit(root)
-  if (preserveScript) {
-    outputSink.diagnostics.push(...sink.diagnostics.filter(reportedReference))
-    outputSink.remoteReferences.push(...sink.remoteReferences)
-    return code
-  }
   if (edits.size === 0 || conflictingEdits) return code
   const ordered = [...edits.values()].sort((a, b) => b.start - a.start)
   if (ordered.some((edit, index) => index > 0 && edit.end > ordered[index - 1].start)) {
@@ -963,8 +991,9 @@ function neutralizeStyleClose(css: string): string {
   return css.replace(/<\/style/gi, '\\003c/style')
 }
 
-function decodeText(bytes: Uint8Array): string {
-  const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+function decodeText(bytes: Uint8Array, html = false, sink?: Sink, reference?: string): string {
+  const { text, notices } = decodeHtmlSource(bytes, html)
+  for (const notice of notices) if (sink) addDiagnostic(sink, 'warning', 'source-encoding', notice, reference)
   return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
 }
 
@@ -1026,14 +1055,14 @@ function relHas(attrs: ParsedAttr[], token: string): boolean {
 function javascriptKind(typeValue: string | null): 'script' | 'module' | 'other' {
   if (typeValue === null) return 'script'
   const type = decodeEntities(typeValue).trim().toLowerCase()
-  if (!type || type === 'text/javascript' || type === 'application/javascript' || type === 'text/ecmascript' || type === 'application/ecmascript') return 'script'
+  if (!type || /^(?:(?:application|text)\/(?:x-)?(?:java|ecma)script|text\/(?:javascript1\.[0-5]|jscript|livescript))$/.test(type)) return 'script'
   if (type === 'module') return 'module'
   return 'other'
 }
 
 function attributeUsage(tag: StartTag, attribute: string, parent: string | null): Usage {
   if (attribute === 'poster') return tag.name === 'video' ? 'image' : 'unknown'
-  if (tag.name === 'img' || tag.name === 'image' || tag.name === 'picture') return 'image'
+  if (tag.name === 'img' || tag.name === 'image' || tag.name === 'feimage' || tag.name === 'picture' || tag.name === 'input' && attributeBy(tag.attrs, 'type')?.rawValue.toLowerCase() === 'image') return 'image'
   if (tag.name === 'audio' || tag.name === 'video') return attribute === 'srcset' ? 'unknown' : 'media'
   if (tag.name === 'source') return attribute === 'srcset' ? parent === 'picture' ? 'image' : 'unknown'
     : parent === 'audio' || parent === 'video' ? 'media' : 'unknown'
@@ -1067,6 +1096,10 @@ function rewriteAttributes(tag: StartTag, baseDir: string, sink: Sink, siblings:
       if (next === decoded) continue
       attribute.value = next
       attribute.changed = true
+    } else if (/^on[a-z]+$/i.test(attribute.name)) {
+      const decoded = decodeEntities(attribute.rawValue), prefix = 'function __guoling_handler(event){', suffix = '\n}'
+      const next = rewriteJavaScript(prefix + decoded + suffix, 'script', baseDir, sink, siblings, `事件 ${attribute.name}`).slice(prefix.length, -suffix.length)
+      if (next !== decoded) { attribute.value = next; attribute.changed = true }
     }
   }
 }
@@ -1118,9 +1151,29 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
     if (!href?.hasValue) continue
     const reference = decodeEntities(href.rawValue).trim()
     const base = resolveRelative(baseDir, reference.endsWith('/') ? `${reference}__document.html` : reference)
-    if (base) { baseDir = directoryOf(base); localBase = true }
+    if (/^https?:\/\//i.test(reference)) { baseDir = new URL(reference).href; localBase = true }
+    else if (base) { baseDir = directoryOf(base); localBase = true }
     break
   }
+  const priorDom = sink.domElements, priorAliases = sink.moduleAliases
+  sink.domElements = new Map(); sink.moduleAliases = new Map()
+  const metadata = (node: DefaultTreeAdapterTypes.Node): void => {
+    if ('tagName' in node) {
+      const id = node.attrs.find(attribute => attribute.name === 'id')?.value
+      if (id) sink.domElements.set(id, sink.domElements.has(id) ? 'unknown' : ['img', 'image', 'feimage'].includes(node.tagName.toLowerCase()) ? 'image' : ['audio', 'video'].includes(node.tagName.toLowerCase()) ? 'media' : 'unknown')
+      if (node.tagName === 'script' && node.attrs.find(attribute => attribute.name === 'type')?.value.trim().toLowerCase() === 'importmap') {
+        try {
+          const map = JSON.parse(node.childNodes.map(child => child.nodeName === '#text' ? (child as DefaultTreeAdapterTypes.TextNode).value : '').join(''))
+          for (const [alias, target] of Object.entries(map.imports ?? {})) {
+            const key = typeof target === 'string' ? resolveRelative(baseDir, target) : null
+            if (key) sink.moduleAliases.set(alias, key)
+          }
+        } catch { addDiagnostic(sink, 'warning', 'importmap-parse', '本地模块别名表无法解析，原文已保留') }
+      }
+    }
+    if ('childNodes' in node) node.childNodes.forEach(metadata)
+  }
+  metadata(parseHtml(html))
   const parts: string[] = []
   let i = 0
   let mediaParent: string | null = null
@@ -1183,7 +1236,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
           if (sink.htmlStack.has(key)) addDiagnostic(sink, 'error', 'recursive-html-document', `嵌入 HTML 循环引用，无法建立离线文档：${key}`, reference)
           else {
             sink.htmlStack.add(key)
-            const content = transformHtml(decodeText(bytes), sink, siblings, directoryOf(key))
+            const content = transformHtml(decodeText(bytes, true, sink, key), sink, siblings, directoryOf(key))
             sink.htmlStack.delete(key)
             src.drop = true
             // The embedded document keeps the name of the file it came from.
@@ -1241,12 +1294,16 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
         const decoded = decodeEntities(href.rawValue).trim()
         const key = resolveRelative(baseDir, decoded)
         const bytes = key ? siblings.get(key) : undefined
-        if (/^https?:/i.test(decoded) || decoded.startsWith('//')) {
+        if (/^https?:/i.test(decoded) || decoded.startsWith('//') || /^https?:\/\//i.test(baseDir)) {
           const rewritten = rewriteSingleUrl(decoded, 'html-attr', baseDir, sink, siblings, true, 'stylesheet')
           if (rewritten.changed) { href.value = rewritten.value; href.changed = true }
         }
         else if (bytes && key) {
-          const css = neutralizeStyleClose(rewriteCss(decodeText(bytes), directoryOf(key), sink, siblings))
+          const css = neutralizeStyleClose(rewriteCss(decodeText(bytes, false, sink, key), directoryOf(key), sink, siblings))
+          if (attributeBy(tag.attrs, 'disabled')) {
+            href.value = `data:text/css;charset=utf-8,${encodeURIComponent(css)}`; href.changed = true
+            parts.push(rebuildStart(tag, tag.selfClosing)); i = tag.end; continue
+          }
           parts.push(rebuildStart({ rawName: 'style', name: 'style', attrs: keptStyleAttributes(tag.attrs), end: 0, selfClosing: false }, false))
           parts.push(css, '</style>')
           i = tag.end
@@ -1290,10 +1347,14 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
           const type = attributeBy(tag.attrs, 'type')?.rawValue ?? null
           const scriptKind = javascriptKind(type)
           const base = directoryOf(key)
-          const source = decodeText(bytes)
-          body = neutralizeScriptClose(scriptKind === 'other'
+          const source = decodeText(bytes, false, sink, key)
+          const preparedSource = scriptKind === 'other'
             ? source
-            : rewriteJavaScript(source, scriptKind === 'module' ? 'module' : 'script', base, sink, siblings, `第 ${scriptNumber} 个 <script>（${key}）`))
+            : rewriteJavaScript(source, scriptKind === 'module' ? 'module' : 'script', base, sink, siblings, `第 ${scriptNumber} 个 <script>（${key}）`)
+          body = neutralizeScriptClose(preparedSource)
+          if (scriptKind === 'script' && /<\/script/i.test(preparedSource)) {
+            tag.attrs.push({ name: 'data-guoling-classic-source', rawName: 'data-guoling-classic-source', hasValue: true, quote: '"', rawValue: '', value: JSON.stringify(preparedSource), changed: true, drop: false }); body = ''
+          }
           src.drop = true
           if (scriptKind !== 'module' && attributeBy(tag.attrs, 'defer') && !attributeBy(tag.attrs, 'async')) tag.attrs.push({
             name: 'data-cw-defer', rawName: 'data-cw-defer', hasValue: false, quote: '', rawValue: '', value: '', changed: true, drop: false,
@@ -1309,7 +1370,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
           if (result.changed) { src.value = result.value.trim(); src.changed = true }
         }
       }
-      if (!inlined) {
+      if (!inlined && !src?.hasValue) {
         const baseKind = javascriptKind(attributeBy(tag.attrs, 'type')?.hasValue ? attributeBy(tag.attrs, 'type')!.rawValue : null)
         body = neutralizeScriptClose(baseKind === 'other'
           ? body
@@ -1321,17 +1382,18 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
       i = raw.closeEnd
       continue
     }
-    rewriteAttributes(tag, baseDir, sink, siblings, tag.name === 'image' || tag.name === 'use', mediaParent)
-    if (tag.name === 'image' || tag.name === 'use') {
+    rewriteAttributes(tag, baseDir, sink, siblings, tag.name === 'image' || tag.name === 'feimage' || tag.name === 'use', mediaParent)
+    if (tag.name === 'image' || tag.name === 'feimage' || tag.name === 'use') {
       const xlink = attributeBy(tag.attrs, 'xlink:href')
       if (xlink?.hasValue) {
-        const result = rewriteSingleUrl(decodeEntities(xlink.rawValue), 'html-attr', baseDir, sink, siblings, false, tag.name === 'image' ? 'image' : 'unknown')
+        const result = rewriteSingleUrl(decodeEntities(xlink.rawValue), 'html-attr', baseDir, sink, siblings, false, tag.name !== 'use' ? 'image' : 'unknown')
         if (result.changed) { xlink.value = result.value; xlink.changed = true }
       }
     }
     parts.push(tag.attrs.some(attribute => attribute.changed || attribute.drop) ? rebuildStart(tag, tag.selfClosing) : html.slice(tagStart, tag.end))
     i = tag.end
   }
+  sink.domElements = priorDom; sink.moduleAliases = priorAliases
   return parts.join('')
 }
 

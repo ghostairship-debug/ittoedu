@@ -1,12 +1,13 @@
 import { Plus, Trash2 } from 'lucide-react'
 import { nanoid } from 'nanoid'
-import { useEffect, useState } from 'react'
 import type { ProjectDesignTokens } from '../../shared/contracts/design-v1/types'
 import { ColorInput } from './ColorInput'
+import { BufferedInput, PropertyDraftFieldBoundary } from './properties/PropertyControls'
+import { courseTokenVariableName } from '../../shared/contracts/design-v1/theme'
 
 interface DesignTokensEditorProps {
   value: ProjectDesignTokens
-  onChange(value: ProjectDesignTokens): void
+  onChange(value: ProjectDesignTokens): void | Promise<void>
 }
 
 const MAX_FONT_TOKENS = 16
@@ -21,37 +22,10 @@ function BufferedTokenInput({
   label: string
   value: string
   tokenId?: boolean
-  onCommit(value: string): void
+  onCommit(value: string): void | Promise<void>
 }) {
-  const [draft, setDraft] = useState(value)
-  useEffect(() => setDraft(value), [value])
-  const commit = () => {
-    const next = draft.trim()
-    if (!next || (tokenId && !/^[a-z][a-z0-9._-]*$/.test(next))) {
-      setDraft(value)
-      return
-    }
-    if (next !== value) onCommit(next)
-  }
-  return (
-    <div className="form-field">
-      <label>{label}</label>
-      <input
-        className="form-input"
-        aria-label={label}
-        value={draft}
-        onChange={(event) => setDraft(event.currentTarget.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') event.currentTarget.blur()
-          if (event.key === 'Escape') {
-            setDraft(value)
-            event.currentTarget.blur()
-          }
-        }}
-      />
-    </div>
-  )
+  return <BufferedInput label={label} value={value} onCommit={onCommit}
+    validate={tokenId ? next => /^[a-z][a-z0-9._-]*$/.test(next) ? null : '请输入有效的 Token ID；输入已保留。' : undefined} />
 }
 
 function nextTokenId(prefix: 'font' | 'color'): string {
@@ -104,7 +78,8 @@ export function DesignTokensEditor({ value, onChange }: DesignTokensEditorProps)
         </button>
       </div>
       {value.fonts.map((token, index) => (
-        <div className="design-token-card" key={token.id}>
+        <PropertyDraftFieldBoundary fieldKey={['fonts', token.id]} key={token.id}><div className="design-token-card">
+          <code title="CSS 字体引用">var({courseTokenVariableName('font', token.id)})</code>
           <BufferedTokenInput
             label={`字体 Token ${index + 1} ID`}
             value={token.id}
@@ -133,7 +108,7 @@ export function DesignTokensEditor({ value, onChange }: DesignTokensEditorProps)
           >
             <Trash2 size={14} />
           </button>
-        </div>
+        </div></PropertyDraftFieldBoundary>
       ))}
 
       <div className="property-subsection-header">
@@ -155,7 +130,8 @@ export function DesignTokensEditor({ value, onChange }: DesignTokensEditorProps)
         </button>
       </div>
       {value.colors.map((token, index) => (
-        <div className="design-token-card design-token-card--color" key={token.id}>
+        <PropertyDraftFieldBoundary fieldKey={['colors', token.id]} key={token.id}><div className="design-token-card design-token-card--color">
+          <code title="CSS 颜色引用">var({courseTokenVariableName('color', token.id)})</code>
           <BufferedTokenInput
             label={`颜色 Token ${index + 1} ID`}
             value={token.id}
@@ -185,7 +161,7 @@ export function DesignTokensEditor({ value, onChange }: DesignTokensEditorProps)
           >
             <Trash2 size={14} />
           </button>
-        </div>
+        </div></PropertyDraftFieldBoundary>
       ))}
     </section>
   )

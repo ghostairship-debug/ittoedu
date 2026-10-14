@@ -1,23 +1,53 @@
-# 教师控制台与自定义导航
+# 教学导航、正式控制与可选教师台
 
-新课已有教师控制台，默认承担步骤、场景、目录、缩放和声音操作。用户没有特殊导航设计时直接复用；有明确要求时，自行比较深度改造与独立重写，选择更方便实现和维护的方式。独立导航应关闭默认控制台，避免重复入口；可以用页面布局、独立组件或导航程序适配用户设计。导航属于创作内容，不限制为固定按钮排列或默认外观。
+新课要考虑教学主路径、页内推进、页间衔接及实际需要的返回，不把“宿主能翻页”或完整默认教师台存在当作设计完成。AI 新作不以完整台为常规起点、不预读其长源码；按需求复用正式动作、原生按钮/标签、小代码片段或局部导航程序。标准运行宿主提供最小上一步/下一步控制，必要推进须能用鼠标或触摸；键盘可附加，不能独占入口。可用线性上/下一步、标签、页内入口或无独立导航栏，不要求固定功能组合、控制台形态或每课创新外观。
 
-改造控制台时先通过 `project.list` 找到 `global/overlay/` 中实际教师控制台的 `.data.json` 与源码路径，再 `project.read`。可以局部修改，也可以重写其界面结构与行为；对象源码只改当前实例，`components/` 里的源码修改共享定义。配色未明确指定时沿用课程主题。自定义导航需要控制工程场景、步骤或目录时，可以复用下列宿主接口；自包含程序采用自己的导航时，按实际载体实现并检查用户要求的路径。
+在现有策划中说明内容怎样推进、下一步显示什么或进入哪里、什么时候需要返回；不套统一闯关、逐页登记或每页按钮模板。采用目录时才将真实场景/状态/标题/镜头组织为必要入口；按宿主推进偏好和用户当前指令继续，不固定策划/框架确认。
 
-关闭默认界面时，在读回的数据中将 `enabled` 改为 `false`，再通过 `project.apply {path,content}` 写回该 `.data.json`；恢复时改回 `true`。这是可撤销的工程修改，不删除源码或独立导航。若已自写控制台，则按它实际使用的数据字段控制显示，不假设自定义源码一定解释默认字段。
+常用操作在课内保持稳定、容易发现，不能频繁拖走/展开/收起控制台才能阅读主要内容。可减少无关控件、把入口融入页面布局；不为兜底台规定统一安全区或开发智能避让。拖动、固定视口、收展是选用能力，不因组件承担导航就自动附加。
 
-改造现有控制台时，沿用读取到的模块入口和 `mount`、`update`、`dispose` 生命周期；由软件保留身份与资源归属。使用实际运行上下文的 `teacherController` 端口，不从页面 DOM 或全局变量推测课程状态。自定义组件按宿主提供的端口工作，不访问未开放的文件、登录凭据或系统接口。
+完整台保留人工添加、用户明确要求及既有作品的合法使用。修改旧工程保留未要求改动的导航；仅实际选择/修改完整台时，才通过 `project.list` 找到 `global/overlay/` 中该实例 `.data.json` 和源码路径并 `project.read`。实例源码只影响当前实例，`components/` 的共享定义影响引用者，应按授权范围处理。AI 新作工厂不再自动插入可见完整台属于软件修复，不是要求模型逐课重复删除的长期步骤。
+
+## 当前实际接口的使用边界
+
+下列为组件运行上下文 `teacherController` 的当前端口。宿主按挂载实例绑定界面状态，共享课程进度、导航和视图；源码组件使用上下文提供的端口，不自行调用 `forInstance` 或寻找其他实例。普通导航/HUD 仍受学生导航守卫和当前运行权限约束，不因显示在全局层、使用该端口或改为源码而取得教师强制跳转权限。实际可用性以本次上下文及回执为准。
+
+默认实现可在读回数据中将 `enabled` 改为 `false`，通过 `project.apply` 写回同一 `.data.json`；恢复为 `true`，这是可撤销正式修改。自定义源码仅在确实解释此字段时才采用，不能假设所有私有程序支持同一开关，也不删除源码或人工布局。
+
+沿现 `mount`、`update`、`dispose` 生命周期使用实际端口，不从页面 DOM 或全局变量猜课程状态；几何、资源、身份由软件维护，不访问未开放文件、凭据或系统接口。
+
+这些端口属于 API5 源码实现的 `mount(context)` 参数，普通 HTML 内的 `<script>` 没有 `window.runtimeContext`、`teacherController` 或 `courseState` 全局。独立对象只需点击跳到已知页面时，可直接用 `interaction.update {target:"已观察的独立对象句柄",change:{kind:"click",action:"location-go",value:"已观察的目的页面句柄"}}` 绑定正式动作，不必改成 Source。同一 HTML 实例内部多个按钮要执行不同动作，或程序需要共享课程结果时，才沿实际局部程序入口使用宿主端口：先 `project.list` 找该实例实际 `.view.js/.view.ts` 和内容/数据文件，再读写短作者入口，保留其实际 import；软件维护工程共享依赖，完整源码按需从 `.dependencies/` 读取。复用 Web 时保留导入实现的 `document:'web'` 声明，并在 `await implementation.mount(context)` 后接所需局部行为；写回形成实例私有实现，其他实例及共享定义保持原有内容。沿 `context.scope.state.get/set/subscribe` 或 `context.interactions?.courseState` 使用实际课程状态，沿 `context.teacherController` 导航，不猜另页 DOM 或全局桥。
 
 | 入口 | 用途 |
 |---|---|
-| `read()` | 当前场景列表、进度、缩放、静音、全屏和收起状态 |
+| `read()` | 共享场景列表及状态/镜头/标题目标、进度、缩放、静音、全屏；`collapsed` 属于当前实例，`camera` 有则为当前会话镜头 |
 | `subscribe(render)` | 状态变化时刷新；返回取消订阅函数，销毁时调用 |
 | `canExecute(action)` | 按当前状态决定按钮可用性 |
-| `execute(action)` | 执行正式导航或声音/全屏动作，返回 `Promise<boolean>` |
-| `setCollapsed(value)` | 收起或展开 |
-| `moveBy(dx,dy)` | 拖动控制台 |
+| `execute(action, signal?)` | 执行正式动作，返回 `Promise<boolean>`；可用 `AbortSignal` 取消本次请求 |
+| `setCollapsed(value)` | 设置当前绑定实例的会话收展；自定义界面按 `read().collapsed` 呈现 |
+| `moveBy(dx,dy)` | 调整当前绑定界面的会话位移，宿主换算坐标；不写正式 frame、不移动其他实例 |
 | `setZoom(value)` / `resetView()` | 调整或恢复视图 |
 
 动作使用现有对象，例如 `{type:"step.next"}`、`{type:"step.previous"}`、`{type:"scene.next"}`、`{type:"scene.previous"}`、`{type:"scene.replay"}`、`{type:"course.restart"}`、`{type:"audio.toggle-mute"}`、`{type:"player.fullscreen.toggle"}`。跳指定场景时，把 `read().scenes` 中实际的 `id` 交给 `{type:"scene.go",sceneId}`；这些身份来自软件，无需写进课件内容。
 
-写回经过现有组件准入，失败保留诊断。检查时确认上一步、下一步和目录仍能操作；键盘与翻页笔使用同一播放逻辑。
+设计细分目录时，读取场景的 `targets`；每项包含显示名称、类型与宿主提供的 `action`，用 `execute(target.action)` 跳到实际状态、镜头或标题。直接点击场景使用不带细分目标的 `scene.go` 回到该页正式播放起点，包括 Spatial 默认路线。将这些实际目标按本课的章节、问题或实验步骤组织，保留宿主给出的动作对象，不凭标题文字拼接身份，也不自行维护第二份播放顺序。
+
+需要普通过渡时，在上述导航动作上添加 `transition`，由宿主捕获旧/新画面并执行同一次正式导航。例如：
+
+```js
+await teacherController.execute({
+  type: "scene.next",
+  transition: {
+    outgoing: { keyframes: [{ opacity: 1 }, { opacity: 0 }], timing: { duration: 220, easing: "ease-out" } },
+    incoming: { keyframes: [{ transform: "translateX(24px)", opacity: 0 }, { transform: "translateX(0)", opacity: 1 }], timing: { duration: 300, delay: 40, easing: "ease-out" } }
+  }
+}, signal);
+```
+
+`outgoing`、`incoming` 各自支持 `keyframes`（`transform`、`opacity`、`offset`、`easing`）及 `timing`（毫秒 `duration`、`delay` 和 CSS `easing`）；关键帧可由普通代码生成。转场展示快照，实际运行内容由当前目标页承接；实例保活与当前活动由宿主管理，不以快照承诺任意运行状态恢复，也不要求程序统一暂停或寻帧。浏览器不支持该转场或请求失败时读取实际回执，不声明动画已完成。
+
+当前表面有镜头时，可执行 `{type:"camera.present",pose:{x:120,y:80,zoom:1.4,rotation:0},motion:{durationMs:450,easing:"ease-in-out"}}`。`pose` 的 `zoom` 为正数；`motion.keyframes` 可加入中间 `{offset,pose,easing?}`，`offset` 在 0 与 1 之间严格递增。导航动作也可带 `camera:{durationMs,easing,keyframes}` 控制到目标镜头的有限运动。当前 pose 可从 `read().camera` 获取；这些表现只改变会话视图，不新增作者镜头或路径。新导航、用户镜头操作、Stop/销毁或该请求的取消负责结束和清理，不保存中途进度。
+
+写回沿现正式组件/工程入口，失败保可修输入与诊断。检查实际主路径、选用目标及必要返回；不为验收补目录、重播、全屏、声音、缩放、拖动或收展。键盘/翻页笔与按钮共享实际播放语义。会话位移/收展归当前实例，课程进度归共享 owner；正式位置或初始设置仍通过当前工程文件修改并保存，不把运行中拖动当作人工布局已存盘。
+
+交付说明实际推进方式、采用入口及未完成项，不以换色/换标签宣称结构重设计，也不以深改完整源码作为质量指标。保留角色/权限边界、人工布局及未涉及的既有内容。

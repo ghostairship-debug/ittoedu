@@ -1,12 +1,12 @@
 import { memo, useMemo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { executionDetailKeys, type ExecutionEventSearchPage, type ExecutionBlobRef, type ExecutionContent, type ExecutionItem, type ExecutionProjection } from '../../shared/workbench/executionEvents'
-import { collapseInterruptedAttempts, executionActivity, executionDocumentFacts, executionTimelineIndex, readableExecutionData } from './executionTimelineModel'
+import { currentExecutionStatus, executionTimelineEntries, toolGroupSummary, executionActivity, executionDocumentFacts, executionTimelineIndex, readableExecutionData, type TimelineEntry } from './executionTimelineModel'
 import './executionTimeline.css'
 import type { ImageResultsDesktopAPI } from '../../shared/workbench/imageResultsDesktop'
 import { ImageResultCard } from './ImageResultCard'
 import type { ConversationMessage } from '../../shared/workbench/conversations'
 import { captureRendererTiming, type RendererTimingStamp } from '../../shared/workbench/executionDesktop'
-import { ExecutionReplyContent } from './ExecutionReplyContent'
+import { ExecutionReplyContent, ReplyLink } from './ExecutionReplyContent'
 
 export interface ExecutionTimelineProps {
   projection: ExecutionProjection
@@ -54,7 +54,7 @@ function ReplyCopyAction({ text }: { text: string }) {
 }
 function TextContent({ text, reply = false }: { text: string; reply?: boolean }) {
   const [limit, setLimit] = useState(TEXT_PAGE)
-  const safe = useMemo(() => readableExecutionData(text), [text])
+  const safe = useMemo(() => reply ? text : readableExecutionData(text), [text, reply])
   return <>{reply && safe.length > 0 && <ReplyCopyAction text={safe} />}
     {reply ? <ExecutionReplyContent text={safe.slice(0, limit)} /> : <pre className="execution-timeline__content">{safe.slice(0, limit)}</pre>}
     {safe.length > limit && <button type="button" onClick={() => setLimit(value => value + TEXT_PAGE)}>继续读取内容（剩余 {safe.length - limit} 字符）</button>}</>
@@ -109,7 +109,7 @@ function QuestionRecord({ item, ended }: { item: ExecutionItem; ended: boolean }
           {option.description && <small> · {readableExecutionData(option.description)}</small>}{chosen && <strong> · 你的选择</strong>}</li>
       })}
     </ul>
-    {answer?.other && <p>你的补充：{readableExecutionData(answer.other)}</p>}
+    {answer?.other && <p>{answer.choices.length ? '你的补充' : '你的回答'}：{readableExecutionData(answer.other)}</p>}
     {item.data.status === 'waiting' && !ended && <p className="execution-timeline__question-hint">请在输入框上方的选项卡中回答。</p>}
     {item.data.error && item.data.status !== 'answered' && <p>{readableExecutionData(item.data.error)}</p>}
   </article>
@@ -122,7 +122,8 @@ const TimelineItem = memo(function TimelineItem({ item, projection, readBlob, on
   const end = executionTimelineIndex(projection).ends.get(item.runId)
   if (item.type === 'tool' && item.source === 'builtin' && item.data.question) return <QuestionRecord item={item} ended={Boolean(end)} />
   const incompleteAfterEnd = Boolean(end && ['running', 'executing', 'pending', 'queued', 'stopping', 'waiting', 'approval'].includes(item.data.status ?? ''))
-  const displayedStatus = item.type === 'run.state' && end && !item.data.label ? statusLabel(end.data.status) : incompleteAfterEnd ? '任务已结束' : statusLabel(item.data.status)
+  const displayedStatus = ['run.state', 'run.end'].includes(item.type) && (end?.data.status ?? item.data.status) === 'completed' ? '本轮已结束'
+    : item.type === 'run.state' && end && !item.data.label ? statusLabel(end.data.status) : incompleteAfterEnd ? '任务已结束' : statusLabel(item.data.status)
   const operationItem = item.type === 'tool' || item.type === 'document.commit' || item.type === 'document.save'
   const application = ({ applied: '已应用', unchanged: '内容未变化', conflict: '应用冲突', denied: '未获应用授权', cancelled: '未应用（已取消）', failed: '应用失败' } as Record<string, string>)[facts.application ?? ''] ?? '未确认应用'
   const saving = ({ saved: '已保存', saving: '保存中', failed: '保存失败' } as Record<string, string>)[facts.save ?? ''] ?? '保存未确认'
@@ -131,8 +132,11 @@ const TimelineItem = memo(function TimelineItem({ item, projection, readBlob, on
     && (item.data.toolName === 'file.write' || item.data.toolName === 'file.save')
   const body = <>
     {item.type === 'image' && item.data.jobId && imageResults && workspaceId && projection.conversationId
-      ? <ImageResultCard api={imageResults} owner={{ workspaceId, conversationId: projection.conversationId, runId: item.runId, jobId: item.data.jobId }} />
+      ? <ImageResultCard api={imageResults} refreshVersion={executionTimelineIndex(projection).runCommitSequences.get(item.runId)}
+        owner={{ workspaceId, conversationId: projection.conversationId, runId: item.runId, jobId: item.data.jobId }} />
       : <ItemContent item={item} readBlob={readBlob} />}
+    {item.data.webSources?.length ? <ul aria-label="搜索来源">{item.data.webSources.map(source =>
+      <li key={source.url}><ReplyLink href={source.url}>{source.title || source.url}</ReplyLink></li>)}</ul> : null}
     {operationItem && <dl className="execution-timeline__facts">
       {item.type === 'tool' && <><dt>工具执行</dt><dd>{['completed', 'returned'].includes(item.data.status ?? '') ? '已运行' : item.data.status === 'failed' ? '执行失败' : incompleteAfterEnd ? '结果未确认（任务已结束）' : statusLabel(item.data.status) || '状态未确认'}</dd></>}
       {(facts.application !== undefined || item.type === 'document.commit') && <><dt>文档应用</dt><dd>{application}</dd></>}
@@ -174,6 +178,29 @@ const TimelineItem = memo(function TimelineItem({ item, projection, readBlob, on
   && previous.workspaceId === next.workspaceId)
 
 interface ReadingState { range: { start: number; end: number }; expanded: Set<string>; following: boolean; top: number }
+function ToolGroup({ group, expanded, onExpanded, ...props }: ExecutionTimelineProps & {
+  group: Extract<TimelineEntry, { kind: 'tools' }>; expanded: boolean; onExpanded(open: boolean): void
+  expandedItems: ReadonlySet<string>; onItemExpanded(key: string, open: boolean): void
+}) {
+  const [limit, setLimit] = useState(PAGE_SIZE)
+  const first = group.items[0]!
+  const files = group.items.filter(item => item.type === 'tool' && item.data.saveStatus === 'saved' && ['file.save', 'file.write'].includes(item.data.toolName ?? ''))
+  return <article className="execution-timeline__tool-group" data-execution-item={`${first.runId}:${first.itemId}`} aria-label="工具组">
+    <details open={expanded} onToggle={event => { if (event.currentTarget.open !== expanded) onExpanded(event.currentTarget.open) }}>
+      <summary>{toolGroupSummary(group.items)}{first.source === 'external-mcp' && <small>外部 MCP</small>}</summary>
+      {expanded && <div className="execution-timeline__group-details">
+        {group.items.slice(0, limit).map(item => {
+          const key = `${item.runId}:${item.itemId}`
+          return <TimelineItem key={key} {...props} item={item} expanded={props.expandedItems.has(key)}
+            onExpanded={open => props.onItemExpanded(key, open)} />
+        })}
+        {group.items.length > limit && <button type="button" onClick={() => setLimit(value => value + PAGE_SIZE)}>读取组内后续记录（剩余 {group.items.length - limit} 条）</button>}
+      </div>}
+    </details>
+    {files.length > 0 && props.onOpenSavedFile && <div className="execution-timeline__group-files">{files.map(item => <button type="button" key={item.itemId}
+      onClick={() => props.onOpenSavedFile?.(item.runId, item.itemId)}>打开文件：{item.data.documentName || '已保存文件'}</button>)}</div>}
+  </article>
+}
 function HistorySearch({ searchEvents, readBlob, onClose }: Pick<ExecutionTimelineProps, 'searchEvents' | 'readBlob'> & { onClose(): void }) {
   const [query, setQuery] = useState(''), [page, setPage] = useState<ExecutionEventSearchPage | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const ticket = useRef(0)
@@ -204,22 +231,18 @@ function TimelineBody({ projection, readBlob, onLocateDocument, onOpenSavedFile,
   const visibilityFrames = useRef<{ first: number; second?: number } | null>(null)
   const visibleCandidates = useRef<ExecutionItem[]>([]), firstVisibleCallback = useRef(onFirstVisible)
   firstVisibleCallback.current = onFirstVisible
-  const total = useRef(projection.items.length); total.current = projection.items.length
+  const collapsedItems = useMemo(() => executionTimelineEntries(projection, userMessages), [projection.items, userMessages])
+  const total = useRef(collapsedItems.length); total.current = collapsedItems.length
   const saved = readings.get(projection.conversationId)
   const follow = useRef(saved?.following ?? true), prepend = useRef<{ height: number; top: number } | null>(null)
   const anchor = useRef<{ key: string; offset: number } | null>(null)
   const seenLatestRequest = useRef<ExecutionTimelineProps['latestRequest']>(undefined)
   const [following, setFollowing] = useState(saved?.following ?? true)
-  const [windowRange, setWindowRange] = useState(() => saved?.range ?? ({ start: Math.max(0, projection.items.length - PAGE_SIZE), end: projection.items.length }))
+  const [windowRange, setWindowRange] = useState(() => saved?.range ?? ({ start: Math.max(0, collapsedItems.length - PAGE_SIZE), end: collapsedItems.length }))
   const [expanded, setExpanded] = useState<Set<string>>(() => saved?.expanded ?? new Set())
   const [localSearchOpen, setLocalSearchOpen] = useState(false)
   const activity = useMemo(() => executionActivity(projection), [projection])
-  const collapsedItems = useMemo(() => collapseInterruptedAttempts(projection.items), [projection.items])
-  const visibleEntries = useMemo(() => [
-    ...collapsedItems.slice(windowRange.start, windowRange.end).map((item, order) => ({ kind: 'item' as const, item, time: item.time, order })),
-    ...userMessages.map((message, order) => ({ kind: 'message' as const, message, time: message.createdAt, order })),
-  ].sort((left, right) => left.time - right.time || (left.kind === right.kind ? left.order - right.order : left.kind === 'message' ? -1 : 1)),
-  [collapsedItems, windowRange.start, windowRange.end, userMessages])
+  const visibleEntries = useMemo(() => collapsedItems.slice(windowRange.start, windowRange.end), [collapsedItems, windowRange.start, windowRange.end])
   const reading = useRef<ReadingState>({ range: windowRange, expanded, following, top: saved?.top ?? 0 })
   reading.current = { ...reading.current, range: windowRange, expanded, following }
   useEffect(() => () => { readings.set(projection.conversationId, reading.current) }, [readings, projection.conversationId])
@@ -247,10 +270,10 @@ function TimelineBody({ projection, readBlob, onLocateDocument, onOpenSavedFile,
   useLayoutEffect(() => {
     if (!follow.current) return
     setWindowRange(value => {
-      const end = projection.items.length, size = PAGE_SIZE
+      const end = collapsedItems.length, size = PAGE_SIZE
       return value.end === end ? value : { start: Math.max(0, end - size), end }
     })
-  }, [projection.cursor, projection.items.length, following])
+  }, [projection.cursor, collapsedItems.length, following])
   useLayoutEffect(() => {
     const host = scroller.current
     if (!host) return
@@ -263,8 +286,7 @@ function TimelineBody({ projection, readBlob, onLocateDocument, onOpenSavedFile,
     }
   }, [projection.cursor, windowRange, expanded])
   useEffect(() => {
-    visibleCandidates.current = visibleEntries.filter((entry): entry is Extract<typeof entry, { kind: 'item' }> => entry.kind === 'item')
-      .map(entry => entry.item).filter(item => !observedTasks.current.has(item.taskId)
+    visibleCandidates.current = visibleEntries.flatMap(entry => entry.kind === 'item' ? [entry.item] : entry.kind === 'tools' && expanded.has(entry.key) ? entry.items : []).filter(item => !observedTasks.current.has(item.taskId)
         && (item.type === 'text' || item.type === 'edit')
         && item.content.some(part => part.kind === 'text' && part.text.trim().length > 0))
     if (!firstVisibleCallback.current || !visibleCandidates.current.length || visibilityFrames.current) return
@@ -276,7 +298,7 @@ function TimelineBody({ projection, readBlob, onLocateDocument, onOpenSavedFile,
       const viewport = host.getBoundingClientRect()
       for (const item of visibleCandidates.current) {
         const card = [...parent.querySelectorAll<HTMLElement>('[data-execution-item]')]
-          .find(node => node.dataset.executionItem === `${item.runId}:${item.itemId}`)
+          .find(node => node.dataset.executionItem === `${item.runId}:${item.itemId}` && node.classList.contains('execution-timeline__card'))
         if (!card) continue
         // A collapsed edit card has only its heading in the DOM. Measure rendered text,
         // not the card shell or a document.commit title, as the first visible content.
@@ -300,7 +322,7 @@ function TimelineBody({ projection, readBlob, onLocateDocument, onOpenSavedFile,
   }, [])
   const latest = () => {
     follow.current = true; setFollowing(true); anchor.current = null
-    setWindowRange({ start: Math.max(0, projection.items.length - PAGE_SIZE), end: projection.items.length })
+    setWindowRange({ start: Math.max(0, collapsedItems.length - PAGE_SIZE), end: collapsedItems.length })
   }
   useLayoutEffect(() => {
     if (!latestRequest || latestRequest.conversationId !== projection.conversationId || seenLatestRequest.current === latestRequest) return
@@ -317,6 +339,7 @@ function TimelineBody({ projection, readBlob, onLocateDocument, onOpenSavedFile,
     {searchEvents && historySearchOpen === undefined && !localSearchOpen && <button type="button" className="execution-timeline__search-open" onClick={() => setLocalSearchOpen(true)}>搜索历史</button>}
     {searchEvents && (historySearchOpen ?? localSearchOpen) && <HistorySearch searchEvents={searchEvents} readBlob={readBlob} onClose={historySearchOpen === undefined ? () => setLocalSearchOpen(false) : onHistorySearchClose ?? (() => {})} />}
     {(activity.busy || activity.waitingRuns > 0) && <p className="execution-timeline__activity" role="status" aria-live="polite" aria-atomic="true">
+      {currentExecutionStatus(projection)} · 
       {[activity.activeRuns ? `${activity.activeRuns} 个任务进行中` : '', activity.waitingRuns ? `${activity.waitingRuns} 个任务等待你的选择` : '',
         activity.externalTools ? `${activity.externalTools} 个外部工具执行中` : ''].filter(Boolean).join(' · ')}
     </p>}
@@ -326,13 +349,17 @@ function TimelineBody({ projection, readBlob, onLocateDocument, onOpenSavedFile,
       if (entry.kind === 'message') return <article className="execution-assistant__user-message" aria-label="用户消息" key={entry.message.messageId}>
         <strong>你</strong><p>{entry.message.text}</p>
       </article>
+      if (entry.kind === 'tools') return <ToolGroup key={entry.key} group={entry} projection={projection} readBlob={readBlob} onLocateDocument={onLocateDocument}
+        onOpenSavedFile={onOpenSavedFile} imageResults={imageResults} workspaceId={workspaceId} expanded={expanded.has(entry.key)}
+        expandedItems={expanded} onItemExpanded={(key, open) => setExpanded(value => { const next = new Set(value); if (open) next.add(key); else next.delete(key); return next })}
+        onExpanded={open => setExpanded(value => { const next = new Set(value); if (open) next.add(entry.key); else next.delete(entry.key); return next })} />
       const item = entry.item
       const key = `${item.runId}:${item.itemId}`
       return <TimelineItem key={key} item={item} projection={projection} readBlob={readBlob} onLocateDocument={onLocateDocument} onOpenSavedFile={onOpenSavedFile} imageResults={imageResults} workspaceId={workspaceId} expanded={expanded.has(key)}
         onExpanded={open => setExpanded(value => { const next = new Set(value); if (open) next.add(key); else next.delete(key); return next })} />
     })}
-    {windowRange.end < projection.items.length && <button type="button" onClick={() => { follow.current = false; setFollowing(false); setWindowRange(value => ({ start: value.end, end: Math.min(projection.items.length, value.end + PAGE_SIZE) })) }}>读取更后记录</button>}
-    {!following && <button type="button" className="execution-timeline__latest" onClick={latest}>回到最新{projection.items.length > windowRange.end ? `（${projection.items.length - windowRange.end} 条新记录）` : ''}</button>}
+    {windowRange.end < collapsedItems.length && <button type="button" onClick={() => { follow.current = false; setFollowing(false); setWindowRange(value => ({ start: value.end, end: Math.min(collapsedItems.length, value.end + PAGE_SIZE) })) }}>读取更后记录</button>}
+    {!following && <button type="button" className="execution-timeline__latest" onClick={latest}>回到最新{collapsedItems.length > windowRange.end ? `（${collapsedItems.length - windowRange.end} 条新记录）` : ''}</button>}
   </section>
 }
 /** A read-only view. Pagination, expansion and scrolling never replay a tool or focus the composer. */

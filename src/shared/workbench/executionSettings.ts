@@ -20,6 +20,7 @@ export interface ExecutionModelFavorite {
 export interface ExecutionProfile {
   revision: number
   updatedAt: string
+  search?: import('./searchSettings').SearchSettings
   roles: Record<Exclude<ExecutionRole, 'compression'>, ExecutionRoleSelection | null> & { compression?: ExecutionRoleSelection | null }
 }
 export type ExecutionConnectionConfiguration = Omit<ModelConnectionSnapshot, 'id' | 'revision' | 'auth'> & {
@@ -48,6 +49,7 @@ export interface ExecutionSettingsView {
 export interface SaveExecutionProfile {
   expectedRevision?: number
   roles: ExecutionProfile['roles']
+  search?: import('./searchSettings').SearchSettings
 }
 export interface ExecutionSelectionSnapshot extends ModelSelection {
   role: ExecutionRole

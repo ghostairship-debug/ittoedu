@@ -8,7 +8,7 @@ import type { ImageApplyCapture, ImageInsertionFrame, ImageResultOwner, ImageRes
 import { workbenchSelection } from './SelectionContextController'
 import './imageResultCard.css'
 
-const labels = { preparing: '准备中', running: '图片请求进行中', ready: '已生成，尚未应用', unapplied: '已生成，停止后尚未应用', stopped: '已停止', unknown: '结果未知；不会自动重发', failed: '图片请求失败' }
+const labels = { preparing: '准备中', running: '图片请求进行中', ready: '图片已生成', unapplied: '已生成，停止后尚未应用', stopped: '已停止', unknown: '结果未知；不会自动重发', failed: '图片请求失败' }
 const billingLabels = { metered: '按量付费', 'token-plan': 'Token Plan', subscription: '订阅', prepaid: '预付费', unknown: '未知' }
 function suggestedFrame(surface: ComponentSurface, resource: ImageResourceReference): ImageInsertionFrame {
   const scale = Math.min(480 / resource.width, 320 / resource.height, 1)
@@ -25,8 +25,8 @@ function parseFrame(values: Record<'x' | 'y' | 'width' | 'height', string>): Ima
   const frame = { x: Number(values.x), y: Number(values.y), width: Number(values.width), height: Number(values.height) }
   return Object.values(frame).every(Number.isFinite) && frame.width > 0 && frame.height > 0 ? frame : null
 }
-export function ImageResultCard({ api, owner, documents = window.desktopAPI?.documents }: {
-  api: ImageResultsDesktopAPI; owner: ImageResultOwner; documents?: DocumentHostAPI;
+export function ImageResultCard({ api, owner, refreshVersion, documents = window.desktopAPI?.documents }: {
+  api: ImageResultsDesktopAPI; owner: ImageResultOwner; refreshVersion?: number; documents?: DocumentHostAPI;
 }) {
   const [view, setView] = useState<ImageResultView>(), [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const [available, setAvailable] = useState<DocumentSnapshot[]>([]), [documentId, setDocumentId] = useState(''), [locationId, setLocationId] = useState('')
@@ -43,7 +43,7 @@ export function ImageResultCard({ api, owner, documents = window.desktopAPI?.doc
     const refresh = () => { void api.read(owner).then(value => { if (alive) { setView(value); setResourceId(current => value.job.resources.some(item => item.resourceId === current) ? current : value.job.resources[0]?.resourceId ?? '') } }).catch(cause => { if (alive) setError((cause as Error).message) }) }
     const stop = api.subscribe(event => { if (event.job.jobId === owner.jobId && event.conversationId === owner.conversationId && event.workspaceId === owner.workspaceId) refresh() })
     refresh(); return () => { alive = false; stop() }
-  }, [api, identity])
+  }, [api, identity, refreshVersion])
   useEffect(() => {
     if (!documents) return
     let alive = true

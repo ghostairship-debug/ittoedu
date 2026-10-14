@@ -1,4 +1,5 @@
 import { captureDocumentReference, workbenchSelection } from '../workbench/SelectionContextController'
+import { prepareSendDocuments } from './prepareSendDocuments'
 import type { CourseDocumentsPort } from '../lessonWorkspace/controller/useDocumentTabsController'
 import { forwardRef, useEffect, useMemo, useRef, useImperativeHandle, useState, type ReactNode } from 'react'
 import type { LessonWorkspace } from '../../shared/lessonWorkspace'
@@ -14,7 +15,7 @@ import type { DocumentHostAPI, SaveDirectoryContext } from '../../shared/workben
 export interface LessonWorkspaceHostProps {
   courseDocuments?: CourseDocumentsPort
   projectPath: string | null
-  captureCourseDocument?(writable: boolean): Promise<ExecutionDocumentReference[]>
+  captureCourseDocument?(writable: boolean, prepare?: boolean): Promise<ExecutionDocumentReference[]>
   prepareCourseDocuments?(documentIds?: readonly string[]): Promise<void>
   onOpenProject(path: string): Promise<boolean>
   onNewProject(): Promise<boolean>
@@ -24,6 +25,7 @@ export interface LessonWorkspaceHostProps {
   documents?: DocumentHostAPI
   onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void
   onImportHtml?(directory: SaveDirectoryContext, sourceEntryId?: string): void
+  onImportFlow?(directory: SaveDirectoryContext, sourceEntryId?: string): void
   toolbarExtras?: ReactNode
   children: ReactNode
 }
@@ -72,7 +74,7 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
       selectSource={() => service.selectSource(sourcePath ? { path: sourcePath } : undefined)}
       list={() => service.list(target)} importMaterial={input => service.importMaterial(target, input)} read={input => service.read(target, input)} />
   }
-  return <><LessonWorkspaceShell ref={shell} {...props} lessonOperation={api.lesson} workspaceFiles={api.workspaceFiles} documentPort={port}
+  return <><LessonWorkspaceShell ref={shell} {...props} onBeforeWorkspaceChange={async () => { await assistant.current?.preserveDraft() }} lessonOperation={api.lesson} workspaceFiles={api.workspaceFiles} documentPort={port}
     toolbarExtras={<>{props.toolbarExtras}<WorkspaceRecoveryPanel api={documents!} onRestored={id => shell.current?.focusDocument(id) ?? Promise.reject(new Error('文档视图尚未就绪'))} /></>}
     renderAssistant={(root, documentTarget, isCourse, drainDocuments, lesson) => {
       const lessonKey = lesson ? lesson.identity.normalizedDirectory + ':' + lesson.identity.lessonId : null
@@ -83,7 +85,7 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
         const chosen = structuredClone(selectionsRef.current[lessonKey] ?? [])
         if (!chosen.length) return undefined
         const target = { lessonId: lesson.identity.lessonId, rootPath: lesson.identity.normalizedDirectory }
-        const records = await api.lessonMaterials.list(target)
+        const { records } = await api.lessonMaterials.list(target)
         if (activeLessonKey.current !== lessonKey) throw new Error('课例已切换，请在当前课例重新发送。')
         for (const choice of chosen) {
           const record = records.find(item => item.id === choice.id)
@@ -94,17 +96,22 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
         return { target, selections: chosen }
       }}
       onLocateDocument={id => shell.current?.focusDocument(id) ?? Promise.resolve()}
-      prepareSend={async (ids = []) => { if (!await drainDocuments(ids)) return false; await props.prepareCourseDocuments?.(ids); return true }}
-      captureDocuments={async writable => {
+      prepareSend={(ids = []) => prepareSendDocuments(ids, {
+        read: id => api.documents!.read(id), drainDocuments, prepareCourses: props.prepareCourseDocuments,
+        reportFailure: (error, context) => api.reportDiagnostic({ source: 'renderer',
+          message: error instanceof Error ? error.message : '界面操作未完成', stack: error instanceof Error ? error.stack : undefined,
+          details: context }),
+      })}
+      captureDocuments={async (writable, prepare = true) => {
         const editor = documentTarget?.getEditor()
         if (editor) {
-          if (!await editor.session.drain()) throw new Error('当前输入尚未提交，请先完成输入或处理冲突')
+          if (prepare && !await editor.session.drain()) throw new Error('当前输入尚未提交，请先完成输入或处理冲突')
           const documentId = editor.session.documentId
           if (!documentId) throw new Error('文档会话尚未就绪')
           const snapshot = await api.documents!.read(documentId)
           return [captureDocumentReference(snapshot, writable)]
         }
-        return isCourse ? props.captureCourseDocument?.(writable) ?? [] : []
+        return isCourse ? props.captureCourseDocument?.(writable, prepare) ?? [] : []
       }} /> : <p role="alert">创作助手服务不可用，请重新打开应用。</p>
     }}
     renderMaterial={(filename, lesson) => material(filename, lesson)} renderMaterials={lesson => material(undefined, lesson)} />

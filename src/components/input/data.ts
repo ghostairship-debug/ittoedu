@@ -9,6 +9,7 @@ export const DEFAULT_INPUT_STYLE = {
   borderColor: '#94a3b8', borderOpacity: 1, borderWidth: 1, cornerRadius: 8, horizontalAlign: 'left' as const, padding: 10,
 }
 export const inputDataSchema = z.object({
+  presentation: z.enum(['block', 'inline']).optional(),
   label: z.string(), placeholder: z.string().default(''), initialValue: z.string().default(''), submitLabel: z.string().default('提交'),
   acceptedAnswers: z.array(z.string()).default([]), trim: z.boolean().default(true), caseSensitive: z.boolean().default(false),
   /** Existing feedback record key; the answer's scalar keys are separate professional values. */

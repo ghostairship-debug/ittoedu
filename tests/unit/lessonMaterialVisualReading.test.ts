@@ -35,7 +35,7 @@ it('reads the selected saved PNG, retains its version and provenance without cla
  expect(receipt.fragments[0].locator).toEqual({ part: 'document.pdf', page: 1 })
  expect(receipt.assets[0].bytes.length).toBeGreaterThan(45)
  expect(receipt).toMatchObject({ sourceVersion: f.record.sourceVersion, extractionVersion: f.record.extractionVersion })
- expect((await f.materials.list(f.target))[0].gaps[0].resolution).toEqual({ kind: 'read-page-image', assetId: 'page-1.png' })
+ expect((await f.materials.list(f.target)).records[0].gaps[0].resolution).toEqual({ kind: 'read-page-image', assetId: 'page-1.png' })
 })
 
 

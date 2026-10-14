@@ -12,6 +12,7 @@ import { createTextComponentData } from '../../../../src/components/text/data'
 import { ComponentCatalogManager } from '../../../../src/main/componentCatalogManager'
 import { AssetLibraryService } from '../../../../src/main/workbench/assetSources/componentLibrarySearch'
 import { exportComponentLibraryArchive } from '../../../../src/core/components/library/archive'
+import { captureComponentOperation } from '../../../../src/core/drivers/courseV10Operations'
 import type { ToolResult } from '../../../../src/shared/workbench/tools'
 
 const electronPaths = vi.hoisted(() => ({ userData: '', appPath: '' }))
@@ -41,9 +42,10 @@ it('the public V10 asset tools save all frozen selections and retain actual cont
   const surfaceId = project.surfaces[0].id; project.surfaces[0].title = '素材演示'
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.definitions.lesson = { id: 'lesson', title: '资料卡', role: 'content', version: '1.0.0',
-    implementation: { kind: 'source', language: 'typescript', workspace: { ownerId: 'lesson-code', entry: 'main.ts' } } }
+    implementation: { kind: 'source', language: 'typescript', workspace: { ownerId: 'lesson-code', entry: 'main.ts' }, resourceBindings: { photo: 'photo' } } }
   const frame = { width: 180, height: 90, transform: [1, 0, 0, 1, 42, 67] as [number, number, number, number, number, number] }
   const localOverride = { kind: 'source' as const, language: 'javascript' as const,
+    resourceBindings: { photo: 'photo' },
     source: 'export default {mount({root,instance}){root.textContent=instance.data.label;return{update(){},dispose(){}}}}' }
   project.instances.first = { id: 'first', definitionId: 'lesson', data: { label: '甲资料正文', assetId: 'photo' }, frame, style: { opacity: 0.8 }, implementationOverride: localOverride }
   project.instances.second = { id: 'second', definitionId: 'lesson', data: { label: '乙资料正文', assetId: 'photo' }, frame: { ...frame, transform: [1, 0, 0, 1, 280, 96] }, style: { opacity: 0.6 } }
@@ -125,5 +127,15 @@ it('the public V10 asset tools save all frozen selections and retain actual cont
     expect(await host.internalAPI.dispatch({ documentId: head.documentId, epoch: head.epoch, baseRevision: head.revision, actor: 'human', operationId: 'undo-library-update', mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
     const undone = await host.internalAPI.read(initial.documentId)
     expect(undone).toMatchObject({ model: { project: { definitions: { lesson: project.definitions.lesson }, instances: { first: project.instances.first, second: project.instances.second } } } })
+    if (undone.model.kind !== 'course-v10') throw new Error('V10 required')
+    const insertedId = appended[0]
+    expect(await host.internalAPI.dispatch({ documentId: undone.documentId, epoch: undone.epoch, baseRevision: undone.revision,
+      actor: 'human', operationId: 'edit-inserted-copy', mutation: { type: 'command', command: captureComponentOperation(undone.model.project,
+        [{ type: 'data.set', instanceId: insertedId, path: ['label'], value: '插入后继续改正文' }]) } })).toMatchObject({ status: 'applied' })
+    const continued = await host.internalAPI.read(initial.documentId)
+    expect(continued).toMatchObject({ model: { project: { instances: { [insertedId]: { data: { label: '插入后继续改正文' } }, first: project.instances.first, second: project.instances.second } } } })
+    await host.internalAPI.save(initial.documentId, filename)
+    const coldContinuation = await new DocumentHostService(path.join(directory, 'cold-continuation')).internalAPI.open(filename)
+    expect(coldContinuation.model).toEqual(continued.model)
   } finally { await host.tools.stop(runId); if (!path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unexpected fixture directory'); await fs.rm(directory, { recursive: true, force: true }) }
 })

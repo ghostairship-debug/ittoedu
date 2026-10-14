@@ -49,7 +49,7 @@ import {
   FormulaAuthoringEditor,
   type FormulaAuthoringDraftChange,
 } from '../FormulaAuthoringEditor'
-import { SharedBackgroundProperties } from './SharedBackgroundProperties'
+import { SharedBackgroundProperties, type SharedBackgroundImportHandler } from './SharedBackgroundProperties'
 import { SharedShapeProperties } from './SharedShapeProperties'
 import { NativeColorPreviewContext } from './NativeColorPreview'
 import {
@@ -89,7 +89,7 @@ export interface FlowPropertiesView {
   readonly backgroundColor?: string
   readonly backgroundAssetId?: string | null
   readonly effectiveBackground: ReturnType<typeof propertiesEffectiveBackground>
-  readonly layout: { readonly widthMode: 'fluid' | 'reading' }
+  readonly layout: { readonly toc?: 'auto' | 'hidden'; readonly widthMode: 'fluid' | 'reading'; readonly readingWidth?: number; readonly wideContentWidth?: number }
   readonly blocks: readonly { readonly blockId: string; readonly block: FlowBlock; readonly label: string; readonly parentId: string | null; readonly index: number }[]
 }
 
@@ -109,12 +109,14 @@ export interface FlowPropertiesCommands {
   readonly connectChartCanvasText?: (port: ChartCanvasTextPort) => () => void
   readonly previewNative?: (patch: PropertiesPatch | null) => void
   readonly previewTextColor?: (color: string | null) => void
+  readonly setToc?: (toc: 'auto' | 'hidden') => void
   readonly setWidthMode?: (widthMode: 'fluid' | 'reading') => void
+  readonly setPaperWidth?: (width: number) => void | Promise<void>
   readonly renamePage: (surfaceId: string, title: string) => void
   readonly setPaperBackground: (surfaceId: string, backgroundColor: string) => void
   readonly updateSurfaceBackground: (patch: FlowSurfaceBackgroundFields) => void
   readonly previewSurfaceBackground?: (patch: { backgroundColor?: string | null }) => void
-  readonly importSurfaceBackgroundAsset: (file: FlowImportedMediaBytes) => void
+  readonly importSurfaceBackgroundAsset: SharedBackgroundImportHandler
   readonly patchSelectedBlock: (patch: Record<string, unknown>) => void | string | null
   readonly patchOverlayProperties: (patch: Record<string, unknown>) => void
   readonly replaceMediaAsset: (assetId: string) => void
@@ -194,9 +196,16 @@ function FlowPageProperties({ context }: { context: FlowPropertiesContext }) {
       <SelectField
         label="讲义宽度"
         value={view.layout.widthMode ?? 'reading'}
-        options={[{ value: 'fluid', label: '自适应宽度' }, { value: 'reading', label: '固定阅读宽度' }]}
+        options={[{ value: 'fluid', label: '宽幅模式' }, { value: 'reading', label: '阅读模式' }]}
         onChange={(mode) => commands.setWidthMode?.(mode as 'fluid' | 'reading')}
       />
+      {commands.setToc && <SelectField label="标题目录" value={view.layout.toc ?? 'auto'}
+        options={[{ value: 'auto', label: '显示独立目录' }, { value: 'hidden', label: '隐藏（使用作品自带目录）' }]}
+        onChange={value => commands.setToc?.(value as 'auto' | 'hidden')} />}
+      {commands.setPaperWidth && <BufferedInput key={view.layout.widthMode} label="纸面宽度" type="number" min={1} step={1}
+        value={view.layout.widthMode === 'fluid' ? view.layout.wideContentWidth ?? view.layout.readingWidth ?? 1100 : view.layout.readingWidth ?? 860}
+        onCommit={value => commands.setPaperWidth!(Number(value))} />}
+      <p className="property-hint">单位为设计像素。窗口和观察缩放只改变显示比例，正文会随纸面宽度排版并向下延伸。</p>
       <SharedBackgroundProperties
         key={`flow-surface-background:${view.surfaceId}`}
         ownerLabel="流式布局页"
@@ -211,7 +220,7 @@ function FlowPageProperties({ context }: { context: FlowPropertiesContext }) {
         onColorChange={(backgroundColor) => commands.updateSurfaceBackground({ backgroundColor })}
         onPreviewColorChange={commands.previewSurfaceBackground ? (backgroundColor) => commands.previewSurfaceBackground!({ backgroundColor }) : undefined}
         onAssetChange={(backgroundAssetId) => commands.updateSurfaceBackground({ backgroundAssetId })}
-        onImportAsset={(file) => commands.importSurfaceBackgroundAsset(file)}
+        onImportAsset={commands.importSurfaceBackgroundAsset}
         testId="flow-surface-background-properties"
       />
     </section>

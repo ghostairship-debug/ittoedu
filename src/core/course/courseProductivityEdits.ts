@@ -1,5 +1,6 @@
 import { documentTextContentSchema, normalizeDocumentText, type FlowInline, type FlowTextContent } from '../../shared/document/content'
 import type { CourseProjectV10, JsonValue } from '../../shared/contracts/component-platform/project'
+import { componentIsLocked, componentDefinitionBuiltinKey, owningContainer, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { equalComponentValue } from '../drivers/courseV10Operations'
 import { duplicateSurfaceEdits } from './courseSurfaceStructure'
@@ -61,15 +62,23 @@ function fields(document: CourseProjectV10, target: { surfaceId: string | null }
     }
   }
   const seen = new Set<string>()
+  const flowText = (id:string) => {
+    let owner=owningContainer(document,id);while(owner?.kind==='instance')owner=owningContainer(document,owner.instanceId)
+    return owner?.kind==='surface' && document.surfaces.find(surface=>surface.id===owner.surfaceId)?.kind==='flow'
+      && componentDefinitionBuiltinKey(document.definitions[document.instances[id]!.definitionId])==='guoling.text'
+  }
   const instance = (id: string, owner: string) => {
     if (seen.has(id)) return
     seen.add(id)
     const item = document.instances[id]; if (!item) return
     const definition = document.definitions[item.definitionId]
     const label = `${item.name ?? definition?.title ?? item.definitionId} (${id})`
-    if (item.locked) unsupported.push(`${owner} · ${label}：对象已锁定`)
-    else if ((item.implementationOverride ?? definition?.implementation)?.kind !== 'builtin') unsupported.push(`${owner} · ${label}：自定义组件的数据和源码保留原样`)
-    else { visit(item.data, [id, 'data'], owner, label, false); visit(item.style, [id, 'style'], owner, label, true) }
+    if (componentIsLocked(document,id)) {
+      if(flowText(id) && item.data && typeof item.data==='object' && !Array.isArray(item.data))visit(item.data.content,[id,'data','content'],owner,label,false)
+      else unsupported.push(`${owner} · ${label}：对象已锁定`)
+    }
+    else if (!componentDefinitionBuiltinKey(definition)) unsupported.push(`${owner} · ${label}：自定义组件的数据和源码保留原样`)
+    else { visit(item.data, [id, 'data'], owner, label, false); visit(item.style, [id, 'style'], owner, label, true); visit(item.flowLayout?.caption,[id,'flowLayout','caption'],owner,label,false) }
     item.childIds?.forEach(child => instance(child, owner))
   }
   const background = (object: { background?: { mode?: 'inherit' | 'own'; color?: string } }, id: string, owner: string) => {
@@ -79,6 +88,17 @@ function fields(document: CourseProjectV10, target: { surfaceId: string | null }
   for (const surface of document.surfaces) {
     if (scope !== 'course' && surface.id !== target.surfaceId) continue
     surface.childIds.forEach(id => instance(id, surface.title)); background(surface, surface.id, surface.title)
+    if(scope==='course')for(const state of surface.presentation?.states ?? []) {
+      const effective=resolveComponentPresentation(document,surface.id,state.id),owner=`${surface.title} · ${state.title}`
+      for(const [id,override] of Object.entries(state.overrides)) {
+        const item=document.instances[id];if(!item)continue
+        const definition=document.definitions[item.definitionId],label=`${item.name ?? definition?.title ?? item.definitionId} (${id})`
+        if(componentIsLocked(effective,id)){unsupported.push(`${owner} · ${label}：对象已锁定`);continue}
+        if(!componentDefinitionBuiltinKey(definition))continue
+        const prefix=['state',surface.id,state.id,id]
+        visit(override.data,[...prefix,'data'],owner,label,false);visit(override.style,[...prefix,'style'],owner,label,true)
+      }
+    }
   }
   if (scope !== 'page') for (const id of [...document.global.underlay, ...document.global.overlay]) instance(id, '整课全局')
   return { fields: result, unsupported }
@@ -118,9 +138,14 @@ export function planCourseProductivityEdits(project: CourseProjectV10, surfaceId
     const before = project.instances[id]!
     changedFields(before.data, after.data, [], (path, value) => edits.push({ type: 'data.set', instanceId: id, path, value }))
     if (after.style) changedFields(before.style, after.style, [], (path, value) => edits.push({ type: 'style.set', instanceId: id, path, value }))
+    if(!equalComponentValue(before.flowLayout,after.flowLayout))edits.push({type:'instance.flowLayout.set',instanceId:id,flowLayout:after.flowLayout ?? null})
   }
   if (!equalComponentValue(project.background, draft.background)) edits.push({ type: 'project.background.set', background: draft.background ?? null })
-  for (const surface of draft.surfaces) if (!equalComponentValue(project.surfaces.find(before => before.id === surface.id)?.background, surface.background)) edits.push({ type: 'surface.background.set', surfaceId: surface.id, background: surface.background ?? null })
+  for (const surface of draft.surfaces) {
+    const before=project.surfaces.find(before=>before.id===surface.id)
+    if(!equalComponentValue(before?.background,surface.background))edits.push({type:'surface.background.set',surfaceId:surface.id,background:surface.background ?? null})
+    if(!equalComponentValue(before?.presentation,surface.presentation))edits.push({type:'surface.presentation.set',surfaceId:surface.id,presentation:surface.presentation ?? null})
+  }
   return { edits, items: fresh.items.filter(item => selected.has(item.id)), unsupported: fresh.unsupported }
 }
 
@@ -178,8 +203,8 @@ export function previewCourseStyleRemix(project: CourseProjectV10, sourceSceneId
   }
   const instance = (id: string) => {
     const item = project.instances[id]!
-    const implementation = item.implementationOverride ?? project.definitions[item.definitionId]?.implementation
-    if (!item.locked && implementation?.kind === 'builtin') visit(id, item.data, [])
+    // Professional data keeps its author meaning when the visual implementation is Source.
+    if (!item.locked && componentDefinitionBuiltinKey(project.definitions[item.definitionId])) visit(id, item.data, [])
     item.childIds?.forEach(instance)
   }
   surface.childIds.forEach(instance)

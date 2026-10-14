@@ -51,6 +51,14 @@ export interface DocumentTextChanges {
 export type DocumentSourceChange =
   | { kind: 'unchanged' }
   | { kind: 'changed'; before: string; after: string }
+  | { kind: 'edits'; documentKind: 'markdown' | 'text';
+      edits: Array<{ from: number; removed: string; text: string }>;
+      beforeResources: DocumentResources; afterResources: DocumentResources }
+
+/** Internal lifecycle listeners can consume versions without copying document resources. */
+export type DocumentVersionEvent =
+  | { type: 'changed'; documentId: DocumentId; epoch: string; revision: number }
+  | { type: 'closed'; documentId: DocumentId }
 
 /** Host-owned envelope. Providers receive domain arguments, never this authority. */
 export interface DocumentOperation {
@@ -89,6 +97,7 @@ export interface DocumentSnapshot {
   saveError?: string | null
   recovered?: boolean
   recoverable: boolean
+  recoveryUnavailable?: string
   undoDepth: number
   redoDepth: number
   /** Read-only identity of the next item ordinary Undo would remove. */
@@ -114,11 +123,14 @@ export interface DurableDocumentState {
   sequence: number
   revision: number
   savedRevision: number | null
+  /** Last acknowledged disk model, kept separate from later local edits. */
+  savedModel?: DocumentModel
   binding: DocumentBinding
   model: DocumentModel
   past: DocumentHistoryEntry[]
   future: DocumentHistoryEntry[]
   operations: { operationId: string; digest: string; result: DocumentOperationResult; actor?: DocumentOperation['actor']; runId?: string;
+    before?: DocumentModel; after?: DocumentModel;
     textChanges?: DocumentTextChanges; sourceChange?: DocumentSourceChange }[]
   stoppedRuns: string[]
 }
@@ -144,5 +156,7 @@ export interface DocumentDriver {
 /** No filesystem, Electron, DOM or renderer dependency is permitted in the core. */
 export interface DocumentPersistence {
   append(state: DurableDocumentState): Promise<void>
+  /** File owner captures dependencies of the frozen source, before serialization/publication. */
+  prepareSaveModel?(input: { model: DocumentModel; sourceBinding: DocumentBinding; targetBinding: DocumentBinding }): Promise<DocumentModel>
   save(input: { documentId: DocumentId; revision: number; model: DocumentModel; binding: DocumentBinding; bytes: Uint8Array; saveIdentity?: DocumentSaveIdentity }): Promise<Extract<DocumentBinding, { kind: 'file' }>>
 }

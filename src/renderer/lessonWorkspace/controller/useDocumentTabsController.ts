@@ -34,6 +34,7 @@ export interface ActiveDocumentTarget {
 export interface DocumentTabsController {
   isCourseActive: boolean
   createMarkdown(name?: string): Promise<void>
+  createText(name?: string): Promise<void>
   tabs: LessonFileTab[]
   activeTab: string
   setActiveTab(tab: string): void
@@ -49,7 +50,7 @@ export interface DocumentTabsController {
   updateDirty(path: string, dirty: boolean): void
   flushAll(): Promise<boolean>
   saveActiveDocument(): Promise<'course' | 'document' | 'none'>
-  drainAll(): Promise<boolean>
+  drainAll(documentIds?: readonly string[]): Promise<boolean>
   captureMediaDrafts(source: string, kind: 'file' | 'directory'): MediaFileDraftInput[]
   preserveAll(mode?: 'save' | 'preserve', documentIds?: readonly string[]): Promise<boolean>
   hasDirtyInputs(documentIds?: readonly string[]): boolean
@@ -69,7 +70,9 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
   mediaFiles?(request: MediaFilesRequest): Promise<MediaFileSnapshot>
 }): DocumentTabsController {
   const [tabs, setTabs] = useState<LessonFileTab[]>([])
-  const [activeTab, setActive] = useState('')
+  const [activeTab, setActiveState] = useState('')
+  const activeTabRef = useRef(activeTab)
+  function setActive(id: string) { activeTabRef.current = id; setActiveState(id) }
   const navigation = useRef(0)
   const courseRef = useRef(courseDocuments); courseRef.current = courseDocuments
   const previousCourse = useRef<string | null>(null)
@@ -214,21 +217,25 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     setTabs(current => current.some(item => item.id === id) ? current : [...current, opened])
     if (ticket === navigation.current) setActive(id)
   }
-  async function createMarkdown(name = '未命名文档') {
+  async function createSource(name: string, kind: 'markdown' | 'text') {
     const api = documentPort.documents
     if (!api) throw new Error('文档服务尚未连接')
     const ticket = ++navigation.current
-    const title = /\.md$/i.test(name) ? name : `${name || '未命名文档'}.md`
-    const snapshot = await api.create({ kind: 'markdown', source: '', resources: { assets: {}, components: {} } }, title)
+    const extension = kind === 'markdown' ? '.md' : '.txt'
+    const title = name.toLowerCase().endsWith(extension) ? name : `${name || '未命名文档'}${extension}`
+    const snapshot = await api.create({ kind, source: '', resources: { assets: {}, components: {} } }, title)
     setTabs(current => [...current, { id: snapshot.documentId, documentId: snapshot.documentId, path: '', name: title, kind: 'document', dirty: snapshot.dirty, lesson: null }])
     if (ticket === navigation.current) setActive(snapshot.documentId)
   }
+  const createMarkdown = (name = '未命名 MD 文档') => createSource(name, 'markdown')
+  const createText = (name = '未命名 TXT 文档') => createSource(name, 'text')
   async function focusDocument(documentId: string) {
     const api = documentPort.documents
     if (!api) throw new Error('文档服务尚未连接')
+    const ticket = ++navigation.current
     const snapshot = await api.read(documentId)
     if (snapshot.model.kind === 'course-v10') {
-      const ticket = ++navigation.current
+      if (ticket !== navigation.current) return
       if (!courseRef.current) throw new Error('果铃工程视图尚未连接')
       pendingCourse.current = { id: documentId, ticket }
       await courseRef.current.activate(documentId)
@@ -240,7 +247,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
       const name = snapshot.binding.kind === 'file' ? path.split(/[\\/]/).pop()! : snapshot.binding.suggestedName
       setTabs(current => current.some(tab => tab.id === documentId) ? current : [...current, { id: documentId, documentId, path, name, kind: 'document', dirty: snapshot.dirty, lesson: null }])
     }
-    setActiveTab(documentId)
+    if (ticket === navigation.current) setActiveTab(documentId)
   }
   async function closeTab(tab: LessonFileTab) {
     if (tab.kind === 'course') {
@@ -262,7 +269,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     documents.current.delete(id); subscriptions.current.get(id)?.(); subscriptions.current.delete(id)
     const remaining = tabsRef.current.filter(item => item.id !== id)
     setTabs(remaining)
-    if (activeTab === id) setActiveTab(remaining.at(-1)?.id ?? '')
+    if (activeTabRef.current === id) setActiveTab(remaining.at(-1)?.id ?? '')
   }
   function registerEditor(id: string, editor: LessonDocumentEditorHandle | null) {
     subscriptions.current.get(id)?.(); subscriptions.current.delete(id)
@@ -275,11 +282,12 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     subscriptions.current.set(id, editor.session.subscribe(follow)); follow()
   }
   useEffect(() => documentPort.documents?.subscribe(event => {
-    if (event.type !== 'changed' || event.snapshot.binding.kind !== 'file') return
-    const snapshot = event.snapshot, filename = event.snapshot.binding.path
+    if (event.type !== 'changed') return
+    const snapshot = event.snapshot, filename = snapshot.binding.kind === 'file' ? snapshot.binding.path : ''
+    const name = snapshot.binding.kind === 'file' ? filename.split(/[\\/]/).pop() ?? filename : snapshot.binding.suggestedName
     const tab = tabsRef.current.find(item => item.documentId === snapshot.documentId || documents.current.get(item.id)?.session.documentId === snapshot.documentId)
-    if (!tab || tab.path === filename) return
-    setTabs(current => current.map(item => item.id === tab.id ? { ...item, documentId: snapshot.documentId, path: filename, name: filename.split(/[\\/]/).pop() ?? filename } : item))
+    if (!tab || tab.path === filename && tab.name === name) return
+    setTabs(current => current.map(item => item.id === tab.id ? { ...item, documentId: snapshot.documentId, path: filename, name } : item))
   }), [documentPort.documents])
   useEffect(() => window.desktopAPI?.onMediaArtifactBindingChanged?.(({ before, binding }) => {
     const matches = (current: MediaFileSnapshot['binding']) => normalized(current.path) === normalized(before.path)
@@ -372,7 +380,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     }
     return drafts
   }
-  return { tabs, activeTab, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, mediaEditorRef, mediaFiles: requestMediaFiles, updateMediaSnapshot, updateDirty, flushAll, saveActiveDocument, drainAll, captureMediaDrafts, preserveAll, hasDirtyInputs, suspendForClose, resumeAfterCloseCancelled, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
+  return { tabs, activeTab, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, createText, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, mediaEditorRef, mediaFiles: requestMediaFiles, updateMediaSnapshot, updateDirty, flushAll, saveActiveDocument, drainAll, captureMediaDrafts, preserveAll, hasDirtyInputs, suspendForClose, resumeAfterCloseCancelled, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
 }
 
 function normalized(value: string) { return value.replace(/\\/g, '/').toLowerCase() }

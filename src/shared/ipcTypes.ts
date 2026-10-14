@@ -106,17 +106,24 @@ export interface ComponentBootstrapInput {
 export interface ComponentBootstrapLease { leaseId: string; url: string }
 
 export type EditorClipboardCommand = 'cut' | 'copy' | 'paste' | 'paste-plain'
+export interface CourseObjectClipboardRequest {
+  command: 'cut' | 'copy'
+  requestId: string
+}
+export const COURSE_OBJECT_CLIPBOARD_COMMAND_EVENT = 'guoling:course-object-clipboard-command'
 
 export type CaptureObservationInput = { x: number; y: number; width: number; height: number } | {
   kind: 'published'; published: import('./contracts/component-platform/published').PublishedCourseV3;
   surfaceId: string; stateId?: string | null; instanceId?: string; spatialFrameId?: string;
+  staticExport?: true;
 }
 
 export interface DesktopAPI {
   launchFiles?(input: { type: 'list' } | { type: 'ack'; id: string }): Promise<Array<{ id: string; path: string }>>
   onLaunchFilesChanged?(handler: () => void): () => void
-  editorClipboard?(command: EditorClipboardCommand): Promise<void>
+  editorClipboard?(command: EditorClipboardCommand | CourseObjectClipboardRequest): Promise<void>
   htmlImport?: import('./workbench/htmlImportDesktop').HtmlImportDesktopAPI
+  flowImport?: import('./workbench/flowImportDesktop').FlowImportDesktopAPI
   imageResults?: import('./workbench/imageResultsDesktop').ImageResultsDesktopAPI
   attachments?: import('./workbench/attachmentsDesktop').AttachmentsDesktopAPI
   execution?: import('./workbench/executionDesktop').ExecutionDesktopAPI
@@ -126,6 +133,7 @@ export interface DesktopAPI {
   executionSettings?: import('./workbench/executionSettingsDesktop').ExecutionSettingsAPI
   pixabaySettings?: import('./workbench/pixabaySettingsDesktop').PixabaySettingsAPI
   workspaceFiles?: import('./workbench/workspaceFiles').WorkspaceFilesAPI
+  skillCatalog?: import('./workbench/skillCatalogDesktop').SkillCatalogAPI
   mediaFiles?(input: import('./workbench/mediaFiles').MediaFilesRequest): Promise<import('./workbench/mediaFiles').MediaFileSnapshot>
   onWorkspaceFilesChanged?(listener: (event: import('./workbench/workspaceFiles').WorkspaceFilesChange) => void): () => void
   documents?: import('./workbench/desktop').DocumentHostAPI
@@ -175,16 +183,19 @@ export interface DesktopAPI {
   exportHtml(input: {
     suggestedName: string
     html: string
+    projectPath?: string
   }): Promise<{ path: string } | null>
   exportWebPackage(input: {
     suggestedName: string
     bytes: Uint8Array
+    projectPath?: string
   }): Promise<{ path: string } | null>
   peekProjectArchive(input: { path: string }): Promise<OpenBinaryFileResult | null>
   exportBinary(input: {
     suggestedName: string
     extension: 'pptx' | 'json' | 'docx' | 'h5component'
     bytes: Uint8Array
+    projectPath?: string
   }): Promise<{ path: string } | null>
   onDocumentExportBuildRequest?(handler: (request: import('./workbench/toolPorts').ExportBuildRequest) => void): () => void
   sendDocumentExportBuildReply?(reply: import('./workbench/toolPorts').ExportBuildReply): void
@@ -193,6 +204,7 @@ export interface DesktopAPI {
   exportPdf(input: {
     suggestedName: string
     html: string
+    projectPath?: string
   }): Promise<{ path: string } | null>
   setPreviewNetworkPolicy(input: PreviewNetworkPolicyInput): Promise<void>
   releasePreviewNetworkPolicy(input: { leaseId: string }): Promise<void>
@@ -213,6 +225,7 @@ export interface DesktopAPI {
     source: 'renderer' | 'preview' | 'component'
     message: string
     stack?: string
+    details?: Record<string, unknown>
   }): Promise<void>
   exportDiagnostics(): Promise<{ path: string } | null>
 }
@@ -220,6 +233,7 @@ export interface DesktopAPI {
 export const IPC_CHANNELS = {
   componentCompilation: 'component:compile',
   htmlImport: 'html-import:operate',
+  flowImport: 'flow-import:read',
   imageResults: 'image-results:operate',
   imageResultsChanged: 'image-results:changed',
   externalMcp: 'external-mcp:operate',
@@ -233,6 +247,7 @@ export const IPC_CHANNELS = {
   executionSettings: 'execution-settings:operate',
   pixabaySettings: 'pixabay-settings:operate',
   workspaceFiles: 'workspace-files:operate',
+  skillCatalog: 'skills:catalog',
   mediaFiles: 'media-files:operate',
   workspaceFilesChanged: 'workspace-files:changed',
   documents: 'documents:operate',

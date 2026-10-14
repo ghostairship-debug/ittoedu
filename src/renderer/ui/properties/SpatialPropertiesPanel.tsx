@@ -31,12 +31,13 @@ export interface SpatialPropertiesCommands {
   readonly activateFrame: (frameId: string) => void
   readonly fitWorldContent: (scope?: 'visible' | 'all') => void
   readonly setPlaybackPathId: (pathId: string | null) => void
+  readonly setDefaultPathId?: (pathId: string | null) => void
   readonly addSemanticZoomRule: (rule: {
     instanceIds: string[]
     minZoom: number
     maxZoom: number
     visible: boolean
-  }) => void
+  }) => unknown | Promise<unknown>
   readonly updateSemanticZoomRule: (
     ruleId: string,
     patch: Partial<Omit<SpatialSemanticZoomRule, 'id'>>,
@@ -62,6 +63,8 @@ export interface SpatialPropertiesCommands {
   readonly updateRelationLabel: (relationId: string, label: string) => void
   readonly updateRelationKind: (relationId: string, kind: SpatialRelationKind) => void
   readonly deleteRelation: (relationId: string) => void
+  readonly selectPath: (pathId: string) => void
+  readonly selectRelation: (relationId: string) => void
   readonly reportError: (message: string) => void
 }
 
@@ -135,6 +138,8 @@ function SpatialPathRelationFields({
       onUpdateRelationLabel={commands.updateRelationLabel}
       onUpdateRelationKind={commands.updateRelationKind}
       onDeleteRelation={commands.deleteRelation}
+      onSelectPath={commands.selectPath}
+      onSelectRelation={commands.selectRelation}
     />
   )
 }
@@ -170,6 +175,7 @@ function SpatialPageProperties({ context }: { context: SpatialPropertiesContext 
         worldInstances={view.worldInstances}
         paths={view.spatial.paths ?? []}
         playbackPathId={context.playbackPathId}
+        defaultPathId={view.spatial.defaultPathId ?? null}
         semanticZoomRules={view.spatial.semanticZoom ?? []}
         sessionCameraLabel={`${Math.round(sessionCamera.zoom * 100)}%`}
         draftBindingKey={context.draftBindings.surface}
@@ -187,6 +193,7 @@ function SpatialPageProperties({ context }: { context: SpatialPropertiesContext 
         onActivateFrame={commands.activateFrame}
         onFitWorldContent={commands.fitWorldContent}
         onPlaybackPathIdChange={commands.setPlaybackPathId}
+        onDefaultPathIdChange={commands.setDefaultPathId}
         onAddSemanticZoomRule={commands.addSemanticZoomRule}
         onUpdateSemanticZoomRule={commands.updateSemanticZoomRule}
         onDeleteSemanticZoomRule={commands.deleteSemanticZoomRule}

@@ -4,6 +4,41 @@ import { parse as parseJavaScript, tokenizer } from 'acorn'
 import { webDataSchema } from './data'
 import type { WebData } from './data'
 
+/** Resource projection changes only JS literal contents, never regex or comments. */
+export function resolveWebJavaScriptResources(source: string, resolve: (reference: string) => string | undefined, module = false, onEdit?: (edit: { start: number; end: number; value: string }) => void): string {
+  if (!source.includes('cw-resource:')) return source
+  const edits: { start: number; end: number; value: string }[] = []
+  try { for (const token of tokenizer(source, { ecmaVersion: 'latest', sourceType: module ? 'module' : 'script' })) {
+    const literal = 'value' in token ? token.value : undefined
+    if (!['string', 'template', 'invalidTemplate'].includes(token.type.label) || typeof literal !== 'string') continue
+    const replace = (value: string) => value.replace(/cw-resource:[a-zA-Z0-9_.-]+/g, reference => resolve(reference) ?? reference)
+    const value = replace(literal)
+    if (value === literal) continue
+    edits.push({ start: token.start, end: token.end, value: token.type.label === 'string' ? JSON.stringify(value)
+      : source.slice(token.start, token.end).replace(/cw-resource:[a-zA-Z0-9_.-]+/g, reference => {
+        const url = resolve(reference)
+        return url === undefined ? reference : url.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${').replace(/\r/g, '\\r').replace(/\n/g, '\\n')
+      }) })
+  } } catch { return source }
+  edits.forEach(edit => onEdit?.(edit))
+  let result = source
+  for (const edit of edits.sort((a, b) => b.start - a.start)) result = result.slice(0, edit.start) + edit.value + result.slice(edit.end)
+  return result
+}
+
+/** Software-generated module URL literals address the same graph's real leases. */
+export function projectWebModuleUrls(source: string, mapExpression: string, onEdit?: (edit: { start: number; end: number; value: string }) => void): string {
+  const edits: { start: number; end: number; value: string }[] = []
+  try { for (const token of tokenizer(source, { ecmaVersion: 'latest', sourceType: 'module' })) {
+    const value = 'value' in token ? token.value : undefined
+    if (token.type.label === 'string' && typeof value === 'string' && value.startsWith('guoling-module-url:')) edits.push({ start: token.start, end: token.end, value: `${mapExpression}[${JSON.stringify(value.slice('guoling-module-url:'.length))}]` })
+  } } catch { return source }
+  edits.forEach(edit => onEdit?.(edit))
+  let result = source
+  for (const edit of edits.reverse()) result = result.slice(0, edit.start) + edit.value + result.slice(edit.end)
+  return result
+}
+
 export interface WebNetworkResourceFact {
   /** Undefined when an actual API/DOM resource consumer cannot be resolved from source. */
   url?: string
@@ -234,11 +269,12 @@ export function webResourceReferenceMarker(templates: Record<string, string>, bi
 }
 
 /** Refresh only software-projected resource fields which author code has not changed. */
-export function refreshWebResourceReferences(root: Document | Element, resources: Record<string, string>): void {
+export function refreshWebResourceReferences(root: Document | Element, resources: Record<string, string>, bindings?: Readonly<Record<string, string>>): void {
   for (const node of root.querySelectorAll('[data-component-resource-bindings]')) {
     if (node.tagName.toLowerCase() === 'script') continue
     let marker: { templates: Record<string, string>; assets: Record<string, string>; values: Record<string, string> }
     try { marker = JSON.parse(node.getAttribute('data-component-resource-bindings')!) } catch { continue }
+    if (bindings) for (const token of Object.keys(marker.assets)) marker.assets[token] = bindings[token] ?? token
     for (const [name, template] of Object.entries(marker.templates)) {
       const text = name === '$text' && node.tagName.toLowerCase() === 'style'
       if (!text && !['src', 'href', 'poster', 'srcset', 'xlink:href', 'style'].includes(name)) continue
@@ -266,9 +302,18 @@ export function refreshWebResourceReferences(root: Document | Element, resources
 }
 
 /** URLs are runtime leases; only asset identities remain in the author data. */
-export function resolveWebResourceBindings(instance: ComponentInstance, resolve: (assetId: string) => string | undefined, report?: (message: string) => void): ComponentInstance {
-  const { moduleGraph, ...source } = instance.data as unknown as import('./moduleGraph').WebRuntimeData
-  const data = webDataSchema.parse(source)
+export function resolveWebResourceBindings(instance: ComponentInstance, resolve: (assetId: string) => string | undefined, report?: (message: string) => void,
+  sourceBindings?: Readonly<Record<string, string>>): ComponentInstance {
+  const { moduleGraph, publishedModuleBundle, publishedDocumentBundles, ...source } = instance.data as unknown as import('./moduleGraph').WebRuntimeData
+  // Source wrappers may carry business fields alongside the mature Web data.
+  const data = webDataSchema.passthrough().parse(source) as WebData
+  // Library Source identities are rebound through its existing resource namespace;
+  // arbitrary canonical business data is not rewritten to infer Web semantics.
+  if (sourceBindings && data.resourceBindings) data.resourceBindings = Object.fromEntries(Object.entries(data.resourceBindings)
+    .map(([token, id]) => [token, sourceBindings[id] ?? id]))
+  // Host-owned author edits override a token locally; authored HTML keeps its
+  // original binding table and both declarations remain part of resource closure.
+  if (instance.authoring?.resourceBindings) data.resourceBindings = { ...data.resourceBindings, ...instance.authoring.resourceBindings }
   const urls = new Map<string, string>()
   for (const [reference, assetId] of Object.entries(data.resourceBindings ?? {})) {
     if (!/^cw-resource:[a-zA-Z0-9_.-]+$/.test(reference)) { report?.(`${instance.id} 资源引用键不是完整token：${reference}；原内容已保留`); continue }
@@ -324,9 +369,9 @@ export function resolveWebResourceBindings(instance: ComponentInstance, resolve:
       for (const attribute of node.attrs) {
         const name = attribute.prefix ? `${attribute.prefix}:${attribute.name}` : attribute.name
         const location = node.sourceCodeLocation?.attrs?.[name]
-        if (!location || !['src', 'href', 'poster', 'srcset', 'srcdoc', 'xlink:href', 'style'].includes(name) && !/^on[a-z]+$/i.test(name)) continue
+        if (!location || !['src', 'href', 'poster', 'srcset', 'srcdoc', 'xlink:href', 'style', 'data-guoling-classic-source'].includes(name) && !/^on[a-z]+$/i.test(name)) continue
         const raw = sourceHtml.slice(location.startOffset, location.endOffset)
-        const projected = name === 'srcdoc' ? projectHtml(attribute.value) : name === 'style' ? cssUrls(attribute.value) : /^on[a-z]+$/i.test(name) ? javascript(attribute.value) : references(attribute.value)
+        const projected = name === 'srcdoc' ? projectHtml(attribute.value) : name === 'data-guoling-classic-source' ? JSON.stringify(javascript(JSON.parse(attribute.value))) : name === 'style' ? cssUrls(attribute.value) : /^on[a-z]+$/i.test(name) ? javascript(attribute.value) : references(attribute.value)
         if (node.tagName !== 'script' && !/^on[a-z]+$/i.test(name)) templates[name] = attribute.value
         if (projected !== attribute.value) edits.push({ start: location.startOffset, end: location.endOffset,
           value: `${raw.match(/^[^\s=]+/)?.[0] ?? name}="${htmlAttribute(projected)}"` })
@@ -360,5 +405,18 @@ export function resolveWebResourceBindings(instance: ComponentInstance, resolve:
   return html
   }
   const html = projectHtml(data.html)
-  return { ...instance, data: { ...data, ...(moduleGraph ? { moduleGraph: moduleGraph as unknown as import('../../shared/contracts/component-platform').JsonObject } : {}), html, ...(data.css === undefined ? {} : { css: cssUrls(data.css) }) } }
+  const graph = moduleGraph ? { ...moduleGraph, modules: Object.fromEntries(Object.entries(moduleGraph.modules).map(([path, module]) => {
+    const edits: { start: number; end: number; value: string }[] = []
+    let code = resolveWebJavaScriptResources(module.code, reference => urls.get(reference), true, edit => edits.push(edit))
+    const shifted = (offset: number) => offset + edits.filter(edit => edit.end <= offset).reduce((shift, edit) => shift + edit.value.length - (edit.end - edit.start), 0)
+    let imports = module.imports.map(reference => ({ ...reference, start: shifted(reference.start), end: shifted(reference.end) }))
+    edits.length = 0
+    code = projectWebModuleUrls(code, `globalThis[${JSON.stringify(`__guoling_module_urls_${encodeURIComponent(instance.id)}`)}]`, edit => edits.push(edit))
+    imports = imports.map(reference => ({ ...reference, start: shifted(reference.start), end: shifted(reference.end) }))
+    return [path, { ...module, code, imports }]
+  })) } : undefined
+  return { ...instance, data: { ...data, ...(graph ? { moduleGraph: graph as unknown as import('../../shared/contracts/component-platform').JsonObject } : {}),
+    ...(publishedModuleBundle === undefined ? {} : { publishedModuleBundle }),
+    ...(publishedDocumentBundles === undefined ? {} : { publishedDocumentBundles }),
+    html, ...(data.css === undefined ? {} : { css: cssUrls(data.css) }) } }
 }

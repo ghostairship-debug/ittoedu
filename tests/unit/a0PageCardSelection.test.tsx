@@ -121,8 +121,8 @@ it('selects the page from card padding while retaining child controls, menus, dr
   expect(reorder).toHaveBeenCalledExactlyOnceWith(['second', firstId, 'space'])
   expect(selectSurface).not.toHaveBeenCalled()
 
-  fireEvent.click(screen.getByRole('button', { name: '新建场景或页面' }))
-  await act(async () => { fireEvent.click(within(screen.getByRole('menu', { name: '新建场景或页面' })).getByRole('menuitem', { name: '新建无限画布' })) })
+  fireEvent.click(screen.getByRole('button', { name: '新建页面' }))
+  await act(async () => { fireEvent.click(within(screen.getByRole('menu', { name: '新建页面' })).getByRole('menuitem', { name: '无限画布' })) })
   expect(add).toHaveBeenCalledExactlyOnceWith('spatial-page', { surfaceId: 'space' })
   expect(selectSurface).not.toHaveBeenCalled()
 

@@ -7,7 +7,7 @@ import { elementChangeUnits, elementUnitLabel, readComponentElementFields, readC
 import { normalizeDocumentText, type FlowTextContent } from '../../../shared/document/content'
 import { CardTextEdits, sourceTextCodec, flowTextCodec, type PeerTextOperation } from './CardTextEdits'
 import { applyComponentOperation, captureComponentOperation, presentationComponentEdits } from '../../../core/drivers/courseV10Operations'
-import { courseInstanceContext, courseInstanceFieldIdentity, courseInstanceTextTarget, courseInstanceTextEdit, isCourseInstanceRange, mapHtmlAuthorFieldTarget, mapMarkdownRange, prepareHtmlAuthorFieldEdit, readHtmlAuthorField, readCourseInstanceText, readEditableTargetContent, type CourseInstanceTarget } from '../../../core/tools/ToolTargets'
+import { courseInstanceContext, courseInstanceFieldIdentity, courseInstanceTextTarget, courseInstanceTextEdit, isCourseInstanceRange, mapHtmlAuthorFieldTarget, mapMarkdownRange, prepareHtmlAuthorFieldEdit, readHtmlAuthorField, readCourseInstanceText, readEditableTargetContent, relocateCourseInstanceFieldTarget,type CourseInstanceTarget } from '../../../core/tools/ToolTargets'
 import type { TextCodec } from './CardTextEdits'
 import { documentSourceEdits } from '../../../shared/document/sourceMerge'
 import { mapAcknowledgedRange } from '../../../core/tools/ToolReadCoverage'
@@ -159,9 +159,9 @@ export class ElementChangeTracker {
     }
     this.off.push(session.subscribeCommits(commit => {
       try { this.observe(commit) } catch { this.invalidate() }
-    }), session.subscribe(event => {
+    }), session.subscribeVersion(event => {
       if (event.type === 'closed') { this.invalidate(); this.dispose() }
-      else if (event.snapshot.epoch !== this.epoch || event.snapshot.revision !== this.revision) this.invalidate()
+      else if (event.epoch !== this.epoch || event.revision !== this.revision) this.invalidate()
     }))
   }
   bindRun(runId: string): void { this.runId = runId; this.fragmentTrackers?.forEach(tracker => tracker.bindRun(runId)) }
@@ -238,16 +238,17 @@ export class ElementChangeTracker {
       return
     }
     if (this.componentText && this.target.kind === 'course-instance') {
+      const nextTarget=relocateCourseInstanceFieldTarget(before,after,this.target)
       if (!sameFieldValue(this.componentIdentity, courseInstanceFieldIdentity(before, this.target))
-        || !sameFieldValue(this.componentIdentity, courseInstanceFieldIdentity(after, this.target))) { this.invalidate('原文字字段所在行、项或单元格已改变，请重新选择。'); return }
-      const a = componentText(before, this.target), b = componentText(after, this.target)
+        || !sameFieldValue(this.componentIdentity, courseInstanceFieldIdentity(after, nextTarget))) { this.invalidate('原文字字段所在行、项或单元格已改变，请重新选择。'); return }
+      const a = componentText(before, this.target), b = componentText(after, nextTarget)
       if (a === null || b === null || !this.richComponentText && typeof a !== typeof b) { this.invalidate(); return }
       this.observeComponentRoots(before, after, own, inverse && reversing?.direction === 'redo')
       if (this.richComponentText) {
         const normalized = (value: string | FlowTextContent) => normalizeDocumentText(typeof value === 'string' ? { inlines: [{ type: 'text', text: value }] } : value)
         ;(this.componentText as CardTextEdits<FlowTextContent>).advance(normalized(a), normalized(b), own, inverse, undefined, provenance)
       } else (this.componentText as CardTextEdits<string>).advance(a as string, b as string, own, inverse, undefined, provenance)
-      if (this.target.dataPath) this.target = courseInstanceTextTarget(after, this.target)
+      this.target = nextTarget
       return
     }
     if (before.kind === 'course-v10' && after.kind === 'course-v10' && this.target.kind === 'course-instance') {

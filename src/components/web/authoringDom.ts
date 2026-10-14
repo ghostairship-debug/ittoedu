@@ -27,6 +27,17 @@ export function createDomAuthoring(root: HTMLElement, options: {
   type Path = ComponentAuthorBinding['path']
   type Property = { original: string | null; applied: string | null; priority?: string; computed?: string }
   type Applied = { node: Target; content?: Property; attributes: Map<Element, Map<string, Property>>; styles: Map<string, Property> }
+  type ValueIndex = Map<string, Target[]>
+  type ScanLookup = { elements: Map<string, Element[]>; scopes: WeakMap<Element, ComponentAuthorScope>;
+    paths: WeakMap<Element, Path>; indices: WeakMap<Element, number>; indexedParents: WeakSet<Element>;
+    values: Map<string, ValueIndex>; nodeIndexes: WeakMap<Target, Set<ValueIndex>>; contexts: WeakMap<Element, string | null> }
+  let lookup: ScanLookup | undefined
+  const withLookup = <Value,>(work: () => Value): Value => {
+    if (lookup) return work()
+    lookup = { elements: new Map(), scopes: new WeakMap(), paths: new WeakMap(), indices: new WeakMap(), indexedParents: new WeakSet(),
+      values: new Map(), nodeIndexes: new WeakMap(), contexts: new WeakMap() }
+    try { return work() } finally { lookup = undefined }
+  }
   const doc = root.ownerDocument, win = doc.defaultView!
   const descriptions = new WeakMap<Node, { scope: string; observation: DomAuthorObservation }>()
   const observedNodes = new Map<string, Target>()
@@ -38,7 +49,29 @@ export function createDomAuthoring(root: HTMLElement, options: {
   const valueOf = (node: Target) => node.nodeType === 3 ? node.nodeValue ?? '' : (node as HTMLImageElement).getAttribute('src') ?? ''
   const authorValueOf = (node: Target) => node.nodeType === 3 ? options.originalText?.(node as Text) ?? valueOf(node)
     : options.resourceReference?.(valueOf(node)) ?? valueOf(node)
+  const cssAxes = (value: string) => {
+    const result: string[] = []; let start = 0, depth = 0
+    for (let index = 0; index < value.length; index++) {
+      if (value[index] === '(') depth++
+      else if (value[index] === ')') depth--
+      else if (!depth && /\s/.test(value[index]!)) {
+        if (index > start) result.push(value.slice(start, index)); start = index + 1
+      }
+    }
+    if (start < value.length) result.push(value.slice(start))
+    return result
+  }
+  const visible = (node: Target) => {
+    const style = win.getComputedStyle(elementOf(node))
+    return style.visibility !== 'hidden' && style.visibility !== 'collapse' && style.display !== 'none'
+  }
   const contextValueOf = (element: Element) => {
+    if (lookup?.contexts.has(element)) return lookup.contexts.get(element)!
+    const value = readContextValue(element)
+    lookup?.contexts.set(element, value)
+    return value
+  }
+  const readContextValue = (element: Element) => {
     if (!options.originalText) return element.textContent
     const walker = doc.createTreeWalker(element, 4), values: string[] = []
     for (let node = walker.nextNode(); node; node = walker.nextNode()) values.push(authorValueOf(node as Text))
@@ -96,6 +129,8 @@ export function createDomAuthoring(root: HTMLElement, options: {
     for (const fiber of roots) visit(fiber, {}, 0)
   }
   const scopeOf = (element: Element): ComponentAuthorScope => {
+    const cached = lookup?.scopes.get(element)
+    if (cached) return cached
     const scope = { ...reactScopes.get(element) }
     let depth = 0
     for (let current: Element | null = element; current && root.contains(current); current = current.parentElement) {
@@ -106,6 +141,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
       depth++
       if (current === root) break
     }
+    lookup?.scopes.set(element, scope)
     return scope
   }
   const attributesOf = (element: Element): Record<string, string> => {
@@ -121,6 +157,21 @@ export function createDomAuthoring(root: HTMLElement, options: {
     return attributes
   }
   const pathFor = (element: Element): Path => {
+    const cached = lookup?.paths.get(element)
+    if (cached) return cached
+    if (lookup) {
+      if (element === root) return []
+      const parent = element.parentElement
+      if (parent && !lookup.indexedParents.has(parent)) {
+        [...parent.children].forEach((child, index) => lookup!.indices.set(child, index))
+        lookup.indexedParents.add(parent)
+      }
+      const attributes = attributesOf(element)
+      const path = [...(parent && root.contains(parent) ? pathFor(parent) : []), { tag: element.localName, index: lookup.indices.get(element) ?? 0,
+        ...(Object.keys(attributes).length ? { attributes } : {}) }]
+      lookup.paths.set(element, path)
+      return path
+    }
     const path: Path = []
     for (let current: Element | null = element; current && current !== root; current = current.parentElement) {
       const attributes = attributesOf(current)
@@ -133,12 +184,43 @@ export function createDomAuthoring(root: HTMLElement, options: {
     && Object.entries(step.attributes ?? {}).every(([name, value]) => name === 'class'
       ? value.split(/\s+/).every(token => element.classList.contains(token)) : element.getAttribute(name) === value)
   const elementsAt = (path: Path): Element[] => {
+    const key = JSON.stringify(path.map(({ tag, attributes }) => ({ tag, attributes })))
+    const cached = lookup?.elements.get(key)
+    if (cached) return cached
     let candidates: Element[] = [root]
     for (const step of path) candidates = candidates.flatMap(parent => [...parent.children].filter(child => matches(child, step)))
+    lookup?.elements.set(key, candidates)
     return candidates
   }
   const sameScope = (element: Element, scope?: ComponentAuthorScope) => ordered(scopeOf(element)) === ordered(scope ?? {})
   const resolve = (key: string, record: ComponentAuthorRecord, previous?: Applied): { node?: Target; status: 'bound' | 'unmounted' | 'unresolved' } => {
+    if (lookup) {
+      const path = record.binding.path.map(({ tag, attributes }) => ({ tag, attributes }))
+      const group = JSON.stringify([path, ordered(record.scope ?? {}), record.kind, record.binding.textIndex ?? 0])
+      let values = lookup.values.get(group)
+      if (!values) {
+        const candidates = elementsAt(record.binding.path).filter(element => sameScope(element, record.scope))
+        if (!candidates.length) return { status: 'unmounted' }
+        values = new Map()
+        for (const element of candidates) {
+          const node = record.kind === 'image' ? element.localName === 'img' ? element as HTMLImageElement : undefined
+            : [...element.childNodes].filter(node => node.nodeType === 3)[record.binding.textIndex ?? 0] as Text | undefined
+          if (!node) continue
+          const value = node.nodeType === 3 ? authorValueOf(node) : valueOf(node)
+          const bucket = values.get(value) ?? []; bucket.push(node); values.set(value, bucket)
+          const indexes = lookup.nodeIndexes.get(node) ?? new Set<ValueIndex>()
+          indexes.add(values); lookup.nodeIndexes.set(node, indexes)
+        }
+        lookup.values.set(group, values)
+      }
+      const override = record.kind === 'text' ? record.overrides.text : record.overrides.src
+      const resolvedOverride = record.kind === 'image' && override ? options.resolveResource?.(override) ?? override : override
+      const baseline = record.kind === 'image' ? options.resolveResource?.(record.binding.baseline) ?? record.binding.baseline : record.binding.baseline
+      const nodes = new Set([...(values.get(baseline) ?? []), ...(resolvedOverride !== undefined ? values.get(resolvedOverride) ?? [] : [])])
+      if (previous && lookup.nodeIndexes.get(previous.node)?.has(values) && valueOf(previous.node) === previous.content?.applied) nodes.add(previous.node)
+      if (record.binding.context?.some(context => { const anchors = elementsAt(context.path); return anchors.length !== 1 || contextValueOf(anchors[0]!) !== context.value })) return { status: 'unresolved' }
+      return nodes.size === 1 ? { node: [...nodes][0], status: 'bound' } : { status: 'unresolved' }
+    }
     const candidates = elementsAt(record.binding.path).filter(element => sameScope(element, record.scope))
     if (!candidates.length) return { status: 'unmounted' }
     const nodes = candidates.flatMap(element => {
@@ -247,7 +329,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
       for (const name of ['display', 'width', 'height']) if (styles[name] !== undefined) applyStyle(name, styles[name]!)
       const changesLinear = geometry.scaleX !== undefined || geometry.scaleY !== undefined || geometry.rotation !== undefined
       if (geometry.translateX !== undefined || geometry.translateY !== undefined || changesLinear) {
-        const base = (baseStyle('translate') || '0px 0px').split(/\s+/)
+        const base = cssAxes(baseStyle('translate') || '0px 0px')
         // Individual transforms share the source's transform-origin. Keep that
         // pivot for its existing transform and compensate only the author delta:
         // T(O) T(A + RS*O - O) RS M T(-O) = T(A) RS T(O) M T(-O).
@@ -276,7 +358,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
     }
     for (const [name, value] of Object.entries(styles)) applyStyle(name, value)
   }
-  const refresh = () => {
+  const refresh = () => withLookup(() => {
     if (disposed || refreshing) return
     refreshing = true
     try {
@@ -295,7 +377,15 @@ export function createDomAuthoring(root: HTMLElement, options: {
         if (previous && result.node !== previous.node) { restore(previous); active.delete(key) }
         if (result.node) {
           const state = active.get(key) ?? { node: result.node, attributes: new Map(), styles: new Map() }
+          const oldValue = result.node.nodeType === 3 ? authorValueOf(result.node) : valueOf(result.node)
           active.set(key, state); apply(record, state)
+          const nextValue = result.node.nodeType === 3 ? authorValueOf(result.node) : valueOf(result.node)
+          if (oldValue !== nextValue) for (const index of lookup?.nodeIndexes.get(result.node) ?? []) {
+            const old = index.get(oldValue)?.filter(node => node !== result.node) ?? []
+            if (old.length) index.set(oldValue, old); else index.delete(oldValue)
+            index.set(nextValue, [...index.get(nextValue) ?? [], result.node])
+          }
+          if (oldValue !== nextValue) for (let parent: Element | null = elementOf(result.node); parent && root.contains(parent); parent = parent.parentElement) lookup?.contexts.delete(parent)
           observedNodes.set(key, result.node)
           descriptions.set(result.node, { scope: ordered(record.scope ?? {}), observation: {
             node: result.node, authorKey: key, record, initialValue: record.kind === 'image' ? record.overrides.src ?? authorValueOf(result.node) : valueOf(result.node),
@@ -305,7 +395,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
         status(key, result.status)
       }
     } finally { refreshing = false }
-  }
+  })
   const describe = (node: Node): DomAuthorObservation | null => {
     if (!eligible(node) || !root.contains(node)) return null
     const element = elementOf(node), scope = scopeOf(element), scopeKey = ordered(scope)
@@ -431,17 +521,23 @@ export function createDomAuthoring(root: HTMLElement, options: {
       const radians = rotation ? Number(rotation[1]) * (rotation[2] === 'deg' ? Math.PI / 180 : rotation[2] === 'turn' ? Math.PI * 2 : 1) : 0
       const cosine = Math.cos(radians), sine = Math.sin(radians), sx = scale[0]!, sy = scale[1] ?? sx
       const individual: Matrix = [cosine * sx, sine * sx, -sine * sy, cosine * sy, 0, 0]
+      const translate = cssAxes(sourceValue('translate') || 'none')
+      const tx = length(translate[0] === 'none' ? '0px' : translate[0] ?? '0px'), ty = length(translate[1] ?? '0px')
       const source = multiply(individual, [sourceTransform.a, sourceTransform.b, sourceTransform.c, sourceTransform.d, sourceTransform.e, sourceTransform.f])
       const ox = originX.offset + originX.fraction * measured.width, oy = originY.offset + originY.fraction * measured.height
       const sourceOffset = {
-        current: { x: source[4] + (1 - source[0]) * ox - source[2] * oy, y: source[5] - source[1] * ox + (1 - source[3]) * oy },
-        widthDelta: { x: individual[0] * transformWidth.x + individual[2] * transformWidth.y + (1 - source[0]) * originX.fraction,
+        current: { x: tx.offset + tx.fraction * measured.width + source[4] + (1 - source[0]) * ox - source[2] * oy,
+          y: ty.offset + ty.fraction * measured.height + source[5] - source[1] * ox + (1 - source[3]) * oy },
+        widthDelta: { x: tx.fraction + individual[0] * transformWidth.x + individual[2] * transformWidth.y + (1 - source[0]) * originX.fraction,
           y: individual[1] * transformWidth.x + individual[3] * transformWidth.y - source[1] * originX.fraction },
         heightDelta: { x: individual[0] * transformHeight.x + individual[2] * transformHeight.y - source[2] * originY.fraction,
-          y: individual[1] * transformHeight.x + individual[3] * transformHeight.y + (1 - source[3]) * originY.fraction },
+          y: ty.fraction + individual[1] * transformHeight.x + individual[3] * transformHeight.y + (1 - source[3]) * originY.fraction },
       }
-      return { frame: { width: measured.width, height: measured.height, transform: multiply(inverseParent, measured.matrix) },
-        parentToInstance: multiply(toInstance, parent.matrix), author: observation?.record.overrides.geometry ?? {}, boxInsets: measured.boxInsets, sourceOffset }
+      const zoom = parseFloat(style.zoom) || 1
+      // CSS translations live before the element's own zoom. Factor that unit map
+      // into the observation's parent coordinate map so gesture deltas stay CSS px.
+      return { frame: { width: measured.width, height: measured.height, transform: multiply([1 / zoom, 0, 0, 1 / zoom, 0, 0], multiply(inverseParent, measured.matrix)) },
+        parentToInstance: multiply(multiply(toInstance, parent.matrix), [zoom, 0, 0, zoom, 0, 0]), author: observation?.record.overrides.geometry ?? {}, boxInsets: measured.boxInsets, sourceOffset }
     } catch { return undefined }
   }
   const enqueue = () => {
@@ -466,7 +562,18 @@ export function createDomAuthoring(root: HTMLElement, options: {
       }
       refresh()
     },
-    scan(): DomAuthorObservation[] { refresh(); return targets().flatMap(node => { const value = describe(node); return value ? [{ ...value, geometry: geometry(node) }] : [] }) },
+    scan(): DomAuthorObservation[] { refresh(); return withLookup(() => targets().filter(visible).flatMap(node => { const value = describe(node); return value ? [{ ...value, geometry: geometry(node) }] : [] })) },
+    hit(x: number, y: number): DomAuthorObservation | undefined {
+      const element = doc.elementsFromPoint(x, y)[0]
+      if (!element || !root.contains(element)) return undefined
+      for (const node of targets()) {
+        if (elementOf(node) !== element || !visible(node)) continue
+        const rect = node.nodeType === 3 ? (() => { const range = doc.createRange(); range.selectNodeContents(node); return range.getBoundingClientRect() })() : element.getBoundingClientRect()
+        if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue
+        const observation = describe(node); if (observation) return observation
+      }
+      return undefined
+    },
     dispose() { if (disposed) return; disposed = true; observer.disconnect(); for (const state of active.values()) restore(state); active.clear(); previews.clear(); observedNodes.clear() },
   }
 }

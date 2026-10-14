@@ -1,3 +1,4 @@
+import { documentNamedColors } from './namedColors'
 export interface DocumentColorChannels { red: number; green: number; blue: number; alpha: number }
 
 const number = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?(%?)$/i
@@ -11,6 +12,8 @@ const channel = (value: string, scale: number): number | undefined => {
 /** CSS RGB/alpha forms used by the existing document text parser and renderers. */
 export function documentColorChannels(value: string): DocumentColorChannels | undefined {
   const text = value.trim()
+  const named = documentNamedColors[text.toLowerCase()]
+  if (named) return { red: named[0], green: named[1], blue: named[2], alpha: 1 }
   const hex = /^#([\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})$/i.exec(text)
   if (hex) {
     const full = hex[1]!.length < 5 ? [...hex[1]!].map(character => character + character).join('') : hex[1]!

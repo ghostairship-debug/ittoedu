@@ -180,7 +180,7 @@ export class DocumentProjection {
         }
       }
     }
-    if (composition && draft.kind === 'course-v10') {
+    if (composition && draft.kind === 'course-v10' && !equalComponentValue(composition.value, composition.initialValue)) {
       try {
         // Validate the original reads, even when IME has not emitted a final input event yet.
         draft = await driver.apply(draft, composition.command)
@@ -243,6 +243,13 @@ export class DocumentProjection {
     ++this.projectionVersion
     this.update({ composing: null })
     if (this.closeSuspended) return
+    if (equalComponentValue(composition.value, composition.initialValue)) {
+      this.composition = undefined
+      ++this.projectionVersion
+      this.update({ retainedComposition: null, ...(!this.queue.length && this.state.error?.code === 'component-field-conflict' ? { error: null } : {}) })
+      await this.scheduleComponentRebase()
+      return
+    }
     await this.scheduleComponentRebase()
     if (this.closeSuspended || this.composition !== composition || this.state.error) return
     const draft = this.state.draft ?? undefined
@@ -562,6 +569,23 @@ export class DocumentProjection {
       if (!this.queue.length && !this.previewTail) return structuredClone(this.state.committed!)
     }
   }
+  /** Explicit user resolution only; never called by an incoming event or reconnect. */
+  async releaseRejectedOperation(operationId: string): Promise<void> {
+    if (this.previewTail) await this.previewTail
+    while (this.worker) await this.worker
+    const index = this.queue.findIndex(entry => entry.operationId === operationId)
+    if (index < 0) return
+    const entry = this.queue[index]!
+    if (entry.status !== 'rejected') throw new Error('请先核实待确认操作的结果')
+    // The input owner retains raw source and will capture a new committed
+    // baseline. Other input and unknown operations keep their existing owners.
+    this.queue.splice(index, 1)
+    ++this.projectionVersion
+    this.update({ error: this.queue.length ? { kind: 'conflict', code: 'pending-input', operationId: this.queue[0]!.operationId,
+      message: '其他未确认输入仍保留，请处理后继续。' } : null })
+    await this.scheduleComponentRebase()
+  }
+
   /** Explicit user resolution only; never called by an incoming event or reconnect. */
   discardDraft(): void {
     if (this.queue.some(entry => entry.status === 'sending' || entry.status === 'unknown')) throw new Error('请先核实待确认操作的结果')

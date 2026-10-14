@@ -4,6 +4,7 @@ import { ExecutionSettingsPanel } from '../../src/renderer/workbench/ExecutionSe
 import type { ExecutionSettingsAPI } from '../../src/shared/workbench/executionSettingsDesktop'
 import type { ExecutionConnectionView, ExecutionSettingsView } from '../../src/shared/workbench/executionSettings'
 import type { ModelCapabilityRecord, ProbedModelCapability } from '../../src/shared/workbench/modelCapabilities'
+import { modelCapabilityIdentity } from '../../src/shared/workbench/modelCapabilities'
 
 afterEach(cleanup)
 const connected = (id: string, revision = 1): ExecutionConnectionView => ({
@@ -13,7 +14,7 @@ const connected = (id: string, revision = 1): ExecutionConnectionView => ({
   hasCredential: true, revoked: false,
 })
 const recorded = (connectionId: string, connectionRevision: number, model: string, capability: ProbedModelCapability,
-  status: 'supported' | 'unknown', parametersKey = '{}'): ModelCapabilityRecord => ({
+  status: 'supported' | 'unknown', parametersKey = '{"protocol":"openai-chat","parameters":{}}'): ModelCapabilityRecord => ({
   connectionId, connectionRevision, model, parametersKey,
   facts: status === 'supported' ? { [capability]: { status, observedAt: 1, source: 'probe' } } : {},
   lastProbe: { observedAt: 1, checks: [capability], requestCount: 1,
@@ -37,8 +38,8 @@ function setup() {
     discoverModels: vi.fn(async () => ({ connectionId: 'connection', connectionRevision: 1, models: [{ id: 'available-model' }], capabilitiesVerified: false as const, source: 'live' as const, checkedAt: '2026-09-25T00:00:00.000Z' })),
     probeCapabilities: vi.fn(async (input: Parameters<ExecutionSettingsAPI['probeCapabilities']>[0]) => {
       const selected = state.profile.roles[input.role]!
-      const record = { connectionId: selected.connectionId, connectionRevision: state.connections.find(entry => entry.connection.id === selected.connectionId)!.connection.revision,
-        model: selected.model, parametersKey: JSON.stringify(selected.parameters ?? {}), facts: { [input.checks[0]]: { status: 'supported' as const, observedAt: 100, source: 'probe' as const, actualModel: 'actual-model' } },
+      const record = { ...modelCapabilityIdentity({ connection: state.connections.find(entry => entry.connection.id === selected.connectionId)!.connection,
+        model: selected.model, parameters: selected.parameters, capabilityModel: selected.capabilityModel }), facts: { [input.checks[0]]: { status: 'supported' as const, observedAt: 100, source: 'probe' as const, actualModel: 'actual-model' } },
         lastProbe: { observedAt: 100, checks: input.checks, requestCount: input.checks.length, outcomes: input.checks.map((capability: typeof input.checks[number]) => ({ capability, status: 'supported' as const,
           code: `probe-${capability}-observed`, message: '已观察', actualModel: 'actual-model' })) } }
       state = { ...state, capabilityRecords: [record] }; return record
@@ -50,15 +51,29 @@ function setup() {
   return { api, state }
 }
 
+it('R01 model routing converts output cap keys without deleting the selected cap or unrelated parameters', async () => {
+  const { api, state } = setup(), entry = connected('relay')
+  entry.connection.baseURL = 'https://api.teamorouter.com/v1'
+  state.connections = [entry]
+  state.profile.roles.conversation = { connectionId: 'relay', model: 'deepseek-flash', parameters: { max_tokens: 1200, reasoning_effort: 'high', temperature: 0.6 } }
+  vi.mocked(api.discoverModels).mockResolvedValue({ connectionId: 'relay', connectionRevision: 1, models: [{ id: 'deepseek-flash' }, { id: 'gpt-6.1-sol' }, { id: 'claude-fixture' }], capabilitiesVerified: false, source: 'live', checkedAt: '2026-10-12T00:00:00.000Z' })
+  render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
+  await screen.findByRole('option', { name: /gpt-6.1-sol/ })
+  fireEvent.change(screen.getByLabelText('主力模型'), { target: { value: 'gpt-6.1-sol' } })
+  expect(JSON.parse((screen.getByLabelText('主力模型参数') as HTMLTextAreaElement).value)).toEqual({ max_output_tokens: 1200, temperature: 0.6 })
+  fireEvent.change(screen.getByLabelText('主力模型'), { target: { value: 'claude-fixture' } })
+  expect(JSON.parse((screen.getByLabelText('主力模型参数') as HTMLTextAreaElement).value)).toEqual({ max_tokens: 1200, temperature: 0.6 })
+})
+
 it('NI05 exposes optional compression in existing model settings and saves only an explicit selection', async () => {
   const { api, state } = setup()
   state.connections = [connected('connection')]
   render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
-  const region = await screen.findByRole('region', { name: '上下文压缩（可选）配置' })
+  const region = await screen.findByRole('region', { name: '上下文压缩配置' })
   expect(within(region).getByText(/未配置时使用当前任务的主模型/)).toBeInTheDocument()
-  fireEvent.change(within(region).getByLabelText('上下文压缩（可选）连接'), { target: { value: 'connection' } })
+  fireEvent.change(within(region).getByLabelText('上下文压缩连接'), { target: { value: 'connection' } })
   await waitFor(() => expect(within(region).getByRole('option', { name: /available-model/ })).toBeInTheDocument())
-  fireEvent.change(within(region).getByLabelText('上下文压缩（可选）模型'), { target: { value: 'available-model' } })
+  fireEvent.change(within(region).getByLabelText('上下文压缩模型'), { target: { value: 'available-model' } })
   fireEvent.click(screen.getByRole('button', { name: '保存模型角色' }))
   await waitFor(() => expect(api.saveProfile).toHaveBeenCalledWith({ expectedRevision: 0, roles: {
     conversation: null, vision: null, imageGenerate: null, imageEdit: null,
@@ -78,14 +93,14 @@ it('saves a write-only key, clears it, edits role parameters and revokes without
   fireEvent.change(screen.getByLabelText('计费来源'), { target: { value: 'token-plan' } })
   fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'fixture-key' } })
   fireEvent.click(screen.getByRole('button', { name: '保存连接' }))
-  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('模型能力尚未验证'))
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('连接设置已保存'))
   expect(screen.getByLabelText('API Key')).toHaveValue('')
   expect(api.saveConnection).toHaveBeenCalledWith(expect.objectContaining({ apiKey: 'fixture-key', connection: expect.objectContaining({ billing: { kind: 'token-plan' } }) }))
   expect(api.discoverModels).not.toHaveBeenCalled()
-  fireEvent.change(screen.getByLabelText('对话与规划连接'), { target: { value: 'connection' } })
-  await waitFor(() => expect(within(screen.getByLabelText('对话与规划模型')).getByRole('option', { name: /available-model/ })).toBeInTheDocument())
-  fireEvent.change(screen.getByLabelText('对话与规划模型'), { target: { value: 'available-model' } })
-  fireEvent.change(screen.getByLabelText('对话与规划参数'), { target: { value: '{"reasoning_effort":"high"}' } })
+  fireEvent.change(screen.getByLabelText('主力模型连接'), { target: { value: 'connection' } })
+  await waitFor(() => expect(within(screen.getByLabelText('主力模型')).getByRole('option', { name: /available-model/ })).toBeInTheDocument())
+  fireEvent.change(screen.getByLabelText('主力模型'), { target: { value: 'available-model' } })
+  fireEvent.change(screen.getByLabelText('主力模型参数'), { target: { value: '{"reasoning_effort":"high"}' } })
   fireEvent.click(screen.getByRole('button', { name: '保存模型角色' }))
   await waitFor(() => expect(api.saveProfile).toHaveBeenCalledWith({ expectedRevision: 0, roles: {
     conversation: { connectionId: 'connection', model: 'available-model', parameters: { reasoning_effort: 'high' } }, vision: null, imageGenerate: null, imageEdit: null,
@@ -152,14 +167,45 @@ it('shows OAuth pending then authenticated but unverified, and exposes logout wi
   const saved = (await api.read()).connections[0]!
   const connected = { ...saved, connection: { ...saved.connection, revision: 2, accountId: 'actual-account' }, hasCredential: true }
   vi.mocked(api.oauthLoginStatus).mockResolvedValue({ loginId: 'login', status: 'connected', connection: connected })
-  const state = await api.read(); vi.mocked(api.read).mockResolvedValue({ ...state, connections: [connected] })
+  const state = await api.read()
+  const selection = (model: string) => ({ connectionId: connected.connection.id, model })
+  vi.mocked(api.read).mockResolvedValue({ ...state, connections: [connected], profile: {
+    ...state.profile, revision: 1, roles: { conversation: selection('gpt-6-sol'), vision: selection('gpt-6-sol'),
+      compression: selection('gpt-6-luna'), imageGenerate: selection('gpt-image-2'), imageEdit: selection('gpt-image-2') },
+  } })
   fireEvent.click(screen.getByRole('button', { name: '登录当前 ChatGPT 账号' }))
   await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('等待浏览器'))
   expect(screen.getByRole('button', { name: '取消 ChatGPT 登录' })).toBeEnabled()
-  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('模型与图片能力尚未验证'))
+  fireEvent.change(screen.getByLabelText('视觉理解参数'), { target: { value: '{"temperature":0.7}' } })
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('未配置的模型角色已按推荐设置'))
+  expect(screen.getByLabelText('视觉理解参数')).toHaveValue('{"temperature":0.7}')
+  expect(screen.getByLabelText('视觉理解连接')).toHaveValue('')
+  expect(screen.getByLabelText('主力模型配置')).toHaveTextContent('gpt-6-sol')
+  expect(screen.getByLabelText('上下文压缩配置')).toHaveTextContent('gpt-6-luna')
+  expect(screen.getByLabelText('图片模型')).toHaveValue('gpt-image-2')
   expect(screen.getByLabelText('账号标识')).toHaveValue('actual-account')
   expect(screen.getByRole('button', { name: '退出 ChatGPT 连接' })).toBeEnabled()
   expect(screen.queryByLabelText('API Key')).toBeNull()
+})
+
+it('keeps login and surfaces the specific directory failure instead of a blank model list', async () => {
+  const { api, state } = setup()
+  const connection = { id: 'oauth-existing', revision: 1, provider: 'openai', protocol: 'chatgpt-responses' as const,
+    baseURL: 'https://chatgpt.com/backend-api/codex', accountId: 'actual-account',
+    auth: { kind: 'oauth' as const, credentialRef: 'private-reference' }, billing: { kind: 'subscription' as const },
+    capabilities: { tools: 'unknown' as const, vision: 'unknown' as const, stream: 'unknown' as const, reasoning: 'unknown' as const } }
+  state.connections = [{ connection, hasCredential: false, revoked: false }]
+  render(<ExecutionSettingsPanel open entry="chatgpt-oauth" api={api} onClose={vi.fn()} />)
+  const login = await screen.findByRole('button', { name: '登录 ChatGPT' })
+  await waitFor(() => expect(login).toBeEnabled())
+  const connected = { connection, hasCredential: true, revoked: false }
+  vi.mocked(api.oauthLoginStatus).mockResolvedValue({ loginId: 'login', status: 'connected', connection: connected,
+    modelDirectoryError: '模型目录请求返回 HTTP 403；未切换连接。' })
+  vi.mocked(api.read).mockResolvedValue({ ...state, connections: [connected] })
+  fireEvent.click(login)
+  await screen.findByText(/ChatGPT 已登录。模型目录请求返回 HTTP 403/)
+  expect(screen.getByRole('button', { name: '重新登录 ChatGPT' })).toBeEnabled()
+  expect(api.saveProfile).not.toHaveBeenCalled()
 })
 
 it('selects an existing unconnected OAuth account on the direct login entry and preserves model roles', async () => {
@@ -207,9 +253,9 @@ it('shows missing/OAuth credentials honestly and does not dispatch malformed rol
   await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('尚未接通凭据'))
   expect(api.saveConnection).toHaveBeenCalledWith(expect.not.objectContaining({ apiKey: expect.anything() }))
   expect(screen.getByRole('button', { name: '读取模型目录' })).toBeDisabled()
-  fireEvent.change(screen.getByLabelText('对话与规划连接'), { target: { value: 'connection' } })
-  fireEvent.change(screen.getByLabelText('对话与规划模型'), { target: { value: 'model' } })
-  fireEvent.change(screen.getByLabelText('对话与规划参数'), { target: { value: '{broken' } })
+  fireEvent.change(screen.getByLabelText('主力模型连接'), { target: { value: 'connection' } })
+  fireEvent.change(screen.getByLabelText('主力模型'), { target: { value: 'model' } })
+  fireEvent.change(screen.getByLabelText('主力模型参数'), { target: { value: '{broken' } })
   fireEvent.click(screen.getByRole('button', { name: '保存模型角色' }))
   await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('JSON 对象'))
   expect(api.saveProfile).not.toHaveBeenCalled()
@@ -223,6 +269,65 @@ function imageSettings(state: ExecutionSettingsView) {
   ]
 }
 
+it('shows main, compression and unified image choices first while connection details and Pixabay stay collapsed', async () => {
+  const { api, state } = setup(); imageSettings(state)
+  state.connections[0]!.hasCredential = true
+  state.profile.roles = { conversation: { connectionId: 'oauth', model: 'gpt-6-sol' },
+    compression: { connectionId: 'oauth', model: 'gpt-6-luna' }, vision: null,
+    imageGenerate: { connectionId: 'oauth', model: 'gpt-image-2' }, imageEdit: { connectionId: 'oauth', model: 'gpt-image-2' } }
+  render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
+  await waitFor(() => expect(screen.getByLabelText('主力模型')).toHaveValue('gpt-6-sol'))
+  const primary = screen.getByRole('group', { name: '默认模型配置' })
+  const sections = within(primary).getAllByRole('region')
+  expect(sections.map(section => section.getAttribute('aria-label'))).toEqual(['主力模型配置', '上下文压缩配置', '图片服务配置'])
+  for (const section of sections) expect(section).toBeVisible()
+  expect(within(primary).getByLabelText('上下文压缩模型')).toHaveValue('gpt-6-luna')
+  expect(within(primary).getByLabelText('图片模型')).toHaveValue('gpt-image-2')
+  expect(screen.getByRole('heading', { name: '模型与连接' })).toBeVisible()
+  expect(screen.getByRole('button', { name: '重新登录 ChatGPT' })).toBeVisible()
+  expect(screen.getByText(/已登录 ChatGPT：image-account · 订阅/)).toBeVisible()
+  expect(screen.getByText('连接详情').closest('details')).not.toHaveAttribute('open')
+  expect(screen.getByText('可选：Pixabay 图库').closest('details')).not.toHaveAttribute('open')
+  expect(screen.getByLabelText('选择连接')).toHaveValue('oauth')
+  expect(screen.queryByText('此连接尚未接通凭据。')).toBeNull()
+  expect(api.saveConnection).not.toHaveBeenCalled()
+  expect(api.saveProfile).not.toHaveBeenCalled()
+  expect(api.probeCapabilities).not.toHaveBeenCalled()
+})
+
+it('retries a concrete model directory error without discarding saved or unsaved model choices', async () => {
+  const { api, state } = setup()
+  state.connections = [connected('connection')]
+  state.profile.roles.conversation = { connectionId: 'connection', model: 'saved-model' }
+  vi.mocked(api.discoverModels).mockRejectedValueOnce(new Error('模型目录返回 HTTP 403，请检查连接权限。'))
+  render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
+  const main = await screen.findByRole('region', { name: '主力模型配置' })
+  await within(main).findByText('模型目录返回 HTTP 403，请检查连接权限。')
+  fireEvent.click(within(main).getByText('手动指定准确模型 ID'))
+  fireEvent.change(within(main).getByLabelText('自定义主力模型'), { target: { value: 'manual-draft-model' } })
+  fireEvent.click(within(main).getByRole('button', { name: '重试主力模型目录' }))
+  await waitFor(() => expect(within(main).getByRole('option', { name: 'available-model' })).toBeInTheDocument())
+  expect(within(main).getByLabelText('主力模型')).toHaveValue('manual-draft-model')
+  expect(within(main).queryByText('模型目录返回 HTTP 403，请检查连接权限。')).toBeNull()
+  expect(api.discoverModels).toHaveBeenCalledTimes(2)
+  expect(api.saveProfile).not.toHaveBeenCalled()
+  expect(state.profile.roles.conversation?.model).toBe('saved-model')
+})
+
+it('offers one-click ChatGPT login from default settings while editing an existing API connection', async () => {
+  const { api, state } = setup(); imageSettings(state)
+  state.profile.roles.conversation = { connectionId: 'text-api', model: 'text-model' }
+  render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
+  const login = await screen.findByRole('button', { name: '登录 ChatGPT' })
+  await waitFor(() => expect(login).toBeEnabled())
+  expect(screen.getByLabelText('选择连接')).toHaveValue('text-api')
+  fireEvent.click(login)
+  await waitFor(() => expect(api.startOAuthLogin).toHaveBeenCalledWith('oauth', 1))
+  expect(api.saveConnection).not.toHaveBeenCalled()
+  expect(api.saveProfile).not.toHaveBeenCalled()
+  expect(screen.getByLabelText('选择连接')).toHaveValue('text-api')
+})
+
 it('uses one direct Images model for both OAuth roles and rejects silently ignored role parameters', async () => {
   const { api, state } = setup(); imageSettings(state)
   state.profile.roles.imageGenerate = { connectionId: 'oauth', model: 'chosen-image-generator', parameters: { executorModel: 'chosen-responses-generator', output: { quality: 'high', format: 'png' }, custom: [1, true] } }
@@ -235,7 +340,7 @@ it('uses one direct Images model for both OAuth roles and rejects silently ignor
   const region = within(screen.getByRole('region', { name: '图片生成配置' }))
   expect(region.getByText(/此连接尚未接通凭据/)).toHaveTextContent('此设置页没有图片生成能力的独立验证记录')
   expect(within(screen.getByLabelText('图片生成连接')).queryByRole('option', { name: /text-provider/ })).toBeNull()
-  expect(within(screen.getByLabelText('对话与规划连接')).getByRole('option', { name: /text-provider/ })).toBeInTheDocument()
+  expect(within(screen.getByLabelText('主力模型连接')).getByRole('option', { name: /text-provider/ })).toBeInTheDocument()
   fireEvent.change(screen.getByLabelText('图片生成图片模型'), { target: { value: '' } })
   fireEvent.click(screen.getByRole('button', { name: '保存模型角色' }))
   await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('需要选择图片模型'))
@@ -279,10 +384,7 @@ it('lets a signed-in user point-select one image service without touching conver
   state.connections[0]!.hasCredential = true
   state.profile.roles.conversation = { connectionId: 'text-api', model: 'text-model', parameters: { reasoning_effort: 'high' } }
   render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
-  const imageService = screen.getByText(/^可选：图片服务/).closest('details')!
-  expect(imageService).not.toHaveAttribute('open')
-  fireEvent.click(screen.getByText(/^可选：图片服务/))
-  expect(imageService).toHaveAttribute('open')
+  expect(screen.getByRole('region', { name: '图片服务配置' })).toBeVisible()
   const account = await screen.findByLabelText('图片账号')
   expect(within(account).getByRole('option', { name: /image-account.*订阅/ })).toBeInTheDocument()
   fireEvent.change(account, { target: { value: 'oauth' } })
@@ -360,8 +462,7 @@ it('retains different existing image routes until explicit unification', async (
   state.profile.roles.imageGenerate = { connectionId: 'oauth', model: 'existing-generate', parameters: {} }
   state.profile.roles.imageEdit = { connectionId: 'oauth', model: 'existing-edit', parameters: {} }
   render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
-  await waitFor(() => expect(screen.getByText(/^可选：图片服务/)).toHaveTextContent('生成与编辑分别配置'))
-  fireEvent.click(screen.getByText(/^可选：图片服务/))
+  await waitFor(() => expect(screen.getByRole('heading', { name: /^图片模型/ })).toHaveTextContent('生成与编辑分别配置'))
   const account = await screen.findByLabelText('图片账号')
   expect(screen.getByText(/分别使用不同配置/)).toBeInTheDocument()
   fireEvent.change(account, { target: { value: 'oauth' } })
@@ -398,7 +499,7 @@ it('point-selects catalog models per role and clears the model when the billing 
   expect(within(screen.getByLabelText('视觉理解模型')).queryByRole('option', { name: /alpha/ })).toBeNull()
   fireEvent.change(screen.getByLabelText('视觉理解模型'), { target: { value: 'beta' } })
   fireEvent.change(screen.getByLabelText('图片生成连接'), { target: { value: 'oauth' } })
-  expect(within(screen.getByLabelText('图片生成图片模型')).getByRole('option', { name: /^gpt-image-2（项目候选/ })).toBeInTheDocument()
+  expect(within(screen.getByLabelText('图片生成图片模型')).getByRole('option', { name: 'gpt-image-2' })).toBeInTheDocument()
   fireEvent.change(screen.getByLabelText('图片生成图片模型'), { target: { value: 'gpt-image-2' } })
   fireEvent.click(screen.getByRole('button', { name: '保存模型角色' }))
   await waitFor(() => expect(api.saveProfile).toHaveBeenCalledWith({ expectedRevision: 0, roles: {
@@ -408,7 +509,7 @@ it('point-selects catalog models per role and clears the model when the billing 
   expect(screen.getByLabelText('视觉理解配置')).toHaveTextContent('second · api-b-account · Token Plan')
 })
 
-it('shows a manual model ID only as an explicit fallback when the chosen directory fails', async () => {
+it('accepts an accurate manual model ID when the chosen directory fails', async () => {
   const { api, state } = setup()
   state.connections = [{ connection: { id: 'custom', revision: 1, provider: 'custom', protocol: 'openai-chat',
     baseURL: 'https://custom.invalid/v1', accountId: 'account', auth: { kind: 'api-key', credentialRef: 'private-reference' },
@@ -416,11 +517,11 @@ it('shows a manual model ID only as an explicit fallback when the chosen directo
     hasCredential: true, revoked: false }]
   vi.mocked(api.discoverModels).mockRejectedValue(new Error('directory unavailable'))
   render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
-  await screen.findByLabelText('对话与规划连接')
-  fireEvent.change(screen.getByLabelText('对话与规划连接'), { target: { value: 'custom' } })
-  await screen.findByText(/目录暂不可用，模型能力仍未验证/)
-  fireEvent.click(screen.getByText('目录不可用或无候选时手动指定模型 ID'))
-  fireEvent.change(screen.getByLabelText('自定义对话与规划模型'), { target: { value: 'vendor-model-id' } })
+  await screen.findByLabelText('主力模型连接')
+  fireEvent.change(screen.getByLabelText('主力模型连接'), { target: { value: 'custom' } })
+  await screen.findByText(/directory unavailable/)
+  fireEvent.click(screen.getByText('手动指定准确模型 ID'))
+  fireEvent.change(screen.getByLabelText('自定义主力模型'), { target: { value: 'vendor-model-id' } })
   fireEvent.click(screen.getByRole('button', { name: '保存模型角色' }))
   await waitFor(() => expect(api.saveProfile).toHaveBeenCalledWith({ expectedRevision: 0, roles: {
     conversation: { connectionId: 'custom', model: 'vendor-model-id', parameters: {} },
@@ -428,57 +529,33 @@ it('shows a manual model ID only as an explicit fallback when the chosen directo
   } }))
 })
 
-it('M30 fills only empty roles with uniquely verified models while preserving advanced choices', async () => {
+it('allows a catalog model without favorites or capability probes and preserves advanced saved roles', async () => {
   const { api, state } = setup()
-  state.connections = [connected('preset', 2), connected('manual')]
-  state.connections[1]!.connection.imageProtocol = 'openai-images'
-  state.profile.roles.vision = { connectionId: 'manual', model: 'manual-vision', parameters: { detail: 'high' } }
-  state.profile.roles.imageGenerate = { connectionId: 'manual', model: 'image-model', parameters: {} }
-  state.capabilityRecords = [
-    recorded('preset', 2, 'tool-model', 'tools', 'supported', '{"reasoning_effort":"low"}'),
-    recorded('preset', 2, 'vision-model', 'vision', 'supported'),
-    recorded('preset', 1, 'stale-tool', 'tools', 'supported'),
-  ]
+  state.connections = [connected('connection')]
+  const vision = { connectionId: 'connection', model: 'manual-vision', parameters: { detail: 'high' } }
+  state.profile.roles.vision = vision
   render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
-  await screen.findByLabelText('选择连接')
-  fireEvent.change(screen.getByLabelText('选择连接'), { target: { value: 'preset' } })
-  const preset = within(screen.getByRole('region', { name: '已验证角色预设' }))
-  expect(preset.getByText(/tool-model 已按当前连接版本/)).toBeInTheDocument()
-  expect(preset.getByText(/vision-model 已按当前连接版本/)).toHaveTextContent('已有角色配置保留')
-  expect(preset.queryByText(/stale-tool/)).toBeNull()
-  fireEvent.click(preset.getByRole('button', { name: '填入已验证的空白角色' }))
-  expect(api.saveProfile).not.toHaveBeenCalled()
-  expect(screen.getByLabelText('对话与规划连接')).toHaveValue('preset')
-  expect(screen.getByLabelText('对话与规划模型')).toHaveValue('tool-model')
-  expect(screen.getByLabelText('对话与规划参数')).toHaveValue('{\n  "reasoning_effort": "low"\n}')
-  expect(screen.getByLabelText('视觉理解连接')).toHaveValue('manual')
-  expect(screen.getByLabelText('图片生成图片模型')).toHaveValue('image-model')
-  await waitFor(() => expect(within(screen.getByLabelText('对话与规划模型')).getByRole('option', { name: /available-model/ })).toBeInTheDocument())
-  fireEvent.change(screen.getByLabelText('对话与规划模型'), { target: { value: 'available-model' } })
+  fireEvent.change(await screen.findByLabelText('主力模型连接'), { target: { value: 'connection' } })
+  await waitFor(() => expect(within(screen.getByLabelText('主力模型')).getByRole('option', { name: 'available-model' })).toBeInTheDocument())
+  fireEvent.change(screen.getByLabelText('主力模型'), { target: { value: 'available-model' } })
   fireEvent.click(screen.getByRole('button', { name: '保存模型角色' }))
-  await waitFor(() => expect(api.saveProfile).toHaveBeenCalledWith({ expectedRevision: 0, roles: {
-    conversation: { connectionId: 'preset', model: 'available-model', parameters: { reasoning_effort: 'low' } },
-    vision: { connectionId: 'manual', model: 'manual-vision', parameters: { detail: 'high' } },
-    imageGenerate: { connectionId: 'manual', model: 'image-model', parameters: {} }, imageEdit: null,
-  } }))
+  await waitFor(() => expect(api.saveProfile).toHaveBeenCalledWith(expect.objectContaining({ roles: expect.objectContaining({ conversation: { connectionId: 'connection', model: 'available-model', parameters: {} }, vision }) })))
+  expect(api.probeCapabilities).not.toHaveBeenCalled()
+  expect(api.setModelFavorite).not.toHaveBeenCalled()
 })
 
-it('M30 leaves unknown and ambiguous abilities out of a connection preset', async () => {
+it('keeps advanced vision collapsed and leaves existing roles unchanged when merely opening settings', async () => {
   const { api, state } = setup()
-  state.connections = [connected('preset', 2)]
-  state.capabilityRecords = [recorded('preset', 2, 'text-unknown', 'tools', 'unknown'),
-    recorded('preset', 1, 'old-vision', 'vision', 'supported')]
+  state.connections = [connected('connection')]
+  state.profile.roles.vision = { connectionId: 'connection', model: 'manual-vision' }
   render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
-  await screen.findByLabelText('选择连接')
-  fireEvent.change(screen.getByLabelText('选择连接'), { target: { value: 'preset' } })
-  const preset = within(screen.getByRole('region', { name: '已验证角色预设' }))
-  expect(preset.getByText(/暂无已验证可用的工具能力/)).toBeInTheDocument()
-  expect(preset.getByText(/暂无已验证可用的视觉能力/)).toBeInTheDocument()
-  expect(preset.getByText(/图片生成与编辑暂无本页可复用的独立能力记录/)).toBeInTheDocument()
-  expect(preset.getByRole('button', { name: '填入已验证的空白角色' })).toBeDisabled()
+  await screen.findByLabelText('主力模型连接')
+  const advanced = screen.getByText('高级：视觉理解').closest('details')
+  expect(advanced).not.toHaveAttribute('open')
+  expect(screen.queryByRole('region', { name: '已验证角色预设' })).toBeNull()
   expect(api.saveProfile).not.toHaveBeenCalled()
+  expect(api.probeCapabilities).not.toHaveBeenCalled()
 })
-
 
 it('saves a capability reference and native effort without JSON while preserving the actual model and other roles', async () => {
   const { api, state } = setup()
@@ -491,10 +568,10 @@ it('saves a capability reference and native effort without JSON while preserving
   vi.mocked(api.knownModels).mockResolvedValue([{ id: 'claude-haiku-4-5', provider: 'anthropic', reasoning: { kind: 'budget' } },
     { id: 'claude-opus-4-6', provider: 'anthropic', reasoning: { kind: 'effort', efforts: ['low', 'high', 'max'] } }])
   render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
-  await screen.findByLabelText('对话与规划参考型号')
+  await screen.findByLabelText('主力模型参考型号')
   await waitFor(() => expect(screen.getByLabelText('思考 token 数')).toHaveValue(12000))
-  fireEvent.change(screen.getByLabelText('对话与规划参考型号'), { target: { value: 'anthropic/claude-opus-4-6' } })
-  const controls = screen.getByRole('group', { name: '对话与规划思考设置' })
+  fireEvent.change(screen.getByLabelText('主力模型参考型号'), { target: { value: 'anthropic/claude-opus-4-6' } })
+  const controls = screen.getByRole('group', { name: '主力模型思考设置' })
   fireEvent.click(within(controls).getByRole('button', { name: '高' }))
   fireEvent.click(screen.getByRole('button', { name: '保存模型角色' }))
   await waitFor(() => expect(api.saveProfile).toHaveBeenCalledWith({ expectedRevision: 0, roles: {

@@ -8,13 +8,13 @@ export interface AttachmentComposerProps {
   api?: AttachmentsDesktopAPI
   workspaceDirectory?: string
   value: readonly InputAttachmentReference[]
-  onChange(value: InputAttachmentReference[]): void
+  onChange(value: InputAttachmentReference[], previous: readonly InputAttachmentReference[]): void
   disabled?: boolean
   onBusyChange?(busy: boolean): void
   /** A function child receives the add actions for a "+" menu; plain children keep the inline buttons. */
   children?: ReactNode | ((actions: AttachmentActions) => ReactNode)
 }
-export interface AttachmentActions { addFiles(): void; referenceWorkspace(): void; canAdd: boolean; canReference: boolean }
+export interface AttachmentActions { addFiles(): void; referenceWorkspace(): void; referenceEntries(workspaceId: string, entryIds: string[]): void; canAdd: boolean; canReference: boolean }
 const references = (snapshot: AttachmentSnapshot): InputAttachmentReference[] => snapshot.representations.map(representation => ({ attachmentId: snapshot.id, representationId: representation.id, role: 'reference', delivery: !snapshot.derivedFrom && representation.kind === 'image' ? 'inline' : 'source' }))
 const htmlImage = /<img\b[^>]*\bsrc\s*=\s*(["'])(data:image\/(png|jpeg|webp|gif);base64,([^"']+))\1/gi
 
@@ -42,6 +42,7 @@ export function AttachmentComposer({ api = window.desktopAPI?.attachments, value
   const jobsRef = useRef<IntakeJob[]>([]), pending = useRef(new Map<string, { controller: AbortController; requestId: string }>())
   const [referencing, setReferencing] = useState(false), [workspaceEntries, setWorkspaceEntries] = useState<{ id: string; name: string; kind: 'file' | 'directory' }[]>([]), [workspace, setWorkspace] = useState<{ workspaceId: string; directoryId: string; rootId: string }>()
   const [error, setError] = useState(''), [busy, setBusy] = useState(false)
+  const [snapshotErrors, setSnapshotErrors] = useState<Record<string, string>>({})
   const [ranges, setRanges] = useState<Record<string, string>>({})
   const [imageModes, setImageModes] = useState<Record<string, 'auto' | 'all'>>({})
   const [extracting, setExtracting] = useState<{ name: string; loaded: number; total: number } | null>(null)
@@ -57,11 +58,11 @@ export function AttachmentComposer({ api = window.desktopAPI?.attachments, value
     let active = true
     void Promise.all([...new Set(value.map(ref => ref.attachmentId))].filter(id => !snapshots[id]).map(async id => {
       try { const snapshot = await api.snapshot(id); if (active) setSnapshots(previous => ({ ...previous, [id]: snapshot })) }
-      catch (failure) { if (active) setError(failure instanceof Error ? failure.message : '附件快照未能读取') }
+      catch (failure) { if (active) setSnapshotErrors(previous => ({ ...previous, [id]: failure instanceof Error ? failure.message : '附件快照未能读取' })) }
     }))
     return () => { active = false }
   }, [api, value, snapshots])
-  const apply = (next: InputAttachmentReference[]) => { current.current = next; change.current(next) }
+  const apply = (next: InputAttachmentReference[]) => { const previous = current.current; current.current = next; change.current(next, previous) }
   const append = (snapshot: AttachmentSnapshot) => {
     setSnapshots(previous => ({ ...previous, [snapshot.id]: snapshot }))
     apply([...current.current, ...references(snapshot)])
@@ -183,7 +184,7 @@ export function AttachmentComposer({ api = window.desktopAPI?.attachments, value
         const embedded = embeddedClipboardImages(html)
         if (embedded.length) { if (!preserveHtmlText) event.preventDefault(); event.stopPropagation(); receive(embedded, 'paste'); return }
         setError('HTML 图片不含可读取的本地字节，请复制图片本身或保存后添加附件')
-      } catch (failure) { event.preventDefault(); setError(failure instanceof Error ? failure.message : 'HTML 图片无法读取'); return }
+      } catch (failure) { if (!preserveHtmlText) event.preventDefault(); setError(failure instanceof Error ? failure.message : 'HTML 图片无法读取'); return }
     }
     // Plain text and HTML text remain native textarea editing. Explorer
     // CF_HDROP normally has neither and uses the controlled clipboard bridge.
@@ -217,16 +218,24 @@ export function AttachmentComposer({ api = window.desktopAPI?.attachments, value
     {referencing && workspace && <section role="dialog" aria-label="引用空间文件"><button type="button" onClick={() => { void listWorkspace(workspace.workspaceId, workspace.rootId, workspace.rootId).catch(reason => setError(String(reason))) }}>工作空间根目录</button><button type="button" onClick={() => setReferencing(false)}>关闭引用列表</button>
       {workspaceEntries.map(entry => <button type="button" key={entry.id} onClick={() => { void work(async () => { if (entry.kind === 'directory') await listWorkspace(workspace.workspaceId, entry.id, workspace.rootId); else { granted(await api!.workspaceFiles({ workspaceId: workspace.workspaceId, entryIds: [entry.id] })); setReferencing(false) } }) }}>{entry.kind === 'directory' ? '文件夹：' : '引用：'}{entry.name}</button>)}
     </section>}
-    {[...new Set(value.map(ref => ref.attachmentId))].map(id => {
+    <div className="attachment-composer__references">{[...new Set(value.map(ref => ref.attachmentId))].map(id => {
       const snapshot = snapshots[id]
-      if (!snapshot) return <div key={id}>正在读取附件快照…</div>
+      if (!snapshot) return <div key={id} aria-label={`附件 ${id}`}>
+        <span>{snapshotErrors[id] ?? '正在读取附件快照…'}</span>
+        <button type="button" disabled={busy || disabled} onClick={() => apply(current.current.filter(ref => ref.attachmentId !== id))}>移除附件</button>
+      </div>
       const pending = snapshot.representations.some(rep => rep.kind === 'file')
       const extractable = pending || Boolean(snapshot.derivedFrom && snapshot.coverage)
       const sourceId = snapshot.derivedFrom ?? id
       const selected = value.filter(ref => ref.attachmentId === id)
       const sourceOnly = selected.every(ref => ref.delivery === 'source')
-      return <div key={id} style={{ border: '1px solid #cbd5e1', borderRadius: 6, marginTop: 8, padding: 8 }}>
-        <AttachmentThumbnail api={api} snapshot={snapshot} /><strong>{snapshot.name}</strong> <span style={{ fontSize: 12 }}>{Math.ceil(snapshot.byteLength / 1024)} KB · {sourceOnly ? '供助手按需读取' : pending ? '原件目录' : `本轮直接发送 · ${selected.length} 个表示`} · 尚未发送</span>
+      return <details key={sourceId} className="attachment-composer__reference">
+        <summary title={`${snapshot.source.pathHint ?? snapshot.name} · ${snapshot.source.kind === 'workspace' ? '工作空间文件' : '附件'} · ${sourceOnly ? '按需读取' : '直接发送'}`}>
+          <AttachmentThumbnail api={api} snapshot={snapshot} /><strong>{snapshot.name}</strong>
+          <span className="attachment-composer__source">{snapshot.source.kind === 'workspace' ? '工作空间' : '附件'}</span>
+          <button type="button" aria-label={`移除附件 ${snapshot.name}`} title="移除引用" disabled={busy || disabled} onClick={event => { event.preventDefault(); apply(current.current.filter(ref => ref.attachmentId !== id)) }}>×</button>
+        </summary>
+        <div className="attachment-composer__reference-details"><span style={{ fontSize: 12 }}>{Math.ceil(snapshot.byteLength / 1024)} KB · {sourceOnly ? '供助手按需读取' : pending ? '原件目录' : `本轮直接发送 · ${selected.length} 个表示`} · 尚未发送</span>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
           {!pending && selected.length > 1 && <select aria-label={`${snapshot.name}预览表示`} value={previewSelection[id] ?? snapshot.representations.find(rep => rep.kind === 'image')?.id ?? selected[0].representationId} onChange={event => setPreviewSelection(previous => ({ ...previous, [id]: event.target.value }))}>
             {selected.map(ref => { const rep = snapshot.representations.find(item => item.id === ref.representationId)!; return <option key={ref.representationId} value={ref.representationId}>{rep.provenance.locator?.page ? `第 ${rep.provenance.locator.page} 页 · ` : ''}{rep.kind === 'image' ? '图片' : '文本'} · {rep.provenance.locator?.paragraph ?? ref.representationId}</option> })}
@@ -246,9 +255,11 @@ export function AttachmentComposer({ api = window.desktopAPI?.attachments, value
         </div>
         {snapshot.coverage?.selectedPages && <div style={{ fontSize: 12 }}>已选第 {snapshot.coverage.selectedPages.from}–{snapshot.coverage.selectedPages.to} 页，共 {snapshot.coverage.totalPages} 页</div>}
         {snapshot.gaps.map((gap, index) => <div key={index} style={{ fontSize: 12, color: '#92400e' }}>{gap.message}</div>)}
-      </div>
-    })}
+        </div>
+      </details>
+    })}</div>
     {typeof children === 'function' && children({ addFiles: () => void work(async () => { granted(await api!.select()) }), referenceWorkspace: () => void startReference(),
+      referenceEntries: (workspaceId, entryIds) => void work(async () => { granted(await api!.workspaceFiles({ workspaceId, entryIds })) }),
       canAdd: Boolean(api) && !disabled && !busy, canReference: Boolean(api) && !disabled && !busy && Boolean(workspaceDirectory) })}
     {extracting && <div role="status">正在提取 {extracting.name}：{extracting.total ? `${extracting.loaded}/${extracting.total} 页已保留` : '读取首批页码…'}
       <button type="button" onClick={cancelExtraction}>取消后续提取</button></div>}

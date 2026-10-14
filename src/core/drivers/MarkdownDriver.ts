@@ -1,5 +1,5 @@
 import type { DocumentCommand, DocumentDriver, DocumentModel } from '../../shared/workbench/document'
-import { cloneDocumentResources, emptyDocumentResources } from './resources'
+import { cloneDocumentResources, emptyDocumentResources, validateDocumentResources } from './resources'
 
 function sourceIsValid(source: string): void {
   if (typeof source !== 'string' || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(source)) throw new TypeError('Markdown 必须是有效 Unicode 源文')
@@ -17,10 +17,16 @@ export class MarkdownDriver implements DocumentDriver {
   validate(model: DocumentModel): void {
     markdown(model)
     sourceIsValid(model.source)
-    cloneDocumentResources(model.resources, true)
+    validateDocumentResources(model.resources, true)
   }
   apply(model: DocumentModel, command: DocumentCommand): DocumentModel {
-    this.validate(model)
+    return this.applySource(model, command, true)
+  }
+  applyValidated(model: DocumentModel, command: DocumentCommand): DocumentModel {
+    return this.applySource(model, command, false)
+  }
+  private applySource(model: DocumentModel, command: DocumentCommand, detached: boolean): DocumentModel {
+    if (detached) this.validate(model)
     markdown(model)
     let source: string
     if (command.type === 'markdown.replace') source = command.source
@@ -36,7 +42,9 @@ export class MarkdownDriver implements DocumentDriver {
       source = model.source.slice(0, from) + text + model.source.slice(to)
     } else throw new TypeError('Markdown Driver 不支持该操作')
     sourceIsValid(source)
-    return { kind: 'markdown', source, resources: cloneDocumentResources(command.resources ?? model.resources, true) }
+    const resources = command.resources ?? model.resources
+    if (command.resources) validateDocumentResources(resources, true)
+    return { kind: 'markdown', source, resources: detached ? cloneDocumentResources(resources, true) : resources }
   }
   withRevision(model: DocumentModel, revision: number): DocumentModel {
     this.validate(model)

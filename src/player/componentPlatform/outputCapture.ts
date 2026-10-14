@@ -2,22 +2,34 @@ import type { PublishedCourseV3 } from '../../shared/contracts/component-platfor
 import { mountPublishedCourseV3, publishedComponentModel } from './publishedPlayer'
 import { componentSurfaceGeometryTargets } from './spatialTargets'
 import { spatialFramePose } from '../surfaces/spatial/componentPlatform/graph'
+import { componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform/project'
 
 export interface ComponentOutputImage { dataUrl: string; width: number; height: number }
 export interface ComponentOutputCaptureOptions {
   payload: PublishedCourseV3
   root: HTMLElement
+  staticExport?: true
   screenshot(rect: { x: number; y: number; width: number; height: number }): Promise<ComponentOutputImage>
 }
 
 /** Camera and local-frame preparation is shared by isolated observation and output capture. */
 export async function prepareComponentOutputRegion(input: {
   payload: PublishedCourseV3; root: HTMLElement; player: Awaited<ReturnType<typeof mountPublishedCourseV3>>;
-  surfaceId: string; instanceId?: string; spatialFrameId?: string;
+  surfaceId: string; instanceId?: string; spatialFrameId?: string; staticExport?: true;
 }): Promise<{ x: number; y: number; width: number; height: number }> {
   const { payload, root, player, surfaceId, instanceId, spatialFrameId } = input
   const surface = payload.surfaces.find(value => value.id === surfaceId)
   if (!surface) throw new Error(`捕获表面已不存在：${surfaceId}`)
+  const omitted = new Set<string>()
+  if (input.staticExport === true) {
+    for (const instance of Object.values(payload.instances)) {
+      const definition = payload.definitions[instance.definitionId], key = componentDefinitionBuiltinKey(definition) ?? definition?.id
+      if (!key || !['guoling.navigation', 'guoling.teacher-controller'].includes(key)) continue
+      if (instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && instance.data.includeInStaticExports === true) continue
+      const target = player.runtime.targetElement(instance.id)
+      if (target && root.contains(target)) { target.hidden = true; target.style.display = 'none'; omitted.add(instance.id) }
+    }
+  }
   if (spatialFrameId) {
     const frame = surface.spatial?.frames.find(value => value.id === spatialFrameId), camera = player.camera(surfaceId)
     if (!frame || !camera) throw new Error(`捕获镜头已不存在：${spatialFrameId}`)
@@ -54,7 +66,21 @@ export async function prepareComponentOutputRegion(input: {
       const ownerId = outer.dataset.componentObject ?? outer.dataset.componentInstanceId
       if (ownerId !== instanceId && !outer.contains(target)) outer.hidden = true
     }
-    target.hidden = false
+    if (!omitted.has(instanceId)) target.hidden = false
+    // Reparenting native media can restart decoding. Prepare the final local
+    // projection through the same target readiness owner before photographing it.
+    await player.waitForCaptureReady(element)
+  }
+  if (input.staticExport === true) {
+    // Static formats consume the decoded video/poster, not browser playback UI.
+    // Apply this after readiness, since asset updates reapply authored controls.
+    for (const instance of Object.values(payload.instances)) {
+      if (componentDefinitionBuiltinKey(payload.definitions[instance.definitionId]) !== 'guoling.video') continue
+      const content = player.runtime.contentElement(instance.id)
+      for (const video of content?.querySelectorAll<HTMLVideoElement>('video[data-media-kind="video"]') ?? []) {
+        if (video.dataset.mediaInstanceId === instance.id) video.controls = false
+      }
+    }
   }
   const view = root.ownerDocument.defaultView
   if (!view) throw new Error('捕获窗口已关闭')
@@ -78,7 +104,7 @@ export async function prepareComponentOutputCapture(options: ComponentOutputCapt
       try {
         if (disposed) throw new Error('输出捕获已结束')
         const rect = await prepareComponentOutputRegion({ payload: options.payload, root: options.root, player: current,
-          surfaceId, instanceId, spatialFrameId })
+          surfaceId, instanceId, spatialFrameId, staticExport: options.staticExport })
         return await options.screenshot({ x: rect.x, y: rect.y, width: rect.width, height: rect.height })
       } finally { await current.dispose(); current = undefined; options.root.querySelector('[data-component-local-capture]')?.remove() }
     })

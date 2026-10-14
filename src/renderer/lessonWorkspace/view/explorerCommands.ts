@@ -4,8 +4,7 @@ export type ExplorerCreateType = 'create-markdown' | 'create-course' | 'create-t
 
 export interface ExplorerCommandPorts {
   create(type: ExplorerCreateType): void
-  newFromPptx(): void
-  importPptx(): void
+  importFlow?(): void
   importHtml(): void
   openHtmlExternal(): void
   rename(): void
@@ -20,14 +19,12 @@ export interface ExplorerCommandPorts {
 }
 
 /** The explorer's 新建 items, shared by its 新建 menu and its right-click menu (M21). */
-export function explorerNewCommands(blocked: string | null, ports: Pick<ExplorerCommandPorts, 'create' | 'newFromPptx'>): MenuCommand[] {
+export function explorerNewCommands(blocked: string | null, ports: Pick<ExplorerCommandPorts, 'create'>): MenuCommand[] {
   return [
-    { id: 'file.new-markdown', label: '新建 Markdown 文档', group: 'new', run: () => ports.create('create-markdown'), disabledReason: blocked },
-    { id: 'file.new-course', label: '新建 果铃工程', group: 'new', run: () => ports.create('create-course'), disabledReason: blocked },
-    { id: 'file.new-course-from-pptx', label: '从 PPT 新建 果铃工程', group: 'new', run: ports.newFromPptx, disabledReason: blocked },
-    { id: 'file.new-text', label: '新建文本文档', group: 'new', run: () => ports.create('create-text'), disabledReason: blocked },
-    { id: 'file.new-html', label: '新建 HTML 文档', group: 'new', run: () => ports.create('create-html'), disabledReason: blocked },
     { id: 'file.new-folder', label: '新建文件夹', group: 'new', run: () => ports.create('mkdir'), disabledReason: blocked },
+    { id: 'file.new-markdown', label: '新建 MD 文档', group: 'new', run: () => ports.create('create-markdown'), disabledReason: blocked },
+    { id: 'file.new-text', label: '新建 TXT 文档', group: 'new', run: () => ports.create('create-text'), disabledReason: blocked },
+    { id: 'file.new-course', label: '新建 果铃工程', group: 'new', run: () => ports.create('create-course'), disabledReason: blocked },
   ]
 }
 
@@ -35,12 +32,12 @@ export function explorerNewCommands(blocked: string | null, ports: Pick<Explorer
  * The right-click menu of the explorer: what the selection offers, with the reason an item cannot run now.
  * `blocked` is set while the workspace is not ready or another file operation runs.
  */
-export function explorerContextCommands(state: { blocked: string | null; selected: number; pptx: boolean; htmlImport: 'pick' | 'selected' | null; htmlFile: boolean; clipboard: number }, ports: ExplorerCommandPorts): MenuCommand[] {
+export function explorerContextCommands(state: { blocked: string | null; selected: number; pptx: boolean; htmlImport: 'pick' | 'selected' | null; htmlFile: boolean; flowImport?: boolean; clipboard: number }, ports: ExplorerCommandPorts): MenuCommand[] {
   const busy = state.blocked
   const any = state.selected ? null : '请先选择文件或文件夹'
   const one = state.selected === 1 ? null : '请只选择一项'
   return [
-    ...(state.pptx ? [{ id: 'file.import-pptx', label: '导入为 果铃工程', group: 'open', run: ports.importPptx, disabledReason: busy }] : []),
+    ...(state.flowImport && ports.importFlow ? [{ id: 'file.import-flow', label: '导入为可编辑 Flow', group: 'open', run: ports.importFlow, disabledReason: busy }] : []),
     ...(state.htmlFile ? [{ id: 'file.open-html-browser', label: '用浏览器打开', group: 'open', run: ports.openHtmlExternal, disabledReason: busy }] : []),
     ...(state.htmlImport ? [{ id: 'file.import-html', label: state.htmlImport === 'selected' ? '作为互动页导入' : '导入 HTML 页面…', group: 'open', run: ports.importHtml, disabledReason: busy }] : []),
     ...explorerNewCommands(busy, ports),
@@ -50,7 +47,7 @@ export function explorerContextCommands(state: { blocked: string | null; selecte
     { id: 'file.paste', label: '粘贴', shortcut: 'Ctrl+V', group: 'edit', run: ports.paste, disabledReason: busy ?? (state.clipboard ? null : '还没有复制或剪切的文件') },
     { id: 'file.copy-to', label: '复制到…', group: 'move', run: ports.copyTo, disabledReason: busy ?? any },
     { id: 'file.move-to', label: '移动到…', group: 'move', run: ports.moveTo, disabledReason: busy ?? any },
-    { id: 'file.trash', label: '移到回收站', shortcut: 'Delete', group: 'move', danger: true, run: ports.trash, disabledReason: busy ?? any },
+    { id: 'file.trash', label: '删除', shortcut: 'Delete', group: 'move', danger: true, run: ports.trash, disabledReason: busy ?? any },
     { id: 'file.copy-path', label: '复制路径', group: 'path', run: ports.copyPath, disabledReason: any },
     { id: 'file.reveal', label: '在系统中定位', group: 'path', run: ports.reveal, disabledReason: busy ?? one },
   ]

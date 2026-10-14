@@ -16,6 +16,12 @@ export interface ComponentModuleDependency extends ComponentModuleSource {
 }
 
 export interface ComponentCompilationInput extends ComponentModuleSource {
+  /** Shared root definition identity; overrides intentionally have their own root. */
+  rootDefinitionId?: string
+  /** Local author import-map aliases, normalized to the same source-key coordinates. */
+  htmlModuleBindings?: Readonly<Record<string, string>>
+  /** Parser documents with different import maps compile the same source in their own environment. */
+  htmlModuleDocuments?: readonly { namespace: string; entries: readonly string[]; bindings: Readonly<Record<string, string>> }[]
   /** HTML module entries share one native graph, including URL query/fragment identity. */
   moduleEntries?: readonly string[]
   dependencies?: Readonly<Record<string, ComponentModuleDependency>>
@@ -45,6 +51,8 @@ export interface CompiledJavaScriptModule {
   code: string
   /** String literal ranges in emitted code; the realm assigns its own render namespace. */
   imports: Array<{ start: number; end: number; path: string }>
+  /** Local import.meta.url targets stay graph dependencies after their URL literals are projected. */
+  moduleUrls?: string[]
 }
 
 /** Rebuildable output; never a package, persisted author state, or an executing instance. */

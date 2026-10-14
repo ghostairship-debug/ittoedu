@@ -15,7 +15,7 @@ async function fixture(viewportBounds?: TeacherControllerPort['viewportBounds'])
     events: { emit() {}, subscribe: () => () => {} }, state: { get: () => undefined, set() {}, subscribe: () => () => {} },
   }
   const port: TeacherControllerPort = {
-    read: () => ({ locationId: 'page', scenes: [{ id: 'page', name: '当前页' }], progress: null, collapsed: false, zoom: 1, muted: false, fullscreen: false }),
+    readLocation: () => "a", read: () => ({ locationId: 'page', scenes: [{ id: 'page', name: '当前页' }], progress: null, collapsed: false, zoom: 1, muted: false, fullscreen: false }),
     subscribe: () => () => {}, viewportBounds, canExecute: () => true, execute: async () => true,
     setCollapsed() {}, moveBy() {}, setZoom() {}, resetView() {},
   }

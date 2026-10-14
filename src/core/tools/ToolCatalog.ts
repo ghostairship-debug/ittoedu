@@ -99,7 +99,7 @@ export const canonicalMutationTools = [
     inputSchema: objectPlaceInputSchema, manual: { label: '对象归属与讲义排版', group: 'edit', targetKinds: ['course-instance'] } },
   { capability: 'write', effect: 'document-edit', family: 'layout', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'object.place', input }) }),
-  registerCanonical({ name: 'object.author', description: '按专业语义修改表格、图表或填空判题。table 支持单元格、行列、合并拆分和样式；chart 支持数据、样式和图型切换；input-rules 同步答案、状态和反馈规则。使用已观察对象/行列身份，新增身份由软件维护，与人工编辑共享算法和一次撤销。',
+  registerCanonical({ name: 'object.author', description: '按专业语义修改表格、图表、正文范围互动或填空判题。table 支持单元格/行列/合并/样式；chart 支持数据/样式/图型；input-rules 同步答案/反馈。text-interaction 使用已观察正文选区target及intent:{kind:annotation,content,label?}添加范围注释，或{kind:input,label?,placeholder?,acceptedAnswers?}在选区/光标加入行内填空；软件生成范围与组件身份、保邻文并统一映射改字，一次撤销。不要手填范围编号或DOM地址。',
     inputSchema: objectAuthorInputSchema, manual: { label: '专业内容编辑', group: 'edit', targetKinds: ['course-instance'] } },
   { capability: 'write', effect: 'document-edit', family: 'layout', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'object.author', input }) }),
@@ -119,8 +119,8 @@ export const canonicalMutationTools = [
     inputSchema: z.object({ target }).strict(), manual: { label: '复制页面', group: 'edit', targetKinds: ['course-surface'] } },
   { capability: 'write', effect: 'document-edit', family: 'navigation', supports: context => hasRunWrite(context, ['document'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'surface.duplicate', input }) }),
-  registerCanonical({ name: 'surface.recipe', description: '在已观察页面后应用现有教学配方，创建可编辑页面。course.recipes 返回模板和正文槽位；只提供配方与文案，分类/排序使用项目文字和正确顺序，软件装配组件、规则和身份。需要整课写入授权。',
-    inputSchema: surfaceRecipeInputSchema, manual: { label: '应用教学配方', group: 'edit', targetKinds: ['course-surface'] } },
+  registerCanonical({ name: 'surface.recipe', description: '应用 course.recipes 实际返回的可深改预置。选择反馈含单选/多选，揭示分步，拖拽匹配/排序，continuous-variable-v1连续变量联动；内容配方在已观察页后创建可编辑页面。static-background-v1/dynamic-background-v1仅添加单份全局底层，不新建页，可选current/include/exclude/all范围、图像/颜色/运动强度与内容联动，不抢前景输入。软件装配正式组件、配置、依赖和身份，一次撤销；需要整课写入授权。',
+    inputSchema: surfaceRecipeInputSchema, manual: { label: '应用互动预置', group: 'edit', targetKinds: ['course-surface'] } },
   { capability: 'write', effect: 'document-edit', family: 'content', supports: context => hasRunWrite(context, ['document'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'surface.recipe', input }) }),
   registerCanonical({ name: 'course.productivity', description: '按普通查找替换或项目颜色意图修改内容，软件扫描并复用人工批量编辑算法；无需逐字段生成补丁。target 是已观察页面；page 只改本页，surface 包含全局层，course 扫描整课。后两种范围需要整课授权。',
@@ -131,7 +131,7 @@ export const canonicalMutationTools = [
     inputSchema: surfaceRemixInputSchema, manual: { label: '参考页面改写', group: 'edit', targetKinds: ['course-surface'] } },
   { capability: 'write', effect: 'document-edit', family: 'content', supports: context => hasRunWrite(context, ['document'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'surface.remix', input }) }),
-  registerCanonical({ name: 'object.insert', description: '在已观察页面或容器内插入文字、公式、图形、表格、图表或填空。只提供类型、正文及所需位置尺寸；软件复用人工插入默认、准备容器、专业数据和身份，正式事务可撤销。Flow destination=document 为正文，paper 为纸张浮层。',
+  registerCanonical({ name: 'object.insert', description: '在已观察页面或容器内插入文字、公式、图形、表格、图表或填空。提供类型、正文及所需位置尺寸，可用 appearance 同次设置文字/公式/图形/表格/图表的初始专业外观，语义同 object.update；省略时保留人工插入默认，input 当前不支持 appearance。软件准备容器、专业数据和身份，正式事务可撤销。Flow destination=document 为正文，paper 为纸张浮层。',
     inputSchema: objectInsertInputSchema, manual: { label: '插入专业元素', group: 'edit', targetKinds: ['course-surface', 'course-instance'] } },
   { capability: 'write', effect: 'document-edit', exposure: 'direct', family: 'content', supports: context => hasRunWrite(context, ['course-surface', 'course-instance'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'object.insert', input }) }),
@@ -208,10 +208,30 @@ export const toolFamilyDescriptions: Record<ToolFamily, string> = {
   external: '公开网页搜索与读取、已授权外部 MCP 工具和资源；配置及调用权限以真实回执为准',
 }
 /** Describe only capabilities actually allowed by this run's frozen grant. */
-export function describeToolFamily(family: ToolFamily, allowedNames: readonly string[]): string {
-  if (family === 'layout' && allowedNames.includes('object.update'))
-    return '对象属性（object.update 修改专业数据、视觉样式与 frame 位置尺寸）、图层与空间布局'
-  return toolFamilyDescriptions[family]
+export function describeToolFamily(family: ToolFamily, allowedNames: readonly string[], scopes: readonly RunToolScope[] = []): string {
+  const has = (name: string) => allowedNames.includes(name)
+  const wide = scopes.some(scope => scope.kind === 'course-v10' && (scope.wholeDocumentWritable || scope.writableTargetKinds.includes('course-surface')))
+  const parts = [toolFamilyDescriptions[family]]
+  if (family === 'content') {
+    parts.push('专业文字、连续正文、公式、表格和图表保持正式数据与人工可编辑语义。图表可把分类、系列和数值共同呈现，正文适合阅读顺序；修改范围以冻结目标为准，不能凭工具名称覆盖范围外内容。')
+    if (has('object.insert')) parts.push('可以把独立文字、图示与专业对象分别放入授权页面，真正耦合的局部模拟或程序保共同源码；软件准备身份和资源，模型决定内容、反馈及合理粒度。具体类型和数据格式在采用时加载。')
+    if (has('asset.use')) parts.push('可复用实际库中的内容及实现，是否已存在所需条目以目录为准；不要把库入口当成所有创意都有预置。')
+    if (has('object.author')) parts.push('正式正文的已选范围可以附可点击注释，选区或光标可以承载行内填空；正文与专业数据仍可人工或AI局部修改，软件维护范围和引用，不把文字换成一张交互截图。')
+  }
+  if (family === 'layout' && has('object.update')) {
+    parts.push('object.update 改专业数据、视觉样式与frame位置尺寸。Slide和Spatial保自由几何／编组／顺序，Flow正文按阅读顺序自排版；普通局部修改不重排整页。实例可沿现源码或参数深改，保正式数据与人工frame，复杂程序不必为每个内部能力增人工面板。')
+    if (wide && has('surface.configure')) parts.push('授权表面可配置背景与布局。全局底层和前景对象分离，背景可以是图、形或局部程序，并按应用／排除范围使用；装饰不抢前景输入，联动用正式事件或共享状态，不能扫描范围外私有DOM。')
+  }
+  if (family === 'navigation') {
+    if (wide && has('presentation.update')) parts.push('场景状态表达作者设计的同场景阶段、分支或选择跳转，可以覆盖对象、顺序和背景并承载动态内容；不是另建一页，也不必枚举每个连续数值。Spatial表达真实空间关系、世界和镜头路径；镜头、页面和状态的实际目标由软件维护。')
+    if (has('presentation.update') || has('course.logic')) parts.push('导航、状态与内容动作按实际授权目标配置，正式播放复用唯一导航owner；例如比较结果后进入对应分支，而非只换按钮颜色。局部权限不能据此增删其他页面或全课规则。')
+    if (has('teacher.ensure')) parts.push('完整教师控制台是按需能力，新作品可用正式键盘、普通按钮／标签或局部程序形成用途合适的路径；现有或人工添加控制台保留。')
+  }
+  if (family === 'interaction' && has('interaction.update')) parts.push('选择、输入、揭示与反馈、状态变化、组件事件和参数可形成有意义操作，按当前专业组件目录复用核心行为、修改文案与画面。连续变量、模拟和游戏适合局部Runtime；复杂动画可用源码／算法／关键帧，普通页过渡可复用快照。仅按钮可点或程序在运行不证明内容结果正确，不宣称尚未交付的具体预置。')
+  if (family === 'media') parts.push('图片、音视频和局部素材按内容选择。真实原作／事件用实际来源，生成与参考图编辑用于合适的创作，不冒充证据；服务是否已配置、支持实际参数和成功均以宿主事实及回执为准，生成候选、应用、保存分别报告。')
+  if (family === 'build') parts.push('交付基于正式当前工程；HTML／ZIP与GLX保存是不同结果。工具成功、已应用、已保存、冷重开及离线运行是不同证据，不把传输结束称作整项用户目标完成。')
+  parts.push('具体schema、API与组件源码按所选表达通过现tools.load或实际目录取得；概览不授予额外权限，也不要求每件作品使用全部能力。')
+  return parts.join(' ')
 }
 export function familyOfTool(name: string): ToolFamily | null { return toolRegistration(name)?.family ?? null }
 export function visibleRunToolNames(allowed: readonly string[], loadedFamilies: ReadonlySet<ToolFamily>): string[] {

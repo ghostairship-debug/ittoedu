@@ -9,6 +9,9 @@ export function componentPaintStyle(instance: ComponentInstance, definition?: Co
     && typeof data.html === 'string' && isMeasuredWebFragmentBox(instance, htmlDocumentKind(data.html), undefined, definition)) {
     // Web CSS paints once in the content realm. Detached children still need their formal group clip.
     const clip: Record<string, string | number> = {}
+    // Input passthrough belongs to the outer hit surface even when paint stays in Web CSS.
+    const pointerEvents = instance.style?.pointerEvents ?? instance.style?.['pointer-events']
+    if (typeof pointerEvents === 'string') clip.pointerEvents = pointerEvents
     if (instance.childIds?.length) {
       const style = instance.style ?? {}
       const x = style['overflow-x'] ?? style.overflowX ?? style.overflow

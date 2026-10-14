@@ -38,8 +38,10 @@ export function currentCompositionGatewayFixture(options: { professionalText?: b
   insert('left', group.id, {}, frame(20, 100, 370, 700), ['paragraph', 'picture', 'interaction'])
   insert('right', group.id, {}, frame(410, 100, 370, 700), ['chart', 'shared-picture', 'native-picture'])
   insert('paragraph', options.professionalText ? TEXT_DEFINITION.id : WEB_DEFINITION.id,
-    options.professionalText ? createTextComponentData(currentFragmentPrompt) : { html: compositionParagraphHtml, css: compositionSourceCss, authoringRecords: { paragraph: textRecord } }, frame(0, 0, 330, 100))
-  insert('picture', WEB_DEFINITION.id, { html: compositionPictureHtml, css: compositionSourceCss, authoringRecords: { picture: imageRecord }, resourceBindings: { photo: 'source-photo' } }, frame(0, 120, 100, 100))
+    options.professionalText ? createTextComponentData(currentFragmentPrompt) : { html: compositionParagraphHtml, css: compositionSourceCss }, frame(0, 0, 330, 100))
+  if (!options.professionalText) project.instances.paragraph.authoring = { records: { paragraph: textRecord } }
+  insert('picture', WEB_DEFINITION.id, { html: compositionPictureHtml, css: compositionSourceCss, resourceBindings: { photo: 'source-photo' } }, frame(0, 120, 100, 100))
+  project.instances.picture.authoring = { records: { picture: imageRecord } }
   insert('interaction', HTML_PROGRAM_DEFINITION.id, { html: compositionProgramHtml }, frame(0, 240, 330, 100))
   insert('chart', CHART_DEFINITION.id, createChartData(), frame(0, 0, 330, 300))
   insert('shared-picture', IMAGE_DEFINITION.id, createImageData('source-photo', '未选共享图片'), frame(0, 320, 100, 100))
@@ -50,8 +52,8 @@ export function currentCompositionGatewayFixture(options: { professionalText?: b
   const resources = { assets: { 'source-photo': bytes }, components: {} }
   const model: Extract<DocumentModel, { kind: 'course-v10' }> = { kind: 'course-v10', project, resources }
   const instanceTarget = (instanceId: string): Extract<ToolTarget, { kind: 'course-instance' }> => ({ kind: 'course-instance', surfaceId: 'slide', instanceId })
-  const textTarget = { ...instanceTarget('paragraph'), dataPath: options.professionalText ? ['content'] : ['authoringRecords', 'paragraph', 'overrides', 'text'] }
-  const imageTarget = { ...instanceTarget('picture'), dataPath: ['authoringRecords', 'picture', 'overrides', 'src'] }
+  const textTarget = { ...instanceTarget('paragraph'), ...(options.professionalText ? {} : { fieldScope: 'authoring' as const }), dataPath: options.professionalText ? ['content'] : ['records', 'paragraph', 'overrides', 'text'] }
+  const imageTarget = { ...instanceTarget('picture'), fieldScope: 'authoring' as const, dataPath: ['records', 'picture', 'overrides', 'src'] }
   return { model, project, resources, target: instanceTarget('quality-composition'), selection: instanceTarget('left'), textTarget, imageTarget, instanceTarget, textRecord, imageRecord }
 }
 
@@ -60,8 +62,7 @@ export function currentCompositionProject(model: DocumentModel) {
   return model.project
 }
 export function currentCompositionText(model: DocumentModel): string {
-  const data = currentCompositionProject(model).instances.paragraph.data
-  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Paragraph data required')
-  const records = data.authoringRecords as unknown as Record<string, ComponentAuthorRecord>
+  const records = currentCompositionProject(model).instances.paragraph.authoring?.records
+  if (!records) throw new Error('Paragraph author records required')
   return records.paragraph.overrides.text ?? records.paragraph.binding.baseline
 }

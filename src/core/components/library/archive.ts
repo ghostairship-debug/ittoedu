@@ -1,21 +1,26 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { z } from 'zod'
 import type { ComponentLibraryEntry } from '../../../shared/contracts/component-platform/library'
-import { componentAssetSchema, componentDefinitionSchema, componentInstanceSchema } from '../../../shared/contracts/component-platform/schema'
+import { componentAssetSchema, componentDefinitionSchema, componentInstanceSchema, componentSurfaceSchema, courseProjectLogicSchema } from '../../../shared/contracts/component-platform/schema'
+import { courseThemeSchema, courseProjectDesignTokensSchema } from '../../../shared/contracts/design-v1/schema'
 import { assertSafeArchivePath } from '../../drivers/codecs/archivePath'
 import type { LibraryDiagnostic } from './types'
+import { ownRecordSchema } from '../../../shared/ownRecordSchema'
 
 export const COMPONENT_LIBRARY_ARCHIVE_FORMAT = 'guoling-component-library'
 const entrySchema = z.object({
   schemaVersion: z.literal(1), id: z.string().min(1), title: z.string(),
-  definitions: z.record(z.string(), componentDefinitionSchema),
-  example: z.object({ instances: z.record(z.string(), componentInstanceSchema), rootIds: z.array(z.string().min(1)) }),
-  assets: z.record(z.string(), componentAssetSchema),
+  kind: z.enum(['objects', 'page', 'structure']).optional(),
+  definitions: ownRecordSchema(z.string(), componentDefinitionSchema),
+  example: z.object({ instances: ownRecordSchema(z.string(), componentInstanceSchema), rootIds: z.array(z.string().min(1)) }),
+  assets: ownRecordSchema(z.string(), componentAssetSchema),
   inputs: z.array(z.object({ instanceId: z.string(), path: z.array(z.string()), role: z.string() })).optional(),
+  surfaces: z.array(componentSurfaceSchema).optional(), global: z.object({ underlay: z.array(z.string()), overlay: z.array(z.string()) }).optional(),
+  theme: courseThemeSchema.optional(), designTokens: courseProjectDesignTokensSchema.optional(), logic: courseProjectLogicSchema.optional(),
 })
 const manifestSchema = z.object({
   format: z.literal(COMPONENT_LIBRARY_ARCHIVE_FORMAT), version: z.string().min(1), entry: entrySchema,
-  resources: z.object({ assets: z.record(z.string(), z.string()), components: z.record(z.string(), z.record(z.string(), z.string())) }),
+  resources: z.object({ assets: ownRecordSchema(z.string(), z.string()), components: ownRecordSchema(z.string(), ownRecordSchema(z.string(), z.string())) }),
 })
 const metadataSchema = z.object({ description: z.string().optional(), subject: z.array(z.string()).optional(), schoolStage: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(), sourceCourse: z.string().optional() })
@@ -25,12 +30,12 @@ export interface ComponentLibraryArchive { entry: ComponentLibraryEntry; version
 /** The existing package file service transports this archive; author identities remain software-owned. */
 export function exportComponentLibraryArchive(entry: ComponentLibraryEntry, version = Object.values(entry.definitions)[0]?.version ?? '1.0.0', metadata?: ComponentLibraryArchiveMetadata): Uint8Array {
   const files: Record<string, Uint8Array> = {}
-  const paths = { assets: {} as Record<string, string>, components: {} as Record<string, Record<string, string>> }
+  const paths = { assets: Object.create(null) as Record<string, string>, components: Object.create(null) as Record<string, Record<string, string>> }
   for (const [id, bytes] of Object.entries(entry.resources.assets)) {
     const name = `assets/${encodeURIComponent(id)}`; files[name] = bytes; paths.assets[id] = name
   }
   for (const [id, resources] of Object.entries(entry.resources.components)) {
-    paths.components[id] = {}
+    paths.components[id] = Object.create(null)
     for (const [file, bytes] of Object.entries(resources)) {
       const name = `components/${encodeURIComponent(id)}/${encodeURIComponent(file)}`
       files[name] = bytes; paths.components[id][file] = name
@@ -78,5 +83,7 @@ export function importComponentLibraryArchive(bytes: Uint8Array): ComponentLibra
     if (instance.childIds?.some(child => !entry.example.instances[child])) throw new Error(`条目子对象缺失：${id}`)
   }
   if (entry.example.rootIds.some(id => !entry.example.instances[id])) throw new Error('条目根对象不存在')
+  const root=entry.example.instances[entry.example.rootIds[0]],definition=root && entry.definitions[root.definitionId]
+  if(definition)definition.library={packageId:entry.id,version:manifest.version}
   return { entry, version: manifest.version, ...(metadata ? { metadata } : {}), ...(diagnostics.length ? { diagnostics } : {}) }
 }

@@ -70,7 +70,7 @@ export async function prepareComponentMediaApplication(input: ComponentMediaAppl
   let instance: ComponentInstance | undefined
   let container: ComponentContainer | undefined
   if (target.kind === 'course-instance') {
-    if (target.dataPath !== undefined || target.from !== undefined || target.to !== undefined || target.fieldScope === 'flowLayout') {
+    if (target.authorField || target.dataPath !== undefined || target.from !== undefined || target.to !== undefined || target.fieldScope === 'flowLayout') {
       throw new Error('媒体应用需要整对象目标，不能覆盖所选文字或排版字段')
     }
     instance = resolveComponentPresentation(project, surfaceId, stateId).instances[target.instanceId]

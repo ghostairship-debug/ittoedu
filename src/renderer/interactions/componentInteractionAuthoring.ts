@@ -3,17 +3,25 @@ export { INTERACTIONS_DEFINITION, componentRuleEdits, interactionBehavior, inter
   componentInteractionDataSchema, remapComponentInteractionData, createComponentInteractionCopyIdentities,
   componentRevealSequenceEdits, componentClickInteractionEdits, duplicateComponentRule } from '../../shared/componentInteractionData'
 import type { ComponentSurface, ComponentTarget, CourseProjectV10 } from '../../shared/contracts/component-platform'
-import type { InteractionSceneView } from '../ui/InteractionEditor'
+import type { InteractionSceneView, InteractionSceneListItem } from '../ui/InteractionEditor'
 import type { InteractionLayerTarget } from '../course/slideInteractionView'
 import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
+import { componentAudioSounds } from '../../shared/componentAudioSounds'
 
 export function readComponentInteractionSounds(target: CapturedCourseTarget): readonly { id: string; name: string }[] {
-  return Object.values(target.project.media?.audio.sounds ?? {}).map(({ id, name }) => ({ id, name }))
+  const view = target.surfaceId ? componentInteractionView(target.project, target.surfaceId) : undefined
+  return Object.values(view?.sounds ?? componentAudioSounds(target.project)).map(({ id, name }) => ({ id, name }))
 }
 export async function setComponentClickInteraction(kernel: EditorStoreKernel, target: CapturedCourseTarget,
   kind: 'audio-play' | 'location-go', value: string): Promise<void> {
   await kernel.editCaptured(kernel.capture(componentClickInteractionEdits(target, kind, value), target))
+}
+export function componentNavigationScene(surface: ComponentSurface): InteractionSceneListItem {
+  return { id: surface.id, name: surface.title,
+    presentation: surface.presentation ? { initialStateId: surface.presentation.initialStateId ?? undefined,
+      states: surface.presentation.states.map(state => ({ id: state.id, name: state.title })) } : undefined,
+    ...(surface.kind === 'spatial' ? { spatial: { frames: (surface.spatial?.frames ?? []).map(frame => ({ id: frame.id, name: frame.title ?? frame.id })) } } : {}) }
 }
 export function componentInteractionView(project: CourseProjectV10, surfaceId: string, global = false) {
   const surface = project.surfaces.find(value => value.id === surfaceId)
@@ -37,11 +45,9 @@ export function componentInteractionView(project: CourseProjectV10, surfaceId: s
         loop: typeof instance.data.loop === 'boolean' ? instance.data.loop : undefined,
       } : {}) }]
   })
-  const presentation = (value: ComponentSurface) => value.presentation ? { initialStateId: value.presentation.initialStateId ?? undefined,
-    states: value.presentation.states.map(state => ({ id: state.id, name: state.title })) } : undefined
-  const scene: InteractionSceneView = { id: surface.id, name: surface.title, nodes, interactions: rules, presentation: presentation(surface) }
-  return { target, behavior, rules, nodes, scene,
-    scenes: project.surfaces.map(value => ({ id: value.id, name: value.title, presentation: presentation(value) })),
+  const scene: InteractionSceneView = { ...componentNavigationScene(surface), nodes, interactions: rules }
+  return { target, behavior, rules, nodes, scene, sounds: componentAudioSounds(project, ids),
+    scenes: project.surfaces.map(componentNavigationScene),
     locations: project.surfaces.map(value => ({ id: value.id, label: value.title })),
   }
 }

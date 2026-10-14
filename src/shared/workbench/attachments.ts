@@ -38,7 +38,7 @@ export const inputAttachmentReferenceSchema = z.object({ attachmentId: z.uuid(),
 export type InputAttachmentReference = z.infer<typeof inputAttachmentReferenceSchema>
 export interface AttachmentReader {
   readSnapshot?(attachmentId: string): Promise<AttachmentSnapshot>
-  readRepresentation(attachmentId: string, representationId: string): Promise<{ snapshot: AttachmentSnapshot; representation: AttachmentRepresentation; bytes: Uint8Array }>
+  readRepresentation(attachmentId: string, representationId: string, preparedSnapshot?: AttachmentSnapshot): Promise<{ snapshot: AttachmentSnapshot; representation: AttachmentRepresentation; bytes: Uint8Array }>
 }
 export interface InputContextProvenance {
   kind: 'history' | 'document' | 'selection' | 'runtime'

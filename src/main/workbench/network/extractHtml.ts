@@ -1,4 +1,5 @@
 import { parse, type DefaultTreeAdapterTypes } from 'parse5'
+import { webPageImages, type WebPageImage } from './webPageImages'
 
 type Node = DefaultTreeAdapterTypes.Node
 type Element = DefaultTreeAdapterTypes.Element
@@ -24,6 +25,7 @@ function normalized(lines: string): string {
 }
 
 export interface ExtractedHtml {
+  images?: WebPageImage[]
   title: string
   text: string
   publishedAt?: string
@@ -72,5 +74,6 @@ export function extractHtml(html: string, pageUrl: string): ExtractedHtml {
   // The observed PyPI response is a client challenge, not the requested article.
   // Match that response's title and message together; ordinary text mentioning a challenge stays readable.
   const clientChallenge = title.toLowerCase() === 'client challenge' && /a required part of this site couldn['’]t load\./i.test(text)
-  return { title, text, ...(publishedAt ? { publishedAt } : {}), accessRequired, clientChallenge }
+  const images = webPageImages(document, pageUrl, title || new URL(pageUrl).hostname)
+  return { title, text, ...(images.length ? { images } : {}), ...(publishedAt ? { publishedAt } : {}), accessRequired, clientChallenge }
 }

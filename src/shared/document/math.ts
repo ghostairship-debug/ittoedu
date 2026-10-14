@@ -205,6 +205,10 @@ class Parser {
 
 export function parseDocumentMath(latex: string): MathNode { return new Parser(latex).parse() }
 
+/** The formal grammar treats percent as a literal symbol, including unescaped source. */
+export function documentMathRenderSource(latex:string):string {
+  return latex.replace(/(^|[^\\])((?:\\\\)*)%/g,'$1$2\\%')
+}
 /** Default description, overridden by an explicitly edited accessibleText. */
 export function describeDocumentMath(node: MathNode): string {
   switch (node.type) {

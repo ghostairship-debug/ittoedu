@@ -1,5 +1,5 @@
 {
-  "description": "编辑已有图片。references 原样传入返回的 source/resource，或当前文档的整张专业图片/图片素材句柄。宿主读取原字节并使用冻结连接。返回资源须经 project.apply 或 media.apply 正式应用；未知结果不自动重发。",
+  "description": "编辑图片，或用一张/多张真实参考图创作下一幅。references 原样传已授权的 source/resource、材料或工程整张图片句柄；参考与 target 独立。省略 application 返回候选；用户明确编辑并插入/替换时传 application:{mode:insert|replace,target:已观察句柄}，软件冻结目标并正式应用，保全同期人工修改与晚到候选。宿主读取原字节并使用冻结图片连接，不承诺绝对一致，未知结果不自动重发。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -10,6 +10,26 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
+      "application": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "insert",
+              "replace"
+            ],
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "mode",
+          "target"
+        ],
+        "type": "object"
+      },
       "output": {
         "additionalProperties": false,
         "properties": {

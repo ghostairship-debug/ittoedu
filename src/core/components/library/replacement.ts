@@ -13,6 +13,7 @@ export function planCourseComponentPackageReplacement(project: CourseProjectV10,
   const prepared = prepareComponentLibraryInsertion(project, entry, {
     container: { kind: 'surface', surfaceId: surface.id }, index: surface.childIds.length,
     definitionBindings: { [root.definitionId]: definitionId },
+    definitionsOnly:true,
   })
   return prepared.command.edits.filter(edit => edit.type !== 'instance.insert')
 }

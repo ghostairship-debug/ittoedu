@@ -92,7 +92,7 @@ export class AgentFileText {
       const root = await this.host.files.registerRoot(path.dirname(filename))
       context.assertActive?.()
       const receipt = await this.host.files.createFile({ operationId, workspaceId: root.workspaceId,
-        targetDirectoryId: root.rootEntryId, name: path.basename(filename), format: 'file', bytes: Buffer.from(content, 'utf8') })
+        targetDirectoryId: root.rootEntryId, name: path.basename(filename), format: 'file', bytes: Buffer.from(content, 'utf8') }, context.assertActive)
       const created = receipt.items.find(item => item.status === 'success')
       return { data: { path: filename, operation: receipt, saved: !!created,
         ...(created ? { afterVersion: hash(Buffer.from(content, 'utf8')) } : {}) } }

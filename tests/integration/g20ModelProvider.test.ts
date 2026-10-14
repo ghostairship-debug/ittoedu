@@ -2,8 +2,20 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http'
 import { setImmediate as nextTurn, setTimeout as delay } from 'node:timers/promises'
 import { afterEach, expect, it, vi } from 'vitest'
-import { OpenAIChatProvider, serializeModelRequest, type ChatTransportDiagnostic } from '../../src/main/workbench/providers/OpenAIChatProvider'
+import { modelToolWireName, OpenAIChatProvider, serializeModelRequest, type ChatTransportDiagnostic } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import type { ModelEvent, ModelJsonObject, ModelRequest } from '../../src/shared/workbench/modelProvider'
+import { modelContextBudget } from '../../src/core/execution/modelContextBudget'
+
+it('R01 maps a Responses output cap to Chat and keeps an explicit Chat completion cap authoritative', () => {
+  const input = request('https://fixture.invalid/v1')
+  for (const parameters of [{ max_output_tokens: 3200 }, { max_output_tokens: 3200, max_tokens: 2400, max_completion_tokens: 1600 }] as ModelJsonObject[]) {
+    input.selection.parameters = parameters
+    const wire = JSON.parse(serializeModelRequest(input))
+    expect(wire).not.toHaveProperty('max_output_tokens')
+    expect(modelContextBudget(input.selection).outputReserve).toBe(wire.max_completion_tokens ?? wire.max_tokens)
+    expect(wire.max_completion_tokens ?? wire.max_tokens).toBe(parameters.max_completion_tokens ?? 3200)
+  }
+})
 
 const servers: Server[] = []
 afterEach(async () => {
@@ -68,7 +80,7 @@ it('serializes the exact final HTTP body for budgets including native tools, par
     thinking: { type: 'enabled' }, reasoning_effort: 'high', max_tokens: 512, metadata: { title: '中文😀' } })
   expect(wire).not.toHaveProperty('n')
   expect(wire.tools[0]).toMatchObject({ type: 'function', function: { description: input.tools![0]!.description, parameters: input.tools![0]!.inputSchema } })
-  expect(wire.tools[0].function.name).toBe('text_replace')
+  expect(wire.tools[0].function.name).toBe(modelToolWireName('text.replace'))
   expect(wire.messages).toEqual(input.messages)
   expect(serialized).not.toContain('credential-one')
   expect(serialized).not.toContain('request-one')

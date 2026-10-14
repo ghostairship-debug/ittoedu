@@ -8,6 +8,14 @@ import type { ComponentDefinition, ComponentEdit, ComponentImplementation } from
 const record = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value)
 
+/** Present the same actual search sources in built-in and external tool history. */
+export function webSearchSources(name: string, result?: ToolResult): { title: string; url: string }[] | undefined {
+  if (name !== 'web.search' || result?.kind !== 'read' || !record(result.data)
+    || result.data.status !== 'results' || !Array.isArray(result.data.results)) return undefined
+  return result.data.results.flatMap(value => record(value) && typeof value.title === 'string' && typeof value.url === 'string'
+    ? [{ title: value.title, url: value.url }] : [])
+}
+
 function operationReceipt(value: unknown): value is DocumentOperationResult {
   return record(value) && (value.status === 'applied' || value.status === 'unchanged')
     && typeof value.documentId === 'string' && typeof value.operationId === 'string'
@@ -117,6 +125,9 @@ export function modelToolResult(toolName: string, result: ToolResult): ToolResul
     return { ...result, data: { ...result.data, input: projectInput(result.data.input),
       ...(operationReceipt(result.data.receipt) ? { receipt: projectReceipt(result.data.receipt) } : {}) } }
   }
+  if ((toolName === 'image.generate' || toolName === 'image.edit' || toolName === 'image.status') && result.kind === 'read'
+    && record(result.data) && record(result.data.application) && operationReceipt(result.data.application.receipt))
+    return { ...result, data: { ...result.data, application: { ...result.data.application, receipt: projectReceipt(result.data.application.receipt) } } }
   return result
 }
 
@@ -136,6 +147,8 @@ export function contentApplyFact(name: string, result?: ToolResult): ContentAppl
 
 export function operationFact(name: string, result?: ToolResult): DocumentOperationResult | null {
   if (result?.kind === 'document-operation') return result.result
+  if (['image.generate', 'image.edit', 'image.status'].includes(name) && result?.kind === 'read' && record(result.data)
+    && record(result.data.application) && operationReceipt(result.data.application.receipt)) return result.data.application.receipt
   return contentApplyFact(name, result)?.receipt ?? null
 }
 export function committedFact(name: string, result?: ToolResult): SuccessfulReceipt | null {
@@ -152,7 +165,7 @@ export function knownApplication(name: string, result?: ToolResult): boolean {
 }
 export function applicationEventFacts(name: string, result?: ToolResult) {
   const receipt = operationFact(name, result), apply = contentApplyFact(name, result)
-  if (receipt) return { applicationStatus: receipt.status, documentId: receipt.documentId,
+  if (receipt) return { applicationStatus: receipt.status, operationId: receipt.operationId, documentId: receipt.documentId,
     ...('revision' in receipt ? { revision: receipt.revision } : { error: receipt.message }) }
   if (apply?.commit === 'unchanged') return { applicationStatus: 'unchanged' as const }
   return {}
@@ -195,6 +208,11 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
     return { status: 'stopped', message: result.message }
   if (result?.kind !== 'read' || !result.data || typeof result.data !== 'object') return null
   const data = result.data as Record<string, unknown>
+  if (['asset.save', 'asset.import', 'asset.delete'].includes(name)) {
+    if (['saved', 'imported', 'deleted'].includes(String(data.status))) return { status: 'saved', message: '资产库修改已完成' }
+    if (['rejected', 'failed', 'stopped'].includes(String(data.status))) return { status: 'failed', message: typeof data.reason === 'string' ? data.reason : '资产库修改未完成' }
+    if (data.status === 'unknown') return { status: 'unknown', message: '资产库修改结果未知，请查询原操作' }
+  }
   const apply = contentApplyFact(name, result)
   if (apply) {
     const error = apply.diagnostics.find(item => item.level === 'error'), diagnostic = error?.message
@@ -264,7 +282,7 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
       || (name === 'compute.run' || name === 'delegate.start' || name === 'local.run' || name === 'delegate.readonly') && (data.status === 'cancelled' || data.status === 'unapplied'))
       return { status: 'failed', message }
   }
-  if (name === 'image.generate' || name === 'image.edit') {
+  if (name === 'image.generate' || name === 'image.edit' || name === 'image.status') {
     const failure = data.failure && typeof data.failure === 'object' ? data.failure as Record<string, unknown> : null
     const message = typeof failure?.message === 'string' && failure.message.trim() ? failure.message.slice(0, 240) : undefined
     // Stopping after dispatch leaves the provider outcome and charge unknown.
@@ -274,6 +292,10 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
     if (data.status === 'failed') return { status: 'failed', message: message ?? '图片请求失败，未得到可应用成果' }
     if (data.status === 'stopped' || data.status === 'unapplied') return { status: 'stopped', message: message ?? '图片任务已停止，成果尚未应用' }
     if (data.status === 'preparing' || data.status === 'running') return { status: 'pending', message: '图片作业仍在运行，请等待并读取成果' }
+    if (record(data.application) && !['applied', 'unchanged', 'pending'].includes(String(data.application.status))) return {
+      status: data.application.status === 'unknown' ? 'unknown' : 'failed',
+      message: typeof data.application.reason === 'string' ? data.application.reason
+        : record(data.application.receipt) && typeof data.application.receipt.message === 'string' ? data.application.receipt.message : '图片已生成，正式应用未完成；候选保留' }
   }
   return null
 }

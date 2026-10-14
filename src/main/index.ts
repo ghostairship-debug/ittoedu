@@ -35,7 +35,7 @@ if (process.argv.includes('--mcp-connect')) {
     app.exit(1)
   } else {
     void runProductMcpBootstrap(process.argv.slice(1), { executable: process.execPath, cwd: process.cwd() })
-      .then(reply => { process.stdout.write(`${JSON.stringify(reply)}\n`); app.exit(0) })
+      .then(reply => { if (reply) process.stdout.write(`${JSON.stringify(reply)}\n`); app.exit(0) })
       .catch(error => { console.error('果铃连接未完成：', error instanceof Error ? error.message : String(error)); app.exit(1) })
   }
 } else {
@@ -83,7 +83,15 @@ async function reportMcpReady(request: HeadlessMcpLaunch, ownership: 'owned' | '
   const reply = { status: 'ready', ...info, pid: process.pid,
     profile: app.getPath('userData'), mode: guiEnabled ? 'gui' : 'headless', ownership,
     requestedWorkspace: request.workspace, workspaceMismatch: !samePath(info.workspace, request.workspace) }
-  if (request.readyFile) await writeMcpLaunchReply(request.readyFile, reply)
+  if (request.readyFile) {
+    try { await writeMcpLaunchReply(request.readyFile, reply) }
+    catch (error) {
+      // The requester may already have removed its one-use directory. The running owner remains valid.
+      void diagnosticLog.append({ source: 'main', message: 'MCP 已运行，连接信息未能交接',
+        details: { reason: error instanceof Error ? error.message : String(error) } })
+      console.error('MCP 已运行，连接信息未能交接：', error)
+    }
+  }
   else if (request.readyJson) process.stdout.write(`${JSON.stringify(reply)}\n`)
   else console.error(`MCP ready: ${info.endpoint}; workspace=${info.workspace}; pid=${process.pid}`)
 }
@@ -224,6 +232,7 @@ app
     }
 
     removeDiagnosticHandlers = diagnosticLog.installProcessHandlers()
+    void diagnosticLog.append({ source: 'main', message: '应用已启动', details: { operation: 'application-start', phase: 'startup' } }).catch(() => undefined)
     // Every outbound request of the main process follows the system proxy (or PAC) from here on.
     installSystemProxy(session.defaultSession)
 

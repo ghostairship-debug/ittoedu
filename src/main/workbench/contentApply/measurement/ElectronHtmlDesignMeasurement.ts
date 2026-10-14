@@ -99,9 +99,12 @@ export async function measureHtmlAtDesignViewport(request: HtmlDesignMeasurement
       const original = prepared.originalElements.get(element.sourcePath.join('/'))
       if (original) { element.attributes = original.attributes; element.sourceHtml = original.sourceHtml }
       restoreStyles(element.style)
+      if(element.sourceStyle)restoreStyles(element.sourceStyle)
+      if(element.inheritedStyle)restoreStyles(element.inheritedStyle)
       Object.values(element.pseudoElements).forEach(restoreStyles)
     }
     restoreStyles(capture.pageStyle)
+    if(capture.sourceCss)capture.sourceCss=restoreReference(capture.sourceCss)
     if (capture.supportCss) capture.supportCss = restoreReference(capture.supportCss)
     for (const scope of capture.sourceScopes ?? []) {
       scope.html = retainedMeasurementScopeHtml(source, capture.elements[scope.index]!.sourcePath)

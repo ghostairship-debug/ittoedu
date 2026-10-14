@@ -43,7 +43,6 @@ export function listSlideWorkspaceHitTargets(state: SlideWorkspaceAuthoringState
     const root = target.ancestors[0] ?? target.instanceId
     const global = state.project.global.underlay.includes(root) || state.project.global.overlay.includes(root)
     if (state.editingScope === 'global' && !global) return false
-    if (state.editingScope === 'scene' && global && state.project.instances[root]?.definitionId !== 'guoling.navigation') return false
     return [target.instanceId, ...target.ancestors].every(id => {
       const instance = state.project.instances[id]
       return instance && isComponentVisibleAtSurface(instance, state.surfaceId)
@@ -67,8 +66,8 @@ export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAut
     const at = transformPoint(invertMatrix(surfaceToPointer), point(pointer))
     let ids = [...state.selectedInstanceIds]
     if (!handle) {
-      const outerHit = hitFreeObject(targets, at, Boolean(pointer.altKey))
-      const selectedHit = hitFreeObject(selectedFreeTargets(targets, ids), at, true)
+      const outerHit = hitFreeObject(targets, at, Boolean(pointer.altKey), surfaceToPointer)
+      const selectedHit = hitFreeObject(selectedFreeTargets(targets, ids), at, true, surfaceToPointer)
       // An explicitly selected child stays draggable inside its containing group.
       const hit = !pointer.altKey && outerHit && selectedHit?.ancestors.includes(outerHit.instanceId) ? selectedHit : outerHit
       if (!hit) {
@@ -133,7 +132,7 @@ export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAut
   }
   return { pointerDown, pointerMove, pointerUp, cancelGesture,
     contextTarget(pointer: GeometryPoint, surfaceToPointer: AffineMatrix) {
-      const state = ports.read(), hit = hitFreeObject(listSlideWorkspaceHitTargets(state), transformPoint(invertMatrix(surfaceToPointer), pointer))
+      const state = ports.read(), hit = hitFreeObject(listSlideWorkspaceHitTargets(state), transformPoint(invertMatrix(surfaceToPointer), pointer), false, surfaceToPointer)
       if (!hit) return null
       if (!state?.selectedInstanceIds.includes(hit.instanceId)) ports.select([hit.instanceId])
       return hit.instanceId

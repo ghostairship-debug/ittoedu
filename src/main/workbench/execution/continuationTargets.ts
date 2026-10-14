@@ -2,12 +2,12 @@ import type { DocumentSession } from '../../../core/documents/DocumentSession'
 import { isSourceDocumentModel } from '../../../shared/workbench/document'
 import type { ToolTarget } from '../../../shared/workbench/tools'
 import { documentDigest } from '../../../core/documents/documentDigest'
-import { courseInstanceFieldIdentity, courseInstanceTextTarget, isCourseInstanceRange, mapHtmlAuthorFieldTarget, mapMarkdownRange, mapSequenceRange, readCourseInstanceText, readTarget } from '../../../core/tools/ToolTargets'
+import { mapExternalCourseTextTarget, targetFootprint, courseInstanceFieldIdentity, courseInstanceTextTarget, isCourseInstanceRange, mapHtmlAuthorFieldTarget, mapMarkdownRange, mapSequenceRange, readCourseInstanceText, readTarget } from '../../../core/tools/ToolTargets'
 import { mapAcknowledgedRange } from '../../../core/tools/ToolReadCoverage'
 import { traceSourceRange } from '../../../core/drivers/course/elementFields'
 import { normalizeDocumentText, type FlowTextContent } from '../../../shared/document/content'
 
-const tokens = (value: string | FlowTextContent): string[] => normalizeDocumentText(typeof value === 'string' ? { inlines: [{ type: 'text', text: value }] } : value).inlines.flatMap(inline => inline.type === 'math'
+const tokens = (value: string | FlowTextContent): string[] => normalizeDocumentText(typeof value === 'string' ? { inlines: [{ type: 'text', text: value }] } : value).inlines.flatMap(inline => inline.type !== 'text'
   ? [documentDigest(inline)] : Array.from(inline.text, text => documentDigest({ ...inline, text })))
 const disjoint = (range: { from: number; to: number }, edit: { from: number; to: number }) =>
   edit.to <= range.from || edit.from >= range.to
@@ -19,7 +19,7 @@ export async function continueDocumentTargets<T extends { documentId: string; ep
   const snapshot = await session.drain()
   if (snapshot.documentId !== reference.documentId) throw new Error('恢复的文档身份不一致')
   const ranges = [...reference.writable, ...(reference.selection ?? [])].some(target => target.kind === 'text-selection' || target.kind === 'markdown-range' || isCourseInstanceRange(target)
-    || target.kind === 'html-author-field' && target.source)
+    || target.kind === 'html-author-field' && target.source || target.kind === 'course-instance' && target.authorField)
   if (snapshot.epoch !== reference.epoch && (!options.followCurrent || ranges)) throw new Error('原文档会话已改变，请重新选择')
   const changes = ranges ? session.committedChangesSince(reference.revision) : []
   const advance = (target: ToolTarget, change: typeof changes[number], own: boolean): ToolTarget => {
@@ -37,6 +37,12 @@ export async function continueDocumentTargets<T extends { documentId: string; ep
         if (!own && readTarget(change.after, mapped) !== before) throw new Error('原 HTML 正文字段已被其他操作改动，请重新选择')
         target = mapped
         return target
+      }
+      if (target.kind === 'course-instance' && target.authorField) {
+        if (!change.before || !change.after) throw new Error('原作者字段历史不足以确认，请重新选择')
+        const mapped = mapExternalCourseTextTarget(change.before, change.after, target, own)
+        if (!own && targetFootprint(change.before, target) !== targetFootprint(change.after, mapped)) throw new Error('原作者字段已被其他操作修改，请重新选择')
+        return mapped
       }
       if (isCourseInstanceRange(target)) {
         if (!change.before || !change.after || change.before.kind !== 'course-v10' || change.after.kind !== 'course-v10') throw new Error('原文字范围历史不足以确认')

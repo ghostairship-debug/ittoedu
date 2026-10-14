@@ -15,11 +15,13 @@ import { type DocumentConflictHunk } from './documentSourceMerge'
 import './documentFileEditor.css'
 import { fileClipboardResourcePort, readFileClipboardContext, selectedFileClipboardContext, type FileClipboardContext } from './fileDocumentClipboard'
 import type { FilePreparedDocumentResources } from '../document/fileDocumentResources'
-import type { DocumentBlock } from '../../shared/document/content'
+import { walkDocument, type DocumentBlock } from '../../shared/document/content'
 import { resolveFileDocumentImage } from '../../shared/document/fileImageReference'
 import { cancelEditPreview, useEditPreviews } from '../workbench/EditPreviewProjection'
 import { mapMarkdownRange } from '../../core/tools/ToolTargets'
 import { Redo2, Undo2 } from 'lucide-react'
+import { documentResourceReferences } from '../../shared/document/resources'
+import { buildNativeChartSvg } from '../../shared/nativeChartSvg'
 
 export interface LessonDocumentEditorHandle {
   session: DocumentFileSession
@@ -44,12 +46,12 @@ export interface LessonDocumentEditorProps {
 }
 const empty: MarkdownDocument = { content: { blocks: [] }, resources: { assets: [], components: [] } }
 function ConflictHunk({ hunk, index, session }: { hunk: DocumentConflictHunk; index: number; session: DocumentFileSession }) {
-  const [merged, setMerged] = useState(hunk.local)
+  const merged = session.getSnapshot().conflictDrafts[hunk.id] ?? hunk.local
   return <fieldset className="document-conflict-hunk"><legend>冲突 {index + 1}</legend>
     <p>其余不冲突的修改已保留，只选择这一处。</p>
     <div className="document-conflict-alternatives"><div><strong>当前稿</strong><pre>{hunk.contextBefore}<mark>{hunk.local || '（删除）'}</mark>{hunk.contextAfter}</pre><button type="button" onClick={() => { void session.resolveConflictHunk(hunk.id, 'local') }}>此处保留当前稿</button></div>
       <div><strong>磁盘稿</strong><pre>{hunk.contextBefore}<mark>{hunk.remote || '（删除）'}</mark>{hunk.contextAfter}</pre><button type="button" onClick={() => { void session.resolveConflictHunk(hunk.id, 'remote') }}>此处采用磁盘稿</button></div></div>
-    <details><summary>手动合并这一处</summary><label>合并内容<textarea value={merged} onChange={event => setMerged(event.target.value)} /></label><button type="button" onClick={() => { void session.resolveConflictHunk(hunk.id, 'local', merged) }}>应用这一处合并</button></details>
+    <details><summary>手动合并这一处</summary><label>合并内容<textarea value={merged} onChange={event => session.setConflictDraft(hunk.id, event.target.value)} /></label><button type="button" onClick={() => { void session.resolveConflictHunk(hunk.id, 'local', merged) }}>应用这一处合并</button></details>
   </fieldset>
 }
 
@@ -74,7 +76,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   useEffect(() => {
     if (!session.documentId) return
     return workbenchSelection.register(session.documentId, async () => {
-      const current = session.committedDocument?.model.kind === 'markdown' ? await editor.current?.drainSource() : activeDraft()
+      const current = await activeDraft()
       if (current && !current.ready) throw new Error('请先完成当前输入。')
       if (current) session.edit(current.source, operationGroup.current)
       if (!await session.drain()) throw new Error('正文输入尚未确认。')
@@ -100,10 +102,11 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   }), [generations, committed?.epoch, committed?.revision, committed?.model.kind, committed?.model.kind === 'markdown' ? committed.model.source : undefined, state.source])
   const lastProjection = useRef<MarkdownProjection | undefined>(undefined)
   const [clipboard, setClipboard] = useState<FileClipboardContext | null>(null)
+  const resourceContext = useRef<{ context: FileClipboardContext; versions: Map<string, string>; mappings: Map<string, string> } | null>(null)
   const operationGroup = useRef<string | undefined>(undefined)
   const draftTicket = useRef(0)
   const currentRef = session.ref
-  const resolveImage = (href: string) => resolveFileDocumentImage(documentRefLabel(currentRef), href)
+  const resolveImage = (href: string) => resolveFileDocumentImage(href)
   const isText = committed?.model.kind === 'text'
   const isHtml = isText && /\.html?$/i.test(committed.binding.kind === 'file' ? committed.binding.path : committed.binding.suggestedName)
   const parsedSource = useMemo(() => {
@@ -125,39 +128,55 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   }, [session, lifetime])
   useEffect(() => { onDirtyChange?.(state.dirty || htmlPendingDraft) }, [state.dirty, htmlPendingDraft, onDirtyChange])
 
-  const resourceKey = JSON.stringify(document.resources)
+  const references = documentResourceReferences(document.content.blocks)
+  const usedResources = { assets: document.resources.assets.filter(resource => references.assets.includes(resource.assetId)),
+    components: document.resources.components.filter(resource => references.components.some(ref => ref.packageId === resource.packageId && ref.version === resource.version)) }
+  const resourceKey = JSON.stringify(usedResources)
+  const paths = new Set([...usedResources.assets, ...usedResources.components].flatMap(resource => resource.source.kind === 'relative' ? [resource.source.path] : []))
+  const attachmentKey = JSON.stringify(state.disk?.version.attachments.filter(attachment => paths.has(attachment.relativePath)))
+  const mediaKinds: [string | null | undefined, string][] = []
+  walkDocument(document.content.blocks, block => { if (block.type === 'media') mediaKinds.push([block.assetId, block.mediaKind]) })
+  const mediaKindKey = JSON.stringify(mediaKinds)
   useEffect(() => {
-    if (isText) { setClipboard(null); return }
-    let live = true; setClipboard(null)
-    void readFileClipboardContext(document.resources, relativePath => session.readResource(relativePath)).then(context => { if (live) setClipboard(context) }).catch(reason => { if (live) setError((reason as Error).message) })
+    if (isText) { resourceContext.current = null; setClipboard(null); return }
+    let live = true
+    const previous = resourceContext.current, versions = new Map(state.disk?.version.attachments.map(attachment => [attachment.relativePath, attachment.contentVersion]))
+    const mappings = new Map([...usedResources.assets, ...usedResources.components].flatMap(resource => resource.source.kind === 'relative' ? [[resource.source.path, JSON.stringify(resource)] as const] : []))
+    void readFileClipboardContext(usedResources, relativePath => session.readResource(relativePath), { blocks: document.content.blocks, previous: previous?.context,
+      unchanged: path => Boolean(previous && previous.versions.get(path) === versions.get(path) && previous.mappings.get(path) === mappings.get(path)),
+      onError: reason => { if (live) setError(reason.message) },
+    }).then(context => { if (live) { resourceContext.current = { context, versions, mappings }; setClipboard(context) } }).catch(reason => { if (live) setError((reason as Error).message) })
     return () => { live = false }
-  }, [session, resourceKey, state.disk?.version.contentVersion, isText])
-  function activeDraft() {
+  }, [session, resourceKey, attachmentKey, mediaKindKey, isText])
+  async function activeDraft() {
     const current = session.committedDocument
-    if (current?.model.kind !== 'text') return editor.current?.flush()
-    const name = current.binding.kind === 'file' ? current.binding.path : current.binding.suggestedName
-    return (/\.html?$/i.test(name) ? htmlEditor.current : textEditor.current)?.flush()
+    const name = current?.binding.kind === 'file' ? current.binding.path : current?.binding.suggestedName
+    const draft = current?.model.kind === 'text' ? (/\.html?$/i.test(name ?? '') ? htmlEditor.current : textEditor.current)?.flush() : await editor.current?.drainSource()
+    const message = '正文输入尚未确认，请完成输入后重试。'
+    if (draft && !draft.ready) setError(message)
+    else setError(previous => previous === message ? '' : previous)
+    return draft
   }
   async function flush() {
-    const current = activeDraft()
+    const current = await activeDraft()
     if (current && !current.ready) return false
     if (current) session.edit(current.source, operationGroup.current)
     return session.flush()
   }
   async function saveAs() {
-    const current = activeDraft()
+    const current = await activeDraft()
     if (current && !current.ready) return false
     if (current) session.edit(current.source, operationGroup.current)
     return session.saveAs()
   }
   async function preserveDraft() {
-    const current = activeDraft()
+    const current = await activeDraft()
     if (current && !current.ready) return false
     if (current) session.edit(current.source, operationGroup.current)
     return session.preserveDraft()
   }
   async function preserveAndClose() {
-    const current = activeDraft()
+    const current = await activeDraft()
     if (current && !current.ready) return false
     if (current) session.edit(current.source, operationGroup.current)
     return session.preserveAndClose()
@@ -168,19 +187,31 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     return { ...selection, ref: session.ref, baseVersion: snapshot.disk.version, epoch: session.epoch, scope: 'selection' }
   }
   function renderObject(block: DocumentBlock, container: HTMLElement) {
+    if (block.type === 'chart') {
+      container.innerHTML = buildNativeChartSvg(block.chart, Math.max(1, container.clientWidth || 640), block.height, block.id)
+      return
+    }
     const assetId = block.type === 'media' ? block.assetId : block.type === 'component' ? block.staticFallbackAssetId : null
     const asset = assetId ? clipboard?.assets[assetId] : null
-    if (!asset) { container.textContent = block.type === 'chart' ? `图表：${block.chart.title ?? ''}` : '正在读取图示'; return }
+    if (!asset) { container.textContent = '正在读取图示'; return }
     const url = URL.createObjectURL(new Blob([Uint8Array.from(asset.bytes)], { type: asset.meta.mimeType }))
-    const element = asset.meta.kind === 'audio' ? window.document.createElement('audio') : asset.meta.kind === 'video' ? window.document.createElement('video') : window.document.createElement('img')
+    const kind = block.type === 'media' ? block.mediaKind : asset.meta.kind
+    const element = kind === 'audio' ? window.document.createElement('audio') : kind === 'video' ? window.document.createElement('video') : window.document.createElement('img')
     element.src = url; element.style.maxWidth = '100%'; element.style.maxHeight = '440px'
+    if (block.type === 'media') {
+      container.dataset.mediaLayout = block.layout
+      container.style.width = '100%'
+      container.style.maxWidth = block.layout === 'content-width' ? '640px' : block.layout === 'wide' ? '960px' : 'none'
+      container.style.marginInline = 'auto'
+      element.style.width = '100%'
+    }
     if (element instanceof HTMLImageElement) element.alt = block.type === 'media' ? block.altText ?? asset.meta.filename : '互动组件静态图示'
     else element.controls = true
     container.append(element)
     return () => URL.revokeObjectURL(url)
   }
   useImperativeHandle(ref, () => ({ session, getContextualEditTarget: () => isText ? null : bindTarget(editor.current?.getContextualEditTarget() ?? null), flush, saveAs, preserveDraft, close: async () => {
-    const current = activeDraft()
+    const current = await activeDraft()
     if (current && !current.ready) return false
     if (current) session.edit(current.source, operationGroup.current)
     return session.close()
@@ -208,6 +239,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     {state.conflict && <aside role="alert">
       <p>{state.conflict === 'deleted' ? '磁盘文档已删除，当前稿已保留。' : '磁盘稿与当前稿在同一处有修改，请比较后选择。'}</p>
       {state.conflictHunks.map((hunk, index) => <ConflictHunk key={hunk.id} hunk={hunk} index={index} session={session} />)}
+      {Object.entries(state.conflictDrafts).filter(([id]) => !state.conflictHunks.some(hunk => hunk.id === id)).map(([id, text]) => <details key={id} open><summary>已保留的手动合并输入</summary><label>未应用输入<textarea value={text} onChange={event => session.setConflictDraft(id, event.target.value)} /></label><p>原冲突边界已改变；可将这段输入复制到当前冲突处再应用。</p><button type="button" onClick={() => session.removeConflictDraft(id)}>移除此输入</button></details>)}
       {!state.conflictHunks.length && <>{state.conflict !== 'deleted' && <><details><summary>查看磁盘稿</summary><pre>{state.conflict.source}</pre></details><button type="button" onClick={() => { void session.resolveConflict('disk') }}>采用磁盘稿</button></>}
       <button type="button" disabled={state.saving || state.composing || state.conflictHunks.length > 0} onClick={() => { void (state.conflict === 'deleted' ? saveAs() : session.resolveConflict('local')) }}>{state.conflict === 'deleted' ? '另存当前稿' : '保留当前稿并保存'}</button></>}
     </aside>}
@@ -217,7 +249,10 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
       sourceMap={parsedSource.status === 'valid' ? parsedSource.sourceMap : undefined}
       editPreviews={editPreviews}
       clipboardContext={(resources: MarkdownDocument['resources']) => selectedFileClipboardContext(clipboard, resources)} clipboardResourcePort={fileClipboardResourcePort}
-      renderObject={renderObject} objectRevision={clipboard}
+      renderObject={renderObject} objectRevision={clipboard} objectRevisionFor={block => {
+        const assetId = block.type === 'media' ? block.assetId : block.type === 'component' ? block.staticFallbackAssetId : null
+        return assetId ? clipboard?.assets[assetId] : undefined
+      }}
       onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }}
        onChange={(next, operation) => {
          if (operation.preparedResources) session.prepareAttachments((operation.preparedResources as FilePreparedDocumentResources).attachments)

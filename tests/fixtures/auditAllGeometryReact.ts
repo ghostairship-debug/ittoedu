@@ -1,0 +1,11 @@
+import * as React from 'react'
+export { React }
+export { createRoot } from 'react-dom/client'
+export { SlideLocationWorkspace } from '../../src/renderer/ui/workspaces/SlideLocationWorkspace'
+export { SpatialLocationWorkspace } from '../../src/renderer/ui/workspaces/SpatialLocationWorkspace'
+export { ImageCropOverlay } from '../../src/renderer/editing/crop/ImageCropOverlay'
+export { NativeSelectionContext } from '../../src/renderer/workbench/NativeSelectionContext'
+export { useEditorStore } from '../../src/renderer/store/editorStore'
+export { PlaybackViewSession, createPlaybackContent } from '../../src/player/playbackViewSession'
+export { InstanceView } from '../../src/renderer/documents/CourseV10DocumentView'
+export { createV10StoreHost } from '../helpers/courseV10StoreHost'

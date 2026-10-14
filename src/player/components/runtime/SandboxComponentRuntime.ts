@@ -1,0 +1,1390 @@
+import { hasWebContentData } from '../../../components/web/sourcePreparation'
+import { nanoid } from 'nanoid'
+import { splitInstalledBundledFontFaceCss } from '../../../shared/fonts/installedBundledFontFaceCss'
+import type { CompiledComponentModule } from '../../../core/components/compilation/types'
+import type { ComponentInstance, ComponentRuntimeScope, ComponentTarget, JsonValue, ComponentRuntimeContext, ComponentAuthorSpotInput, ComponentAuthorPreviewCallbacks, ComponentAuthorGeometry, ComponentMediaCommand, ComponentMediaRegistration, ComponentMediaPort, ComponentInteractionPort, ComponentPresentationPort, ComponentMediaState, ComponentMediaRegistrationOptions, ComponentLayoutInput, ComponentLayoutPort } from '../../../shared/contracts/component-platform'
+import type { PreparedComponentRuntime } from './ComponentRuntimeHost'
+import { componentTargetSchema, jsonValueSchema, componentFrameSchema } from '../../../shared/contracts/component-platform'
+import { teacherControllerActionSchema, type TeacherControllerAction, type TeacherControllerPort, type TeacherControllerSnapshot } from '../../../shared/contracts/component-platform/teacherController'
+import { htmlPreviewTargetReportSchema } from '../../../shared/workbench/htmlPreview'
+import type { locateHtmlSourceTarget } from '../../../shared/html/htmlSourceLocator'
+import type { ComponentMotionContext, ComponentMotionOutcome, ComponentMotionProgram, ComponentMotionTask, MotionFrame, MotionKeyframe, MotionTiming } from '../../../shared/contracts/component-platform/motion'
+import { componentFragmentStateKey } from '../../componentPlatform/fragments'
+import type { ComponentBootstrapInput, ComponentBootstrapLease } from '../../../shared/ipcTypes'
+import { interactionActionSchema, interactionTriggerSchema } from '../../../shared/contracts/interaction-v1/schema'
+import { htmlDocumentKind } from '../../../shared/html/documentKind'
+import { isMeasuredWebFragmentBox, measuredFragmentExtent } from '../../../components/web/measuredFragmentBox'
+import { authoredDocumentBootstrap, authoredDocumentProgramsSource } from '../../../components/web/authoredDocumentBootstrap'
+import { webRuntimeTargetProfile, type RuntimeTargetProfile, type WebRuntimeData } from '../../../components/web/moduleGraph'
+import { refreshWebResourceReferences } from '../../../components/web/resources'
+import { createDomAuthoring } from '../../../components/web/authoringDom'
+import { domTextOverrideRealmSource, type DomTextOverrideController } from '../../lightEdit/domTextOverrides'
+import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
+import { invertMatrix, transformPoint } from '../../../core/components/geometry'
+import { componentClientMatrix } from './componentClientMatrix'
+
+export interface RuntimeTargetSnapshot { reference: ComponentTarget; instanceId: string; value?: JsonValue }
+export interface ComponentBootstrapTransport {
+  createComponentBootstrap(input: ComponentBootstrapInput): Promise<ComponentBootstrapLease>
+  releaseComponentBootstrap(input: { leaseId: string }): Promise<void>
+}
+export interface SandboxRuntimeSnapshots { state(): Record<string, JsonValue>; targets(profile: RuntimeTargetProfile): RuntimeTargetSnapshot[]; instance?(value: ComponentInstance): ComponentInstance<JsonValue | WebRuntimeData> | Promise<ComponentInstance<JsonValue | WebRuntimeData>>; webInstance?(value: ComponentInstance): ComponentInstance<JsonValue | WebRuntimeData> | Promise<ComponentInstance<JsonValue | WebRuntimeData>>; teacherController?: TeacherControllerPort; htmlAuthoring?: boolean; authorHtml?(instance: ComponentInstance): string | undefined; nativeDocument?: boolean; builtinKey?: string; connectOrigins?(): readonly string[]; themeCss?(): string; resources?(): Record<string, string>; resourceBindings?: Readonly<Record<string, string>>; bootstrap?: ComponentBootstrapTransport; hostAdapter?: SandboxRuntimeHostAdapter }
+
+export interface SandboxRuntimeHostAdapter {
+  clientMatrix?(element: HTMLElement): readonly [number, number, number, number, number, number] | null
+  locateTarget?: typeof locateHtmlSourceTarget
+  authorHitEvent?: string
+}
+interface ComponentAuthorHitRequest { point: { x: number; y: number }; resolve(authorKey: string | null): void }
+
+/** Serialized trusted bridge only. Author code arrives through its dedicated port. */
+function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences; authoring: typeof createDomAuthoring; textOverrides(roots: readonly Node[], rules: readonly LightEditTextOverride[]): DomTextOverrideController }, authoredDocument?: { release(): void; transportFragment?: boolean; setActivity?(value: { active: boolean; visible: boolean; playing: boolean }): void; onDiagnostic?(listener: (message: string) => void): () => void }) {
+  // This fixed loader is created only inside the content realm. Keeping import's
+  // syntax in its string prevents Vite from inserting a parent lexical helper.
+  const importModule = new Function('url', 'return import(url)') as (url: string) => Promise<Record<string, any>>
+  const fragmentRoot = document.getElementById('component-root')!, fragmentDefaults = document.getElementById('component-defaults')!
+  const loader = document.currentScript; if (loader) document.head.append(loader)
+  const courseStyle = document.createElement('style'); document.head.append(courseStyle)
+  let sourceStyle: HTMLStyleElement | undefined
+  const bundledFaces = [...document.querySelectorAll<HTMLStyleElement>('style[data-component-bundled-faces]')]
+  type Message = { type: string; id?: number; [key: string]: unknown }
+  let port: MessagePort, implementation: { document?: 'web'; mount(context: unknown): unknown }, mounted: { update(instance: unknown): unknown; updatePlacement?(frame: unknown): unknown; suspend?(): void | Promise<void>; resume?(): void | Promise<void>; dispose(): unknown } | undefined
+  let controller: AbortController, instance: ComponentInstance, active = false, generation = 0
+  let activity: { active: boolean; visible: boolean; playing: boolean } | undefined
+  let mountedRunning = true, activityTail: Promise<void> = Promise.resolve()
+  const activitySnapshot = () => activity && { ...activity }
+  if (!authoredDocument) Object.defineProperty(window, '__guolingRuntimeActivity', { configurable: true, get: activitySnapshot })
+  const applyMountedActivity = () => {
+    activityTail = activityTail.then(async () => {
+      if (!active || !mounted || !activity) return
+      const running = activity.active && activity.visible && activity.playing
+      if (running === mountedRunning) return
+      mountedRunning = running
+      if (running) await mounted.resume?.()
+      else await mounted.suspend?.()
+    }).catch(error => {
+      if (active) send({ type: 'event.emit', name: 'component.diagnostic', value: { instanceId: instance.id,
+        message: `组件局部暂停／恢复失败：${error instanceof Error ? error.message : String(error)}；原实例仍保留` } })
+    })
+    return activityTail
+  }
+  const setActivity = (value: unknown) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return
+    const next = value as { active: boolean; visible: boolean; playing: boolean }
+    if (typeof next.active !== 'boolean' || typeof next.visible !== 'boolean' || typeof next.playing !== 'boolean') return
+    activity = { active: next.active, visible: next.visible, playing: next.playing }
+    if (authoredDocument) authoredDocument.setActivity?.(activitySnapshot()!)
+    else window.dispatchEvent(new CustomEvent('__runtime.activity', { detail: activitySnapshot() }))
+    void applyMountedActivity()
+  }
+  let updateResourceCss: (value: unknown) => void = () => {}
+  let states: Record<string, JsonValue> = {}, targets: RuntimeTargetSnapshot[] = []
+  let resourceUrls: Record<string, string> = {}
+  let resourceBindings: Readonly<Record<string, string>> = {}
+  let webContent = false
+  const currentBindings = () => ({ ...resourceBindings,
+    ...(webContent ? (instance.data as unknown as WebRuntimeData).resourceBindings : {}), ...instance.authoring?.resourceBindings })
+  const refreshCurrentResources = () => fragmentBox.refreshResources(document, resourceUrls, currentBindings())
+  const explicitAuthorSpots = new Map<number, ComponentAuthorSpotInput>()
+  let hitAuthor: (x: number, y: number) => string | undefined = () => undefined
+  let layoutInput: ComponentLayoutInput | undefined
+  let sourceViewport: { left: number; top: number; right: number; bottom: number; width: number; height: number } | undefined
+  let fragmentThemeCanvas = false
+  const layoutListeners = new Set<(layout: ComponentLayoutInput) => void>()
+  let refreshSourcePaint: (() => void) | undefined
+  const applyFragmentLayout = () => {
+    if (!fragmentDefaults || authoredDocument && !authoredDocument.transportFragment) return
+    fragmentDefaults.textContent = sourceViewport
+      ? `html,body{width:100%;height:100%;margin:0;overflow:hidden}#component-root{position:absolute!important;left:${-sourceViewport.left}px!important;top:${-sourceViewport.top}px!important;width:${sourceViewport.width}px!important;height:${layoutInput?.mode === 'flow-content' ? 'auto' : `${sourceViewport.height}px`}!important;margin:0}`
+      : `html,body,#component-root{width:100%;height:${layoutInput?.mode === 'flow-content' ? 'auto' : '100%'};margin:0}`
+  }
+  const writeCourseTheme = (value: unknown) => {
+    // Main has projected the immutable faces into this lease's resource URLs.
+    // A later course-theme event must not restore the editor document's URLs.
+    courseStyle.textContent = typeof value === 'string' ? value.replace(/\/\* guoling-bundled-font-faces:start \*\/[\s\S]*?\/\* guoling-bundled-font-faces:end \*\//g, '') : ''
+    if (!fragmentThemeCanvas || !courseStyle.sheet) return
+    // The course canvas paints once in the formal surface/group. A framed builtin Web
+    // fragment has an implicit transport document, not another authored canvas.
+    // Keep inherited theme typography and descendant paint; only exclude that
+    // transport html/body from the course theme's background declarations.
+    const selectors = (text: string) => {
+      const values: string[] = []
+      let start = 0, depth = 0, quote = '', escaped = false
+      for (let index = 0; index < text.length; index++) {
+        const character = text[index]!
+        if (escaped) { escaped = false; continue }
+        if (character === '\\') { escaped = true; continue }
+        if (quote) { if (character === quote) quote = ''; continue }
+        if (character === '"' || character === "'") quote = character
+        else if (character === '(' || character === '[') depth++
+        else if (character === ')' || character === ']') depth--
+        else if (character === ',' && depth === 0) { values.push(text.slice(start, index).trim()); start = index + 1 }
+      }
+      values.push(text.slice(start).trim())
+      return values
+    }
+    const visit = (owner: CSSStyleSheet | CSSGroupingRule) => {
+      for (let index = 0; index < owner.cssRules.length; index++) {
+        const rule = owner.cssRules[index]!
+        if (rule instanceof CSSStyleRule) {
+          const paint = Array.from(rule.style).filter(name => name === 'background' || name.startsWith('background-'))
+          if (!paint.length) continue
+          const original = selectors(rule.selectorText)
+          const projected = original.map(selector => {
+            try {
+              return document.documentElement.matches(selector) || document.body.matches(selector)
+                ? `${selector}:not(:where(html,body))` : selector
+            } catch { return selector }
+          })
+          if (projected.every((selector, index) => selector === original[index])) continue
+          const style = document.createElement('span').style
+          for (const name of paint) {
+            style.setProperty(name, rule.style.getPropertyValue(name), rule.style.getPropertyPriority(name))
+            rule.style.removeProperty(name)
+          }
+          owner.insertRule(`${projected.join(',')}{${style.cssText}}`, index + 1)
+          index++
+        } else if ('cssRules' in rule) visit(rule as CSSGroupingRule)
+      }
+    }
+    visit(courseStyle.sheet)
+  }
+  const cleanups = new Set<() => void>(), listeners = new Map<string, Set<(value: unknown) => void>>()
+  let authorSpotSequence = 0
+  const authorPreviewCallbacks = new Map<number, ComponentAuthorPreviewCallbacks>()
+  let motionSequence = 0, motionRequestSequence = 0
+  const motionTasks = new Map<number, { start(reducedMotion: boolean): void; settle(outcome: ComponentMotionOutcome): void }>()
+  const motionRequests = new Map<number, { taskId: number; method: string; resolve(value: unknown): void }>()
+  let serviceSequence = 0
+  const serviceRequests = new Map<number, (value: boolean) => void>()
+  const mediaCommands = new Map<number, (command: ComponentMediaCommand) => boolean | Promise<boolean>>()
+  const interactionListeners = new Map<number, (value?: unknown) => boolean | void | PromiseLike<boolean | void>>()
+  let interaction: { surfaceId: string | null; stateId: string | null } | undefined
+  let originalHtml: string | undefined, observeHtml = false, collectHtml = () => {}
+  let contentAuthoring: ReturnType<typeof createDomAuthoring> | undefined
+  let sourcePageText: DomTextOverrideController | undefined, refreshSourceText = () => {}
+  let teacher: { snapshot: TeacherControllerSnapshot; allowed: Record<string, boolean>; viewport?: { left: number; top: number; right: number; bottom: number } } | undefined, teacherSequence = 0
+  const teacherListeners = new Set<() => void>(), teacherPending = new Map<number, { resolve(value: boolean): void; reject(error: Error): void }>()
+  const teacherRequest = (method: string, values: object = {}, signal?: AbortSignal) => new Promise<boolean>((resolve, reject) => {
+    if (!active) { reject(new Error('导航作用域已取消')); return }
+    if (signal?.aborted) { resolve(false); return }
+    const requestId = ++teacherSequence
+    const stop = () => { teacherPending.delete(requestId); signal?.removeEventListener('abort', abort) }
+    const abort = () => { send({ type: 'teacher.cancel', requestId }); stop(); resolve(false) }
+    teacherPending.set(requestId, { resolve: value => { stop(); resolve(value) }, reject: error => { stop(); reject(error) } })
+    signal?.addEventListener('abort', abort, { once: true })
+    send({ type: 'teacher.request', requestId, method, ...values })
+  })
+  const reply = (id: number | undefined, error?: unknown, value?: unknown) => port.postMessage({ type: 'reply', id, value,
+    ...(error ? { error: error instanceof Error ? error.message : String(error) } : {}) })
+  const send = (message: Message) => { if (active) port.postMessage({ ...message, generation }) }
+  const nativeDiagnostics: string[] = []
+  const adoptDocument = (next: NonNullable<typeof authoredDocument>) => {
+    authoredDocument = next
+    document.head.append(courseStyle)
+    if (sourceStyle) document.head.append(sourceStyle)
+    const report = (message: string) => {
+      if (active) send({ type: 'event.emit', name: 'component.diagnostic', value: { instanceId: instance.id, message } })
+      else nativeDiagnostics.push(message)
+    }
+    const offDiagnostic = authoredDocument.onDiagnostic?.(report)
+    if (offDiagnostic) cleanups.add(offDiagnostic)
+    const error = (event: Event) => report(event instanceof ErrorEvent ? `HTML脚本错误：${event.message}；原源码已保留` : 'HTML文档资源加载失败；原源码和其余内容已保留')
+    const rejection = (event: PromiseRejectionEvent) => report(`HTML程序错误：${String(event.reason)}；原源码已保留`)
+    window.addEventListener('error', error, true); window.addEventListener('unhandledrejection', rejection)
+    cleanups.add(() => { window.removeEventListener('error', error, true); window.removeEventListener('unhandledrejection', rejection) })
+  }
+  if (authoredDocument) adoptDocument(authoredDocument)
+  const subscribe = (kind: string, name: string, listener: (value: unknown) => void) => {
+    const key = `${kind}:${name}`, set = listeners.get(key) ?? new Set()
+    listeners.set(key, set); set.add(listener); send({ type: 'subscribe', kind, name })
+    const off = () => { set.delete(listener); if (!set.size) send({ type: 'unsubscribe', kind, name }) }
+    cleanups.add(off)
+    if (kind === 'event' && name === '__runtime.activity' && activity) listener(activitySnapshot())
+    return () => { cleanups.delete(off); off() }
+  }
+  const cancel = () => {
+    if (!active) return
+    active = false; controller.abort()
+    for (const cleanup of cleanups) { try { cleanup() } catch {} }
+    cleanups.clear(); listeners.clear(); layoutListeners.clear()
+    for (const pending of teacherPending.values()) pending.reject(new Error('导航作用域已取消'))
+    teacherPending.clear(); teacherListeners.clear()
+    for (const task of [...motionTasks.values()]) task.settle({ status: 'cancelled' })
+    motionTasks.clear()
+    for (const pending of motionRequests.values()) pending.resolve(pending.method === 'nextFrame' ? null : false)
+    motionRequests.clear()
+    for (const resolve of serviceRequests.values()) resolve(false)
+    serviceRequests.clear(); mediaCommands.clear(); interactionListeners.clear()
+    authorPreviewCallbacks.clear()
+    authoredDocument?.release()
+    if (!authoredDocument && Object.getOwnPropertyDescriptor(window, '__guolingRuntimeActivity')?.get === activitySnapshot)
+      Reflect.deleteProperty(window, '__guolingRuntimeActivity')
+  }
+  const motion = (reference: ComponentTarget) => ({ replace: (channel: string, program: ComponentMotionProgram): ComponentMotionTask => {
+    if (!active) return { finished: Promise.resolve({ status: 'cancelled' }), cancel() {} }
+    const taskId = ++motionSequence, abort = new AbortController(), cleanup = new Set<() => void>()
+    let ended = false, resolveFinished!: (outcome: ComponentMotionOutcome) => void
+    const finished = new Promise<ComponentMotionOutcome>(resolve => { resolveFinished = resolve })
+    const settle = (outcome: ComponentMotionOutcome) => {
+      if (ended) return
+      ended = true; abort.abort(); motionTasks.delete(taskId)
+      for (const [id, request] of motionRequests) if (request.taskId === taskId) { request.resolve(request.method === 'nextFrame' ? null : false); motionRequests.delete(id) }
+      for (const callback of cleanup) { try { callback() } catch {} }
+      cleanup.clear(); resolveFinished(outcome)
+    }
+    const request = (method: string, values: object = {}) => new Promise<unknown>(resolve => {
+      if (ended || !active) { resolve(method === 'nextFrame' ? null : false); return }
+      const requestId = ++motionRequestSequence; motionRequests.set(requestId, { taskId, method, resolve })
+      send({ type: 'motion.request', taskId, requestId, method, ...values })
+    })
+    motionTasks.set(taskId, { settle, start: reducedMotion => {
+      const context: ComponentMotionContext = { signal: abort.signal, reducedMotion,
+        write: frame => request('write', { frame }) as Promise<boolean>,
+        nextFrame: () => request('nextFrame') as Promise<{ elapsed: number } | null>,
+        animate: (frames, timing) => request('animate', { frames, timing }) as Promise<boolean>,
+        onCleanup: callback => { if (ended) callback(); else cleanup.add(callback) } }
+      void Promise.resolve().then(() => { if (!ended) return program(context) }).then(() => {
+        if (!ended) send({ type: 'motion.finish', taskId })
+      }, error => { if (!ended) send({ type: 'motion.finish', taskId, error: error instanceof Error ? error.message : String(error) }) })
+    } })
+    const cancelTask = () => { if (!ended) { send({ type: 'motion.cancel', taskId }); settle({ status: 'cancelled' }) } }
+    cleanups.add(cancelTask)
+    void finished.then(() => cleanups.delete(cancelTask))
+    send({ type: 'motion.start', taskId, reference, channel })
+    return { finished, cancel: cancelTask }
+  } })
+  const serviceRequest = (type: string, values: object = {}, signal?: AbortSignal): Promise<boolean> => new Promise(resolve => {
+    if (!active || signal?.aborted) { resolve(false); return }
+    const requestId = ++serviceSequence
+    const settle = (value: boolean) => { serviceRequests.delete(requestId); signal?.removeEventListener('abort', abort); resolve(value) }
+    const abort = () => { send({ type: 'interaction.cancel', requestId }); settle(false) }
+    serviceRequests.set(requestId, settle); signal?.addEventListener('abort', abort, { once: true })
+    send({ type, requestId, ...values })
+  })
+  const presentation = (reference: ComponentTarget): ComponentPresentationPort => {
+    const create = (kind: 'feedback' | 'visibility', value: string | boolean) => {
+      const presentationId = ++serviceSequence
+      let closed = false
+      send({ type: 'presentation.create', presentationId, reference, kind, value })
+      const dispose = () => { if (closed) return; closed = true; send({ type: 'presentation.dispose', presentationId }); cleanups.delete(dispose) }
+      cleanups.add(dispose)
+      return { write: (next: string | boolean) => closed ? Promise.resolve(false) : serviceRequest('presentation.write', { presentationId, value: next }), dispose }
+    }
+    return {
+      feedback: (text = '') => { const handle = create('feedback', text); return { setText: handle.write, dispose: handle.dispose } },
+      visibility: (visible = true) => { const handle = create('visibility', visible); return { setVisible: handle.write, dispose: handle.dispose } },
+    }
+  }
+  const media: ComponentMediaPort = {
+    register: (options, onCommand) => {
+      if (!active) return { update() {}, report() {}, dispose() {} }
+      const mediaId = ++serviceSequence
+      let closed = false
+      mediaCommands.set(mediaId, onCommand); send({ type: 'media.register', mediaId, options })
+      const dispose = () => { if (closed) return; closed = true; mediaCommands.delete(mediaId); send({ type: 'media.dispose', mediaId }); cleanups.delete(dispose) }
+      cleanups.add(dispose)
+      return { update: patch => { if (!closed) send({ type: 'media.update', mediaId, patch }) },
+        report: (state, event) => { if (!closed) send({ type: 'media.report', mediaId, state, event }) }, dispose }
+    },
+    interruptBackground: mode => {
+      if (!active) return { release() {} }
+      const interruptionId = ++serviceSequence
+      send({ type: 'media.interrupt', interruptionId, mode })
+      let closed = false
+      const release = () => { if (closed) return; closed = true; send({ type: 'media.release', interruptionId }); cleanups.delete(release) }
+      cleanups.add(release); return { release }
+    },
+  }
+  const receive = async (message: Message) => {
+    try {
+      if (message.type === 'prepare') {
+        const artifact = message.artifact as CompiledComponentModule
+        sourceStyle = document.createElement('style'); sourceStyle.textContent = artifact.css; document.head.append(sourceStyle)
+        const url = URL.createObjectURL(new Blob([artifact.code], { type: 'text/javascript' }))
+        try {
+          const module = await importModule(url)
+          implementation = module.default ?? module.implementation ?? module
+          if (typeof implementation?.mount !== 'function') throw new Error('组件模块需要导出 mount(context) 或 default { mount(context) }')
+        } finally { URL.revokeObjectURL(url) }
+        reply(message.id, undefined, { document: implementation.document === 'web' ? 'web' : undefined, fontFaceCss: bundledFaces.map(face => face.textContent ?? '').join('\n') }); return
+      } else if (message.type === 'document') {
+        // The actual module selected this lifecycle. Preserve its namespace and port;
+        // neither module top-level effects nor mount are replayed for parser setup.
+        if (implementation.document !== 'web' || typeof message.html !== 'string') throw new Error('Source 未声明 Web 文档准备')
+        const property = `__guoling_adopt_${nonce.replace(/-/g, '_')}`
+        Object.defineProperty(window, property, { configurable: true, value: adoptDocument })
+        try {
+          // document.close() can expose complete before its deferred modules and
+          // DOMContentLoaded in Chromium. Observe this parser's event before writing.
+          document.open()
+          const parsed = new Promise<void>(resolve => document.addEventListener('DOMContentLoaded', () => resolve(), { once: true }))
+          document.write(message.html); document.close(); await parsed
+          if (!authoredDocument) throw new Error('Web 文档桥尚未连接；原源码已保留')
+          if (sourceStyle) document.head.append(sourceStyle)
+        } finally { Reflect.deleteProperty(window, property) }
+      } else if (message.type === 'mount') {
+        if (authoredDocument && document.readyState === 'loading') await new Promise<void>(resolve => document.addEventListener('DOMContentLoaded', () => resolve(), { once: true }))
+        document.querySelector('style[data-component-initial-theme]')?.remove()
+        resourceUrls = message.resources as Record<string, string> ?? {}
+        resourceBindings = message.resourceBindings as Record<string, string> ?? {}
+        layoutInput = message.layout as ComponentLayoutInput | undefined
+        sourceViewport = message.sourceViewport as typeof sourceViewport
+        applyFragmentLayout()
+        instance = message.instance as ComponentInstance
+        webContent = ['guoling.web', 'guoling.html-program'].includes(String(message.builtinKey))
+        fragmentThemeCanvas = Boolean(message.visual && message.documentKind === 'fragment' && message.builtinKey === 'guoling.web' && instance.frame)
+        writeCourseTheme(message.themeCss)
+        originalHtml = typeof message.authorHtml === 'string' ? message.authorHtml : undefined
+        observeHtml = message.htmlAuthoring === true
+        generation = message.generation as number
+        states = message.state as Record<string, JsonValue>; targets = message.targets as RuntimeTargetSnapshot[]
+        controller = new AbortController(); active = true
+        setActivity(message.activity)
+        for (const message of nativeDiagnostics.splice(0)) send({ type: 'event.emit', name: 'component.diagnostic', value: { instanceId: instance.id, message } })
+        teacher = message.teacher as typeof teacher
+        interaction = message.interaction as typeof interaction
+        const scope = {
+          runScopeId: message.runScopeId, instanceId: instance.id, generation, signal: controller.signal,
+          isActive: () => active,
+          cleanup: (cleanup: () => void) => { if (active) cleanups.add(cleanup); else cleanup() },
+          // These are explicitly the latest observed snapshots, never synchronous RPC.
+          target: (reference: ComponentTarget) => {
+            if (!active) return null
+            const target = targets.find(value => JSON.stringify(value.reference) === JSON.stringify(reference))
+            return target ? { instanceId: target.instanceId, read: () => targets.find(value => JSON.stringify(value.reference) === JSON.stringify(reference))?.value ?? null,
+              emit: (name: string, value: JsonValue) => send({ type: 'target.emit', reference, name, value }),
+              ...(reference.kind === 'instance' ? { motion: motion(reference), presentation: presentation(reference) } : {}) } : null
+          },
+          state: { get: (name: string) => states[name], set: (name: string, value: JsonValue) => {
+            if (!active) return
+            states[name] = value; send({ type: 'state.set', name, value })
+          }, subscribe: (name: string, listener: (value: unknown) => void) => subscribe('state', name, listener) },
+          events: { emit: (name: string, value: JsonValue) => send({ type: 'event.emit', name, value }),
+            subscribe: (name: string, listener: (value: unknown) => void) => subscribe('event', name, listener) },
+        }
+        const documentRoot = message.visual && message.documentKind === 'document'
+        const root = message.visual ? documentRoot ? document.body : fragmentRoot : undefined
+        if (documentRoot) {
+          fragmentRoot?.remove(); fragmentDefaults?.remove()
+          if (!authoredDocument && originalHtml && new DOMParser().parseFromString(originalHtml, 'text/html').compatMode !== document.compatMode)
+            scope.events.emit('component.diagnostic', { instanceId: instance.id, message: '原 HTML 使用兼容排版模式；当前内容环境使用标准模式，原源码已保留' })
+        }
+        if (root) {
+          const clicked = () => send({ type: 'interaction.clicked' })
+          const clickRoot = sourceViewport ? document : root
+          clickRoot.addEventListener('click', clicked, true); cleanups.add(() => clickRoot.removeEventListener('click', clicked, true))
+          const ownedClick = (event: MessageEvent) => {
+            if (event.data?.type === 'guoling.owned-document.click' && event.data.token === `__guoling_parser_${nonce.replace(/-/g, '_')}`
+              && [...document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]')].some(frame => frame.contentWindow === event.source)) clicked()
+          }
+          window.addEventListener('message', ownedClick); cleanups.add(() => window.removeEventListener('message', ownedClick))
+          const doubleClicked = (event: MouseEvent) => send({ type: 'authoring.double-click', x: event.clientX, y: event.clientY,
+            authorKey: hitAuthor(event.clientX, event.clientY) })
+          root.addEventListener('dblclick', doubleClicked, true); cleanups.add(() => root.removeEventListener('dblclick', doubleClicked, true))
+        }
+        const teacherController = teacher ? {
+          read: () => teacher!.snapshot,
+          readLocation: () => teacher!.snapshot.locationId,
+          viewportBounds: () => teacher?.viewport,
+          subscribe: (listener: () => void) => { teacherListeners.add(listener); return () => { teacherListeners.delete(listener) } },
+          canExecute: (action: TeacherControllerAction) => Boolean(teacher?.allowed[action.type]) && (action.type !== 'scene.go'
+            || teacher!.snapshot.scenes.some(scene => scene.id === action.sceneId)),
+          execute: (action: TeacherControllerAction, signal?: AbortSignal) => teacherRequest('execute', { action }, signal),
+          setCollapsed: (value: boolean) => { void teacherRequest('setCollapsed', { value }).catch(() => {}) },
+          moveBy: (dx: number, dy: number) => { void teacherRequest('moveBy', { dx, dy }).catch(() => {}) },
+          movePointer: (phase: 'start' | 'move' | 'end', x: number, y: number) => { void teacherRequest('movePointer', { phase, x, y }).catch(() => {}) },
+          setZoom: (value: number) => { void teacherRequest('setZoom', { value }).catch(() => {}) },
+          resetView: () => { void teacherRequest('resetView').catch(() => {}) },
+        } : undefined
+        hitAuthor = (x, y) => {
+          const top = document.elementsFromPoint(x, y)[0]
+          if (!root || !top || !root.contains(top)) return undefined
+          const observed = contentAuthoring?.hit(x, y)
+          const origin = documentRoot ? { x: 0, y: 0 } : root.getBoundingClientRect()
+          const px = x - origin.x, py = y - origin.y
+          for (const spot of [...explicitAuthorSpots.values()].reverse()) {
+            const [a, b, c, d, e, f] = spot.localBounds.transform, determinant = a * d - b * c
+            if (!determinant) continue
+            const sx = (d * (px - e) - c * (py - f)) / determinant
+            const sy = (-b * (px - e) + a * (py - f)) / determinant
+            if (sx < 0 || sy < 0 || sx > spot.localBounds.width || sy > spot.localBounds.height) continue
+            // The current painted node must be the registered content. A rectangle
+            // alone never promotes a spot above a foreground element.
+            if (observed && observed.record.kind === spot.kind && observed.initialValue === spot.initialValue) {
+              const matching = (contentAuthoring?.scan() ?? []).filter(value => {
+                if (value.record.kind !== spot.kind || value.initialValue !== spot.initialValue) return false
+                const node = value.node
+                const rect = node.nodeType === Node.TEXT_NODE ? (() => { const range = document.createRange(); range.selectNodeContents(node); return range.getBoundingClientRect() })() : (node as Element).getBoundingClientRect()
+                return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+              })
+              if (matching.length === 1 && matching[0].node === observed.node) return spot.authorKey
+            } else if (top.localName === 'canvas' && top.getAttribute('data-cw-author-key') === spot.authorKey) return spot.authorKey
+          }
+          return observed?.authorKey
+        }
+        const authoring = { register: (input: ComponentAuthorSpotInput, callbacks?: ComponentAuthorPreviewCallbacks) => {
+          const spotId = ++authorSpotSequence
+          const spot = { ...input, authorKey: input.authorKey ?? `spot:${spotId}` }
+          explicitAuthorSpots.set(spotId, spot)
+          if (callbacks) authorPreviewCallbacks.set(spotId, callbacks)
+          send({ type: 'authoring.register', spotId, spot, preview: Boolean(callbacks) })
+          const off = () => { explicitAuthorSpots.delete(spotId); authorPreviewCallbacks.delete(spotId); send({ type: 'authoring.unregister', spotId }) }
+          cleanups.add(off)
+          return () => { cleanups.delete(off); off() }
+        } }
+        const interactions: ComponentInteractionPort = {
+          currentSurfaceId: () => interaction?.surfaceId ?? null, currentStateId: () => interaction?.stateId ?? null,
+          courseState: { get: name => scope.state.get(name), set: (name, value) => scope.state.set(name, value as JsonValue) },
+          subscribeTrigger: (trigger, listener) => {
+            if (!active) return () => {}
+            const subscriptionId = ++serviceSequence
+            interactionListeners.set(subscriptionId, listener); send({ type: 'interaction.subscribe', subscriptionId, trigger })
+            const off = () => { interactionListeners.delete(subscriptionId); send({ type: 'interaction.unsubscribe', subscriptionId }); cleanups.delete(off) }
+            cleanups.add(off); return off
+          },
+          executeAction: (action, context) => serviceRequest('interaction.action', { action, context: {
+            ruleId: context.ruleId, stepId: context.stepId, restartFromBeginning: context.restartFromBeginning,
+          } }, context.signal),
+          report: message => scope.events.emit('component.diagnostic', { message }),
+        }
+        const layout = layoutInput ? {
+          read: () => layoutInput!,
+          subscribe: (listener: (layout: ComponentLayoutInput) => void) => { layoutListeners.add(listener); return () => layoutListeners.delete(listener) },
+          reportSize: (report: { inlineSize: number; blockSize: number }) => send({ type: 'layout.size', report }),
+        } : undefined
+        const runtimeContext = { instance, scope, root, teacherController, authoring, layout, authoredDocument: Boolean(authoredDocument), builtinKey: message.builtinKey, resourceCss: message.resourceCss, resources: { url: (name: string) => resourceUrls[currentBindings()[name] ?? name] },
+          media: message.media === true ? media : undefined, interactions: interaction ? interactions : undefined }
+        updateResourceCss = value => { runtimeContext.resourceCss = value }
+        mounted = await implementation.mount(runtimeContext) as typeof mounted
+        if (!active) { await mounted?.dispose(); mounted = undefined; return }
+        mountedRunning = true
+        await applyMountedActivity()
+        if (!mounted || typeof mounted.update !== 'function' || typeof mounted.dispose !== 'function') throw new Error('mount 必须返回 update/dispose 生命周期')
+        if (sourceViewport && root) {
+          let queued = false, previous = ''
+          const measurePaint = () => {
+            if (!active || !sourceViewport) return
+            const rects: DOMRect[] = []
+            for (const element of document.body.querySelectorAll<HTMLElement>('*')) {
+              if (['style', 'script', 'template'].includes(element.localName)) continue
+              const css = getComputedStyle(element)
+              if (css.display === 'none' || css.visibility === 'hidden' || css.visibility === 'collapse' || Number(css.opacity) === 0) continue
+              const painted = [...element.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())
+                || /^(?:button|input|select|textarea|img|video|canvas|iframe|svg|summary)$/.test(element.localName)
+                || css.backgroundImage !== 'none' || !/^(?:transparent|rgba\(0, 0, 0, 0\))$/.test(css.backgroundColor)
+                || ['Top', 'Right', 'Bottom', 'Left'].some(side => Number.parseFloat(css.getPropertyValue(`border-${side.toLowerCase()}-width`)) > 0 && css.getPropertyValue(`border-${side.toLowerCase()}-style`) !== 'none')
+              if (painted) for (const rect of element.getClientRects()) if (rect.width > 0 && rect.height > 0) rects.push(rect)
+            }
+            const bounds = rects.length ? { left: Math.min(...rects.map(rect => rect.left)), top: Math.min(...rects.map(rect => rect.top)), right: Math.max(...rects.map(rect => rect.right)), bottom: Math.max(...rects.map(rect => rect.bottom)) } : null
+            const signature = JSON.stringify(bounds)
+            if (signature !== previous) { previous = signature; send({ type: 'source.paint', bounds }) }
+          }
+          const enqueue = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; measurePaint() }) } }
+          const observer = new MutationObserver(enqueue); observer.observe(document.body, { childList: true, attributes: true, characterData: true, subtree: true })
+          const resize = new ResizeObserver(enqueue); resize.observe(root)
+          window.addEventListener('resize', enqueue); root.addEventListener('load', enqueue, true)
+          refreshSourcePaint = enqueue
+          cleanups.add(() => { observer.disconnect(); resize.disconnect(); window.removeEventListener('resize', enqueue); root.removeEventListener('load', enqueue, true)
+            if (refreshSourcePaint === enqueue) refreshSourcePaint = undefined })
+          measurePaint()
+        }
+        if (documentRoot && !authoredDocument) cleanups.add(() => { document.head.prepend(fragmentDefaults); document.body.append(fragmentRoot) })
+        if (root && !webContent) {
+          refreshSourceText = () => {
+            if (originalHtml === undefined) { sourcePageText?.setRules([]); return }
+            const rules = (instance.data as unknown as WebRuntimeData).textOverrides ?? []
+            if (sourcePageText) sourcePageText.setRules(rules)
+            else { sourcePageText = fragmentBox.textOverrides([root], rules); sourcePageText.applyAll() }
+          }
+          refreshSourceText()
+          cleanups.add(() => { sourcePageText?.destroy(); sourcePageText = undefined })
+        }
+        // Content application is always active, including Published/read-only
+        // consumers. Editor target observation below is a separate concern.
+        if (root) {
+          contentAuthoring = fragmentBox.authoring(documentRoot ? document.documentElement : root, {
+            records: () => instance.authoring?.records ?? {},
+            originalText: node => (sourcePageText ?? (window as Window & { __cwPageTextOverrides?: DomTextOverrideController }).__cwPageTextOverrides)?.originalText(node),
+            claimText: (node, text) => (sourcePageText ?? (window as Window & { __cwPageTextOverrides?: DomTextOverrideController }).__cwPageTextOverrides)?.setLocalText(node, text),
+            resolveResource: reference => resourceUrls[currentBindings()[reference] ?? reference] ?? reference,
+            resourceReference: url => Object.entries(currentBindings())
+              .find(([, id]) => resourceUrls[id] === url)?.[0],
+            report: (authorKey, status) => {
+              if (status === 'unresolved') scope.events.emit('component.diagnostic', { instanceId: instance.id, authorKey,
+                message: '内部作者对象当前无法唯一重绑定；原内容与作者修改已保留，尚未应用' })
+            },
+          })
+          cleanups.add(() => { contentAuthoring?.dispose(); contentAuthoring = undefined })
+        }
+        if (root && observeHtml) {
+          const fragmentKey = String(message.fragmentStateKey), hiddenStyles = new WeakMap<HTMLElement, { property: 'display' | 'visibility'; value: string; priority: string }>()
+          const applyFragments = () => {
+            const progress = states[fragmentKey], fragments = [...root.querySelectorAll<HTMLElement>('.fragment')]
+            const count = typeof progress === 'number' ? progress : fragments.length
+            fragments.forEach((element, index) => {
+              let previous = hiddenStyles.get(element)
+              const property = layoutInput?.mode === 'flow-content' ? 'display' : 'visibility', hidden = property === 'display' ? 'none' : 'hidden'
+              if (previous && previous.property !== property) {
+                if (previous.value) element.style.setProperty(previous.property, previous.value, previous.priority)
+                else element.style.removeProperty(previous.property)
+                hiddenStyles.delete(element); previous = undefined
+              }
+              if (index < count) {
+                if (previous) { if (previous.value) element.style.setProperty(property, previous.value, previous.priority); else element.style.removeProperty(property); hiddenStyles.delete(element) }
+              } else if (element.style.getPropertyValue(property) !== hidden || element.style.getPropertyPriority(property) !== 'important') {
+                hiddenStyles.set(element, { property, value: element.style.getPropertyValue(property), priority: element.style.getPropertyPriority(property) })
+                element.style.setProperty(property, hidden, 'important')
+              }
+            })
+          }
+          subscribe('state', fragmentKey, applyFragments)
+          const handles = new WeakMap<Node, string>(); let sequence = 0, queued = false
+          const pathFor = (element: Element) => {
+            const path: { name: string; index: number }[] = []
+            for (let current: Element | null = element; current; current = current.parentElement) path.unshift({ name: current.localName,
+              index: current.parentElement ? Array.from(current.parentElement.children).indexOf(current) : 0 })
+            return path
+          }
+          const sectionOrder = (element: Element) => {
+            for (let current: Element | null = element; current; current = current.parentElement) {
+              if (current.localName !== 'section') continue
+              const parent = current.parentElement
+              if (parent?.localName === 'body' || parent?.localName === 'main' && parent.parentElement?.localName === 'body')
+                return Array.from(parent.children).filter(child => child.localName === 'section').indexOf(current)
+            }
+            return null
+          }
+          collectHtml = () => {
+            if (!active) return
+            applyFragments()
+            const source = originalHtml === undefined ? undefined : new DOMParser().parseFromString(originalHtml, 'text/html')
+            const projected = new DOMParser().parseFromString(String(originalHtml !== undefined && instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data.html ?? '' : ''), 'text/html')
+            const reports: unknown[] = []
+            const reported = new Set<Node>()
+            const pageText = sourcePageText ?? (window as Window & { __cwPageTextOverrides?: { samples(): readonly { node: Text; raw: string }[] } }).__cwPageTextOverrides
+            const originalText = new Map(pageText?.samples().map(sample => [sample.node, sample.raw]) ?? [])
+            const origin = documentRoot ? { x: 0, y: 0 } : root.getBoundingClientRect()
+            const walk = (live: Element, original: Element, bound: Element) => {
+              if (live.localName !== original.localName && live !== root || original.localName !== bound.localName) return
+              if (live !== root && ['id', 'data-cw-author-key'].some(name => bound.hasAttribute(name) && live.getAttribute(name) !== bound.getAttribute(name))) return
+              const style = getComputedStyle(live), visible = style.visibility !== 'hidden' && style.visibility !== 'collapse' && style.display !== 'none'
+              const liveTexts = [...live.childNodes].filter(node => node.nodeType === Node.TEXT_NODE)
+              const boundTexts = [...bound.childNodes].filter(node => node.nodeType === Node.TEXT_NODE)
+              for (const node of live.childNodes) {
+                if (!visible || node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim() || live.closest('script,style,noscript,template,textarea,title,option,[contenteditable]')) continue
+                const rawText = originalText.get(node as Text) ?? node.textContent
+                if (boundTexts[liveTexts.indexOf(node)]?.textContent !== rawText) continue
+                const range = document.createRange(); range.selectNodeContents(node)
+                const rect = range.getBoundingClientRect()
+                let handle = handles.get(node); if (!handle) { handle = `html:${++sequence}`; handles.set(node, handle) }
+                reported.add(node)
+                reports.push({ handle, kind: 'text', domPath: pathFor(original), sectionOrder: sectionOrder(original), rawText,
+                  attributeName: null, scriptCreated: false, rect: { x: rect.x - origin.x, y: rect.y - origin.y, width: rect.width, height: rect.height } })
+              }
+              if (visible && live.localName === 'img' && live.getAttribute('src') === bound.getAttribute('src')) {
+                const rect = live.getBoundingClientRect()
+                let handle = handles.get(live); if (!handle) { handle = `html:${++sequence}`; handles.set(live, handle) }
+                reported.add(live)
+                reports.push({ handle, kind: 'image', domPath: pathFor(original), sectionOrder: sectionOrder(original), rawText: original.getAttribute('src') ?? '',
+                  attributeName: 'src', scriptCreated: false, rect: { x: rect.x - origin.x, y: rect.y - origin.y, width: rect.width, height: rect.height } })
+              }
+              const originals = Array.from(original.children).filter(element => element.localName !== 'script')
+              const bindings = Array.from(bound.children).filter(element => element.localName !== 'script')
+              Array.from(live.children).filter(element => element.localName !== 'script').forEach((child, index) => { if (originals[index] && bindings[index]) walk(child, originals[index], bindings[index]) })
+            }
+            if (source) walk(root, source.body, projected.body)
+            for (const observed of contentAuthoring?.scan() ?? []) {
+              const { node, authorKey, record, initialValue, geometry, bindingStatus } = observed
+              // Once an object has a formal override that is its effective
+              // owner, even if it also happens to have a static source span.
+              if (reported.has(node) && instance.authoring?.records?.[authorKey]?.overrides[record.kind === 'text' ? 'text' : 'src'] === undefined) {
+                const report = reports.find(report => (report as { handle: string }).handle === handles.get(node)) as Record<string, unknown> | undefined
+                if (report) { report.authoring = { authorKey, record }; report.bindingStatus = bindingStatus; if (geometry) report.geometry = geometry }
+                continue
+              }
+              const element = node.nodeType === Node.TEXT_NODE ? node.parentElement! : node as HTMLImageElement
+              const rect = node.nodeType === Node.TEXT_NODE ? (() => { const range = document.createRange(); range.selectNodeContents(node); return range.getBoundingClientRect() })() : element.getBoundingClientRect()
+              if (!rect.width || !rect.height) continue
+              let handle = handles.get(node); if (!handle) { handle = `html:${++sequence}`; handles.set(node, handle) }
+              if (reported.has(node)) {
+                const index = reports.findIndex(report => (report as { handle: string }).handle === handle)
+                if (index !== -1) reports.splice(index, 1)
+              }
+              reports.push({ handle, kind: record.kind, domPath: pathFor(element), sectionOrder: sectionOrder(element), rawText: initialValue,
+                attributeName: record.kind === 'image' ? 'src' : null, scriptCreated: !reported.has(node),
+                authoring: { authorKey, record }, bindingStatus, ...(geometry ? { geometry } : {}), rect: { x: rect.x - origin.x, y: rect.y - origin.y, width: rect.width, height: rect.height } })
+            }
+            const sourceElement = source?.body.firstElementChild as HTMLElement | SVGElement | null
+            const liveElement = root.firstElementChild as HTMLElement | SVGElement | null
+            const sourceStyle = sourceElement?.style ? Object.fromEntries(Array.from({ length: sourceElement.style.length }, (_unused, index) => {
+              const key = sourceElement.style.item(index)
+              return [key, sourceElement.style.getPropertyValue(key)]
+            })) : undefined
+            const contentExtent = webContent && liveElement && sourceStyle && instance.frame
+              && fragmentBox.isMeasured(instance, documentRoot ? 'document' : 'fragment', sourceStyle,
+                typeof message.builtinKey === 'string' ? { implementation: { kind: 'builtin', key: message.builtinKey } } : undefined)
+              && liveElement.style.margin === '0px' && liveElement.style.boxSizing === 'border-box'
+              ? fragmentBox.extent(liveElement, layoutInput ? { width: layoutInput.inlineSize,
+                height: layoutInput.mode === 'flow-content' ? 0 : layoutInput.blockSize } : instance.frame, layoutInput?.mode) : null
+            send({ type: 'authoring.observe', reports, contentExtent })
+          }
+          const enqueue = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; collectHtml() }) } }
+          const observer = new MutationObserver(enqueue); observer.observe(documentRoot ? document.documentElement : root, { childList: true, characterData: true, attributes: true, subtree: true })
+          const resize = new ResizeObserver(enqueue); resize.observe(root)
+          // Font completion can change text ink without resizing a fixed root.
+          document.fonts.addEventListener('loadingdone', enqueue)
+          if (documentRoot) {
+            resize.observe(document.documentElement)
+            window.addEventListener('scroll', enqueue, true); window.addEventListener('resize', enqueue)
+          }
+          cleanups.add(() => {
+            observer.disconnect(); resize.disconnect()
+            document.fonts.removeEventListener('loadingdone', enqueue)
+            if (documentRoot) { window.removeEventListener('scroll', enqueue, true); window.removeEventListener('resize', enqueue) }
+          })
+          collectHtml()
+        }
+      } else if (message.type === 'authoring.hit-test') {
+        send({ type: 'authoring.hit-result', requestId: message.requestId, authorKey: hitAuthor(Number(message.x), Number(message.y)) ?? null })
+      } else if (message.type === 'update') {
+        if (!active) return
+        writeCourseTheme(message.themeCss)
+        resourceUrls = message.resources as Record<string, string> ?? {}
+        instance = message.instance as ComponentInstance
+        updateResourceCss(message.resourceCss)
+        originalHtml = typeof message.authorHtml === 'string' ? message.authorHtml : undefined
+        targets = message.targets as RuntimeTargetSnapshot[]
+        states = message.state as Record<string, JsonValue>
+        interaction = message.interaction as typeof interaction
+        await mounted?.update(instance)
+        refreshSourceText()
+        refreshCurrentResources()
+        contentAuthoring?.refresh()
+        collectHtml()
+      } else if (message.type === 'authoring.preview') {
+        if (!active || message.generation !== generation) return
+        const geometry = message.geometry as ComponentAuthorGeometry | null
+        if (typeof message.authorKey === 'string') contentAuthoring?.previewGeometry(message.authorKey, geometry)
+        else if (typeof message.spotId === 'number') authorPreviewCallbacks.get(message.spotId)?.previewGeometry(geometry)
+        if (geometry === null) collectHtml()
+        return
+      } else if (message.type === 'placement') {
+        if (!active) return
+        instance = { ...instance, frame: message.frame as ComponentInstance['frame'] }
+        await mounted?.updatePlacement?.(message.frame)
+      } else if (message.type === 'layout.input') {
+        if (!active || message.generation !== generation) return
+        layoutInput = message.layout as ComponentLayoutInput
+        applyFragmentLayout()
+        for (const listener of layoutListeners) listener(layoutInput)
+        collectHtml()
+        return
+      } else if (message.type === 'source.viewport') {
+        if (!active || !sourceViewport) return
+        sourceViewport = message.viewport as typeof sourceViewport
+        applyFragmentLayout()
+        // Moving the root changes only the defaults in <head>, so neither the
+        // body mutation observer nor a size-only observer sees this new origin.
+        refreshSourcePaint?.()
+        if (teacher) teacher.viewport = { left: 0, top: 0, right: sourceViewport!.right - sourceViewport!.left, bottom: sourceViewport!.bottom - sourceViewport!.top }
+        return
+      } else if (message.type === 'notification') {
+        if (!active) return
+        const kind = message.kind as string, name = message.name as string
+        if (kind === 'event' && name === '__runtime.activity') setActivity(message.value)
+        if (kind === 'event' && name === '__runtime.theme') writeCourseTheme(message.value)
+        if (kind === 'event' && name === '__runtime.resources') {
+          resourceUrls = message.value as Record<string, string> ?? {}
+          refreshCurrentResources()
+          contentAuthoring?.refresh()
+          for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]')) frame.contentWindow?.postMessage({
+            type: 'guoling.resources.refresh', token: `__guoling_parser_${nonce.replace(/-/g, '_')}`, resources: resourceUrls,
+          }, '*')
+        }
+        if (kind === 'event' && name === '__runtime.state') {
+          const update = message.value as { name: string; value: JsonValue }
+          if (typeof update?.name === 'string') states[update.name] = update.value
+        }
+        if (kind === 'state') states[name] = message.value as JsonValue
+        for (const listener of listeners.get(`${kind}:${name}`) ?? []) listener(message.value)
+        return
+      } else if (message.type === 'targets.snapshot') {
+        if (active && Array.isArray(message.targets)) targets = message.targets as RuntimeTargetSnapshot[]
+        return
+      } else if (message.type === 'teacher.snapshot') {
+        if (!active) return
+        teacher = message.teacher as typeof teacher
+        interaction = message.interaction as typeof interaction
+        for (const listener of teacherListeners) listener()
+        return
+      } else if (message.type === 'teacher.reply') {
+        const pending = teacherPending.get(message.requestId as number)
+        if (!pending) return
+        teacherPending.delete(message.requestId as number)
+        if (message.error) pending.reject(new Error(String(message.error)))
+        else pending.resolve(message.result === true)
+        return
+      } else if (message.type === 'motion.started') {
+        if (active && message.generation === generation) motionTasks.get(message.taskId as number)?.start(message.reducedMotion === true)
+        return
+      } else if (message.type === 'motion.reply') {
+        const pending = motionRequests.get(message.requestId as number)
+        if (pending) { motionRequests.delete(message.requestId as number); pending.resolve(message.value) }
+        return
+      } else if (message.type === 'motion.finished') {
+        const outcome = message.error ? { status: 'failed' as const, error: new Error(String(message.error)) } : { status: message.status === 'completed' ? 'completed' as const : 'cancelled' as const }
+        motionTasks.get(message.taskId as number)?.settle(outcome)
+        return
+      } else if (message.type === 'service.reply') {
+        serviceRequests.get(message.requestId as number)?.(message.result === true); return
+      } else if (message.type === 'interaction.trigger') {
+        const listener = active && message.generation === generation ? interactionListeners.get(message.subscriptionId as number) : undefined
+        try {
+          const result = listener ? await listener(message.value) : false
+          send({ type: 'interaction.trigger.reply', requestId: message.requestId, result: Boolean(listener) && active && result !== false })
+        } catch (error) {
+          send({ type: 'interaction.trigger.reply', requestId: message.requestId, error: String(error) })
+        }
+        return
+      } else if (message.type === 'media.command') {
+        const callback = mediaCommands.get(message.mediaId as number), command = message.command as ComponentMediaCommand
+        let result = false
+        try { if (active && message.generation === generation && callback) result = await callback(command) === true }
+        catch (error) { send({ type: 'event.emit', name: 'component.diagnostic', value: { message: `媒体命令失败：${String(error)}` } }) }
+        send({ type: 'media.reply', requestId: message.requestId, mediaId: message.mediaId, result: result && mediaCommands.get(message.mediaId as number) === callback })
+        return
+      } else if (message.type === 'cancel' || message.type === 'dispose') {
+        cancel(); await mounted?.dispose(); mounted = undefined
+      } else return
+      reply(message.id)
+    } catch (error) { reply(message.id, error) }
+  }
+  const connect = (event: MessageEvent) => {
+    if (event.source !== parent || event.data?.type !== 'component.connect' || event.data?.nonce !== nonce || !event.ports[0]) return
+    window.removeEventListener('message', connect)
+    port = event.ports[0]; port.onmessage = event => { void receive(event.data) }; port.start()
+    port.postMessage({ type: 'connected' })
+  }
+  window.addEventListener('message', connect)
+  parent.postMessage({ type: 'component.ready', nonce }, '*')
+}
+
+/** One source lease/generation. No author module is imported by the workbench realm. */
+export async function preparePublishedNativeComponent(artifact: CompiledComponentModule, signal: AbortSignal, snapshots: SandboxRuntimeSnapshots): Promise<PreparedComponentRuntime> {
+  const leaseId = `component-${nanoid()}`
+  const bootstrapApi = snapshots.bootstrap
+  const clientMatrix = snapshots.hostAdapter?.clientMatrix ?? componentClientMatrix
+  const authorHitEvent = snapshots.hostAdapter?.authorHitEvent ?? 'component-author-hit-test'
+  if (signal.aborted) throw new Error('组件源码准备已取消')
+  const nonce = nanoid(), iframe = document.createElement('iframe')
+  iframe.name = leaseId
+  iframe.setAttribute('sandbox', 'allow-scripts')
+  iframe.setAttribute('title', '组件内容')
+  Object.assign(iframe.style, { border: '0', width: '100%', height: '100%' })
+  // Main's existing preview protocol supplies the desktop document, without its
+  // parent's CSP or Blob storage key. Standalone HTML owns this inline document.
+  // The author module still arrives over a dedicated port and is loaded by the child.
+  const bridge = (programs?: import('../../../components/web/authoredDocumentBootstrap').AuthoredDocumentPrograms) =>
+    `(function(){${programs ? `const authored=${authoredDocumentProgramsSource(programs)};` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),refreshResources:(${refreshWebResourceReferences.toString()}),authoring:(${createDomAuthoring.toString()}),textOverrides:(roots,rules)=>{${domTextOverrideRealmSource()}return createPageTextOverrides(roots,rules)}}${programs ? ',authored' : ''})})()`
+  let runtimeBuiltinKey = snapshots.builtinKey, sourceWebDocument = false
+  const readAuthorHtml = (instance: ComponentInstance | undefined): string | undefined => {
+    if (!instance) return undefined
+    // A professional Source may retain the Web HTML field without inheriting
+    // Web execution. The editor identifies that owner; live/source matching
+    // below still decides whether any particular span is actually editable.
+    const sourceHtml = snapshots.authorHtml?.(instance)
+    if (sourceHtml !== undefined) return sourceHtml
+    if (!snapshots.htmlAuthoring || !['guoling.web', 'guoling.html-program'].includes(runtimeBuiltinKey ?? '')) return undefined
+    const data = instance.data
+    return data && typeof data === 'object' && !Array.isArray(data) && typeof data.html === 'string' ? data.html : undefined
+  }
+  const projectInstance = async (instance: ComponentInstance) => {
+    const project = snapshots.instance ?? (['guoling.web', 'guoling.html-program'].includes(runtimeBuiltinKey ?? '') ? snapshots.webInstance : undefined)
+    const projected = await project?.(instance) ?? instance
+    const data = projected.data as WebRuntimeData
+    if (!['guoling.web', 'guoling.html-program'].includes(runtimeBuiltinKey ?? '')
+      || !data || typeof data.html !== 'string' || htmlDocumentKind(data.html) === 'document' || snapshots.nativeDocument) return projected
+    return { ...projected, data: { ...data, html: authoredDocumentBootstrap(data, {
+      nonce, instanceId: instance.id, nestedOnly: true, resources: snapshots.resources?.() ?? {},
+      bridge: authoredDocumentProgramsSource,
+    }) } }
+  }
+  let lease: ComponentBootstrapLease | undefined, htmlUrl: string | undefined
+  const channel = new MessageChannel(), port = channel.port1
+  let scope: ComponentRuntimeScope | undefined, authoring: ComponentRuntimeContext['authoring'], layoutPort: ComponentLayoutPort | undefined, disposed = false, sequence = 0
+  let activity: { active: boolean; visible: boolean; playing: boolean } | undefined
+  let runtimeTeacherController = snapshots.teacherController
+  let teacherPointer: { x: number; y: number; matrix: readonly number[] } | undefined
+  let sourceViewport: { left: number; top: number; right: number; bottom: number; width: number; height: number } | undefined
+  let authorInstance: ComponentInstance | undefined
+  let authorRoot: HTMLElement | undefined
+  // A full realm can retain author-created handlers/timers across content updates.
+  // Only its existing retirement lifecycle may reset this transport choice.
+  let targetProfile: RuntimeTargetProfile | undefined
+  const targetsFor = (instance: ComponentInstance<JsonValue | WebRuntimeData>) => {
+    if (targetProfile !== 'full') targetProfile = webRuntimeTargetProfile(runtimeBuiltinKey, instance.data)
+    return snapshots.targets(targetProfile)
+  }
+  let readyResolve!: () => void, readyReject!: (error: Error) => void
+  const ready = new Promise<void>((resolve, reject) => { readyResolve = resolve; readyReject = reject })
+  // Preparation can be cancelled before mount starts waiting for the handshake.
+  void ready.catch(() => undefined)
+  const pending = new Map<number, { resolve(value?: { document?: 'web'; fontFaceCss?: string }): void; reject(error: Error): void }>()
+  const subscriptions = new Map<string, () => void>()
+  const authorSpots = new Map<number, () => void>()
+  const observedSpots = new Map<string, { signature: string; off(): void }>()
+  const authorPreviews = new Set<string>()
+  const authorHits = new Map<number, (key: string | null) => void>()
+  let authorHitSequence = 0
+  const authorHit = (event: Event) => {
+    const request = (event as CustomEvent<ComponentAuthorHitRequest>).detail
+    if (!request || disposed || !scope?.isActive()) return
+    event.preventDefault()
+    const requestId = ++authorHitSequence
+    authorHits.set(requestId, request.resolve)
+    port.postMessage({ type: 'authoring.hit-test', generation: scope.generation, requestId, x: request.point.x - (sourceViewport?.left ?? 0), y: request.point.y - (sourceViewport?.top ?? 0) })
+  }
+  const remoteMotions = new Map<number, { context?: ComponentMotionContext; task: ComponentMotionTask; finish(error?: string): void }>()
+  let mediaPort: ComponentMediaPort | undefined, interactionPort: ComponentInteractionPort | undefined, mediaRequestSequence = 0
+  const remoteMedia = new Map<number, ComponentMediaRegistration>()
+  const mediaPending = new Map<number, { mediaId: number; resolve(value: boolean): void }>()
+  const interruptions = new Map<number, { release(): void }>()
+  const presentations = new Map<number, { write(value: unknown): Promise<boolean>; dispose(): void }>()
+  const interactionSubscriptions = new Map<number, () => void>()
+  let triggerSequence = 0
+  const triggerPending = new Map<number, { subscriptionId: number; resolve(value: boolean): void; reject(error: Error): void }>()
+  const teacherActions = new Map<number, { controller: AbortController; committed: boolean }>()
+  const interactionActions = new Map<number, { controller: AbortController; committed: boolean }>()
+  const mediaStateValue = (value: unknown): value is ComponentMediaState => {
+    if (!value || typeof value !== 'object') return false
+    const state = value as ComponentMediaState
+    return typeof state.paused === 'boolean' && typeof state.loop === 'boolean' && Number.isFinite(state.currentTime)
+  }
+  const interactionSnapshot = () => interactionPort && { surfaceId: interactionPort.currentSurfaceId(), stateId: interactionPort.currentStateId() }
+  const frameValue = (value: unknown): value is MotionFrame => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const frame = value as Record<string, unknown>
+    return Object.keys(frame).every(key => ['transform', 'opacity', 'offset', 'easing'].includes(key))
+      && (frame.transform === undefined || typeof frame.transform === 'string')
+      && (frame.opacity === undefined || typeof frame.opacity === 'number' && Number.isFinite(frame.opacity))
+      && (frame.offset === undefined || typeof frame.offset === 'number' && Number.isFinite(frame.offset))
+      && (frame.easing === undefined || typeof frame.easing === 'string')
+  }
+  const timingValue = (value: unknown): value is MotionTiming => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const timing = value as Record<string, unknown>
+    return Object.entries(timing).every(([key, item]) => ['delay', 'direction', 'duration', 'easing', 'endDelay', 'fill', 'iterationStart', 'iterations'].includes(key)
+      && (typeof item === 'number' && Number.isFinite(item) || typeof item === 'string'))
+  }
+  const teacherSnapshot = () => {
+    const teacher = runtimeTeacherController
+    if (!teacher) return undefined
+    const snapshot = teacher.read()
+    const types = ['step.previous', 'step.next', 'scene.previous', 'scene.next', 'scene.replay', 'course.restart', 'scene.open-picker', 'audio.toggle-mute', 'player.fullscreen.toggle'] as const
+    const matrix = clientMatrix(iframe), bounds = teacher.viewportBounds?.()
+    const corners = matrix && bounds ? [{ x: bounds.left, y: bounds.top }, { x: bounds.right, y: bounds.top }, { x: bounds.left, y: bounds.bottom }, { x: bounds.right, y: bounds.bottom }].map(point => transformPoint(invertMatrix(matrix), point)) : undefined
+    return { snapshot, ...(corners ? { viewport: { left: Math.min(...corners.map(point => point.x)), top: Math.min(...corners.map(point => point.y)), right: Math.max(...corners.map(point => point.x)), bottom: Math.max(...corners.map(point => point.y)) } } : {}), allowed: { ...Object.fromEntries(types.map(type => [type, teacher.canExecute({ type })])),
+      'camera.present': Boolean(snapshot.camera),
+      'scene.go': snapshot.scenes.some(scene => teacher.canExecute({ type: 'scene.go', sceneId: scene.id })) } }
+  }
+  const refreshSourceViewport = (notify = true) => {
+    if (!sourceViewport || !authorRoot) return
+    const matrix = clientMatrix(authorRoot)
+    if (!matrix) return
+    const view = authorRoot.ownerDocument.documentElement, bounds = runtimeTeacherController?.viewportBounds?.() ?? { left: 0, top: 0, right: view.clientWidth, bottom: view.clientHeight }
+    const inverse = invertMatrix(matrix), corners = [{ x: bounds.left, y: bounds.top }, { x: bounds.right, y: bounds.top }, { x: bounds.left, y: bounds.bottom }, { x: bounds.right, y: bounds.bottom }].map(point => transformPoint(inverse, point))
+    const previous = sourceViewport
+    sourceViewport = { left: Math.min(...corners.map(point => point.x)), top: Math.min(...corners.map(point => point.y)), right: Math.max(...corners.map(point => point.x)), bottom: Math.max(...corners.map(point => point.y)),
+      width: authorRoot.clientWidth || authorInstance?.frame?.width || 300, height: authorRoot.clientHeight || authorInstance?.frame?.height || 150 }
+    Object.assign(iframe.style, { position: 'absolute', left: `${sourceViewport.left}px`, top: `${sourceViewport.top}px`, width: `${sourceViewport.right - sourceViewport.left}px`, height: `${sourceViewport.bottom - sourceViewport.top}px` })
+    // Mount sends the initial viewport. A pointer start with unchanged geometry
+    // must not rebuild subscribed controls between pointerdown and click.
+    const changed = sourceViewport.left !== previous.left || sourceViewport.top !== previous.top
+      || sourceViewport.right !== previous.right || sourceViewport.bottom !== previous.bottom
+      || sourceViewport.width !== previous.width || sourceViewport.height !== previous.height
+    if (notify && changed && scope?.isActive()) port.postMessage({ type: 'source.viewport', viewport: sourceViewport })
+  }
+  const release = () => {
+    if (disposed) return
+    if (scope) port.postMessage({ type: 'cancel', generation: scope.generation })
+    disposed = true
+    const error = new Error('组件运行已取消')
+    readyReject(error)
+    for (const request of pending.values()) request.reject(error)
+    pending.clear()
+    for (const off of subscriptions.values()) off()
+    subscriptions.clear(); window.removeEventListener('message', handshake)
+    for (const off of authorSpots.values()) off()
+    authorSpots.clear()
+    for (const value of observedSpots.values()) value.off()
+    observedSpots.clear()
+    authorPreviews.clear()
+    authorRoot?.removeEventListener(authorHitEvent, authorHit)
+    for (const resolve of authorHits.values()) resolve(null)
+    authorHits.clear()
+    for (const value of remoteMotions.values()) { value.task.cancel(); value.finish() }
+    remoteMotions.clear()
+    // A navigation already committed its destination belongs to the host, not the departing realm.
+    for (const request of teacherActions.values()) if (!request.committed) request.controller.abort()
+    teacherActions.clear()
+    for (const request of interactionActions.values()) if (!request.committed) request.controller.abort()
+    interactionActions.clear()
+    for (const off of interactionSubscriptions.values()) off()
+    interactionSubscriptions.clear()
+    for (const pending of triggerPending.values()) pending.resolve(false)
+    triggerPending.clear()
+    for (const handle of presentations.values()) handle.dispose()
+    presentations.clear()
+    for (const handle of remoteMedia.values()) handle.dispose()
+    remoteMedia.clear()
+    for (const handle of interruptions.values()) handle.release()
+    interruptions.clear()
+    for (const pending of mediaPending.values()) pending.resolve(false)
+    mediaPending.clear()
+    signal.removeEventListener('abort', release); scope?.signal.removeEventListener('abort', release)
+    port.close(); channel.port2.close(); iframe.remove()
+    if (lease) void bootstrapApi!.releaseComponentBootstrap!({ leaseId }).catch(() => undefined)
+    else if (htmlUrl) URL.revokeObjectURL(htmlUrl)
+  }
+  const handshake = (event: MessageEvent) => {
+    if (disposed || event.source !== iframe.contentWindow || event.data?.type !== 'component.ready' || event.data?.nonce !== nonce) return
+    window.removeEventListener('message', handshake)
+    iframe.contentWindow!.postMessage({ type: 'component.connect', nonce }, '*', [channel.port2])
+  }
+  port.onmessage = event => {
+    const message = event.data
+    if (disposed) return
+    if (message?.type === 'connected') { readyResolve(); return }
+    if (message?.type === 'reply') {
+      const request = pending.get(message.id)
+      if (!request) return
+      pending.delete(message.id)
+      if (message.error) request.reject(new Error(String(message.error)))
+      else request.resolve(message.value)
+      return
+    }
+    if (!scope?.isActive() || message?.generation !== scope.generation) return
+    if (message.type === 'source.paint' && sourceViewport) {
+      const bounds = message.bounds
+      iframe.style.clipPath = bounds && ['left', 'top', 'right', 'bottom'].every(key => Number.isFinite(bounds[key]))
+        ? `polygon(${bounds.left}px ${bounds.top}px,${bounds.right}px ${bounds.top}px,${bounds.right}px ${bounds.bottom}px,${bounds.left}px ${bounds.bottom}px)` : 'polygon(0 0,0 0,0 0)'
+      return
+    }
+    if (message.type === 'interaction.trigger.reply') {
+      const pending = triggerPending.get(message.requestId)
+      if (!pending) return
+      triggerPending.delete(message.requestId)
+      if (message.error) pending.reject(new Error(String(message.error)))
+      else pending.resolve(message.result === true)
+      return
+    }
+    if (message.type === 'layout.size' && layoutPort) {
+      const report = message.report
+      if (report && Number.isFinite(report.inlineSize) && Number.isFinite(report.blockSize) && report.inlineSize > 0 && report.blockSize >= 0)
+        layoutPort.reportSize({ inlineSize: report.inlineSize, blockSize: report.blockSize })
+      return
+    }
+    if (message.type === 'media.reply') {
+      const pending = mediaPending.get(message.requestId)
+      if (pending && pending.mediaId === message.mediaId) { mediaPending.delete(message.requestId); pending.resolve(message.result === true) }
+      return
+    }
+    if (message.type === 'media.register' && mediaPort && Number.isInteger(message.mediaId)) {
+      const value = message.options as ComponentMediaRegistrationOptions
+      if (!value || !['audio', 'video'].includes(value.kind) || !['music', 'narration', 'sfx', 'ui', 'video'].includes(value.channel)
+        || !Number.isFinite(value.volume) || typeof value.muted !== 'boolean' || !mediaStateValue(value.initial)) return
+      const mediaId = message.mediaId, currentScope = scope
+      remoteMedia.get(mediaId)?.dispose()
+      try {
+        const handle = mediaPort.register(value, command => new Promise<boolean>(resolve => {
+          if (disposed || !currentScope.isActive()) { resolve(false); return }
+          const requestId = ++mediaRequestSequence; mediaPending.set(requestId, { mediaId, resolve })
+          port.postMessage({ type: 'media.command', generation: currentScope.generation, mediaId, requestId, command })
+        }))
+        remoteMedia.set(mediaId, handle)
+      } catch (error) { interactionPort?.report(`${scope.instanceId} 媒体登记失败：${String(error)}`) }
+      return
+    }
+    if (message.type === 'media.dispose') {
+      remoteMedia.get(message.mediaId)?.dispose(); remoteMedia.delete(message.mediaId)
+      for (const [id, pending] of mediaPending) if (pending.mediaId === message.mediaId) { pending.resolve(false); mediaPending.delete(id) }
+      return
+    }
+    if (message.type === 'media.update') {
+      const patch = message.patch
+      if (!patch || typeof patch !== 'object') return
+      const options: Partial<Pick<ComponentMediaRegistrationOptions, 'channel' | 'volume' | 'muted'>> = {}
+      if (['music', 'narration', 'sfx', 'ui', 'video'].includes(patch.channel)) options.channel = patch.channel
+      if (Number.isFinite(patch.volume)) options.volume = patch.volume
+      if (typeof patch.muted === 'boolean') options.muted = patch.muted
+      remoteMedia.get(message.mediaId)?.update(options); return
+    }
+    if (message.type === 'media.report') {
+      if (mediaStateValue(message.state) && (message.event === undefined || ['play', 'pause', 'ended'].includes(message.event))) remoteMedia.get(message.mediaId)?.report(message.state, message.event)
+      return
+    }
+    if (message.type === 'media.interrupt' && mediaPort && Number.isInteger(message.interruptionId) && ['none', 'duck', 'pause', 'stop'].includes(message.mode)) {
+      interruptions.get(message.interruptionId)?.release(); interruptions.set(message.interruptionId, mediaPort.interruptBackground(message.mode)); return
+    }
+    if (message.type === 'media.release') { interruptions.get(message.interruptionId)?.release(); interruptions.delete(message.interruptionId); return }
+    if (message.type === 'presentation.create' && Number.isInteger(message.presentationId)) {
+      const reference = componentTargetSchema.safeParse(message.reference)
+      const target = reference.success && reference.data.kind === 'instance' ? scope.target(reference.data)?.presentation : undefined
+      presentations.get(message.presentationId)?.dispose(); presentations.delete(message.presentationId)
+      if (target && message.kind === 'feedback' && typeof message.value === 'string') {
+        const handle = target.feedback(message.value)
+        presentations.set(message.presentationId, { write: value => typeof value === 'string' ? handle.setText(value) : Promise.resolve(false), dispose: handle.dispose })
+      } else if (target && message.kind === 'visibility' && typeof message.value === 'boolean') {
+        const handle = target.visibility(message.value)
+        presentations.set(message.presentationId, { write: value => typeof value === 'boolean' ? handle.setVisible(value) : Promise.resolve(false), dispose: handle.dispose })
+      } else interactionPort?.report(`${scope.instanceId}：目标没有可用的${message.kind === 'feedback' ? '反馈' : '显示'}内容容器`)
+      return
+    }
+    if (message.type === 'presentation.dispose') { presentations.get(message.presentationId)?.dispose(); presentations.delete(message.presentationId); return }
+    if (message.type === 'presentation.write' && Number.isInteger(message.requestId)) {
+      const currentScope = scope
+      void (presentations.get(message.presentationId)?.write(message.value) ?? Promise.resolve(false)).then(result => {
+        if (!disposed) port.postMessage({ type: 'service.reply', requestId: message.requestId, generation: currentScope.generation, result: result && currentScope.isActive() })
+      }); return
+    }
+    if (message.type === 'interaction.clicked') { scope.events.emit('__runtime.node-click', { instanceId: scope.instanceId }); return }
+    if (message.type === 'authoring.hit-result') {
+      const resolve = authorHits.get(message.requestId)
+      authorHits.delete(message.requestId)
+      resolve?.(typeof message.authorKey === 'string' ? message.authorKey : null)
+      return
+    }
+    if (message.type === 'authoring.double-click' && authoring && authorRoot?.isConnected
+      && (authorSpots.size || observedSpots.size) && Number.isFinite(message.x) && Number.isFinite(message.y)) {
+      authorRoot.dispatchEvent(new CustomEvent('component-author-double-click', { bubbles: true, detail: {
+        instanceId: scope.instanceId, mountGeneration: scope.generation, localPoint: { x: message.x + (sourceViewport?.left ?? 0), y: message.y + (sourceViewport?.top ?? 0) }, authorKey: message.authorKey,
+      } })); return
+    }
+    if (message.type === 'interaction.unsubscribe') {
+      interactionSubscriptions.get(message.subscriptionId)?.(); interactionSubscriptions.delete(message.subscriptionId)
+      for (const [id, pending] of triggerPending) if (pending.subscriptionId === message.subscriptionId) { pending.resolve(false); triggerPending.delete(id) }
+      return
+    }
+    if (message.type === 'interaction.subscribe' && interactionPort && Number.isInteger(message.subscriptionId)) {
+      const trigger = interactionTriggerSchema.safeParse(message.trigger), currentScope = scope
+      if (!trigger.success) { interactionPort.report('源码互动触发条件无法解析'); return }
+      interactionSubscriptions.get(message.subscriptionId)?.()
+      interactionSubscriptions.set(message.subscriptionId, interactionPort.subscribeTrigger(trigger.data, value => {
+        if (disposed || !currentScope.isActive()) return false
+        const requestId = ++triggerSequence
+        return new Promise<boolean>((resolve, reject) => {
+          triggerPending.set(requestId, { subscriptionId: message.subscriptionId, resolve, reject })
+          port.postMessage({ type: 'interaction.trigger', requestId, subscriptionId: message.subscriptionId, generation: currentScope.generation, value })
+        })
+      })); return
+    }
+    if (message.type === 'interaction.cancel') { interactionActions.get(message.requestId)?.controller.abort(); interactionActions.delete(message.requestId); return }
+    if (message.type === 'interaction.action' && interactionPort && Number.isInteger(message.requestId)) {
+      const action = interactionActionSchema.safeParse(message.action), currentScope = scope, currentPort = interactionPort
+      const controller = new AbortController(), context = message.context
+      const request = { controller, committed: false }; interactionActions.set(message.requestId, request)
+      void (async () => {
+        let result = false
+        if (action.success && context && typeof context.ruleId === 'string' && typeof context.stepId === 'string') {
+          const outcome = await currentPort.executeAction(action.data, { signal: controller.signal, ruleId: context.ruleId, stepId: context.stepId, restartFromBeginning: context.restartFromBeginning === true, onNavigationCommit: () => { request.committed = true } })
+          result = outcome !== false && !controller.signal.aborted && currentScope.isActive()
+        } else currentPort.report('源码互动动作无法解析')
+        return result
+      })().catch(error => { if (!controller.signal.aborted && currentScope.isActive()) currentPort.report(String(error)); return false }).then(result => {
+        if (interactionActions.get(message.requestId) === request) interactionActions.delete(message.requestId)
+        if (!disposed) port.postMessage({ type: 'service.reply', requestId: message.requestId, generation: currentScope.generation, result })
+      }); return
+    }
+    if (message.type === 'motion.start' && Number.isInteger(message.taskId) && typeof message.channel === 'string') {
+      const reference = componentTargetSchema.safeParse(message.reference)
+      const target = reference.success && reference.data.kind === 'instance' ? scope.target(reference.data) : null
+      const generation = scope.generation, taskId = message.taskId as number
+      if (!target?.motion) { port.postMessage({ type: 'motion.finished', taskId, generation, status: 'failed', error: '该目标没有可运行动效的视觉内容' }); return }
+      remoteMotions.get(taskId)?.task.cancel()
+      let finish!: (error?: string) => void, context: ComponentMotionContext | undefined
+      const programFinished = new Promise<void>((resolve, reject) => { finish = error => error === undefined ? resolve() : reject(new Error(error)) })
+      const task = target.motion.replace(message.channel, current => {
+        context = current
+        port.postMessage({ type: 'motion.started', taskId, generation, reducedMotion: current.reducedMotion })
+        return programFinished
+      })
+      const record = { task, finish, get context() { return context } }
+      remoteMotions.set(taskId, record)
+      void task.finished.then(outcome => {
+        finish()
+        if (remoteMotions.get(taskId) === record) remoteMotions.delete(taskId)
+        if (!disposed) port.postMessage({ type: 'motion.finished', taskId, generation, status: outcome.status,
+          ...(outcome.status === 'failed' ? { error: outcome.error instanceof Error ? outcome.error.message : String(outcome.error) } : {}) })
+      })
+      return
+    }
+    if (message.type === 'motion.cancel' || message.type === 'motion.finish') {
+      const record = remoteMotions.get(message.taskId)
+      if (message.type === 'motion.cancel') { record?.task.cancel(); record?.finish() }
+      else record?.finish(typeof message.error === 'string' ? message.error : undefined)
+      return
+    }
+    if (message.type === 'motion.request' && Number.isInteger(message.requestId)) {
+      const record = remoteMotions.get(message.taskId), currentScope = scope
+      void (async () => {
+        const context = record?.context
+        let value: unknown = message.method === 'nextFrame' ? null : false
+        if (context && !context.signal.aborted && currentScope.isActive()) {
+          if (message.method === 'write' && frameValue(message.frame)) value = await context.write(message.frame)
+          else if (message.method === 'nextFrame') value = await context.nextFrame()
+          else if (message.method === 'animate' && Array.isArray(message.frames) && message.frames.every(frameValue) && timingValue(message.timing))
+            value = await context.animate(message.frames as MotionKeyframe[], message.timing)
+        }
+        if (!disposed) port.postMessage({ type: 'motion.reply', requestId: message.requestId, generation: currentScope.generation, value })
+      })().catch(error => { record?.task.cancel(); record?.finish(String(error)); if (!disposed) port.postMessage({ type: 'motion.reply', requestId: message.requestId, generation: currentScope.generation, value: false }) })
+      return
+    }
+    if (message.type === 'authoring.observe') {
+      // The formal frame and the fragment's layout root retain their authored
+      // dimensions. Only the iframe's paint viewport includes visible overflow.
+      const extent = message.contentExtent
+      if (!sourceViewport) {
+        iframe.style.width = extent && Number.isFinite(extent.width) && extent.width > 0 ? `${extent.width}px` : '100%'
+        iframe.style.height = extent && Number.isFinite(extent.height) && extent.height > 0 ? `${extent.height}px` : '100%'
+      }
+      if (!snapshots.htmlAuthoring || !authoring || !Array.isArray(message.reports)) return
+      const html = readAuthorHtml(authorInstance)
+      const present = new Set<string>()
+      for (const report of message.reports) {
+        const parsed = htmlPreviewTargetReportSchema.safeParse(report)
+        if (!parsed.success) continue
+        const resolved = typeof html === 'string' ? snapshots.hostAdapter?.locateTarget?.(html, parsed.data, { documentId: scope.runScopeId, epoch: String(scope.generation), revision: 0, bindingVersion: 0 }) : undefined
+        const { handle, kind, rawText, rect } = parsed.data
+        const observed = parsed.data.authoring
+        const record = observed?.record
+        const stored = observed && authorInstance?.authoring?.records?.[observed.authorKey]?.overrides[kind === 'text' ? 'text' : 'src']
+        const source = stored === undefined && resolved?.status === 'editable' && resolved.locator.valueSpan ? resolved.locator.valueSpan : undefined
+        if (!source && (!observed || !record || record.kind !== kind || record.binding?.kind !== 'dom')) continue
+        const input: ComponentAuthorSpotInput = { kind, initialValue: rawText,
+          ...(observed && record ? { authorKey: observed.authorKey, scope: record.scope, binding: record.binding, bindingStatus: parsed.data.bindingStatus ?? 'bound' as const } : {}),
+          ...(parsed.data.geometry ? { geometry: parsed.data.geometry } : {}),
+          ...(source ? { sourceRegion: { kind: 'data' as const, path: ['html'], ...source, encoding: kind === 'text' ? 'html-text' as const : 'html-attribute' as const } }
+            : { fieldScope: 'authoring' as const, dataPath: ['records', observed!.authorKey, 'overrides', kind === 'text' ? 'text' : 'src'] }),
+          localBounds: { width: Math.max(1, rect.width), height: Math.max(1, rect.height), transform: [1, 0, 0, 1, rect.x, rect.y] } }
+        const signature = JSON.stringify(input), previous = observedSpots.get(handle)
+        present.add(handle)
+        if (previous?.signature === signature || previous && input.authorKey && authorPreviews.has(input.authorKey)) continue
+        previous?.off(); observedSpots.set(handle, { signature, off: authoring.register(input, input.authorKey ? {
+          previewGeometry: geometry => {
+            if (!scope?.isActive() || disposed) return
+            if (geometry === null) authorPreviews.delete(input.authorKey!)
+            else authorPreviews.add(input.authorKey!)
+            port.postMessage({ type: 'authoring.preview', generation: scope.generation, authorKey: input.authorKey, geometry })
+          },
+        } : undefined) })
+      }
+      for (const [handle, value] of observedSpots) if (!present.has(handle)) { value.off(); observedSpots.delete(handle) }
+      return
+    }
+    if (message.type === 'authoring.unregister' && Number.isInteger(message.spotId)) { authorSpots.get(message.spotId)?.(); authorSpots.delete(message.spotId); return }
+    if (message.type === 'authoring.register' && Number.isInteger(message.spotId) && authoring) {
+      const spot = message.spot as ComponentAuthorSpotInput | undefined
+      if (!spot || !['text', 'image'].includes(spot.kind) || !componentFrameSchema.safeParse(spot.localBounds).success
+        || !jsonValueSchema.safeParse(spot.initialValue).success
+        || spot.dataPath && (!Array.isArray(spot.dataPath) || !spot.dataPath.every(value => typeof value === 'string'))
+        || spot.sourceRegion && (!['implementation', 'data'].includes(spot.sourceRegion.kind) || !Number.isInteger(spot.sourceRegion.start)
+          || !Number.isInteger(spot.sourceRegion.end) || spot.sourceRegion.start < 0 || spot.sourceRegion.end < spot.sourceRegion.start)) return
+      authorSpots.get(message.spotId)?.()
+      authorSpots.set(message.spotId, authoring.register(spot, message.preview === true ? {
+        previewGeometry: geometry => { if (scope?.isActive() && !disposed) port.postMessage({ type: 'authoring.preview', generation: scope.generation, spotId: message.spotId, geometry }) },
+      } : undefined)); return
+    }
+    if (message.type === 'teacher.cancel') { teacherActions.get(message.requestId)?.controller.abort(); return }
+    if (message.type === 'teacher.request' && runtimeTeacherController) {
+      const currentScope = scope, teacher = runtimeTeacherController
+      if (activity && (!activity.active || !activity.playing)) {
+        teacherPointer = undefined
+        port.postMessage({ type: 'teacher.reply', requestId: message.requestId, result: false })
+        return
+      }
+      const request = { controller: new AbortController(), committed: false }; teacherActions.set(message.requestId, request)
+      void (async () => {
+        let result = false
+        if (message.method === 'execute') {
+          const action = teacherControllerActionSchema.safeParse(message.action)
+          if (action.success && currentScope.isActive() && teacher.canExecute(action.data)) result = await teacher.execute(action.data, request.controller.signal, () => { request.committed = true })
+        } else if (message.method === 'setCollapsed' && typeof message.value === 'boolean') { teacher.setCollapsed(message.value); result = true }
+        else if (message.method === 'movePointer' && typeof message.phase === 'string' && ['start', 'move', 'end'].includes(message.phase) && Number.isFinite(message.x) && Number.isFinite(message.y)) {
+          const matrix = teacherPointer?.matrix ?? clientMatrix(iframe)
+          if (message.phase === 'end') teacherPointer = undefined
+          else if (matrix) {
+            // Pointer coordinates belong to the source viewport at gesture start.
+            // Translation caused by this drag must not feed back into its next delta.
+            if (message.phase === 'move' && teacherPointer) {
+              const dx = message.x - teacherPointer.x, dy = message.y - teacherPointer.y
+              teacher.moveBy(matrix[0] * dx + matrix[2] * dy, matrix[1] * dx + matrix[3] * dy)
+            }
+            teacherPointer = { x: message.x, y: message.y, matrix }
+            refreshSourceViewport()
+          }
+          result = Boolean(matrix)
+        }
+        else if (message.method === 'moveBy' && Number.isFinite(message.dx) && Number.isFinite(message.dy)) {
+          const matrix = clientMatrix(iframe)
+          if (matrix) { teacher.moveBy(matrix[0] * message.dx + matrix[2] * message.dy, matrix[1] * message.dx + matrix[3] * message.dy); result = true }
+        }
+        else if (message.method === 'setZoom' && Number.isFinite(message.value) && message.value > 0) { teacher.setZoom(message.value); result = true }
+        else if (message.method === 'resetView') { teacher.resetView(); result = true }
+        if (!disposed && currentScope.isActive()) port.postMessage({ type: 'teacher.reply', requestId: message.requestId, result })
+      })().catch(error => { if (!disposed && currentScope.isActive()) port.postMessage({ type: 'teacher.reply', requestId: message.requestId, error: String(error) }) })
+        .finally(() => { if (teacherActions.get(message.requestId) === request) teacherActions.delete(message.requestId) })
+      return
+    }
+    const value = jsonValueSchema.safeParse(message.value)
+    if (message.type === 'event.emit' && typeof message.name === 'string' && value.success) scope.events.emit(message.name, value.data)
+    else if (message.type === 'state.set' && typeof message.name === 'string' && value.success) scope.state.set(message.name, value.data)
+    else if (message.type === 'target.emit' && typeof message.name === 'string' && value.success) {
+      const reference = componentTargetSchema.safeParse(message.reference)
+      if (reference.success) scope.target(reference.data)?.emit(message.name, value.data)
+    }
+    else if ((message.type === 'subscribe' || message.type === 'unsubscribe') && typeof message.name === 'string' && ['state', 'event'].includes(message.kind)) {
+      // This instance fact already has one permanent bridge subscription; the child owns listener replay.
+      if (message.kind === 'event' && message.name === '__runtime.activity') return
+      const key = `${message.kind}:${message.name}`
+      if (message.type === 'unsubscribe') { subscriptions.get(key)?.(); subscriptions.delete(key); return }
+      if (subscriptions.has(key)) return
+      const currentScope = scope
+      const listener = (value: JsonValue | undefined) => { if (currentScope.isActive() && !disposed) port.postMessage({ type: 'notification', kind: message.kind, name: message.name, value }) }
+      subscriptions.set(key, message.kind === 'state' ? currentScope.state.subscribe(message.name, listener) : currentScope.events.subscribe(message.name, listener))
+    }
+  }
+  port.start(); window.addEventListener('message', handshake)
+  signal.addEventListener('abort', release, { once: true })
+  const request = (type: string, values: object = {}) => new Promise<{ document?: 'web'; fontFaceCss?: string } | undefined>((resolve, reject) => {
+    if (disposed) { reject(new Error('组件运行已取消')); return }
+    const id = ++sequence; pending.set(id, { resolve, reject }); port.postMessage({ type, id, ...values })
+  })
+  try {
+    if (signal.aborted) release()
+    return { release, isWebDocument: () => sourceWebDocument || ['guoling.web', 'guoling.html-program'].includes(runtimeBuiltinKey ?? ''), artifactIdentity: JSON.stringify([
+      artifact.format, artifact.code, artifact.css,
+      Object.entries(artifact.modules ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+    ]), implementation: {
+      async mount(context) {
+        scope = context.scope
+        // World replays the current instance fact synchronously. Cache it before any asynchronous preparation.
+        subscriptions.set('runtime-activity', scope.events.subscribe('__runtime.activity', value => {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) return
+          const next = value as { active: boolean; visible: boolean; playing: boolean }
+          if (typeof next.active !== 'boolean' || typeof next.visible !== 'boolean' || typeof next.playing !== 'boolean') return
+          activity = { active: next.active, visible: next.visible, playing: next.playing }
+          if (scope?.isActive() && !disposed) port.postMessage({ type: 'notification', kind: 'event', name: '__runtime.activity', value: activity })
+        }))
+        runtimeTeacherController = context.teacherController ?? snapshots.teacherController
+        mediaPort = context.media; interactionPort = context.interactions
+        authoring = context.authoring
+        authorRoot = context.root
+        authorRoot?.addEventListener(authorHitEvent, authorHit)
+        layoutPort = context.layout
+        authorInstance = context.instance
+        scope.signal.addEventListener('abort', release, { once: true }); scope.cleanup(release)
+        if (layoutPort) {
+          const currentScope = scope
+          subscriptions.set('layout', layoutPort.subscribe(layout => {
+            if (currentScope.isActive() && !disposed) port.postMessage({ type: 'layout.input', generation: currentScope.generation, layout })
+          }))
+        }
+        subscriptions.set('course-theme', scope.events.subscribe('__runtime.theme', value => {
+          if (scope?.isActive() && !disposed) port.postMessage({ type: 'notification', kind: 'event', name: '__runtime.theme', value })
+        }))
+        subscriptions.set('course-resources', scope.events.subscribe('__runtime.resources', value => {
+          if (scope?.isActive() && !disposed) port.postMessage({ type: 'notification', kind: 'event', name: '__runtime.resources', value })
+        }))
+        subscriptions.set('course-state', scope.events.subscribe('__runtime.state', value => {
+          if (scope?.isActive() && !disposed) port.postMessage({ type: 'notification', kind: 'event', name: '__runtime.state', value })
+        }))
+        subscriptions.set('course-targets', scope.events.subscribe('__runtime.targets', value => {
+          if (scope?.isActive() && !disposed) port.postMessage({ type: 'targets.snapshot', targets: value })
+        }))
+        if (runtimeTeacherController) subscriptions.set('teacher', runtimeTeacherController.subscribe(() => {
+          refreshSourceViewport()
+          if (scope?.isActive() && !disposed) port.postMessage({ type: 'teacher.snapshot', teacher: teacherSnapshot(), interaction: interactionSnapshot() })
+        }))
+        let authorHtml = readAuthorHtml(context.instance)
+        // Classify author syntax independently of editor target observation.
+        const data = context.instance.data && typeof context.instance.data === 'object' && !Array.isArray(context.instance.data) ? context.instance.data : undefined
+        let web = ['guoling.web', 'guoling.html-program'].includes(runtimeBuiltinKey ?? '')
+        let authorDocumentKind = web && typeof data?.html === 'string' ? htmlDocumentKind(data.html) : undefined
+        let documentKind = snapshots.nativeDocument && authorDocumentKind ? 'document' : authorDocumentKind
+        let projected = await projectInstance(context.instance)
+        if (signal.aborted || !scope.isActive()) throw new Error('组件挂载已取消')
+        const resources = snapshots.resources?.() ?? {}
+        const faces = splitInstalledBundledFontFaceCss(snapshots.themeCss?.() ?? '').faces
+        const transportFragment = snapshots.nativeDocument && authorDocumentKind === 'fragment'
+        const nativeData = projected.data as WebRuntimeData
+        const parserData = transportFragment ? { ...nativeData, html: `<!doctype html><html><head><style id="component-defaults">html,body{width:100%;height:100%;margin:0}</style></head><body>${nativeData.html}</body></html>` } : nativeData
+        const html = documentKind === 'document' && context.root
+          ? authoredDocumentBootstrap(parserData, { nonce, instanceId: context.instance.id, bridge, resources, themeCss: snapshots.themeCss?.(), transportFragment, resourceCss: typeof data?.css === 'string' ? data.css : undefined })
+          : `<!doctype html><meta charset="utf-8">${faces ? `<style data-component-bundled-faces>${faces.replace(/<\/style/gi, '<\\/style')}</style>` : ''}<style id="component-defaults">html,body,#component-root{width:100%;height:100%;margin:0}</style><div id="component-root"></div><script>${bridge().replace(/<\/script/gi, '<\\/script')}</script>`
+        lease = bootstrapApi ? await bootstrapApi.createComponentBootstrap!({ leaseId, html, connectOrigins: [...(snapshots.connectOrigins?.() ?? [])],
+          resourceSources: hasWebContentData(data) && Array.isArray(data?.resourceSources) ? data.resourceSources as unknown as ComponentBootstrapInput['resourceSources'] : undefined,
+          remoteAssetUrls: Object.values(resources).filter(url => /^https?:/i.test(url)) }) : undefined
+        if (signal.aborted || !scope.isActive()) {
+          if (lease) await bootstrapApi!.releaseComponentBootstrap!({ leaseId })
+          lease = undefined; throw new Error('组件挂载已取消')
+        }
+        htmlUrl = lease?.url ?? URL.createObjectURL(new Blob([html], { type: 'text/html' }))
+        if (context.root) {
+          if (!context.root.isConnected || context.root.ownerDocument !== iframe.ownerDocument) throw new Error('组件内容根尚未连接')
+          // The destination supplies the real viewport before parser scripts run.
+          // No loaded realm is detached and reinserted during initial mounting.
+          context.root.append(iframe); iframe.hidden = false
+        } else { iframe.hidden = true; document.body.append(iframe) }
+        iframe.src = htmlUrl
+        await ready
+        const prepared = await request('prepare', { artifact })
+        sourceWebDocument = prepared?.document === 'web'
+        if (signal.aborted || !scope.isActive()) throw new Error('组件挂载已取消')
+        if (!web && prepared?.document === 'web' && hasWebContentData(data)) {
+          // A professional identity is never an execution directive. Only the
+          // actually imported Source may request the mature Web document path.
+          runtimeBuiltinKey = 'guoling.web'; web = true
+          authorDocumentKind = htmlDocumentKind(data.html); documentKind = authorDocumentKind
+          projected = await projectInstance(context.instance)
+          authorHtml = readAuthorHtml(context.instance)
+          if (signal.aborted || !scope.isActive()) throw new Error('组件挂载已取消')
+          if (documentKind === 'document' && context.root) await request('document', { html: authoredDocumentBootstrap(projected.data as WebRuntimeData, {
+            nonce, instanceId: context.instance.id, resources, resourceCss: typeof data.css === 'string' ? data.css : undefined,
+            themeCss: `${prepared.fontFaceCss ?? ''}\n${splitInstalledBundledFontFaceCss(snapshots.themeCss?.() ?? '').theme}`,
+            bridge: programs => `window[${JSON.stringify(`__guoling_adopt_${nonce.replace(/-/g, '_')}`)}](${authoredDocumentProgramsSource(programs)})`,
+          }) })
+        }
+        if (!web && context.root && context.instance.frame) {
+          sourceViewport = { left: 0, top: 0, right: context.instance.frame.width, bottom: context.instance.frame.height, width: context.instance.frame.width, height: context.instance.frame.height }
+          if (getComputedStyle(context.root).position === 'static') { const position = context.root.style.position; context.root.style.position = 'relative'; scope.cleanup(() => { context.root!.style.position = position }) }
+          refreshSourceViewport(false)
+          const resize = new ResizeObserver(() => refreshSourceViewport()); resize.observe(context.root)
+          const refresh = () => refreshSourceViewport()
+          window.addEventListener('resize', refresh); window.addEventListener('scroll', refresh, true)
+          scope.cleanup(() => { resize.disconnect(); window.removeEventListener('resize', refresh); window.removeEventListener('scroll', refresh, true) })
+        }
+        if (signal.aborted || !scope.isActive()) throw new Error('组件挂载已取消')
+        await request('mount', { instance: projected, generation: scope.generation, runScopeId: scope.runScopeId,
+          activity,
+          visual: Boolean(context.root), state: snapshots.state(), targets: targetsFor(projected), teacher: teacherSnapshot(), htmlAuthoring: snapshots.htmlAuthoring,
+          media: Boolean(mediaPort), interaction: interactionSnapshot(),
+          layout: layoutPort?.read(),
+          sourceViewport,
+          fragmentStateKey: componentFragmentStateKey(context.instance.id), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), resourceBindings: snapshots.resourceBindings,
+          authorHtml, documentKind, builtinKey: runtimeBuiltinKey, resourceCss: typeof data?.css === 'string' ? data.css : undefined })
+        if (!scope.isActive()) throw new Error('组件挂载已取消')
+        return { update: async instance => { authorInstance = instance; const projected = await projectInstance(instance); return request('update', { instance: projected, state: snapshots.state(), targets: targetsFor(projected), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), interaction: interactionSnapshot(),
+            resourceCss: instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && typeof instance.data.css === 'string' ? instance.data.css : undefined,
+            authorHtml: readAuthorHtml(instance) }).then(() => undefined) },
+          updatePlacement: frame => {
+            if (authorInstance) authorInstance = { ...authorInstance, frame }
+            refreshSourceViewport()
+            if (scope?.isActive()) void request('placement', { frame }).catch(() => {})
+          },
+          async dispose() { if (!disposed) { try { await request('dispose') } finally { release() } } },
+        }
+      },
+    } }
+  } catch (error) { release(); throw error }
+}

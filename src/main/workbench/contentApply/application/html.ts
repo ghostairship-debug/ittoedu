@@ -1,11 +1,12 @@
 import { parse, serialize, serializeOuter, type DefaultTreeAdapterTypes } from 'parse5'
 import { htmlObjectStyle, type HtmlAssembly, type HtmlAssemblyObject, type HtmlObjectContent } from '../../../../core/contentApply/assembly/htmlAssembly'
-import type { ComponentDefinition, ComponentFrame, CourseProjectV10, JsonObject } from '../../../../shared/contracts/component-platform'
+import { containerChildIds, type ComponentDefinition, type ComponentFrame, type CourseProjectV10, type JsonObject } from '../../../../shared/contracts/component-platform'
 import { htmlContentTargetIds } from './plan'
 import type { ContentApplyDiagnostic, ContentChangeRequest, ContentObjectDraft, HtmlContentProjection } from './types'
 import { professionalHtmlDraft } from './professionalHtml'
-import { measuredFragmentBoxStyle } from '../../../../components/web/measuredFragmentBox'
+import { measuredFragmentBoxStyle, measuredFragmentRootCss, measuredFragmentDocumentCss } from '../../../../components/web/measuredFragmentBox'
 import { HTML_PROGRAM_DEFINITION, WEB_DEFINITION } from '../../../../components/web/data'
+import { retainedMeasurementScopeHtml } from '../measurement/prepareMeasurementDocument'
 import { htmlDocumentKind } from '../../../../shared/html/documentKind'
 
 type Element = DefaultTreeAdapterTypes.Element
@@ -23,7 +24,7 @@ function contentHtml(content: HtmlObjectContent, serialization: HtmlSerializatio
   const attributes = { ...content.attributes }
   // A computed pseudo-element has no DOM node. Keep its measured declarations
   // under a software-owned selector instead of dropping generated text/paint.
-  const pseudos = Object.entries(content.pseudoElements)
+  const pseudos = content.sourceStyle === undefined ? Object.entries(content.pseudoElements) : []
   let pseudoCss = ''
   if (pseudos.length) {
     const anchor = `p${serialization.nextPseudo++}`
@@ -32,7 +33,8 @@ function contentHtml(content: HtmlObjectContent, serialization: HtmlSerializatio
       `[data-guoling-measured-pseudo="${anchor}"]${pseudo}{${Object.entries(declarations).map(([name, value]) => `${name}:${value}`).join(';')}}`
     ).join('\n').replace(/<\/style/gi, '<\\/style')}</style>`
   }
-  const style = Object.entries(content.style).map(([key, value]) => `${key}:${value}`).join(';')
+  if (content.sourceStyle !== undefined) delete attributes.style
+  const style = Object.entries(content.sourceStyle === undefined ? content.style : { ...content.inheritedStyle, ...content.sourceStyle }).map(([key, value]) => `${key}:${value}`).join(';')
   if (style) attributes.style = style
   const open = `<${content.tagName}${Object.entries(attributes).map(([key, value]) => ` ${key}="${escape(value)}"`).join('')}>`
   if (VOID.has(content.tagName)) return pseudoCss + open
@@ -47,6 +49,8 @@ function orderedChildren(object: HtmlAssemblyObject): HtmlAssemblyObject[] {
   const children = [...object.children, ...object.decorations.filter(value => value.interleaves).map<HtmlAssemblyObject>(decoration => ({
     kind: 'web', label: '装饰', sourcePath: decoration.sourcePath, frame: decoration.frame,
     style: decoration.content.kind === 'element' ? decoration.content.style : {},
+    sourceStyle: decoration.content.kind === 'element' ? decoration.content.sourceStyle : undefined,
+    inheritedStyle: decoration.content.kind === 'element' ? decoration.content.inheritedStyle : undefined,
     pseudoElements: decoration.content.kind === 'element' ? decoration.content.pseudoElements : {},
     content: decoration.content, stacking: decoration.stacking, children: [], decorations: [], sourceRegions: [],
   }))]
@@ -70,7 +74,7 @@ function backgroundDecorationHtml(object: HtmlAssemblyObject, serialization: Htm
   return object.decorations.filter(value => !value.interleaves).map(decoration => {
     const frame = decoration.frame
     const content = decoration.content.kind === 'element'
-      ? { ...decoration.content, style: measuredFragmentBoxStyle(decoration.content.style) } : decoration.content
+      ? { ...decoration.content, attributes: { ...decoration.content.attributes, ...(decoration.content.sourceStyle !== undefined ? { 'data-guoling-measured-root': '' } : {}) }, style: measuredFragmentBoxStyle(decoration.content.style) } : decoration.content
     return `<div style="position:absolute;left:0;top:0;width:${frame.width}px;height:${frame.height}px;transform-origin:0 0;transform:matrix(${frame.transform.join(',')})">${contentHtml(content, serialization)}</div>`
   }).join('')
 }
@@ -113,23 +117,36 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
     const definition = definitionFor(WEB_DEFINITIONS.find(value => value.id === (object.kind === 'program' ? 'guoling.html-program' : 'guoling.web'))!)
     const originalContent = object.content?.kind === 'element' && object.content.tagName === 'body'
       ? { ...object.content, tagName: 'div' } : object.content
-    const measuredStyle = object.kind === 'program' ? object.style : measuredFragmentBoxStyle(object.style)
+    const measuredStyle = object.kind === 'group' ? htmlObjectStyle(object.style, true) : object.kind === 'program' ? object.style : object.sourceStyle === undefined
+      ? measuredFragmentBoxStyle(object.style) : htmlObjectStyle({ ...object.inheritedStyle, ...object.sourceStyle })
     const content = object.kind !== 'program' && originalContent?.kind === 'element'
-      ? { ...originalContent, style: measuredFragmentBoxStyle(originalContent.style) } : originalContent
-    let html = object.retainedSource?.html ?? object.program?.html ?? (content ? contentHtml(content, serialization) : '')
+      ? { ...originalContent, attributes: { ...originalContent.attributes, ...(originalContent.sourceStyle !== undefined ? { 'data-guoling-measured-root': '', ...(object.kind === 'group' ? { 'data-guoling-measured-group': '' } : {}) } : {}) },
+        ...(object.kind === 'group' && originalContent.sourceStyle !== undefined ? { sourceStyle: measuredStyle } : {}),
+        style: measuredFragmentBoxStyle(originalContent.style) } : originalContent
+    // Atomic Web source keeps its real CSS ancestor context. Detached group children
+    // remain separately owned objects and cannot be copied back into this source.
+    const sourceScope = !object.retainedSource && object.kind !== 'program' && object.kind !== 'group'
+      && object.sourceStyle !== undefined && object.sourcePath.length && !object.children.length
+      ? retainedMeasurementScopeHtml(assembly.source, object.sourcePath) : undefined
+    let html = object.retainedSource?.html ?? object.program?.html ?? sourceScope ?? (content ? contentHtml(content, serialization) : '')
     const retained = backgroundDecorationHtml(object, serialization) + object.sourceRegions.map(region => region.html).join('')
     if (retained) {
       const closing = content?.kind === 'element' && !VOID.has(content.tagName) ? `</${content.tagName}>` : ''
       html = closing && html.endsWith(closing) ? html.slice(0, -closing.length) + retained + closing : html + retained
     }
-    const supportCss = object.sourcePath.length === 0 && (object.kind === 'program' || object.retainedSource)
-      ? assembly.source.themeCss : assembly.supportCss
+    const sourceCss = assembly.sourceCss
+    const supportCss = object.sourcePath.length === 0 && object.kind === 'program'
+      ? assembly.source.themeCss
+      : [...new Set([assembly.source.themeCss, sourceCss, assembly.supportCss,
+        ...(object.kind !== 'program' && !object.retainedSource && !sourceScope && object.sourceStyle !== undefined
+          ? [measuredFragmentDocumentCss(Boolean(options.flow)), measuredFragmentRootCss('[data-guoling-measured-root]', Boolean(options.flow)),
+            ...(object.kind === 'group' ? ['[data-guoling-measured-group]{display:block!important;padding:0!important;gap:0!important;align-items:normal!important;justify-content:normal!important}'] : [])] : [])].filter((css): css is string => !!css))].join('\n')
     const data: JsonObject = { html, ...(supportCss ? { css: supportCss } : {}),
       ...(object.kind === 'program' && options.modules ? { modules: options.modules } : {}),
       ...(Object.keys(resourceBindings).length ? { resourceBindings } : {}) }
     return { definitionId: definition.id, data,
       frame: { width: object.frame.width, height: object.frame.height, transform: [...object.frame.transform] } as ComponentFrame,
-      style: object.kind === 'program' ? htmlObjectStyle(object.style, false) : measuredStyle,
+      style: object.kind === 'program' ? htmlObjectStyle(object.style, false) : object.retainedSource || sourceScope ? {} : measuredStyle,
       ...(object.kind === 'group' ? { children: orderedChildren(object).map(draft) } : {}) }
   }
   const rootStyle = assembly.root.style
@@ -245,10 +262,12 @@ export function localHtmlInputs(project: CourseProjectV10, request: ContentChang
   if (request.source.kind !== 'html') throw new Error('当前源不是 HTML')
   const ids = htmlContentTargetIds(project, request)
   if (request.source.scope !== 'projection') {
-    if (request.target.kind !== 'instance' || (project.instances[request.target.instanceId]?.childIds?.length ?? 0)) {
-      throw new Error('编组内容修改需要当前软件投影，不能猜测替换其内部对象')
-    }
-    return [{ instanceId: request.target.instanceId, html: request.source.html }]
+    const roots = request.target.kind === 'instance' ? [request.target.instanceId] : containerChildIds(project, request.target.container)
+    // One leaf is an unambiguous content target even when its read alias is the page file.
+    if (roots.length === 1 && !project.instances[roots[0]!]!.childIds?.length) return [{ instanceId: roots[0]!, html: request.source.html }]
+    // A read-back projection passed as complete content can still modify its mapped objects.
+    // Independent replacement programs take redo's assembly path and never enter this mapper.
+    if (!request.projection) throw new Error('编组内容修改需要当前软件投影；独立新内容可沿同一范围使用 intent: "redo"')
   }
   if (!request.projection) throw new Error('整页输入缺少当前软件投影，未扩大修改范围')
   const mapped = projectedHtmlElements(request.source.html, request.projection, ids)

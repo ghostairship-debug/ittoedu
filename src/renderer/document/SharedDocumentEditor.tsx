@@ -4,10 +4,12 @@ import { editorPositionToPoint } from './documentAdapter'
 import type { ExecutionSelectionTarget } from '../../shared/workbench/executionDesktop'
 import { workbenchSelection } from '../workbench/SelectionContextController'
 import { cancelEditPreview, useEditPreviews } from '../workbench/EditPreviewProjection'
+import { projectDocumentRanges } from '../../shared/document/textInteraction'
 import { pinnedSelectionKey, pinnedSelectionPlugin, sourcePinnedSelectionEffect, sourcePinnedSelectionField } from './selectionDecorations'
 import { FONT_FAMILY_OPTIONS } from '../../shared/fonts/fontFamilyCatalog'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, useMemo, type ReactNode } from 'react'
-import { Baseline, Bold, Highlighter, Italic, Link2, MoreHorizontal, Sigma, SlidersHorizontal, Table2, Underline } from 'lucide-react'
+import { AArrowDown, AArrowUp, Baseline, Bold, Highlighter, Italic, Link2, MoreHorizontal, Sigma, SlidersHorizontal, Table2, Underline, Strikethrough, Superscript, Subscript, Code, Eraser, Dot } from 'lucide-react'
+import { stepFontSize } from '../../shared/fontSizeStep'
 import { LatexFormulaAuthoringEditor } from '../ui/LatexFormulaAuthoringEditor'
 import { PaletteButton } from '../editing/color/PaletteButton'
 import type { QuickBarBounds, QuickBarRect } from '../editing/quickbar/placeQuickBar'
@@ -20,7 +22,7 @@ import { EditorView as SourceView, keymap as sourceKeymap } from '@codemirror/vi
 import { markdown } from '@codemirror/lang-markdown'
 import { foldGutter, foldEffect } from '@codemirror/language'
 import { parseDocumentMarkdown, serializeDocumentMarkdown, type MarkdownDocument, type MarkdownOptions } from '../../shared/document/markdown'
-import type { DocumentDiagnostic, DocumentSelection, DocumentContextSelection } from '../../shared/document/ports'
+import type { DocumentDiagnostic, DocumentSelection, DocumentContextSelection, DocumentPoint } from '../../shared/document/ports'
 import { mapDocumentSelectionToSource, type MarkdownSourceMap } from '../../shared/document/markdownSourceMap'
 import type { TextRunStyle } from '../../shared/contracts/native-v1/types'
 import { buildFlowTextStyleCss } from '../../shared/flowRichText'
@@ -32,7 +34,7 @@ import { DocumentBlockHandle, documentBlockDragId, DOCUMENT_BLOCK_DRAG_MIME } fr
 import { documentTableCommandLabels, type DocumentTableCommand } from './documentTableCommands'
 import { changeDocumentTableFromEditorState, resolveDocumentTableEditorTarget } from './documentTableEditorPort'
 import { restoreDocumentTableSelection, type PreviousDocumentTableSelection } from './documentTableSelectionRestore'
-import { fromEditorDocument, toEditorDocument } from './documentAdapter'
+import { fromEditorDocument, toEditorDocument,readEditorMath } from './documentAdapter'
 import { documentEditorSchema } from './editorSchema'
 import { NodeSelection, Selection, TextSelection, type EditorState } from 'prosemirror-state'
 import { CellSelection } from 'prosemirror-tables'
@@ -67,7 +69,7 @@ function visibleEditorBounds(editor: HTMLElement): { left: number; right: number
   return { left, right, top, bottom }
 }
 
-export type DocumentInlineStyleDefaults = (blockId: string) => TextRunStyle | undefined
+export type DocumentInlineStyleDefaults = (blockId: string, point?:DocumentPoint|null) => TextRunStyle | undefined
 function inlineBlockId(state: EditorState, position: number): string {
   const point = state.doc.resolve(position)
   for (let depth = point.depth; depth > 0; depth--) {
@@ -82,11 +84,11 @@ export function documentInlineDefaultDecorations(state: EditorState, defaults?: 
   const decorations: Decoration[] = []
   state.doc.descendants((node, position) => {
     if (!node.isInline || node.type === documentEditorSchema.nodes.hard_break) return
-    const base = defaults(inlineBlockId(state, position))
+    const base = defaults(inlineBlockId(state, position),editorPositionToPoint(state.doc,position))
     if (!base) return
     const own = node.marks.find(mark => mark.type === documentEditorSchema.marks.style)?.attrs.value ?? {}
     const style = node.type === documentEditorSchema.nodes.math
-      ? { ...(base.fontSize === undefined ? {} : { fontSize: base.fontSize }), ...(base.color === undefined ? {} : { color: base.color }), ...node.attrs.data.style, ...own }
+      ? { ...(base.fontSize === undefined ? {} : { fontSize: base.fontSize }), ...(base.color === undefined ? {} : { color: base.color }), ...own }
       : { ...base, ...own }
     const css = buildFlowTextStyleCss(style)
     if (css) decorations.push(Decoration.inline(position, position + node.nodeSize, { style: css, 'data-document-inline-defaults': 'true' }))
@@ -100,7 +102,7 @@ export function readDocumentFormatting(state: EditorState, defaults?: DocumentIn
     if (node.isTextblock) paragraphTypes.add(node.type === documentEditorSchema.nodes.heading ? String(node.attrs.data.level ?? 2)
       : node.type === documentEditorSchema.nodes.paragraph ? 'paragraph' : '')
   })
-  const sample = (marks: typeof state.selection.$from.parent.marks, position: number) => samples.push({ ...defaults?.(inlineBlockId(state, position)), ...marks.find(mark => mark.type === documentEditorSchema.marks.style)?.attrs.value })
+  const sample = (marks: typeof state.selection.$from.parent.marks, position: number) => samples.push({ ...defaults?.(inlineBlockId(state, position),editorPositionToPoint(state.doc,position)), ...marks.find(mark => mark.type === documentEditorSchema.marks.style)?.attrs.value })
   if (state.selection.empty) sample(state.storedMarks ?? state.selection.$from.marks(), state.selection.from)
   else for (const range of state.selection.ranges) state.doc.nodesBetween(range.$from.pos, range.$to.pos, (node, position) => { if (node.isInline && !node.isTextblock) sample(node.marks, position) })
   const values = <T,>(get: (style: TextRunStyle) => T): T | 'mixed' => {
@@ -116,6 +118,7 @@ export interface SharedDocumentEditorProps {
   toolbarHost?: HTMLElement | null
   /** The caller's saved field shape; the full document editor remains the default. */
   contentScope?: DocumentContentScope
+  hiddenBlockIds?:readonly string[]
   /** Host-owned whole-text defaults, resolved per formal block; explicit run false/null wins. */
   inlineStyleDefaults?: DocumentInlineStyleDefaults
   document: MarkdownDocument
@@ -126,9 +129,12 @@ export interface SharedDocumentEditorProps {
   sourceMap?: MarkdownSourceMap
   initialMode?: 'layout' | 'source'
   readOnly?: boolean
+  renderTextActions?(selection: DocumentSelection | null): ReactNode
+  renderInline?(instanceId: string, container: HTMLElement): (() => void) | void
   renderObject?(block: DocumentBlock, container: HTMLElement): (() => void) | void
   runtimeSpacers?: readonly { readonly blockId: string; readonly height: number }[]
   objectRevision?: unknown
+  objectRevisionFor?(block:DocumentBlock):unknown
   beforeProjectionMutation?():void
   afterProjectionMutation?():void
   clipboardContext?: unknown
@@ -202,7 +208,10 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const diagnosticsRef = useRef<DocumentDiagnostic[]>([...(props.sourceDiagnostics ?? [])])
   const restoredDiagnostics = useRef(Boolean(props.sourceDiagnostics?.length))
   function reportDiagnostics(issues: DocumentDiagnostic[]) { diagnosticsRef.current = issues; setDiagnostics(issues) }
-  const [mathDraft, setMathDraft] = useState<{ latex: string; accessibleText: string; display: boolean; formulaId: string; from: number; to: number } | null>(null)
+  const [mathDraft, setMathDraft] = useState<{ latex: string; accessibleText: string; display: boolean; formulaId: string; from: number; to: number; existing?: boolean } | null>(null)
+  const mathTarget=useRef<ReturnType<ReturnType<typeof createLayoutEditor>['trackSelection']>|null>(null)
+  const linkTarget=useRef<ReturnType<ReturnType<typeof createLayoutEditor>['trackSelection']>|null>(null)
+  const [semanticSelection, setSemanticSelection] = useState<DocumentSelection | null>(null)
   const [activeBlock, setActiveBlock] = useState<{ id: string; rect: { left: number; top: number; height: number } } | null>(null)
   const [linkDraft, setLinkDraft] = useState<string | null>(null)
   const [contextualTarget, setContextualTarget] = useState<DocumentContextSelection | null>(null)
@@ -220,6 +229,16 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const attachRoot = useCallback((element: HTMLDivElement | null) => { editorRoot.current = element; setRootElement(element) }, [])
   // A right-clicked object is selected first; its owner builds the menu for the new selection on the next turn.
   const objectMenu = useContextMenu()
+  const slashReturn=useRef<ReturnType<ReturnType<typeof createLayoutEditor>['trackSelection']>|null>(null)
+  useEffect(()=>{if(!objectMenu.isOpen){slashReturn.current?.release();slashReturn.current=null}},[objectMenu.isOpen])
+  useEffect(()=>{
+    const escape=(event:KeyboardEvent)=>{
+      if(event.key!=='Escape' || !slashReturn.current)return
+      const kept=slashReturn.current;slashReturn.current=null
+      queueMicrotask(()=>{const editor=layout.current;if(editor && !editor.view.isDestroyed){const selected=kept.resolve();if(selected)editor.view.dispatch(editor.view.state.tr.setSelection(selected));editor.view.focus()};kept.release()})
+    }
+    window.addEventListener('keydown',escape,true);return()=>{window.removeEventListener('keydown',escape,true);slashReturn.current?.release()}
+  },[])
   const openObjectMenu = objectMenu.open
   useEffect(() => {
     if (!rootElement) return
@@ -332,6 +351,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   }
   function publishLayoutSelection(selection: DocumentSelection | null, notifyOwner = true) {
     if (latest.current.active === false) return
+    setSemanticSelection(previous => JSON.stringify(previous) === JSON.stringify(selection) ? previous : selection)
     if (notifyOwner) latest.current.onSelection?.(selection)
     if (!selection) { publishContextualTarget(null); return }
     if (selection.kind === 'text' && JSON.stringify(selection.anchor.slot) === JSON.stringify(selection.head.slot) && selection.anchor.blockId === selection.head.blockId && selection.anchor.offset === selection.head.offset) {
@@ -402,7 +422,10 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     const view = editor.view
     try {
       const replacement = toEditorDocument(content)
-      const selected = activeBlock?.id
+      const previousIds=new Set<string>();view.state.doc.descendants(node=>{if(node.attrs.id)previousIds.add(node.attrs.id)})
+      let inserted:string|undefined
+      replacement.descendants(node=>{if(!inserted && node.attrs.id && !previousIds.has(node.attrs.id) && node.type.name!=='section')inserted=node.attrs.id})
+      const selected = inserted ?? activeBlock?.id
       editor.boundary()
       const transaction = view.state.tr.replaceWith(0, view.state.doc.content.size, replacement.content)
       if (tableSelection) restoreDocumentTableSelection(transaction, tableSelection, content)
@@ -501,13 +524,13 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     { id: 'table-delete', label: '删除表格', group: '表格', danger: true,
       disabledReason: previewSelection() ? '正在生成的范围暂时只读' : null, run: () => run('delete-table') }]
   }
-  const options = () => ({ draftSession, contentScope: latest.current.contentScope, presentation: latest.current.target === 'flow' ? 'flow' as const : undefined, stateChanged: (state: EditorState) => { const next = readDocumentFormatting(state, latest.current.inlineStyleDefaults); setFormat(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next); updateActiveBlock(state) }, requestMathDraft: (request: { from: number; to: number; display: true; latex: ''; formulaId: string }) => setMathDraft({ ...request, accessibleText: '' }), document: projection.current.document, sourceMap: mapRef.current, revision: latest.current.revision,
+  const options = () => ({ draftSession, contentScope: latest.current.contentScope,hiddenBlockIds:latest.current.hiddenBlockIds, presentation: latest.current.target === 'flow' ? 'flow' as const : undefined, stateChanged: (state: EditorState) => { const next = readDocumentFormatting(state, latest.current.inlineStyleDefaults); setFormat(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next); updateActiveBlock(state) }, requestMathDraft: (request: { from: number; to: number; display: true; latex: ''; formulaId: string }) => {const editor=layout.current;if(editor){mathTarget.current?.release();mathTarget.current=editor.trackSelection(TextSelection.create(editor.view.state.doc,request.from,request.to))}setMathDraft({ ...request, accessibleText: '' })}, document: projection.current.document, sourceMap: mapRef.current, revision: latest.current.revision,
     projectionPlugins: [previewPlugin, pinPlugin, inlineDefaultsPlugin], projectionClipboard: (view: Parameters<typeof layoutPreviewClipboard>[0], event: ClipboardEvent, cut: boolean) => {
       const handled = layoutPreviewClipboard(view, event, cut)
       if (handled && cut) previewBlocked()
       return handled
     },
-    readOnly: latest.current.readOnly, renderObject: latest.current.renderObject, objectRevision: latest.current.objectRevision,
+    readOnly: latest.current.readOnly, renderInline: latest.current.renderInline, renderObject: latest.current.renderObject, objectRevision: latest.current.objectRevision,objectRevisionFor:latest.current.objectRevisionFor,
     beforeProjectionMutation:latest.current.beforeProjectionMutation,afterProjectionMutation:latest.current.afterProjectionMutation,
     runtimeSpacers: latest.current.runtimeSpacers,
     clipboardContext: latest.current.clipboardContext, clipboardResourcePort: latest.current.clipboardResourcePort,
@@ -532,7 +555,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   function commit(document: MarkdownDocument, operation: DocumentOperation, owner: SharedDocumentEditorProps): DocumentCommitResult {
     latestOperation.current = operation.operationId
     try {
-      const result = owner.onChange(document, operation)
+      const result = owner.onChange(document, { ...operation, rangeProjection: operation.rangeProjection ?? projectDocumentRanges(document.content) })
       if (result instanceof Promise) return result.then(accepted => {
         if (accepted === false && latestOperation.current === operation.operationId) rejectCommit('正文未能提交，请修正后重试或丢弃草稿', owner.onDraft)
         return accepted
@@ -631,6 +654,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (source.current) source.current.dispatch({ effects: sourcePreviewEffect.of(allPreviews.flatMap(preview => sourcePreviewRanges(preview, mapRef.current, draft.current, toEditorDocument(projection.current.document.content)))) })
   }, [mode, allPreviews, props.revision, props.document])
   useEffect(() => {
+    if(mode==='layout' && layout.current && latest.current.active!==false){const selection=layout.current.readSelection();latest.current.onSelection?.(selection ? {...selection,revision:props.revision}:null)}
     const current = contextualTargetRef.current
     if (!current || current.revision === props.revision) return
     // A committed edit such as formatting keeps the same selection: report it again at the new revision so the
@@ -741,8 +765,9 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       if (!editor || mode !== 'layout' || latest.current.readOnly) return false
       let position: number | null = null
       editor.view.state.doc.descendants((node, offset) => {
-        if (node.attrs.id === blockId && node.type.name === 'paragraph') {
-          position = offset + 1
+        if (node.attrs.id === blockId) {
+          if(node.isTextblock)position=offset+1
+          else node.descendants((child,at)=>{if(position===null && child.isTextblock)position=offset+1+at+1;return position===null})
           return false
         }
         return true
@@ -809,15 +834,16 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     await draftSession.drain()
     if (!await draftSession.discard(latest.current.document)) return
     owner.onDiscardDraft?.()
-    draftOwner.current = null; sourceInvalid.current = false; restoredDiagnostics.current = false; latestOperation.current = null
-    const current = latest.current, text = serializeDocumentMarkdown(current.document, current.target)
+    draftOwner.current = null; restoredDiagnostics.current = false; latestOperation.current = null
+    const current = latest.current, text = current.target === 'file' && current.sourceDraft !== undefined ? current.sourceDraft : serializeDocumentMarkdown(current.document, current.target)
     const parsed = documentScope ? parseDocumentMarkdown(text, { createId: () => crypto.randomUUID(), target: current.target, resolveImage: current.resolveImage }) : null
+    sourceInvalid.current = parsed !== null && parsed.status !== 'valid'
     if (parsed?.status === 'valid') { bindMarkdownIdentities(parsed, current.document); projection.current = parsed }
     else projection.current = { source: text, document: current.document, sourceMap: { blocks: [] } }
     mapRef.current = projection.current.sourceMap; draft.current = text
-    reportDiagnostics([]); latest.current.onDraft(draft.current, [])
+    reportDiagnostics(parsed?.diagnostics ?? []); latest.current.onDraft(draft.current, parsed?.diagnostics ?? [])
     layout.current?.update(options())
-    setMode('layout')
+    setMode(sourceInvalid.current ? 'source' : 'layout')
   }
   function switchMode() {
     publishContextualTarget(null)
@@ -840,7 +866,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       restoreSourceSelection.current = true; sourceSelection.current = source.current ? { anchor: source.current.state.selection.main.anchor, head: source.current.state.selection.main.head } : sourceSelection.current; focusAfterSwitch.current = true; setMode('layout')
     }
   }
-  function style(patch: TextRunStyle) {
+  function style(patch: TextRunStyle | ((effective: TextRunStyle) => TextRunStyle)) {
     const editor = layout.current
     if (!editor) return
     editor.syncDomTextSelection()
@@ -849,14 +875,19 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     const type = documentEditorSchema.marks.style
     const tr = state.tr
     // Under host defaults, explicit null means "no highlight", rather than inheriting the host color.
-    const merged = (current: TextRunStyle) => Object.fromEntries(Object.entries({ ...current, ...patch }).filter(([key, value]) => value !== undefined && (value !== null || key === 'highlightColor' && latest.current.inlineStyleDefaults !== undefined))) as TextRunStyle
+    const merged = (current: TextRunStyle, position: number) => {
+      const base = latest.current.inlineStyleDefaults?.(inlineBlockId(state, position),editorPositionToPoint(state.doc,position)) ?? {}
+      const inheritedSize = base.fontSize ?? (() => { const dom = editor.view.domAtPos(position); const element = dom.node instanceof Element ? dom.node : dom.node.parentElement; return element ? Number.parseFloat(getComputedStyle(element).fontSize) || 16 : 16 })()
+      const change = typeof patch === 'function' ? patch({ ...base, fontSize: inheritedSize, ...current }) : patch
+      return Object.fromEntries(Object.entries({ ...current, ...change }).filter(([key, value]) => value !== undefined && (value !== null || key === 'highlightColor' && latest.current.inlineStyleDefaults !== undefined))) as TextRunStyle
+    }
     if (state.selection.empty) {
       const current = (state.storedMarks ?? state.selection.$from.marks()).find(mark => mark.type === type)?.attrs.value ?? {}
-      tr.addStoredMark(type.create({ value: merged(current) }))
+      tr.addStoredMark(type.create({ value: merged(current, state.selection.from) }))
     } else for (const range of state.selection.ranges) state.doc.nodesBetween(range.$from.pos, range.$to.pos, (node, pos) => {
       if (!node.isInline) return
       const current = node.marks.find(mark => mark.type === type)?.attrs.value ?? {}
-      tr.addMark(Math.max(range.$from.pos, pos), Math.min(range.$to.pos, pos + node.nodeSize), type.create({ value: merged(current) }))
+      tr.addMark(Math.max(range.$from.pos, pos), Math.min(range.$to.pos, pos + node.nodeSize), type.create({ value: merged(current, pos) }))
     })
     editor.view.dispatch(tr)
     editor.view.focus()
@@ -892,7 +923,11 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       visited.add(position)
       const point = state.doc.resolve(position), index = point.index()
       if (node.type !== nodeType && !point.parent.canReplaceWith(index, index + 1, nodeType)) return
-      const attrs = { ...node.attrs, data: { ...node.attrs.data, type, ...(type === 'paragraph' ? {} : { level: Number(value) }) } }
+      if(!node.attrs.id)return
+      const content=fromEditorDocument(documentEditorSchema.nodes.doc.create(null,node))
+      const converted=applyDocumentBlockCommand(content,{action:'convert',blockId:node.attrs.id,kind:type}).blocks[0]!
+      const {id:_id,...data}=converted
+      const attrs = { ...node.attrs, data: {...data,...(type==='heading' ? {level:Number(value)}:{})} }
       if (!node.hasMarkup(nodeType, attrs)) transaction.setNodeMarkup(position, nodeType, attrs)
     })
     if (transaction.docChanged) { editor.boundary(); editor.view.dispatch(transaction.scrollIntoView()) }
@@ -923,37 +958,48 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   }
   function contextualIssue(target: DocumentContextSelection) {
     if (target.revision !== props.revision) return '选中的内容已改变，请改为当前选择；原指令仍保留。'
-    return props.contextualCommandIssue ? props.contextualCommandIssue(target) : target.ranges?.length ? null : target.message ?? '请重新选择要修改的内容。'
+    return props.contextualCommandIssue ? props.contextualCommandIssue(target) : props.target==='flow' && target.mode==='layout' && target.selection ? null:target.ranges?.length ? null : target.message ?? '请重新选择要修改的内容。'
   }
   function openMath() {
     const editor = layout.current
     if (!editor) return
     const { selection } = editor.view.state
+    mathTarget.current?.release();mathTarget.current=editor.trackSelection()
     if (props.contentScope === 'formula') {
       editor.view.state.doc.descendants((node, from) => {
         if (node.type.name !== 'formula') return true
         const data = node.attrs.data
-        setMathDraft({ latex: data.latex, accessibleText: data.accessibleText ?? '', display: true, formulaId: data.formulaId, from, to: from + node.nodeSize })
+        setMathDraft({ latex: data.latex, accessibleText: data.accessibleText ?? '', display: true, formulaId: data.formulaId, from, to: from + node.nodeSize,existing:true })
         return false
       })
       return
     }
     const node = selection instanceof NodeSelection ? selection.node : null
     const data = node?.type.name === 'math' || node?.type.name === 'formula' ? node.attrs.data : null
-    setMathDraft({ latex: data?.latex ?? 'x^2', accessibleText: data?.accessibleText ?? '', display: documentScope && node?.type.name === 'formula', formulaId: data?.formulaId ?? crypto.randomUUID(), from: selection.from, to: selection.to })
+    setMathDraft({ latex: data?.latex ?? 'x^2', accessibleText: data?.accessibleText ?? '', display: documentScope && node?.type.name === 'formula', formulaId: data?.formulaId ?? crypto.randomUUID(), from: selection.from, to: selection.to,existing:Boolean(data) })
   }
   function applyMath(latex = mathDraft?.latex, accessibleText = mathDraft?.accessibleText) {
     const editor = layout.current
     if (!editor || !mathDraft || latex === undefined) return
     try {
       const parsedMath = parseDocumentMath(latex)
-      const current = editor.view.state.doc.nodeAt(mathDraft.from)
+      const tracked=mathTarget.current?.resolve()
+      let from=tracked?.from ?? mathDraft.from,to=tracked?.to ?? mathDraft.to
+      if(mathDraft.existing) {
+        let found=false
+        editor.view.state.doc.descendants((node,at)=>{if(node.attrs.data?.formulaId===mathDraft.formulaId){from=at;to=at+node.nodeSize;found=true;return false}return !found})
+        if(!found)throw new Error('要修改的公式已被删除，原输入仍保留。')
+      }
+      const current = editor.view.state.doc.nodeAt(from)
+      const effective=current?.type.name==='math' ? readEditorMath(current):current?.attrs.data
       const data = { type: 'math', formulaId: mathDraft.formulaId, latex, accessibleText: accessibleText || describeDocumentMath(parsedMath),
-        ...(current?.attrs.data?.style ? { style: current.attrs.data.style } : {}) }
-      let node = mathDraft.display ? documentEditorSchema.nodes.formula.create({ id: current?.type.name === 'formula' ? current.attrs.id : crypto.randomUUID(), data: { ...data, type: 'formula' } }) : documentEditorSchema.nodes.math.create({ data })
+        ...(effective?.style ? { style: effective.style } : {}) }
+      const marks=current?.type.name==='math' ? current.marks:current?.type.name==='formula' && effective?.style ? [documentEditorSchema.marks.style.create({value:effective.style})]:editor.view.state.selection.$from.marks()
+      let node = mathDraft.display ? documentEditorSchema.nodes.formula.create({ id: current?.type.name === 'formula' ? current.attrs.id : crypto.randomUUID(), data: { ...data, type: 'formula' } }) : documentEditorSchema.nodes.math.create({ data },null,marks)
       if (!mathDraft.display && current?.type.name === 'formula') node = documentEditorSchema.nodes.paragraph.create({ id: current.attrs.id, data: { type: 'paragraph' } }, node)
       editor.boundary()
-      editor.view.dispatch(editor.view.state.tr.replaceRangeWith(mathDraft.from, mathDraft.to, node))
+      editor.view.dispatch(editor.view.state.tr.replaceRangeWith(from, to, node))
+      mathTarget.current?.release();mathTarget.current=null
       setMathDraft(null); editor.view.focus()
     } catch (error) { fail(error instanceof Error ? error.message : String(error)) }
   }
@@ -990,30 +1036,32 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       {documentScope && modeControls}
       {mode === 'layout' && props.contentScope === 'formula' && <button type="button" onMouseDown={event => event.preventDefault()} onClick={openMath}>编辑公式</button>}
       {mode === 'layout' && props.contentScope !== 'formula' && <>
-        {([['bold', '粗体'], ['italic', '斜体'], ['underline', '下划线'], ['strike', '删除线'], ['emphasis', '着重号']] as const).map(([key, label]) => <button key={key} type="button" onMouseDown={event => event.preventDefault()} aria-pressed={format.flags[key]} onClick={() => toggleStyle(key)}>{label}</button>)}
-        <label>字号<input aria-label="字号" type="number" min="8" max="400" value={format.fontSize === 'mixed' ? '' : format.fontSize ?? ''} placeholder={format.fontSize === 'mixed' ? '混合' : '默认'} onChange={event => { const value = Number(event.target.value); if (value >= 8 && value <= 400) style({ fontSize: value }) }} /></label>
-        <label>字体<select aria-label="字体" value={format.fontFamily === 'mixed' ? '__mixed' : format.fontFamily ?? ''} onChange={event => { if (event.target.value && event.target.value !== '__mixed') style({ fontFamily: event.target.value }) }}><option value="">默认字体</option>{format.fontFamily === 'mixed' && <option value="__mixed">混合字体</option>}{format.fontFamily && format.fontFamily !== 'mixed' && !FONT_FAMILY_OPTIONS.some(option => option.family === format.fontFamily) && <option value={format.fontFamily}>{format.fontFamily}</option>}{FONT_FAMILY_OPTIONS.map(option => <option key={option.family} value={option.family}>{option.label}</option>)}</select></label>
+        {([['bold', '粗体'], ['italic', '斜体'], ['underline', '下划线'], ['strike', '删除线'], ['emphasis', '着重号']] as const).map(([key, label]) => <button key={key} type="button" onMouseDown={event => event.preventDefault()} aria-label={label} title={label} aria-pressed={format.flags[key]} onClick={() => toggleStyle(key)}>{key === 'bold' ? <Bold size={16} /> : key === 'italic' ? <Italic size={16} /> : key === 'underline' ? <Underline size={16} /> : key === 'strike' ? <Strikethrough size={16} /> : <Dot size={16} />}</button>)}
+        <button type="button" aria-label="减小字号" title="按原字号减小" onMouseDown={event => event.preventDefault()} onClick={() => style(effective => ({ fontSize: stepFontSize(effective.fontSize ?? 16, -1) }))}><AArrowDown size={16} /></button>        <label><input aria-label="字号" type="number" min="8" max="400" value={format.fontSize === 'mixed' ? '' : format.fontSize ?? ''} placeholder={format.fontSize === 'mixed' ? '混合' : '默认'} onChange={event => { const value = Number(event.target.value); if (value >= 8 && value <= 400) style({ fontSize: value }) }} /></label>
+        <button type="button" aria-label="增大字号" title="按原字号增大" onMouseDown={event => event.preventDefault()} onClick={() => style(effective => ({ fontSize: stepFontSize(effective.fontSize ?? 16, 1) }))}><AArrowUp size={16} /></button>        <label><select aria-label="字体" value={format.fontFamily === 'mixed' ? '__mixed' : format.fontFamily ?? ''} onChange={event => { if (event.target.value && event.target.value !== '__mixed') style({ fontFamily: event.target.value }) }}><option value="">默认字体</option>{format.fontFamily === 'mixed' && <option value="__mixed">混合字体</option>}{format.fontFamily && format.fontFamily !== 'mixed' && !FONT_FAMILY_OPTIONS.some(option => option.family === format.fontFamily) && <option value={format.fontFamily}>{format.fontFamily}</option>}{FONT_FAMILY_OPTIONS.map(option => <option key={option.family} value={option.family}>{option.label}</option>)}</select></label>
         <PaletteButton label="文字颜色" text="颜色" onPick={color => { if (color) style({ color }) }} />
         <PaletteButton label="高亮颜色" text="高亮" variant="highlight" onPick={highlightColor => style({ highlightColor })} />
-        <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => style({ baseline: 0.35 })}>上标</button>
-        <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => style({ baseline: -0.25 })}>下标</button>
-        <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { const editor = layout.current; if (editor) toggleMark(documentEditorSchema.marks.code)(editor.view.state, editor.view.dispatch) }}>行内代码</button>
-        <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { const state = layout.current?.view.state; setLinkDraft(state?.selection.$from.marks().find(mark => mark.type === documentEditorSchema.marks.link)?.attrs.href ?? '') }}>链接</button>
-        <button type="button" onMouseDown={event => event.preventDefault()} onClick={openMath}>公式</button>
+        <button type="button" aria-label="上标" title="上标" onMouseDown={event => event.preventDefault()} onClick={() => style({ baseline: 0.35 })}><Superscript size={16} /></button>
+        <button type="button" aria-label="下标" title="下标" onMouseDown={event => event.preventDefault()} onClick={() => style({ baseline: -0.25 })}><Subscript size={16} /></button>
+        <button type="button" aria-label="行内代码" title="行内代码" onMouseDown={event => event.preventDefault()} onClick={() => { const editor = layout.current; if (editor) toggleMark(documentEditorSchema.marks.code)(editor.view.state, editor.view.dispatch) }}><Code size={16} /></button>
+        <button type="button" aria-label="链接" title="链接" onMouseDown={event => event.preventDefault()} onClick={() => { const editor=layout.current;if(!editor)return;const state=editor.view.state;let selected=state.selection;const mark=state.selection.$from.marks().find(mark=>mark.type===documentEditorSchema.marks.link);if(mark && selected.empty){const parent=selected.$from.parent,base=selected.$from.start();let from=selected.from,to=selected.to;parent.forEach((node,pos)=>{if(node.marks.some(value=>value.eq(mark))){if(base+pos<=selected.from && base+pos+node.nodeSize>=selected.from){from=base+pos;to=base+pos+node.nodeSize}}});while(from>base && state.doc.resolve(from).nodeBefore?.marks.some(value=>value.eq(mark)))from-=state.doc.resolve(from).nodeBefore!.nodeSize;while(to<selected.$from.end() && state.doc.resolve(to).nodeAfter?.marks.some(value=>value.eq(mark)))to+=state.doc.resolve(to).nodeAfter!.nodeSize;selected=TextSelection.create(state.doc,from,to)}linkTarget.current?.release();linkTarget.current=editor.trackSelection(selected);setLinkDraft(mark?.attrs.href ?? '') }}><Link2 size={16} /></button>
+        <button type="button" aria-label="公式" title="公式" onMouseDown={event => event.preventDefault()} onClick={openMath}><Sigma size={16} /></button>
         {documentScope && <button type="button" aria-label="插入表格" title="插入表格" onMouseDown={event => event.preventDefault()} onClick={insertTable}><Table2 size={16} aria-hidden="true" /></button>}
-        {!documentScope && <button type="button" onMouseDown={event => event.preventDefault()} onClick={clearFormatting}>清除文字格式</button>}
+        {!documentScope && <button type="button" aria-label="清除文字格式" title="清除文字格式" onMouseDown={event => event.preventDefault()} onClick={clearFormatting}><Eraser size={16} /></button>}
         {documentScope && <select aria-label="段落类型" value={format.paragraphType} onChange={event => applyParagraphType(event.target.value)}><option value="" disabled>段落类型</option><option value="paragraph">正文</option>{[1,2,3,4,5,6].map(level => <option key={level} value={level}>标题 {level}</option>)}</select>}
       </>}
+      {mode === 'layout' && !props.readOnly && props.renderTextActions?.(semanticSelection)}
       {discardButton}
     </div>
   const editorForms = <>
     {linkDraft !== null && <form className="shared-document-form" aria-label="链接编辑" onSubmit={event => {
       event.preventDefault(); const editor = layout.current; if (!editor) return
       if (linkDraft && !/^(https?:|mailto:|#|\.\/|\.\.\/)/i.test(linkDraft)) { fail('请输入 https、mailto 或文档内相对链接'); return }
-      editor.boundary(); const state = editor.view.state
-      if (!linkDraft) editor.view.dispatch(state.tr.removeMark(state.selection.from, state.selection.to, documentEditorSchema.marks.link))
-      else if (state.selection.empty) editor.view.dispatch(state.tr.insertText(linkDraft).addMark(state.selection.from, state.selection.from + linkDraft.length, documentEditorSchema.marks.link.create({ href: linkDraft })))
-      else editor.view.dispatch(state.tr.addMark(state.selection.from, state.selection.to, documentEditorSchema.marks.link.create({ href: linkDraft })))
+      editor.boundary(); const state = editor.view.state,selection=linkTarget.current?.resolve() ?? state.selection
+      if (!linkDraft) editor.view.dispatch(state.tr.removeMark(selection.from, selection.to, documentEditorSchema.marks.link))
+      else if (selection.empty) editor.view.dispatch(state.tr.insertText(linkDraft,selection.from,selection.to).addMark(selection.from, selection.from + linkDraft.length, documentEditorSchema.marks.link.create({ href: linkDraft })))
+      else editor.view.dispatch(state.tr.addMark(selection.from, selection.to, documentEditorSchema.marks.link.create({ href: linkDraft })))
+      linkTarget.current?.release();linkTarget.current=null
       setLinkDraft(null); editor.view.focus()
     }}><label>链接地址<input aria-label="链接地址" value={linkDraft} onChange={event => setLinkDraft(event.target.value)} /></label><button type="submit">应用链接</button><button type="button" onClick={() => setLinkDraft(null)}>取消</button></form>}
     {mathDraft && <div className="shared-document-form shared-document-form--formula" aria-label="公式编辑">
@@ -1064,17 +1112,17 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
           {close => <div className="selection-quick-bar__menu" role="menu" aria-label="更多文字格式">
             {([['strike', '删除线'], ['emphasis', '着重号']] as const).map(([key, label]) =>
               <button key={key} type="button" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { close(); toggleStyle(key) }}>{label}</button>)}
-            <button type="button" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { close(); style({ baseline: 0.35 }) }}>上标</button>
-            <button type="button" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { close(); style({ baseline: -0.25 }) }}>下标</button>
-            <button type="button" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { const editor = layout.current; close(); if (editor) { editor.boundary(); toggleMark(documentEditorSchema.marks.code)(editor.view.state, editor.view.dispatch) } }}>行内代码</button>
-            <label>字号<input aria-label="选区字号" type="number" min="8" max="400" value={format.fontSize === 'mixed' ? '' : format.fontSize ?? ''} placeholder={format.fontSize === 'mixed' ? '混合' : '默认'}
+            <button type="button" aria-label="上标" title="上标" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { close(); style({ baseline: 0.35 }) }}><Superscript size={16} /></button>
+            <button type="button" aria-label="下标" title="下标" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { close(); style({ baseline: -0.25 }) }}><Subscript size={16} /></button>
+            <button type="button" aria-label="行内代码" title="行内代码" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { const editor = layout.current; close(); if (editor) { editor.boundary(); toggleMark(documentEditorSchema.marks.code)(editor.view.state, editor.view.dispatch) } }}><Code size={16} /></button>
+            <label><input aria-label="选区字号" type="number" min="8" max="400" value={format.fontSize === 'mixed' ? '' : format.fontSize ?? ''} placeholder={format.fontSize === 'mixed' ? '混合' : '默认'}
               onChange={event => { const value = Number(event.target.value); if (value >= 8 && value <= 400) style({ fontSize: value }) }} /></label>
-            <label>字体<select aria-label="选区字体" value={format.fontFamily === 'mixed' ? '__mixed' : format.fontFamily ?? ''}
+            <label><select aria-label="选区字体" value={format.fontFamily === 'mixed' ? '__mixed' : format.fontFamily ?? ''}
               onChange={event => { if (event.target.value && event.target.value !== '__mixed') { close(); style({ fontFamily: event.target.value }) } }}>
               <option value="">默认字体</option>{format.fontFamily === 'mixed' && <option value="__mixed">混合字体</option>}
               {FONT_FAMILY_OPTIONS.map(option => <option key={option.family} value={option.family}>{option.label}</option>)}
             </select></label>
-            <button type="button" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { close(); clearFormatting() }}>清除文字格式</button>
+            <button type="button" aria-label="清除文字格式" title="清除文字格式" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { close(); clearFormatting() }}><Eraser size={16} /></button>
           </div>}
         </QuickBarPopoverButton>
         </>}
@@ -1150,6 +1198,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       const selection = layout.current.view.state.selection
       if (selection.empty && selection.$from.depth === 1 && selection.$from.parent.type === documentEditorSchema.nodes.paragraph && selection.$from.parent.content.size === 0) {
         event.preventDefault()
+        slashReturn.current?.release();slashReturn.current=layout.current.trackSelection()
         openObjectMenu({ x: activeBlock.rect.left, y: activeBlock.rect.top + activeBlock.rect.height }, '插入段落',
           activeBlockMenu(activeBlock.id).filter(command => command.group === '插入'))
       }

@@ -1,3 +1,6 @@
+import { componentTextRelationshipCleanupEdits } from './componentTextRelationshipEdits'
+export { componentTextRelationshipCleanupEdits } from './componentTextRelationshipEdits'
+import { remapDocumentData, documentComponentDataVersions, type TextRangeProjection } from '../../shared/document/textInteraction'
 import type { ComponentEdit, CourseProjectV10, JsonValue } from '../../shared/contracts/component-platform'
 import { componentDefinitionBuiltinKey, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
 import { componentRuleEdits, interactionBehavior, componentInteractionDataSchema } from '../../shared/componentInteractionData'
@@ -13,8 +16,11 @@ import { switchShapeType } from '../../components/shape/authoring'
 
 export interface ComponentDataTarget { surfaceId: string | null; instanceId: string; stateId?: string | null }
 export interface ComponentDataField { path: string[]; value: JsonValue }
-export type ComponentDataChange = { kind: 'patch' | 'replace'; data: JsonValue }
-  | { kind: 'fields'; fields: readonly ComponentDataField[] }
+export type ComponentDataChange = ( { kind: 'patch' | 'replace'; data: JsonValue }
+  | { kind: 'fields'; fields: readonly ComponentDataField[] }) & {
+    textEdits?: readonly { path: string[]; edits: readonly import('../../shared/textRuns').TextRunEdit[] }[]
+    rangeProjection?: readonly TextRangeProjection[]
+  }
 const record = (value: unknown): value is Record<string, JsonValue> => value !== null && typeof value === 'object' && !Array.isArray(value)
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
 
@@ -82,6 +88,8 @@ export function componentDataEdits(project: CourseProjectV10, target: ComponentD
   let fields = change.kind === 'fields' ? [...change.fields] : change.kind === 'patch'
     ? componentDataPropertyFields(instance.data, change.data, builtinKey) : [{ path: [], value: change.data }]
   let next = changedData(instance.data, fields)
+  const mapped = json(remapDocumentData(instance.data, next, change))
+  if (!equalComponentValue(mapped, next)) { next = mapped; fields = [{ path: [], value: next }] }
   if (equalComponentValue(instance.data, next)) return []
 
   if (builtinKey === 'guoling.input') {
@@ -128,7 +136,7 @@ export function componentDataEdits(project: CourseProjectV10, target: ComponentD
     if (owner && interactionBehavior(effective, owner)?.id === instance.id)
       return componentRuleEdits(effective, owner, componentInteractionDataSchema.parse(next).rules)
   }
-  return fields.map(field => ({ type: 'data.set', instanceId: instance.id, ...field }))
+  return [...fields.map((field): ComponentEdit => ({ type: 'data.set', instanceId: instance.id, ...field })), ...componentTextRelationshipCleanupEdits(effective, instance.id, next, documentComponentDataVersions(project, instance.id, { ...target, data: next }))]
 }
 
 export function componentTableDataEdits(project: CourseProjectV10, target: ComponentDataTarget, edit: TableEdit): ComponentEdit[] {
@@ -143,3 +151,4 @@ export function componentChartDataEdits(project: CourseProjectV10, target: Compo
   return componentDataEdits(project, target, { kind: 'replace', data: json(edit.type === 'chart-type'
     ? changeChartType(data, edit.chartType, edit.retainedSeriesId) : editChartData(data, edit)) })
 }
+

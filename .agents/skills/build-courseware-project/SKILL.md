@@ -5,7 +5,7 @@ description: 将已有第三方或外来 HTML 保真导入可编辑课件；适�
 
 # 从 HTML 交付课件
 
-取得用户指定的已有外来 HTML，保留其内容、样式、资源和互动。直接导入无需重新策划、改写正文或先套模板。新课创作从框架起写入工程内文件，不经过本入口。
+取得用户指定的已有外来 HTML，保留其内容、样式、资源和互动。直接导入无需重新策划、改写正文或先套模板。新互动演示由 `orchestrate-courseware` 从正式工程中的关键体验开始，不经过整课HTML导入中转。
 
 导入需要操作说明时按需读共享指南的[发现与可用性](../workbench-usage/references/discovery.md)及[文件与保存](../workbench-usage/references/files-and-delivery.md)；内置用 `skills.read {skill:"workbench-usage",path:"references/所需文件.md"}`，安装版用目录返回的完整名称。
 

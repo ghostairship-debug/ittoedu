@@ -9,12 +9,7 @@ async function closeActivity(): Promise<CloseActivity> {
   let recording: CloseActivity['recording']
   const builtinTasks = await executionDesktopService().then(async execution => {
     recording = execution.events.getPendingState()
-    let count = 0
-    for (const stored of await execution.runs.list()) {
-      const run = await execution.engine.read(stored.runId) ?? stored
-      if (['queued', 'running', 'stopping'].includes(run.status)) count++
-    }
-    return count
+    return execution.engine.activeRunCount()
   }).catch(() => 0)
   const external = await externalMcpService().then(service => service.activity()).catch(() => [])
   return { builtinTasks, external, ...(recording ? { recording } : {}) }

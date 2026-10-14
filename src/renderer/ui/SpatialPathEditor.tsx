@@ -45,6 +45,8 @@ export interface SpatialPathEditorProps {
   readonly onUpdateRelationLabel: (relationId: string, label: string) => void
   readonly onUpdateRelationKind: (relationId: string, kind: SpatialRelationKind) => void
   readonly onDeleteRelation: (relationId: string) => void
+  readonly onSelectPath?: (pathId: string) => void
+  readonly onSelectRelation?: (relationId: string) => void
 }
 
 const DASH_OPTIONS = ['solid', 'dashed', 'dotted'] as const
@@ -148,6 +150,8 @@ export function SpatialPathEditor(props: SpatialPathEditorProps): React.JSX.Elem
     onUpdateRelationLabel,
     onUpdateRelationKind,
     onDeleteRelation,
+    onSelectPath,
+    onSelectRelation,
   } = props
 
   const [pathName, setPathName] = useState('')
@@ -202,6 +206,7 @@ export function SpatialPathEditor(props: SpatialPathEditorProps): React.JSX.Elem
   const selectedPath = selectedPathId
     ? paths.find((path) => path.id === selectedPathId)
     : undefined
+  const selectedPathSource = selectedPath?.instanceIds?.length || (!selectedPath?.frameIds.length && selectedPath?.instanceIds !== undefined) ? 'instances' : 'frames'
   const selectedRelation = selectedRelationId
     ? relations.find((relation) => relation.id === selectedRelationId)
     : undefined
@@ -382,8 +387,33 @@ export function SpatialPathEditor(props: SpatialPathEditorProps): React.JSX.Elem
               value={(selectedPath.title ?? selectedPath.id)}
               onCommit={(name) => onRenamePath(selectedPath.id, name)}
             />
+            <label className="form-field"><span>路径成员类型</span>
+              <select className="form-input" aria-label="路径成员类型" value={selectedPathSource}
+                disabled={disabled || !onReorderPathWaypoints || !onReorderPathFrames}
+                onChange={event => event.currentTarget.value === 'frames'
+                  ? onReorderPathFrames?.(selectedPath.id, []) : onReorderPathWaypoints?.(selectedPath.id, [])}>
+                <option value="instances">世界对象</option><option value="frames">镜头停靠点</option>
+              </select>
+            </label>
+            <p className="property-hint">切换类型会清空本路径成员，可撤销；不改变全部镜头顺序。</p>
+            <label className="form-field"><span>添加路径成员</span>
+              <select className="form-input" aria-label="添加路径成员" value=""
+                disabled={disabled || (selectedPathSource === 'frames' ? !onReorderPathFrames : !onReorderPathWaypoints)}
+                onChange={event => {
+                  const id = event.currentTarget.value
+                  if (!id) return
+                  if (selectedPathSource === 'frames') onReorderPathFrames?.(selectedPath.id, [...selectedPath.frameIds, id])
+                  else onReorderPathWaypoints?.(selectedPath.id, [...selectedPath.instanceIds ?? [], id])
+                }}>
+                <option value="">选择要添加的成员</option>
+                {selectedPathSource === 'frames'
+                  ? frames.filter(frame => !selectedPath.frameIds.includes(frame.id)).map(frame => <option key={frame.id} value={frame.id}>{frame.title ?? frame.id}</option>)
+                  : worldInstances.filter(item => !selectedPath.instanceIds?.includes(item.id)).map(item => <option key={item.id} value={item.id}>{layerLabel(item.id)}</option>)}
+              </select>
+            </label>
             <p className="property-hint">
-              {(selectedPath.instanceIds ?? []).map(layerLabel).join(' → ') || '未选择图层'}
+              {(selectedPath.instanceIds?.length ? selectedPath.instanceIds.map(layerLabel)
+                : selectedPath.frameIds.map(id => frames.find(frame => frame.id === id)?.title ?? id)).join(' → ') || '未选择路径点'}
             </p>
             {onReorderPathWaypoints && (selectedPath.instanceIds ?? []).map((layerItemId, index) => (
               <div className="form-field" key={`${selectedPath.id}-${layerItemId}-${index}`} data-layer-item-id={layerItemId}>
@@ -406,6 +436,9 @@ export function SpatialPathEditor(props: SpatialPathEditorProps): React.JSX.Elem
                 >
                   下移
                 </button>
+                <button type="button" className="secondary-button" disabled={disabled}
+                  aria-label={`删除路径点 ${layerLabel(layerItemId)}`}
+                  onClick={() => onReorderPathWaypoints?.(selectedPath.id, (selectedPath.instanceIds ?? []).filter((_, at) => at !== index))}>删除</button>
               </div>
             ))}
             {!(selectedPath.instanceIds?.length) && selectedPath.frameIds.map((frameId, index) => {
@@ -416,6 +449,9 @@ export function SpatialPathEditor(props: SpatialPathEditorProps): React.JSX.Elem
                   aria-label={`上移路径镜头 ${label}`} onClick={() => movePathFrameAt(selectedPath, index, -1)}>上移</button>
                 <button type="button" className="secondary-button" disabled={disabled || !onReorderPathFrames || index === selectedPath.frameIds.length - 1}
                   aria-label={`下移路径镜头 ${label}`} onClick={() => movePathFrameAt(selectedPath, index, 1)}>下移</button>
+                <button type="button" className="secondary-button" disabled={disabled || !onReorderPathFrames}
+                  aria-label={`删除路径镜头 ${label}`}
+                  onClick={() => onReorderPathFrames?.(selectedPath.id, selectedPath.frameIds.filter((_, at) => at !== index))}>删除</button>
               </div>
             })}
             <PathStyleFields
@@ -496,7 +532,7 @@ export function SpatialPathEditor(props: SpatialPathEditorProps): React.JSX.Elem
       <details className="simple-advanced-properties">
         <summary>路径与关系</summary>
         <p className="property-hint">
-          「{surfaceTitle}」的路径和关系会随课程保存。它们不是图层行，也不会进入通用叠放顺序。
+          「{surfaceTitle}」的路径决定镜头巡游顺序；关系连线说明节点之间的联系。点击画布上的线或关系标签，或使用下面的“编辑”按钮修改。修改会随课程保存。
         </p>
         {createPathForm}
         {paths.length === 0 ? (
@@ -509,6 +545,8 @@ export function SpatialPathEditor(props: SpatialPathEditorProps): React.JSX.Elem
               {path.instanceIds?.length ? path.instanceIds.map(layerLabel).join(' → ')
                 : path.frameIds.map(id => frames.find(frame => frame.id === id)?.title ?? id).join(' → ')}
             </p>
+            {onSelectPath && <button type="button" className="secondary-button" disabled={disabled} aria-label={`编辑路径 ${(path.title ?? path.id)}`}
+              onClick={() => onSelectPath(path.id)}>编辑</button>}
             <button
               type="button"
               className="secondary-button secondary-button--danger"
@@ -530,6 +568,8 @@ export function SpatialPathEditor(props: SpatialPathEditorProps): React.JSX.Elem
               {' → '}
               {layerLabel(relation.targetInstanceId)}
             </p>
+            {onSelectRelation && <button type="button" className="secondary-button" disabled={disabled} aria-label={`编辑关系 ${layerLabel(relation.sourceInstanceId)} → ${layerLabel(relation.targetInstanceId)}`}
+              onClick={() => onSelectRelation(relation.id)}>编辑</button>}
             <button
               type="button"
               className="secondary-button secondary-button--danger"

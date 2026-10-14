@@ -54,8 +54,9 @@ async function fixture() {
   const host = new DocumentHostService(path.join(directory, 'host'))
   const initial = await host.internalAPI.create({ kind: 'course-v10', project: model('A'), resources: resources() }, 'A.h5lesson')
   const bridge = new CourseV10DocumentBridge(); disposers.push(async () => bridge.dispose())
-  await bridge.connect(hostAPI(host, initial)); bridge.selectInstances(initial.documentId, ['a'], 'page')
-  return { ...testing, screen: testing.within(document.body), host, bridge, directory, initial }
+  const api = hostAPI(host, initial)
+  await bridge.connect(api); bridge.selectInstances(initial.documentId, ['a'], 'page')
+  return { ...testing, screen: testing.within(document.body), host, bridge, directory, initial, api }
 }
 function SourceConsumer({ bridge, scope = 'instance' }: { bridge: CourseV10DocumentBridge; scope?: 'instance' | 'definition' }) {
   const view = useSyncExternalStore(bridge.subscribe, bridge.read), instance = view.project!.instances[view.selectedInstanceId!]
@@ -254,5 +255,63 @@ it('finishes an in-flight ACK in the remounted source panel without a second app
   expect(h.bridge.read().project!.revision).toBe(h.initial.revision + 1)
   expect((h.screen.getByRole('combobox', { name: '组件源码文件' }) as HTMLSelectElement).value).toBe('helper.js')
   expect((h.screen.getByRole('textbox', { name: '组件实现源码' }) as HTMLTextAreaElement).value).toBe('export const value = 101;')
+  editor.unmount()
+})
+
+it('forks at the canonical source owner when B starts sharing after A captures its private draft', async () => {
+  const h = await fixture()
+  const independent = independentComponentSourceEdits(h.bridge, h.initial.documentId, 'a')
+  await h.bridge.editCaptured(h.bridge.capture(independent.edits, independent.target))
+  const session = captureComponentSourceSession(h.bridge, h.initial.documentId, 'a')
+  const changed = 'export const value = 77;'
+  const edits = componentSourceSessionEdits(session, { workspace: true, entry: 'main.js', selected: 'helper.js', language: 'javascript', files: {
+    'main.js': { bytes: bytes(source), text: source }, 'helper.js': { bytes: bytes(changed), text: changed },
+    'opaque.bin': { bytes: new Uint8Array([0, 255, 128]), text: null },
+  } })
+  await h.bridge.edit([{ type: 'implementation.set', instanceId: 'b', implementation: session.implementation! }])
+  await h.bridge.editCaptured(h.bridge.capture(edits, session.target))
+  const target = h.bridge.captureTarget(), a = target.project.instances.a.implementationOverride, b = target.project.instances.b.implementationOverride
+  if (a?.kind !== 'source' || !a.workspace || b?.kind !== 'source' || !b.workspace) throw new Error('Expected source workspaces')
+  expect(a.workspace.ownerId).not.toBe(b.workspace.ownerId)
+  expect(decode(target.resources.components[a.workspace.ownerId]['helper.js'])).toBe(changed)
+  expect(decode(target.resources.components[b.workspace.ownerId]['helper.js'])).toBe(helper)
+  await h.bridge.undo()
+  expect(h.bridge.captureTarget().project.instances.a.implementationOverride).toEqual(session.implementation)
+  await h.bridge.redo()
+  expect(h.bridge.captureTarget().project.instances.b.implementationOverride).toEqual(b)
+})
+
+it('loads a committed baseline after a real rejected source ACK, keeps raw files and completes the next apply', async () => {
+  const h = await fixture(), editor = h.render(<SourceConsumer bridge={h.bridge} scope="definition" />)
+  h.fireEvent.change(h.screen.getByRole('combobox', { name: '组件源码文件' }), { target: { value: 'helper.js' } })
+  const changed = 'export const value = 123;'
+  h.fireEvent.change(h.screen.getByRole('textbox', { name: '组件实现源码' }), { target: { value: changed } })
+  const dispatch = h.api.dispatch.bind(h.api)
+  vi.spyOn(h.api, 'dispatch').mockImplementationOnce(async operation => {
+    const current = await h.host.internalAPI.read(h.initial.documentId)
+    if (current.model.kind !== 'course-v10') throw new Error('Expected V10')
+    const files = current.model.resources.components['shared-files']
+    const { documentId: _documentId, epoch: _epoch, ...command } = h.bridge.capture([
+        { type: 'component.files.set', ownerId: 'shared-files', expectedFiles: files,
+          files: { ...files, 'helper.js': bytes('export const value = 200;'), 'opaque.bin': new Uint8Array([4, 5, 6]) } },
+      ], h.bridge.captureTarget(h.initial.documentId, true))
+    const external = await h.host.internalAPI.dispatch({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision,
+      operationId: crypto.randomUUID(), actor: 'agent', mutation: { type: 'command', command } })
+    expect(external.status).toBe('applied')
+    return dispatch(operation)
+  })
+  h.fireEvent.click(h.screen.getByRole('button', { name: '保存实现' }))
+  await h.waitFor(() => expect(h.screen.getByText(/未应用：/)).toBeInTheDocument())
+  expect(decode(h.bridge.captureTarget(h.initial.documentId, true).resources.components['shared-files']['helper.js'])).toBe('export const value = 200;')
+  h.fireEvent.click(h.screen.getByRole('button', { name: '载入当前基线并保留草稿' }))
+  await h.waitFor(() => expect(h.screen.getByText('已载入当前基线并保留各文件草稿，请检查后重新应用。')).toBeInTheDocument())
+  expect((h.screen.getByRole('textbox', { name: '组件实现源码' }) as HTMLTextAreaElement).value).toBe(changed)
+  h.fireEvent.click(h.screen.getByRole('button', { name: '保存实现' }))
+  await h.waitFor(() => expect(h.screen.getByText('实现已应用到课件。')).toBeInTheDocument())
+  await h.bridge.drain([h.initial.documentId])
+  const committed = h.bridge.captureTarget(h.initial.documentId, true)
+  expect(decode(committed.resources.components['shared-files']['helper.js'])).toBe(changed)
+  expect(committed.resources.components['shared-files']['opaque.bin']).toEqual(new Uint8Array([4, 5, 6]))
+  expect(h.bridge.read().pending).toBe(0)
   editor.unmount()
 })

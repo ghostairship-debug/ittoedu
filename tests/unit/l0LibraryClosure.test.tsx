@@ -28,10 +28,10 @@ it('shares declared references across rebound Web definitions and effective sour
   const instance = { id: 'example', definitionId: web.id, data: { html: '<img src="cw-resource:photo">', resourceBindings: { 'cw-resource:photo': 'absent' } } }
   expect(componentAssetIds(instance, web)).toEqual(['absent'])
   expect(componentAssetIds({ ...instance, implementationOverride: { kind: 'source', language: 'javascript', source: 'export default {}',
-    resourceBindings: { image: 'source-asset' } } }, web)).toEqual(['source-asset'])
-  const source = { ...web, id: 'guoling.web', implementation: { kind: 'source' as const, language: 'javascript' as const,
+    resourceBindings: { image: 'source-asset' } } }, web)).toEqual(['absent', 'source-asset'])
+  const source = { ...web, id: 'guoling.web', professionalBuiltinKey: 'guoling.web', implementation: { kind: 'source' as const, language: 'javascript' as const,
     source: 'export default {}', resourceBindings: { image: 'definition-asset' } } }
-  expect(componentAssetIds(instance, source)).toEqual(['definition-asset'])
+  expect(componentAssetIds(instance, source)).toEqual(['absent', 'definition-asset'])
   expect(componentAssetIds({ ...instance, implementationOverride: { kind: 'builtin', key: 'fixture' } }, source)).toEqual([])
 })
 

@@ -1,17 +1,15 @@
-# 普通布局与可选专业内容
+# 局部布局与可选专业内容
 
-普通 HTML 可以直接创作；Grid、Flex、SVG、CSS 效果和必要的程序逻辑都是作品表达。以下例子是可组合片段，不是必须套用的模板。
+普通 HTML 可以表达局部材料；Grid、Flex、SVG、CSS 效果和必要的程序逻辑都是作品表达。独立标题、学生可见说明和配图先沿[分素材装配](material-assembly.md)使用正式对象；不要按这里的示例扩写成包含全页内容的单个 Web 对象。以下只是有共同排版或状态关系的片段，不是课程或页面模板。
 
 ```html
 <style>
-  .lesson { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 2rem; }
-  .lesson h1 { grid-column: 1 / -1; }
-  .lesson > * { min-width: 0; }
-  @media (max-width: 680px) { .lesson { grid-template-columns: 1fr; } }
+  .evidence { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 2rem; }
+  .evidence > * { min-width: 0; }
+  @media (max-width: 680px) { .evidence { grid-template-columns: 1fr; } }
 </style>
-<section class="lesson">
-  <h1>比较两组观察结果</h1>
-  <p>保持其他条件一致，比较哪一组变化更明显，并说明证据。</p>
+<figure class="evidence">
+  <figcaption>甲组记录3次，乙组记录5次；比较观察证据。</figcaption>
   <figure>
     <svg viewBox="0 0 240 140" role="img" aria-label="甲组记录3次，乙组记录5次">
       <rect x="44" y="62" width="48" height="54" fill="#93c5fd"/>
@@ -20,7 +18,7 @@
       <text x="172" y="134" text-anchor="middle">乙组：5次</text>
     </svg>
   </figure>
-</section>
+</figure>
 ```
 
 只有希望复用软件的图表数据编辑能力时，使用 `guoling-chart`。类别、系列和数据点身份及默认样式由软件建立；值的数量对应类别数。外围元素用 CSS 指定实际宽高，图表类型支持 bar、line、area、pie、donut，pie/donut 使用一个系列。
@@ -104,3 +102,13 @@
 ```
 
 希望只交付一份文件时，也可使用标准 `iframe srcdoc`。尺寸由外层 CSS 或 width/height 表达；内部资源相对独立 HTML 的目录解析，srcdoc 中的资源相对外层文件解析。需要跨块共用脚本、访问外层 DOM 或共享程序状态时保留整体程序，不为拆块破坏依赖。整份 HTML 含有外层程序行为时由现有 Runtime 整体承载，不能假定其中的短标签已经转成专业组件。
+# 两个完整局部体验
+
+需要理解操作、构图和反馈如何共同表达内容时，可读取并运行 [原文取证与时间判断](examples/text-evidence.html) 或 [预测与变量关系](examples/variable-relation.html)。它们是完整可运行局部片段，不是所有作品必套的题材、页数或技术模板。
+
+原文例使用《论语·为政》2.4的真实章句，原文、年龄顺序与判断在同一视线中。选择句子改变时间高亮和解释；选择判断时反馈说明当前证据是否足够及支持范围，避免将作者自述误当人人必须遵守的年龄标准。原文来源为 [中国哲学书电子化计划](https://ctext.org/text.pl?if=en&node=1121&remap=gb)，不是课件摘要。
+
+变量例保持宽为3厘米，以同一长值驱动长方形、面积、坐标点和实际记录；预测后将长从4调至8可检验面积是否变为2倍。图表单位、初始值、状态及复位均明确；这是准确几何演示，不冒称实测数据。可改问题、图形、初始参数和反馈，保各消费者用同一状态。
+
+两个例子均有可读初始画面、真实核心动作、可解释反馈和复位。独立预览用于检查片段；进入正式作品时用当前工程的局部源文/组件应用入口保持可续编，不重导整课或覆盖外围人工布局。正式嵌入的尺寸、输入与导航仍需实际检查。
+

@@ -67,6 +67,27 @@ export async function searchCommons(http: AssetHttpPort, input: ImageSearchInput
   return { library: 'wikimedia-commons', candidates, excluded: pages.length - candidates.length, hasMore: isRecord(body.continue) }
 }
 
+/** A known Commons file page uses its existing per-file license reader, never a guessed page-wide license. */
+export async function readCommonsSourcePage(http: AssetHttpPort, pageUrl: string, allowShareAlike: boolean, signal?: AbortSignal): Promise<{
+  candidate: OpenImageCandidate | null; title: string; license: string
+} | null> {
+  const url = new URL(pageUrl)
+  if (url.hostname !== 'commons.wikimedia.org') return null
+  const title = url.pathname.startsWith('/wiki/') ? decodeURIComponent(url.pathname.slice('/wiki/'.length)) : url.searchParams.get('title')
+  const pageId = url.searchParams.get('curid')
+  const identity: Record<string, string> | null = title?.startsWith('File:') ? { titles: title } : pageId && /^\d+$/.test(pageId) ? { pageids: pageId } : null
+  if (!identity) return null
+  const body = await query(http, { ...identity, prop: 'imageinfo', iiprop: 'url|size|mime|extmetadata', iiurlwidth: String(PREVIEW_WIDTH),
+    iiextmetadatafilter: metadataFields, iiextmetadatalanguage: 'zh' }, signal)
+  const page = pagesOf(body)[0]
+  if (!isRecord(page)) return { candidate: null, title: title ?? 'Commons 文件', license: '未知' }
+  const info = Array.isArray(page.imageinfo) ? page.imageinfo[0] : undefined
+  const meta = isRecord(info) && isRecord(info.extmetadata) ? info.extmetadata : {}
+  return { candidate: candidate(page, { query: '', page: 1, limit: 1, allowShareAlike, signal }),
+    title: cleanText(page.title, 200) ?? title ?? 'Commons 文件',
+    license: htmlText(metaValue(meta, 'LicenseShortName'), 120) ?? cleanText(metaValue(meta, 'License'), 120) ?? '未知' }
+}
+
 /** 取 Commons 文件约 width 宽的版本：原图更小时就是原图，矢量图为 PNG 渲染。 */
 export async function commonsRendition(http: AssetHttpPort, title: string, width: number, signal?: AbortSignal): Promise<string> {
   const body = await query(http, { titles: title, prop: 'imageinfo', iiprop: 'url|size|mime', iiurlwidth: String(width) }, signal)

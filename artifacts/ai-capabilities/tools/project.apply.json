@@ -1,5 +1,5 @@
 {
-  "description": "应用已观察的工程路径，用content或授权工作区from。project.json 可提供 title/background/designTokens/playback 设置补丁，软件维护身份和版本。已有内容时content只修改原对象的内容，保留人工位置、顺序和其他对象；页面结构insert追加独立内容，redo重做所选范围的整体布局，另可surface.add/move/remove/title。theme.css修改整课主题；body.html/body.md修改连续正文，保留浮层；spatial.json修改镜头与路径，软件维护身份。components/源码修改共享定义；页面内源码只改该实例。源码、资产与正式内容为一次可撤销操作并进入恢复稿，不自动存盘。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。",
+  "description": "应用已观察的工程路径，用content、授权工作区from或文本局部edits:[{old,new}]，三者择一。edits在已观察源文上按顺序替换，每处old须唯一（包含重叠出现），new为字面文本；全部成功才一次提交，未命中或多处命中请重读并提供准确、唯一的原文。edits仅用于content/style，不用于insert/redo。project.json 可提供 title/background/designTokens/playback 设置补丁，软件维护身份和版本。已有内容时content只修改原对象的内容，保留人工位置、顺序和其他对象；页面结构insert追加独立内容，redo重做所选范围的整体布局，另可surface.add/move/remove/title。theme.css修改整课主题；body.html/body.md修改连续正文，保留浮层；spatial.json修改镜头与路径，软件维护身份。components/源码修改共享定义；页面内源码只改该实例。默认读写短作者入口，完整实现按需读.dependencies；软件保存真实共享依赖并隔离局部深改。插入/源码/定义变更回执files给当前路径，readPaths先read，refreshPaths先list；unknown沿原操作查证。源码、资产与正式内容为一次可撤销操作并进入恢复稿，不自动存盘。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -18,6 +18,46 @@
           "redo"
         ],
         "type": "string"
+      },
+      "__schema3": {
+        "additionalProperties": false,
+        "properties": {
+          "new": {
+            "type": "string"
+          },
+          "old": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "old",
+          "new"
+        ],
+        "type": "object"
+      },
+      "__schema4": {
+        "additionalProperties": false,
+        "properties": {
+          "before": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "kind": {
+            "enum": [
+              "slide",
+              "flow",
+              "spatial"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -73,6 +113,36 @@
       {
         "additionalProperties": false,
         "properties": {
+          "edits": {
+            "items": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "intent": {
+            "enum": [
+              "content",
+              "style"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "project": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "path",
+          "edits"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
           "before": {
             "$ref": "#/$defs/__schema1"
           },
@@ -103,6 +173,35 @@
           "path",
           "intent",
           "kind"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "intent": {
+            "const": "surface.add",
+            "type": "string"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "path": {
+            "const": "pages",
+            "type": "string"
+          },
+          "project": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "path",
+          "intent",
+          "pages"
         ],
         "type": "object"
       },

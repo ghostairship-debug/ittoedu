@@ -1,3 +1,4 @@
+import type { TextRangeProjection } from '../../../shared/document/textInteraction'
 import { Hand, Maximize2, Minus, Plus } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react'
 import type { ComponentEdit, ComponentFrame, ComponentSurface, CourseProjectV10 } from '../../../shared/contracts/component-platform'
@@ -5,8 +6,8 @@ import { isComponentVisibleAtSurface } from '../../../shared/contracts/component
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import type { SpatialSurfaceViewState, SpatialGraphSelection } from '../../store/slices/spatialAuthoringSlice'
 import { componentSpatialCameraMatrix, panComponentSpatialCamera, zoomComponentSpatialCamera } from '../../../player/surfaces/spatial/componentSpatialAdapter'
-import { spatialComponentCenter, spatialFramePose, spatialPathPoints, spatialSemanticVisible } from '../../../player/surfaces/spatial/componentPlatform/graph'
-import { composeMatrices, frameCorners, invertMatrix, rotationMatrix, scaleMatrix, transformPoint, translationMatrix, type AffineMatrix, type GeometryPoint } from '../../../core/components/geometry'
+import { spatialComponentCenter, spatialConnectionSegments, spatialConnectionTargets, spatialFramePose, spatialPathPoints, spatialPathTargetIds, spatialRelationLabelPosition, spatialSemanticVisible, type SpatialConnectionSegment, type SpatialGeometryTarget } from '../../../player/surfaces/spatial/componentPlatform/graph'
+import { composeMatrices, frameCorners, IDENTITY_MATRIX, invertMatrix, multiplyMatrices, rotationMatrix, scaleMatrix, transformPoint, translationMatrix, type AffineMatrix, type GeometryPoint } from '../../../core/components/geometry'
 import { FreeTransformGesture, type FreeResizeHandle, type FreeSnapGuide } from '../../componentPlatform/surfaces/slide/freeTransformGesture'
 import { freeSelectionBounds, freeSurfaceTargets, hitFreeObject, marqueeFreeTargets, sameFreeTarget, selectedFreeTargets, type FreeObjectTarget } from '../../componentPlatform/surfaces/slide/targets'
 import { spatialWorldTargets } from '../../componentPlatform/surfaces/spatial/targets'
@@ -21,9 +22,11 @@ import { useSlideNativeTextEditor } from './useSlideNativeTextEditor'
 import { componentDefinitionPresentation } from '../properties/componentDefinitionPresentation'
 import type { SlideContentEdit } from '../../store/slices/slideAuthoringSlice'
 import { resolveComponentBackground } from '../../../shared/contracts/component-platform'
-import { createTeacherControllerHudGeometry, teacherControllerReferenceSize, isGlobalTeacherController, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, type TeacherControllerDisplayPort, type TeacherControllerHudGeometry } from '../../../shared/teacherControllerViewportGeometry'
+import { createTeacherControllerHudGeometry, teacherControllerReferenceSize, isViewportComponent, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, type TeacherControllerDisplayPort, type TeacherControllerHudGeometry } from '../../../shared/teacherControllerViewportGeometry'
 import { SlideLayerSelectionOverlay } from './SlideLayerSelectionOverlay'
 import { CourseNavigationControls } from './CourseNavigationControls'
+import { EDITOR_PAGE_INSETS, fitPage } from '../../../shared/pageFrame'
+import { MIXED_GLOBAL_GEOMETRY, mixedGlobalGeometryEdits, type MixedGlobalGeometryRequest } from './mixedGlobalGeometry'
 
 export interface SpatialLocationWorkspaceProps {
   documentId: string
@@ -51,7 +54,7 @@ export interface SpatialLocationWorkspaceProps {
   contentEditor?: {
     read?(): SlideContentEdit | null
     begin(id: string): SlideContentEdit | null
-    update(data: unknown, composing?: boolean, height?: number): void
+    update(data: unknown, composing?: boolean, height?: number, width?: number, rangeProjection?: TextRangeProjection[]): void
     setComposing?(active: boolean): void
     commit(): Promise<void>
     cancel(): void
@@ -75,6 +78,14 @@ function distance(point: GeometryPoint, a: GeometryPoint, b: GeometryPoint) {
   return Math.hypot(point.x - a.x - t * dx, point.y - a.y - t * dy)
 }
 
+function RelationLabel({ text, segments, targets, matrix, interactive }: { text: string; segments: readonly SpatialConnectionSegment[]; targets: readonly SpatialGeometryTarget[]; matrix: AffineMatrix; interactive: boolean }) {
+  const element = useRef<SVGTextElement>(null), [size, setSize] = useState({ width: 0, height: 14 })
+  useLayoutEffect(() => { const bounds = element.current?.getBBox(); if (bounds) setSize({ width: bounds.width, height: bounds.height }) }, [text])
+  const position = spatialRelationLabelPosition(segments, targets, matrix, size)
+  return position && <text ref={element} x={position.x} y={position.y} fontSize={14} textAnchor="middle" dominantBaseline="central" fill="#334155"
+    stroke="#fff" strokeWidth={6} paintOrder="stroke" strokeLinejoin="round" style={{ pointerEvents: interactive ? 'auto' : 'none', cursor: interactive ? 'pointer' : undefined }}>{text}</text>
+}
+
 /** Mature Spatial shell. Runtime DOM comes from the document's one U11 World. */
 export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const latest = useRef(props); latest.current = props
@@ -89,6 +100,7 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const [error, setError] = useState<string | null>(null), [dragOver, setDragOver] = useState(false)
   const [, refreshNavigation] = useState(0)
   useEffect(() => props.teacherController?.subscribe(() => refreshNavigation(value => value + 1)), [props.teacherController])
+  useEffect(() => props.teacherController?.subscribePlacement?.(() => refreshNavigation(value => value + 1)), [props.teacherController])
   const active = useRef<{ pointerId: number; last: GeometryPoint; marquee?: GeometryPoint; originalSelection?: readonly string[]; geometry?: FreeTransformGesture; targets: FreeObjectTarget[]; edits: ComponentEdit[]; captured: CapturedCourseTarget } | null>(null)
   const deferred = useRef<{ input: PointerInput; mode: 'drag' | 'resize' | 'rotate'; handle?: FreeResizeHandle;
     latest: PointerInput; ended: boolean; documentId: string; surfaceId: string; stateId: string | null; scope: SpatialSurfaceViewState['scope']; epoch: string } | null>(null)
@@ -98,37 +110,76 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const spatial = props.surface.spatial
   const worldTargets = spatialWorldTargets(props.project, props.surface.id)
   const design = props.surface.designSize ?? { width: 1280, height: 720 }
-  const overlayScale = Math.min(size.width / design.width, size.height / design.height)
-  const hudMatrix = composeMatrices(translationMatrix((size.width - design.width * overlayScale) / 2, (size.height - design.height * overlayScale) / 2), scaleMatrix(overlayScale))
-  const worldMatrix = componentSpatialCameraMatrix(props.view.camera, { x: 0, y: 0, ...size })
+  const [available, setAvailable] = useState({ width: 800, height: 500 })
+  useLayoutEffect(() => {
+    const element = root.current!
+    const resize = () => setAvailable({ width: element.clientWidth || 800, height: element.clientHeight || 500 })
+    const observer = new ResizeObserver(resize); observer.observe(element); resize()
+    return () => observer.disconnect()
+  }, [])
+  const runFit = fitPage(available, design, EDITOR_PAGE_INSETS, 'contain')
+  // Camera poses are authored in design units in both modes. Editing exposes the surrounding world instead
+  // of clipping it to the camera frame, but it must keep the same base fit as Slides and playback.
+  const renderScale = runFit.scale
+  const renderScaleRef = useRef(renderScale); renderScaleRef.current = renderScale
+  const overlayScale = renderScale
+  const cameraViewport = props.canvasMode === 'edit'
+    ? { x: runFit.left, y: runFit.top, width: design.width * renderScale, height: design.height * renderScale }
+    : { x: 0, y: 0, ...size }
+  const cameraViewportRef = useRef(cameraViewport); cameraViewportRef.current = cameraViewport
+  const hudMatrix = composeMatrices(translationMatrix(cameraViewport.x + (cameraViewport.width - design.width * overlayScale) / 2,
+    cameraViewport.y + (cameraViewport.height - design.height * overlayScale) / 2), scaleMatrix(overlayScale))
+  const worldMatrix = componentSpatialCameraMatrix({ ...props.view.camera, zoom: props.view.camera.zoom * renderScale }, cameraViewport)
   const controllerGeometry = createTeacherControllerHudGeometry({ referenceSize: teacherControllerReferenceSize(props.project), viewportRect: { x: 0, y: 0, ...size } })
   const displayProject = projectTeacherControllerInstances(props.project, controllerGeometry, props.teacherController)
-  const latestDisplay = useRef(displayProject); latestDisplay.current = displayProject
+  // Controller gestures use viewport frames; their DOM remains inside the shared HUD plane.
+  const controllerToHud = invertMatrix(hudMatrix)
+  const renderedFrame = (id: string, frame: ComponentFrame): ComponentFrame => isViewportComponent(props.project, id)
+    ? { ...frame, transform: [...multiplyMatrices(controllerToHud, frame.transform)] as ComponentFrame['transform'] } : frame
+  const hudDisplayProject = { ...displayProject, instances: Object.fromEntries(Object.entries(displayProject.instances).map(([id, instance]) =>
+    [id, isViewportComponent(props.project, id) && instance.frame ? { ...instance, frame: renderedFrame(id, instance.frame) } : instance])) }
+  useEffect(() => {
+    const request = (event: Event) => {
+      const input = (event as CustomEvent<MixedGlobalGeometryRequest>).detail
+      if (!input || input.edits || input.documentId !== props.documentId || input.surfaceId !== props.surface.id || !root.current?.isConnected) return
+      input.edits = mixedGlobalGeometryEdits(input.project, input.instanceIds, input.intent, hudMatrix, controllerGeometry, props.teacherController)
+    }
+    window.addEventListener(MIXED_GLOBAL_GEOMETRY, request); return () => window.removeEventListener(MIXED_GLOBAL_GEOMETRY, request)
+  }, [props.documentId, props.surface.id, props.teacherController, size, renderScale, cameraViewport.x, cameraViewport.y])
+  const latestDisplay = useRef(hudDisplayProject); latestDisplay.current = hudDisplayProject
   const allTargets = freeSurfaceTargets(displayProject, props.surface.id)
   const globalIds = new Set([...props.project.global.underlay, ...props.project.global.overlay])
-  const allControllerTargets = allTargets.filter(target => isGlobalTeacherController(props.project, target.instanceId))
+  const allControllerTargets = allTargets.filter(target => isViewportComponent(props.project, target.instanceId))
   const controllerTargets = allControllerTargets
     .filter(target => isComponentVisibleAtSurface(props.project.instances[target.instanceId], props.surface.id))
-  const scopeTargets = props.view.scope === 'global' ? allTargets.filter(target => globalIds.has(target.ancestors[0] ?? target.instanceId)) : [...worldTargets, ...allControllerTargets]
+  const isGlobalTarget = (target: FreeObjectTarget) => globalIds.has(target.ancestors[0] ?? target.instanceId)
+  const scopeTargets = props.view.scope === 'global' ? allTargets.filter(isGlobalTarget) : allTargets
   const visibleTargets = scopeTargets.filter(target => isComponentVisibleAtSurface(props.project.instances[target.instanceId], props.surface.id)
     && target.ancestors.every(id => isComponentVisibleAtSurface(props.project.instances[id], props.surface.id))
-    && (props.view.scope === 'global' || isGlobalTeacherController(props.project, target.instanceId) || spatialSemanticVisible(spatial, target.instanceId, props.view.camera.zoom)))
+    && (isGlobalTarget(target)
+      || [...target.ancestors, target.instanceId].every(id => spatialSemanticVisible(spatial, id, props.view.camera.zoom))))
+  const visibleWorldTargets = worldTargets.filter(target => [...target.ancestors, target.instanceId].every(id =>
+    isComponentVisibleAtSurface(props.project.instances[id], props.surface.id) && spatialSemanticVisible(spatial, id, props.view.camera.zoom)))
   const locked = (target: FreeObjectTarget) => props.project.instances[target.instanceId]?.locked || target.ancestors.some(id => props.project.instances[id]?.locked)
   const gestureDisplay = useRef<{ original: CourseProjectV10; display: CourseProjectV10; viewport: TeacherControllerHudGeometry; offset: { x: number; y: number } } | null>(null)
   const background = resolveComponentBackground(props.project, props.surface)
   const matrix = props.view.scope === 'global' ? hudMatrix : worldMatrix
   const clientMatrix = () => { const box = viewport.current!.getBoundingClientRect(); return composeMatrices(translationMatrix(box.left, box.top), matrix) }
   const controllerPointerMatrix = (): AffineMatrix => { const box = viewport.current?.getBoundingClientRect(); return [1, 0, 0, 1, box?.left ?? 0, box?.top ?? 0] }
+  const viewportPoint = (event: { clientX: number; clientY: number }) => transformPoint(invertMatrix(controllerPointerMatrix()), pointer(event))
+  const targetViewportMatrix = (target: FreeObjectTarget): AffineMatrix => isViewportComponent(props.project, target.ancestors[0] ?? target.instanceId)
+    ? IDENTITY_MATRIX : isGlobalTarget(target) ? hudMatrix : worldMatrix
+  const viewportTarget = (target: FreeObjectTarget): FreeObjectTarget => ({ ...target, parentToSurface: multiplyMatrices(targetViewportMatrix(target), target.parentToSurface) })
+  const viewportTargets = visibleTargets.map(viewportTarget)
   const at = (event: { clientX: number; clientY: number }) => transformPoint(invertMatrix(clientMatrix()), pointer(event))
   const editor = useSlideNativeTextEditor({ project: props.project, surfaceId: props.surface.id, edit: props.contentEdit ?? null,
-    begin: id => props.contentEditor?.begin(id) ?? null, update: (data, composing, height) => props.contentEditor?.update(data, composing, height),
+    begin: id => props.contentEditor?.begin(id) ?? null, update: (data, composing, height, width) => props.contentEditor?.update(data, composing, height, width),
     setComposing: props.contentEditor?.setComposing ? active => props.contentEditor!.setComposing!(active) : undefined,
     commit: () => props.contentEditor?.commit() ?? Promise.resolve(), cancel: () => props.contentEditor?.cancel(),
     undo: () => props.contentEditor?.undo(), redo: () => props.contentEditor?.redo(), host: () => viewport.current,
     report: message => props.contentEditor?.report(message),
   }, props.documentId + ':' + props.surface.id + ':' + (props.activeStateId ?? ''))
   const resetPreview = () => {
-    const current = latest.current
     for (const node of viewport.current?.querySelectorAll<HTMLElement>('[data-component-instance]') ?? []) {
       const frame = latestDisplay.current.instances[node.dataset.componentInstance ?? '']?.frame
       if (frame) { node.style.transform = `matrix(${frame.transform.join(',')})`; node.style.width = `${frame.width}px`; node.style.height = `${frame.height}px` }
@@ -168,7 +219,11 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
       if ((!event.ctrlKey && !event.metaKey) || inputOwnsPointer(event.target)) return
       event.preventDefault()
       const box = element.getBoundingClientRect(), camera = latest.current.view.camera
-      latest.current.onCamera(zoomComponentSpatialCamera(camera, Math.max(0.01, camera.zoom + (event.deltaY > 0 ? -0.1 : 0.1)), pointer(event), { x: box.left, y: box.top, width: box.width, height: box.height }))
+      const fit = renderScaleRef.current
+      const currentViewport = cameraViewportRef.current
+      const next = zoomComponentSpatialCamera({ ...camera, zoom: camera.zoom * fit }, Math.max(0.01, camera.zoom + (event.deltaY > 0 ? -0.1 : 0.1)) * fit, pointer(event),
+        { ...currentViewport, x: box.left + currentViewport.x, y: box.top + currentViewport.y })
+      latest.current.onCamera({ ...next, zoom: next.zoom / fit })
     }
     element.addEventListener('wheel', wheel, { passive: false }); return () => element.removeEventListener('wheel', wheel)
   }, [])
@@ -183,19 +238,22 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const hiddenMenu = () => hiddenObjectCommands(hidden.map(target => ({ id: target.instanceId, name: props.project.instances[target.instanceId]?.name ?? target.instanceId })), ids => props.onShowInstances?.(ids))
   const graphAt = (point: GeometryPoint): SpatialGraphSelection => {
     if (props.view.scope === 'global') return null
-    const threshold = 6 / props.view.camera.zoom
+    const threshold = 6 / (props.view.camera.zoom * renderScale)
     for (const relation of [...(spatial?.relations ?? [])].reverse()) {
-      const a = spatialComponentCenter(worldTargets, relation.sourceInstanceId), b = spatialComponentCenter(worldTargets, relation.targetInstanceId)
-      if (a && b && distance(point, a, b) <= threshold) return { kind: 'relation', id: relation.id }
+      const a = spatialComponentCenter(visibleWorldTargets, relation.sourceInstanceId), b = spatialComponentCenter(visibleWorldTargets, relation.targetInstanceId)
+      const obstacles = spatialConnectionTargets(visibleWorldTargets, [relation.sourceInstanceId, relation.targetInstanceId])
+      if (a && b && spatialConnectionSegments([a, b], obstacles).some(segment => distance(point, segment.start, segment.end) <= threshold)) return { kind: 'relation', id: relation.id }
     }
     for (const path of [...(spatial?.paths ?? [])].reverse()) {
-      const points = spatialPathPoints(spatial, path, worldTargets)
-      if (points.some((value, index) => index > 0 && distance(point, points[index - 1]!, value) <= threshold)) return { kind: 'path', id: path.id }
+      const points = spatialPathPoints(spatial, path, visibleWorldTargets)
+      if (spatialConnectionSegments(points, spatialConnectionTargets(visibleWorldTargets, spatialPathTargetIds(spatial, path))).some(segment => distance(point, segment.start, segment.end) <= threshold)) return { kind: 'path', id: path.id }
     }
     return null
   }
   const begin = (event: PointerInput, mode: 'drag' | 'resize' | 'rotate' = 'drag', handle?: FreeResizeHandle) => {
-    if (active.current || deferred.current || (event.button !== 0 && event.button !== 1) || inputOwnsPointer(event.target)) return
+    const teacherButton = props.canvasMode === 'edit' && event.target instanceof Element && event.target.closest('button')
+      && isViewportComponent(props.project, event.target.closest('[data-component-instance]')?.getAttribute('data-component-instance') ?? '')
+    if (active.current || deferred.current || (event.button !== 0 && event.button !== 1) || inputOwnsPointer(event.target) && !teacherButton) return
     const contentEdit = props.contentEditor?.read ? props.contentEditor.read() : props.contentEdit
     if (contentEdit) {
       if (contentEdit.composing || !props.contentEditor) return
@@ -226,29 +284,34 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
       return
     }
     if (props.canvasMode === 'run' && event.button !== 1 && !spacePan.current && event.target instanceof Element && event.target.closest('[data-component-instance]')) return
+    const graphElement = event.target instanceof Element && event.target.closest('[data-spatial-relation-id],[data-spatial-path-id]')
+    if (props.canvasMode === 'edit' && props.view.scope === 'world' && event.button === 0 && !spacePan.current && graphElement) {
+      const relationId = graphElement.getAttribute('data-spatial-relation-id'), pathId = graphElement.getAttribute('data-spatial-path-id')
+      props.onGraphSelect(relationId ? { kind: 'relation', id: relationId } : { kind: 'path', id: pathId! })
+      event.preventDefault(); event.stopPropagation(); return
+    }
     const hudHandle = event.target instanceof Element && event.target.closest('[data-controller-selection]')
-    const hudHit = props.canvasMode === 'edit' && event.button !== 1 && !spacePan.current
-      ? hudHandle ? controllerTargets.find(target => props.selectionIds.includes(target.instanceId)) ?? null
-        : mode === 'drag' ? hitFreeObject(controllerTargets.filter(target => props.project.instances[target.instanceId]?.visible !== false), transformPoint(invertMatrix(controllerPointerMatrix()), pointer(event))) : null : null
-    const contentTargets = visibleTargets.filter(target => !isGlobalTeacherController(props.project, target.instanceId))
-    const hit = hudHit ?? (props.canvasMode === 'run' || event.button === 1 || spacePan.current ? null : mode === 'drag' ? hitFreeObject(contentTargets, at(event), event.altKey) : contentTargets.find(target => props.selectionIds.includes(target.instanceId)) ?? null)
+    const hit = props.canvasMode === 'run' || event.button === 1 || spacePan.current ? null
+      : hudHandle ? controllerTargets.find(target => props.selectionIds.includes(target.instanceId)) ?? null
+        : mode === 'drag' ? hitFreeObject(viewportTargets, viewportPoint(event), event.altKey)
+          : visibleTargets.find(target => props.selectionIds.includes(target.instanceId)) ?? null
     const pan = event.button === 1 || spacePan.current || (!hit && !event.shiftKey)
     if (!hit && !pan && props.canvasMode === 'edit') {
       event.preventDefault(); event.stopPropagation(); viewport.current!.setPointerCapture(event.pointerId)
-      const start = transformPoint(matrix, at(event))
+      const start = viewportPoint(event)
       active.current = { pointerId: event.pointerId, last: pointer(event), marquee: start, originalSelection: props.selectionIds, targets: [], edits: [], captured: props.captureTarget() }
       setMarquee({ start, end: start }); return
     }
     if (!hit && props.canvasMode === 'edit') { const graph = graphAt(at(event)); if (graph) { props.onGraphSelect(graph); event.stopPropagation(); return } }
     if (hit) { props.onGraphSelect(null); if (mode === 'drag') props.onSelect(event.shiftKey ? props.selectionIds.includes(hit.instanceId) ? props.selectionIds.filter(id => id !== hit.instanceId) : [...props.selectionIds, hit.instanceId] : props.selectionIds.includes(hit.instanceId) ? props.selectionIds : [hit.instanceId]) }
-    else if (!event.shiftKey && props.canvasMode === 'edit' && event.button !== 1 && !spacePan.current) props.onSelect([])
+    else if (!event.shiftKey && props.canvasMode === 'edit' && event.button !== 1 && !spacePan.current) { props.onGraphSelect(null); props.onSelect([]) }
     const ids = mode !== 'drag' ? props.selectionIds : hit && event.shiftKey ? props.selectionIds.includes(hit.instanceId) ? props.selectionIds.filter(id => id !== hit.instanceId) : [...props.selectionIds, hit.instanceId] : hit && props.selectionIds.includes(hit.instanceId) ? props.selectionIds : hit ? [hit.instanceId] : []
-    const targets = selectedFreeTargets(hudHit ? controllerTargets : contentTargets, ids).filter(target => !locked(target))
+    const targets = selectedFreeTargets(visibleTargets, ids).filter(target => !locked(target))
     if (hit && !targets.length || !hit && !pan) { event.stopPropagation(); return }
     event.preventDefault(); event.stopPropagation(); viewport.current!.setPointerCapture(event.pointerId)
     gestureDisplay.current = { original: props.project, display: displayProject, viewport: controllerGeometry,
       offset: props.teacherController?.placement?.() ?? { x: 0, y: 0 } }
-    active.current = { pointerId: event.pointerId, last: pointer(event), targets, captured: props.captureTarget(), edits: [], geometry: pan ? undefined : new FreeTransformGesture({ mode, handle, targets, pointer: pointer(event), surfaceToPointer: hudHit ? controllerPointerMatrix() : clientMatrix(), snapTargets: (hudHit ? controllerTargets : contentTargets).filter(target => !ids.includes(target.instanceId) && !target.ancestors.some(id => ids.includes(id))) }) }
+    active.current = { pointerId: event.pointerId, last: pointer(event), targets, captured: props.captureTarget(), edits: [], geometry: pan ? undefined : new FreeTransformGesture({ mode, handle, targets: targets.map(viewportTarget), pointer: pointer(event), surfaceToPointer: controllerPointerMatrix(), snapTargets: viewportTargets.filter(target => !ids.includes(target.instanceId) && !target.ancestors.some(id => ids.includes(id))) }) }
   }
   resumePointer.current = begin
   const move = (event: PointerInput) => {
@@ -256,15 +319,16 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     const gesture = active.current
     if (!gesture || gesture.pointerId !== event.pointerId) return
     const next = pointer(event)
-    if (gesture.marquee) { const end = transformPoint(matrix, at(event)); setMarquee({ start: gesture.marquee, end }); props.onSelect([...new Set([...(gesture.originalSelection ?? []), ...marqueeFreeTargets(visibleTargets.map(target => ({ ...target, parentToSurface: composeMatrices(matrix, target.parentToSurface) })), gesture.marquee, end)])]) }
-    else if (!gesture.geometry) props.onCamera(panComponentSpatialCamera(latest.current.view.camera, { x: next.x - gesture.last.x, y: next.y - gesture.last.y }))
+    if (gesture.marquee) { const end = viewportPoint(event); setMarquee({ start: gesture.marquee, end }); props.onSelect([...new Set([...(gesture.originalSelection ?? []), ...marqueeFreeTargets(viewportTargets, gesture.marquee, end)])]) }
+    else if (!gesture.geometry) props.onCamera(panComponentSpatialCamera(latest.current.view.camera, { x: (next.x - gesture.last.x) / renderScale, y: (next.y - gesture.last.y) / renderScale }))
     else {
       const update = gesture.geometry.update(next, { shift: event.shiftKey, alt: event.altKey })
       gesture.edits = update.edits; setGuides(update.guides)
       const frames = Object.fromEntries(gesture.edits.flatMap(edit => edit.type === 'frame.set' && edit.frame ? [[edit.instanceId, edit.frame]] : []))
       setPreview(frames)
       for (const node of viewport.current?.querySelectorAll<HTMLElement>('[data-component-instance]') ?? []) {
-        const frame = frames[node.dataset.componentInstance ?? '']
+        const id = node.dataset.componentInstance ?? '', sourceFrame = frames[id]
+        const frame = sourceFrame && renderedFrame(id, sourceFrame)
         if (frame) { node.style.transform = `matrix(${frame.transform.join(',')})`; node.style.width = `${frame.width}px`; node.style.height = `${frame.height}px` }
       }
     }
@@ -291,51 +355,60 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   }
   resumeFinish.current = pointerId => finish({ pointerId })
   const selectedTargets = selectedFreeTargets(scopeTargets.map(target => preview[target.instanceId] ? { ...target, frame: preview[target.instanceId]! } : target), props.selectionIds)
-  const selected = selectedTargets.filter(target => !isGlobalTeacherController(props.project, target.instanceId))
-  const selectedControllers = selectedTargets.filter(target => isGlobalTeacherController(props.project, target.instanceId))
+  const selected = selectedTargets.filter(target => !isViewportComponent(props.project, target.instanceId)).map(viewportTarget)
+  const selectedControllers = selectedTargets.filter(target => isViewportComponent(props.project, target.instanceId))
   const bounds = freeSelectionBounds(selected)
   const corners = selected.length === 1 ? frameCorners(selected[0]!.frame, selected[0]!.parentToSurface) : bounds ? [{ x: bounds.left, y: bounds.top }, { x: bounds.right, y: bounds.top }, { x: bounds.right, y: bounds.bottom }, { x: bounds.left, y: bounds.bottom }] : []
-  const screenCorners = corners.map(point => transformPoint(matrix, point))
+  const screenCorners = corners
   const [nw, ne, se, sw] = screenCorners
   const mid = (a: GeometryPoint, b: GeometryPoint) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
   const points = nw && ne && se && sw ? { nw, n: mid(nw, ne), ne, e: mid(ne, se), se, s: mid(sw, se), sw, w: mid(nw, sw) } : null
+  const editTarget = props.contentEdit && scopeTargets.find(target => target.instanceId === props.contentEdit!.instanceId)
+  const editorMatrix = editTarget && isGlobalTarget(editTarget) ? hudMatrix : matrix
   const currentFrame = spatial?.frames.find(frame => frame.id === props.view.activeCameraFrameId)
+  const cameraFrameCorners = (pose: SpatialSurfaceViewState['camera']) => {
+    const cameraBox = composeMatrices(translationMatrix(pose.x, pose.y), rotationMatrix((pose.rotation ?? 0) * Math.PI / 180),
+      scaleMatrix(1 / pose.zoom), translationMatrix(-design.width / 2, -design.height / 2))
+    return frameCorners({ width: design.width, height: design.height, transform: cameraBox }).map(point => transformPoint(worldMatrix, point))
+  }
   const zoom = (delta: number) => props.onCamera({ ...props.view.camera, zoom: Math.max(0.01, props.view.camera.zoom + delta) })
   return <main ref={root} className={`workspace workspace--${props.canvasMode} workspace--spatial`} data-testid="spatial-workspace">
     <NativeSelectionContext documentId={props.documentId} revision={props.project.revision} locationId={props.surface.id} itemIds={props.selectionIds} stateId={props.activeStateId} enabled={props.canvasMode === 'edit'} textEditing={Boolean(props.contentEdit)}
       bounds={id => { const element = [...(viewport.current?.querySelectorAll<HTMLElement>('[data-component-instance]') ?? [])].find(value => value.dataset.componentInstance === id); return element?.getBoundingClientRect() ?? null }} />
     {menu.element}
     <CourseNavigationControls canvasMode={props.canvasMode} onCanvasModeChange={props.onCanvasModeChange}
+      runTitle="从起始镜头试运行"
       navigation={props.teacherController} beforeNavigate={props.contentEditor?.commit} resetPlayback={props.onResetPlayback} report={setError} />
     {props.canvasMode === 'edit' && <div className="canvas-view-controls" role="group" aria-label="画布视图">
       <button type="button" aria-label="缩小画布" onClick={() => zoom(-0.1)}><Minus size={14} /></button><output aria-label="画布缩放比例">{Math.round(props.view.camera.zoom * 100)}%</output>
       <button type="button" aria-label="放大画布" onClick={() => zoom(0.1)}><Plus size={14} /></button>
-      <button type="button" aria-label="适合窗口" title="回到首页镜头" onClick={() => props.onActivateFrame(null)}><Maximize2 size={14} /></button><span title="Ctrl+滚轮缩放；拖动空白处平移画布"><Hand size={13} /></span>
+      <button type="button" aria-label="恢复自由视图" title="恢复自由视图" onClick={() => props.onActivateFrame(null)}><Maximize2 size={14} /></button><span title="Ctrl+滚轮缩放；拖动空白处平移画布"><Hand size={13} /></span>
     </div>}
-    <div className={`canvas-label${props.view.scope === 'global' ? ' canvas-label--global' : ''}`}>{props.view.scope === 'global' ? `全局层 · ${globalIds.size} 个元素` : `${props.surface.title} · ${currentFrame?.title ?? '世界'}`}
+    <div className={`canvas-label${props.view.scope === 'global' ? ' canvas-label--global' : ''}`}>{props.view.scope === 'global' ? `全局层 · ${globalIds.size} 个元素` : `${props.surface.title} · ${currentFrame?.title ?? '自由视图'}`}
       {hidden.length > 0 && <button type="button" className="canvas-label__hidden" onClick={event => { const box = event.currentTarget.getBoundingClientRect(); menu.open({ x: box.left, y: box.bottom + 4 }, '隐藏的对象', hiddenMenu()) }}>隐藏 {hidden.length}</button>}
     </div>
     {error && <div role="alert" className="canvas-label">{error}</div>}
     <div ref={viewport} className="canvas-viewport" data-testid="spatial-world-stage" data-workspace-media-drop={dragOver || undefined}
       data-observation-source={props.canvasMode === 'edit' ? 'authoring' : undefined} data-observation-project-id={props.project.id} data-observation-revision={props.project.revision}
       data-observation-surface-id={props.surface.id} data-observation-location-id={currentFrame?.id ?? props.surface.id} data-observation-state-id={props.activeStateId ?? ''} data-observation-ready="true"
-      data-observation-spatial-camera={JSON.stringify(props.view.camera)} style={{ overflow: 'hidden', touchAction: 'none', backgroundColor: props.backgroundPreviewColor ?? background.color,
+      data-observation-spatial-camera={JSON.stringify(props.view.camera)} style={{ ...(props.canvasMode === 'run'
+        ? { inset: 'auto', left: runFit.left, top: runFit.top, width: design.width * runFit.scale, height: design.height * runFit.scale }
+        : { inset: 0 }), overflow: 'hidden', touchAction: 'none', backgroundColor: props.backgroundPreviewColor ?? background.color,
         backgroundImage: props.backgroundAssetUrl ? `url(${JSON.stringify(props.backgroundAssetUrl)})` : undefined, backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit, backgroundPosition: 'center', backgroundRepeat: 'no-repeat', boxShadow: dragOver ? 'inset 0 0 0 3px #245b46' : undefined }}
       onPointerDownCapture={event => { if (event.target instanceof Element && event.target.closest('[data-controller-selection]')) {
         const handle = event.target.closest('[data-handle]')?.getAttribute('data-handle') as FreeResizeHandle | 'rotate' | null
         begin(event, handle === 'rotate' ? 'rotate' : handle ? 'resize' : 'drag', handle === 'rotate' ? undefined : handle ?? undefined)
       } else if (!(event.target instanceof Element && event.target.closest('[data-handle]'))) begin(event) }} onPointerMove={move} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event, true)} onLostPointerCapture={event => finish(event, true)}
-      onDoubleClick={event => { if (props.canvasMode === 'edit' && !inputOwnsPointer(event.target)) { const hit = hitFreeObject(visibleTargets, at(event), true); if (hit) { props.onSelect([hit.instanceId]); if (!editor.begin(hit.instanceId, at(event), pointer(event))) props.onEditContent?.(hit.instanceId) } } }}
+      onDoubleClick={event => { if (props.canvasMode === 'edit' && !inputOwnsPointer(event.target)) { const hit = hitFreeObject(viewportTargets, viewportPoint(event), true); if (hit) { const original = visibleTargets.find(target => target.instanceId === hit.instanceId)!, point = transformPoint(invertMatrix(targetViewportMatrix(original)), viewportPoint(event)); props.onSelect([hit.instanceId]); if (!editor.begin(hit.instanceId, point, pointer(event))) props.onEditContent?.(hit.instanceId) } } }}
       onContextMenu={event => {
         if (props.canvasMode !== 'edit' || inputOwnsPointer(event.target)) return
-        event.preventDefault(); const place = pointer(event), hit = hitFreeObject(controllerTargets, transformPoint(invertMatrix(controllerPointerMatrix()), place), true)
-          ?? hitFreeObject(visibleTargets.filter(target => !isGlobalTeacherController(props.project, target.instanceId)), at(event), true)
+        event.preventDefault(); const place = pointer(event), hit = hitFreeObject(viewportTargets, viewportPoint(event), true)
         if (hit) { const ids = props.selectionIds.includes(hit.instanceId) ? props.selectionIds : [hit.instanceId]; props.onSelect(ids); setTimeout(() => { if (root.current) requestObjectContextMenu(root.current, { ...place, itemIds: ids }) }, 0); return }
         menu.open(place, '画布操作', [
           { id: 'canvas.paste', label: '粘贴', shortcut: 'Ctrl+V', group: 'clipboard', run: () => props.onPaste?.(), disabledReason: props.onPaste ? null : '当前界面不支持此操作' },
           { id: 'canvas.select-all', label: '全选', shortcut: 'Ctrl+A', group: 'clipboard', run: () => props.onSelectAll?.() },
           { id: 'canvas.hidden', label: '找回隐藏的对象', group: 'view', run: () => menu.open(place, '隐藏的对象', hiddenMenu()), disabledReason: hidden.length ? null : '本页没有隐藏的对象' },
-          { id: 'canvas.try-run', label: '当前位置试运行', group: 'view', run: () => props.onCanvasModeChange('run') },
+          { id: 'canvas.try-run', label: '从起始镜头试运行', group: 'view', run: () => props.onCanvasModeChange('run') },
         ])
       }}
       onDragOver={event => { if (props.onDropWorkspaceMedia && props.canvasMode === 'edit' && props.view.scope === 'world' && event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDragOver(true) } }}
@@ -349,30 +422,46 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
           { captured: frozen, documentId: frozen.documentId, projectId: frozen.project.id, revision: frozen.project.revision, locationId: props.surface.id, surfaceId: props.surface.id, sessionGeneration: props.activation ?? 0 }, props.onDropWorkspaceMedia,
           () => mediaRef.current.directory === media.directory && mediaRef.current.files === media.files).then(result => setError(result.ok ? null : result.reason ?? '媒体未插入'))
       }}>
-      <div data-spatial-hud-plane="underlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: props.view.scope === 'global' ? 'auto' : 'none' }}>{props.project.global.underlay.filter(id => !isGlobalTeacherController(props.project, id)).map(id => props.renderInstance(id))}</div>
-      <div data-spatial-world="true" style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0, transformOrigin: '0 0', transform: `matrix(${worldMatrix.join(',')})` }}>{props.surface.childIds.map(id => props.renderInstance(id))}</div>
-      <div data-spatial-hud-plane="overlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: props.view.scope === 'global' || props.canvasMode === 'run' ? 'auto' : 'none' }}>{props.project.global.overlay.filter(id => !isGlobalTeacherController(props.project, id)).map(id => props.renderInstance(id))}</div>
-      <div data-controller-hud="true" style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>{[...props.project.global.underlay, ...props.project.global.overlay].filter(id => isGlobalTeacherController(props.project, id)).map(id => <div key={id} style={{ pointerEvents: 'auto' }}>{props.renderInstance(id, displayProject)}</div>)}</div>
+      <div data-spatial-hud-plane="underlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: props.view.scope === 'global' ? 'auto' : 'none' }}>{props.project.global.underlay.map(id => props.renderInstance(id, hudDisplayProject))}</div>
+      <div data-spatial-world="true" style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0, transformOrigin: '0 0', transform: `matrix(${worldMatrix.join(',')})` }}>{props.surface.childIds.map(id => props.renderInstance(id))}
+      </div>
+      <svg data-spatial-graph-layer="true" width="100%" height="100%" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'visible' }}>
+        <defs><marker id={`spatial-arrow-${props.surface.id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#64748b" /></marker></defs>
+        {(spatial?.paths ?? []).map(path => <path key={path.id} data-spatial-path-id={path.id}
+          d={spatialConnectionSegments(spatialPathPoints(spatial, path, visibleWorldTargets), spatialConnectionTargets(visibleWorldTargets, spatialPathTargetIds(spatial, path))).map(segment => { const start = transformPoint(worldMatrix, segment.start), end = transformPoint(worldMatrix, segment.end); return `M${start.x},${start.y}L${end.x},${end.y}` }).join(' ')}
+          fill="none" stroke={props.view.graphSelection?.id === path.id ? '#2563eb' : path.style?.color ?? '#3388ff'} strokeWidth={path.style?.width ?? 2} strokeDasharray={path.style?.dash === 'dashed' ? '8 5' : path.style?.dash === 'dotted' ? '2 4' : undefined}
+          style={{ pointerEvents: props.canvasMode === 'edit' && props.view.scope === 'world' ? 'stroke' : 'none', cursor: 'pointer' }}><title>巡游路径：{path.title ?? path.id}，点击编辑</title></path>)}
+        {(spatial?.relations ?? []).map(relation => {
+          const a = spatialComponentCenter(visibleWorldTargets, relation.sourceInstanceId), b = spatialComponentCenter(visibleWorldTargets, relation.targetInstanceId); if (!a || !b) return null
+          const obstacles = spatialConnectionTargets(visibleWorldTargets, [relation.sourceInstanceId, relation.targetInstanceId]), segments = spatialConnectionSegments([a, b], obstacles)
+          return <g key={relation.id} data-spatial-relation-id={relation.id}>
+            <title>关系：{relation.label || '连线'}，点击线或标签编辑</title>
+            {segments.map((segment, index) => { const start = transformPoint(worldMatrix, segment.start), end = transformPoint(worldMatrix, segment.end)
+              return <line key={index} x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke={props.view.graphSelection?.id === relation.id ? '#2563eb' : '#64748b'} strokeWidth={2}
+                markerEnd={index === segments.length - 1 && relation.kind !== 'line' ? `url(#spatial-arrow-${props.surface.id})` : undefined}
+                markerStart={index === 0 && relation.kind === 'bidirectional' ? `url(#spatial-arrow-${props.surface.id})` : undefined}
+                style={{ pointerEvents: props.canvasMode === 'edit' && props.view.scope === 'world' ? 'stroke' : 'none', cursor: 'pointer' }} /> })}
+            {relation.label && segments.length > 0 && <RelationLabel text={relation.label} segments={segments} targets={obstacles} matrix={worldMatrix} interactive={props.canvasMode === 'edit' && props.view.scope === 'world'} />}
+          </g>
+        })}
+      </svg>
+      <div data-spatial-hud-plane="overlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: props.view.scope === 'global' || props.canvasMode === 'run' ? 'auto' : 'none' }}>{props.project.global.overlay.map(id => props.renderInstance(id, hudDisplayProject))}</div>
       {props.canvasMode === 'edit' && <div data-controller-selection="true"><SlideLayerSelectionOverlay targets={selectedControllers.filter(target => !locked(target))} scale={1} surfaceToPointer={controllerPointerMatrix()} /></div>}
-      {props.canvasMode === 'edit' && <div style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0, transformOrigin: '0 0', transform: `matrix(${matrix.join(',')})` }}>{editor.editor}</div>}
+      {props.canvasMode === 'edit' && <div style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0, transformOrigin: '0 0', transform: `matrix(${editorMatrix.join(',')})` }}>{editor.editor}</div>}
       <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'visible' }}>
         {guides.map((guide, index) => {
-          const inverse = invertMatrix(matrix), extent = [{ x: 0, y: 0 }, { x: size.width, y: 0 }, { x: size.width, y: size.height }, { x: 0, y: size.height }].map(point => transformPoint(inverse, point))
-          const start = transformPoint(matrix, guide.axis === 'x' ? { x: guide.value, y: Math.min(...extent.map(point => point.y)) } : { x: Math.min(...extent.map(point => point.x)), y: guide.value })
-          const end = transformPoint(matrix, guide.axis === 'x' ? { x: guide.value, y: Math.max(...extent.map(point => point.y)) } : { x: Math.max(...extent.map(point => point.x)), y: guide.value })
+          const start = guide.axis === 'x' ? { x: guide.value, y: 0 } : { x: 0, y: guide.value }
+          const end = guide.axis === 'x' ? { x: guide.value, y: size.height } : { x: size.width, y: guide.value }
           return <line key={index} data-spatial-snap-guide={guide.axis} x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="#ff4d9d" />
         })}
         {marquee && (() => { const { start, end } = marquee; return <rect data-spatial-marquee="true" x={Math.min(start.x, end.x)} y={Math.min(start.y, end.y)} width={Math.abs(end.x - start.x)} height={Math.abs(end.y - start.y)} fill="#2563eb22" stroke="#2563eb" /> })()}
-        <defs><marker id={`spatial-arrow-${props.surface.id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#64748b" /></marker></defs>
-        {(spatial?.relations ?? []).map(relation => {
-          const a = spatialComponentCenter(worldTargets, relation.sourceInstanceId), b = spatialComponentCenter(worldTargets, relation.targetInstanceId); if (!a || !b) return null
-          const start = transformPoint(worldMatrix, a), end = transformPoint(worldMatrix, b)
-          return <g key={relation.id} data-spatial-relation-id={relation.id}><line x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke={props.view.graphSelection?.id === relation.id ? '#2563eb' : '#64748b'} strokeWidth={2} markerEnd={relation.kind !== 'line' ? `url(#spatial-arrow-${props.surface.id})` : undefined} markerStart={relation.kind === 'bidirectional' ? `url(#spatial-arrow-${props.surface.id})` : undefined} />{relation.label && <text x={(start.x + end.x) / 2} y={(start.y + end.y) / 2 - 6} fill="#334155">{relation.label}</text>}</g>
-        })}
-        {(spatial?.paths ?? []).map(path => <polyline key={path.id} data-spatial-path-id={path.id} points={spatialPathPoints(spatial, path, worldTargets).map(point => { const value = transformPoint(worldMatrix, point); return `${value.x},${value.y}` }).join(' ')} fill="none" stroke={props.view.graphSelection?.id === path.id ? '#2563eb' : path.style?.color ?? '#3388ff'} strokeWidth={path.style?.width ?? 2} strokeDasharray={path.style?.dash === 'dashed' ? '8 5' : path.style?.dash === 'dotted' ? '2 4' : undefined} />)}
+        {props.canvasMode === 'edit' && (() => {
+          const points = cameraFrameCorners(props.view.camera)
+          return <g data-spatial-camera-preview="true" aria-label="当前镜头示意框"><polygon points={points.map(point => `${point.x},${point.y}`).join(' ')} fill="none" stroke="#ac7b35" strokeWidth={1.5} strokeDasharray="10 6" />
+            <text x={points[0]!.x + 8} y={points[0]!.y + 18} fill="#8c622c" fontSize={12}>当前镜头 · 添加后固定</text></g>
+        })()}
         {props.canvasMode === 'edit' && props.view.showCameraFrames && spatial?.frames.map(frame => {
-          const pose = spatialFramePose(frame, design, worldTargets), cameraBox = composeMatrices(translationMatrix(pose.x, pose.y), rotationMatrix((pose.rotation ?? 0) * Math.PI / 180), scaleMatrix(1 / pose.zoom), translationMatrix(-design.width / 2, -design.height / 2))
-          const points = frameCorners({ width: design.width, height: design.height, transform: cameraBox }).map(point => transformPoint(worldMatrix, point))
+          const points = cameraFrameCorners(spatialFramePose(frame, design, worldTargets))
           return <g key={frame.id} data-spatial-camera-frame={frame.id}><polygon points={points.map(point => `${point.x},${point.y}`).join(' ')} fill="none" stroke={frame.id === props.view.activeCameraFrameId ? '#2563eb' : '#94a3b8'} strokeDasharray="7 5" /><text x={points[0]!.x + 4} y={points[0]!.y - 6}>{frame.title ?? frame.id}</text></g>
         })}
         {props.canvasMode === 'edit' && points && <><polygon points={screenCorners.map(point => `${point.x},${point.y}`).join(' ')} fill="none" stroke="#2563eb" strokeWidth={1.5} />

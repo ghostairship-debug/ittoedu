@@ -1,5 +1,5 @@
 import { ImageIcon, Palette } from 'lucide-react'
-import { useRef, type ChangeEvent } from 'react'
+import { useRef, useState, type ChangeEvent } from 'react'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { BackgroundMode } from '../../../shared/courseProjectTypes'
 import type {
@@ -7,7 +7,7 @@ import type {
   EffectiveBackgroundOwner,
 } from '../../../shared/effectiveBackground'
 import { ColorInput } from '../ColorInput'
-import { SelectField } from './PropertyControls'
+import { SelectField, usePropertyDraftBindingKey, usePropertyDraftFlush, type PropertyDraftResume } from './PropertyControls'
 
 export const EFFECTIVE_BACKGROUND_SOURCE_LABEL: Record<EffectiveBackgroundOwner, string> = {
   course: '课程',
@@ -22,6 +22,15 @@ export interface SharedBackgroundImportFile {
   readonly name: string
   readonly mimeType: string
   readonly bytes: Uint8Array
+}
+export interface SharedBackgroundImportHandler {
+  (file: SharedBackgroundImportFile): void | Promise<void>
+  capture?(): (file: SharedBackgroundImportFile) => void | Promise<void>
+}
+/** Freeze the existing canonical target before asynchronous file IO. */
+export function backgroundImportHandler<T>(capture: () => T, commit: (target: T, file: SharedBackgroundImportFile) => void | Promise<void>): SharedBackgroundImportHandler {
+  const prepare = () => { const target = capture(); return (file: SharedBackgroundImportFile) => commit(target, file) }
+  return Object.assign((file: SharedBackgroundImportFile) => prepare()(file), { capture: prepare })
 }
 
 export interface SharedBackgroundModeControl {
@@ -58,7 +67,7 @@ export interface SharedBackgroundProps {
   readonly onPreviewColorChange?: (color: string | null) => void
   readonly onAssetChange: (assetId: string | null) => void
   /** Omit to hide the upload affordance for owners with no import pathway wired yet. */
-  readonly onImportAsset?: (file: SharedBackgroundImportFile) => void
+  readonly onImportAsset?: SharedBackgroundImportHandler
   readonly testId?: string
 }
 
@@ -84,17 +93,86 @@ export function SharedBackgroundProperties({
   testId = 'shared-background-properties',
 }: SharedBackgroundProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const bindingKey = usePropertyDraftBindingKey(), baseline = JSON.stringify({ color, assetId, mode: mode?.value })
+  const [, refresh] = useState(0)
+  const upload = useRef<{ bindingKey: string; baseline: string; name: string; mimeType: string; bytes?: Uint8Array;
+    read?: () => Promise<Uint8Array>; commit?: SharedBackgroundImportHandler; resume?: PropertyDraftResume; pending?: Promise<boolean>; error?: string } | null>(null)
   const imageAssets = Object.values(assets).filter((asset) => asset.kind === 'image')
   const isInheritMode = mode?.value === 'inherit'
   const colorInherited = inherit?.color.inherited ?? false
   const assetInherited = inherit?.asset.inherited ?? false
 
-  const onFileInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
+  const applyUpload = (): Promise<boolean> => {
+    const draft = upload.current
+    if (!draft) return Promise.resolve(true)
+    if (draft.pending) return draft.pending
+    draft.pending = Promise.resolve().then(async () => {
+      try {
+        if (draft.resume) {
+          const complete = await (draft.resume.pending ?? draft.resume.flush())
+          if (!complete) {
+            const raw = draft.resume.readDraft()?.raw
+            const saved = raw ? JSON.parse(raw) : null
+            if (Array.isArray(saved?.bytes)) draft.bytes = new Uint8Array(saved.bytes)
+            draft.resume = { ...draft.resume, pending: undefined }
+            throw new Error('原上传未完成；图片输入已保留，可重试上传。')
+          }
+          if (upload.current === draft) { upload.current = null; if (fileInputRef.current) fileInputRef.current.value = '' }
+          return true
+        }
+        draft.bytes ??= await draft.read?.()
+        if (!draft.bytes) throw new Error('原图片尚未读取完成，请重新选择文件。')
+        if (!draft.commit) {
+          if (draft.bindingKey !== bindingKey || draft.baseline !== baseline) throw new Error('原背景已变化；图片输入已保留，请返回原目标后处理。')
+          draft.commit = onImportAsset?.capture?.() ?? onImportAsset
+        }
+        if (!draft.commit) throw new Error('当前背景暂不能上传；图片输入已保留。')
+        await draft.commit({ name: draft.name, mimeType: draft.mimeType, bytes: draft.bytes })
+        if (upload.current === draft) { upload.current = null; if (fileInputRef.current) fileInputRef.current.value = '' }
+        return true
+      } catch (error) { draft.error = error instanceof Error ? error.message : String(error); return false }
+    }).finally(() => { draft.pending = undefined; refresh(value => value + 1) })
+    return draft.pending
+  }
+  usePropertyDraftFlush(applyUpload, {
+    hasDirty: () => Boolean(upload.current),
+    inFlight: () => upload.current?.pending,
+    readDraft: () => ({ bindingKey: upload.current?.bindingKey ?? bindingKey, label: `${testId}:图片上传`, kind: 'structured',
+      raw: JSON.stringify(upload.current ? { name: upload.current.name, mimeType: upload.current.mimeType, bytes: upload.current.bytes ? Array.from(upload.current.bytes) : null } : null),
+      baseline: upload.current?.baseline ?? baseline, composing: false }),
+    restoreDraft: (record, resume) => {
+      try {
+        const value = JSON.parse(record.raw)
+        if (!value || typeof value.name !== 'string') return false
+        if (resume?.pending || !Array.isArray(value.bytes)) {
+          if (!resume) return false
+          upload.current = { bindingKey: record.bindingKey, baseline: record.baseline ?? baseline, name: value.name, mimeType: value.mimeType,
+            bytes: Array.isArray(value.bytes) ? new Uint8Array(value.bytes) : undefined, resume, error: resume.pending ? undefined : '图片输入已保留，点击重试上传。' }
+          // This is the original user-started IO, not a replay of a recovered command.
+          if (resume.pending) void applyUpload()
+          refresh(value => value + 1)
+          return true
+        }
+        upload.current = { bindingKey: record.bindingKey, baseline: record.baseline ?? baseline, name: value.name, mimeType: value.mimeType,
+          bytes: new Uint8Array(value.bytes), error: '图片输入已恢复，点击重试上传。' }
+        refresh(value => value + 1)
+        return true
+      } catch { return false }
+    },
+  })
+  const onFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0]
-    event.currentTarget.value = ''
     if (!file || !onImportAsset) return
-    const bytes = new Uint8Array(await file.arrayBuffer())
-    onImportAsset({ name: file.name, mimeType: file.type || 'image/png', bytes })
+    try {
+      const commit = onImportAsset.capture?.() ?? onImportAsset
+      upload.current = { bindingKey, baseline, name: file.name, mimeType: file.type || 'image/png', commit,
+        read: async () => new Uint8Array(await file.arrayBuffer()) }
+      void applyUpload()
+    } catch (error) {
+      upload.current = { bindingKey, baseline, name: file.name, mimeType: file.type || 'image/png', read: async () => new Uint8Array(await file.arrayBuffer()),
+        error: error instanceof Error ? error.message : String(error) }
+      refresh(value => value + 1)
+    }
   }
 
   return (
@@ -183,6 +261,9 @@ export function SharedBackgroundProperties({
             >
               <ImageIcon size={14} />从文件上传…
             </button>
+            {upload.current && <p className="property-hint" role="status">{upload.current.name}：{upload.current.error ?? '正在读取并上传…'}
+              {upload.current.error && <button type="button" className="link-button" onClick={() => { void applyUpload() }}>重试上传</button>}
+            </p>}
           </>
         )}
         {inherit && (

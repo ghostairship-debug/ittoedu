@@ -67,7 +67,7 @@ test('r19 lesson: real PDF DOCX PPTX reading, document conflict and reopen, firs
       expect(pixels).toBeGreaterThan(500)
       rmSync(filename)
       const saved = await page.evaluate(async ({ target, title }) => {
-        const api = window.desktopAPI!.lessonMaterials!, record = (await api.list(target)).find(item => item.title === title)!
+        const api = window.desktopAPI!.lessonMaterials!, record = (await api.list(target)).records.find(item => item.title === title)!
         const read = await api.read(target, { id: record.id, extractionVersion: record.extractionVersion, fragmentIds: record.fragments.map(item => item.id) })
         return { record, read: { ...read, assets: read.assets.map(asset => ({ ...asset, bytes: Array.from(asset.bytes) })) } }
       }, { target, title: fixture.name })
@@ -103,7 +103,7 @@ test('r19 lesson: real PDF DOCX PPTX reading, document conflict and reopen, firs
     }), { directory: target.rootPath, ref, target })
     expect(reopened.lesson.lesson!.identity).toEqual(lesson.identity)
     expect(reopened.file.source).toContain('外部修订')
-    expect(reopened.materials).toHaveLength(3)
+    expect(reopened.materials.records).toHaveLength(3)
     // Reactivate the lesson through its real GUI after renderer reload（V3.1：经目录树点选 .h5lesson 激活；重载后自动回到上次工作空间）
     await expect(page.locator('.lesson-workspace-toolbar')).toContainText('workspace')
     await page.locator('.lesson-directory-tree').getByRole('button', { name: '串联电路', exact: true }).click()

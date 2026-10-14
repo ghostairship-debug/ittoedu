@@ -1,6 +1,7 @@
 import { ZodError } from 'zod'
 import { UserFacingError } from '../shared/errors'
 import { diagnosticLog } from './diagnosticLog'
+import { diagnosticFailureDetails } from './diagnosticPrivacy'
 
 export interface DesktopErrorPayload {
   code: string
@@ -33,13 +34,13 @@ function systemErrorCode(error: unknown): string | undefined {
 }
 
 /** Diagnostic output must never make IPC error normalization fail (for example, a closed stderr pipe). */
-function recordDesktopError(error: unknown): void {
+function recordDesktopError(error: unknown, operation?: string): void {
   try {
     void diagnosticLog.append({
       source: 'main',
       message: error instanceof Error ? error.message : 'IPC 操作失败',
       stack: error instanceof Error ? error.stack : undefined,
-      details: { code: systemErrorCode(error) },
+      details: { ...diagnosticFailureDetails(error), operation },
     }).catch(() => undefined)
   } catch { /* The IPC envelope remains available even when diagnostics cannot be written. */ }
 }
@@ -51,7 +52,7 @@ export function normalizeDesktopError(
   // Errors written for the teacher (a damaged course file, a missing asset) keep their own words; only unexpected
   // exceptions fall back to the operation's generic message.
   if (error instanceof DesktopOperationError || error instanceof UserFacingError) {
-    recordDesktopError(error)
+    recordDesktopError(error, fallback.code)
     const causeCode = systemErrorCode(error.cause)
     if (causeCode === 'ENOSPC') {
       return {
@@ -82,7 +83,7 @@ export function normalizeDesktopError(
   }
 
   if (error instanceof ZodError) {
-    recordDesktopError(error)
+    recordDesktopError(error, fallback.code)
     return {
       code: 'INVALID_ARGUMENT',
       title: '操作未完成',
@@ -92,7 +93,7 @@ export function normalizeDesktopError(
   }
 
   const code = systemErrorCode(error)
-  recordDesktopError(error)
+  recordDesktopError(error, fallback.code)
 
   if (code === 'ENOSPC') {
     return {

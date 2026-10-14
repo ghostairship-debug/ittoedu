@@ -13,5 +13,6 @@ export function fitSpatialComponentWorld(project: CourseProjectV10, surfaceId: s
   if (!points.length) return spatial?.home ?? { x: 0, y: 0, zoom: 1 }
   const left = Math.min(...points.map(point => point.x)), right = Math.max(...points.map(point => point.x))
   const top = Math.min(...points.map(point => point.y)), bottom = Math.max(...points.map(point => point.y))
-  return { x: (left + right) / 2, y: (top + bottom) / 2, zoom: Math.min(viewport.width / Math.max(1, right - left), viewport.height / Math.max(1, bottom - top)) * 0.9 }
+  const zoom = Math.min(right > left ? viewport.width / (right - left) : Infinity, bottom > top ? viewport.height / (bottom - top) : Infinity) * .9
+  return { x: (left + right) / 2, y: (top + bottom) / 2, zoom: Number.isFinite(zoom) && zoom > 0 ? zoom : spatial?.home.zoom ?? 1 }
 }

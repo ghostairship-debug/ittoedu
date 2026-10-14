@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ownJsonValueSchema, ownRecordSchema } from '../../ownRecordSchema'
 import { documentTextContentSchema } from '../../document/content'
 import { courseStateDeclarationSchema, courseStateConditionSchema } from '../course-state/schema'
 import { courseProjectDesignTokensSchema, courseThemeSchema } from '../design-v1/schema'
@@ -10,22 +11,22 @@ import type { ComponentAuthorRecord } from './runtime'
 
 const id = z.string().min(1)
 const finite = z.number().finite()
-export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() => z.union([
-  z.null(), z.boolean(), finite, z.string(), z.array(jsonValueSchema), z.record(z.string(), jsonValueSchema),
-]))
+export const jsonValueSchema: z.ZodType<JsonValue> = ownJsonValueSchema
 const authorBindingStepSchema = z.object({ tag: z.string().min(1), index: z.number().int().nonnegative(),
-  attributes: z.record(z.string(), z.string()).optional() }).strict()
+  attributes: ownRecordSchema(z.string(), z.string()).optional() }).strict()
 export const componentAuthorRecordSchema = z.object({ kind: z.enum(['text', 'image']),
-  scope: z.record(z.string(), z.string()).optional(),
+  scope: ownRecordSchema(z.string(), z.string()).optional(),
   binding: z.object({ kind: z.literal('dom'), path: z.array(authorBindingStepSchema), textIndex: z.number().int().nonnegative().optional(),
     baseline: z.string(), context: z.array(z.object({ path: z.array(authorBindingStepSchema), value: z.string() }).strict()).optional() }).strict(),
-  overrides: z.object({ text: z.string().optional(), src: z.string().optional(), style: z.record(z.string(), z.string()).optional(),
+  overrides: z.object({ text: z.string().optional(), src: z.string().optional(), style: ownRecordSchema(z.string(), z.string()).optional(),
     geometry: z.object({ translateX: z.number().finite().optional(), translateY: z.number().finite().optional(),
       scaleX: z.number().finite().positive().optional(), scaleY: z.number().finite().positive().optional(),
       width: z.number().finite().positive().optional(), height: z.number().finite().positive().optional(),
       rotation: z.number().finite().optional() }).strict().optional() }).strict(),
 }).strict() satisfies z.ZodType<ComponentAuthorRecord>
-export const componentAuthorRecordsSchema = z.record(z.string().min(1), componentAuthorRecordSchema)
+export const componentAuthorRecordsSchema = ownRecordSchema(z.string().min(1), componentAuthorRecordSchema)
+export const componentAuthoringSchema = z.object({ records: componentAuthorRecordsSchema.optional(),
+  resourceBindings: ownRecordSchema(z.string(), id).optional() }).strict()
 
 export const componentFrameSchema = z.object({
   width: finite.positive(), height: finite.positive(),
@@ -40,14 +41,15 @@ export const componentAuthorGeometryObservationSchema = z.object({ frame: compon
 }).strict()
 export const componentBuiltinImplementationSchema = z.object({ kind: z.literal('builtin'), key: id }).strict()
 export const componentSourceImplementationSchema = z.object({ kind: z.literal('source'), source: z.string().optional(), language: z.enum(['javascript', 'typescript']), dependencies: z.array(id).optional(),
-    workspace: z.object({ ownerId: id, entry: id }).strict().optional(), moduleBindings: z.record(id, id).optional(),
-    resourceBindings: z.record(z.string(), id).optional() }).strict().refine(value => (value.source !== undefined) !== (value.workspace !== undefined),
+    workspace: z.object({ ownerId: id, entry: id }).strict().optional(), moduleBindings: ownRecordSchema(id, id).optional(),
+    resourceBindings: ownRecordSchema(z.string(), id).optional() }).strict().refine(value => (value.source !== undefined) !== (value.workspace !== undefined),
       '组件源码必须来自单文件 source 或正式 workspace 之一')
 export const componentImplementationSchema: z.ZodType<ComponentImplementation> = z.discriminatedUnion('kind', [
   componentBuiltinImplementationSchema, componentSourceImplementationSchema,
 ]) as z.ZodType<ComponentImplementation>
 export const componentTargetSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('instance'), instanceId: id }).strict(),
+  z.object({ kind: z.literal('text-range'), instanceId: id, dataPath: z.array(z.string()), rangeId: id }).strict(),
   z.object({ kind: z.literal('surface'), surfaceId: id }).strict(),
   z.object({ kind: z.literal('project') }).strict(),
 ])
@@ -62,11 +64,11 @@ export const componentFlowPlacementSchema = z.object({
   paragraphAnchor: z.object({ blockId: id, offsetY: finite, xRatio: finite }).strict().optional(),
 }).strict()
 export const componentFlowAuthoringSchema = z.object({ layout: z.object({
-  widthMode: z.enum(['fluid', 'reading']).optional(), readingWidth: finite.positive(), wideContentWidth: finite.positive(), paperBackgroundColor: z.string().optional(),
+  toc: z.enum(['auto', 'hidden']).optional(), widthMode: z.enum(['fluid', 'reading']).optional(), readingWidth: finite.positive(), wideContentWidth: finite.positive(), paperBackgroundColor: z.string().optional(),
 }).strict() }).strict()
 export const componentPresentationSchema = z.object({
-  states: z.array(z.object({ id, title: z.string(), overrides: z.record(z.string(), z.object({
-    data: jsonValueSchema.optional(), style: z.record(z.string(), jsonValueSchema).optional(),
+  states: z.array(z.object({ id, title: z.string(), overrides: ownRecordSchema(z.string(), z.object({
+    data: jsonValueSchema.optional(), authoring: componentAuthoringSchema.optional(), style: ownRecordSchema(z.string(), jsonValueSchema).optional(),
     frame: componentFrameSchema.nullable().optional(), visible: z.boolean().optional(),
     playbackInitialVisibility: z.enum(['inherit', 'hidden']).optional(),
   }).strict()), order: z.array(id).optional(), background: componentBackgroundSchema.optional() }).strict()),
@@ -85,17 +87,18 @@ export const courseProjectLogicSchema = z.object({
 }).strict()
 export const componentVisibilitySchema = z.object({ mode: z.enum(['all', 'include', 'exclude']), surfaceIds: z.array(id) }).strict()
 export const componentInstanceSchema = z.object({
-  id, definitionId: id, data: jsonValueSchema,
-  name: z.string().optional(), visible: z.boolean().optional(), locked: z.boolean().optional(),
+  id, definitionId: id, data: jsonValueSchema, authoring: componentAuthoringSchema.optional(),
+  name: z.string().optional(), visible: z.boolean().optional(), locked: z.boolean().optional(), viewportPinned: z.boolean().optional(),
   visibility: componentVisibilitySchema.optional(),
   playbackInitialVisibility: z.enum(['inherit', 'hidden']).optional(), flowPlacement: componentFlowPlacementSchema.optional(), flowLayout: componentFlowBodyLayoutSchema.optional(),
-  style: z.record(z.string(), jsonValueSchema).optional(), frame: componentFrameSchema.optional(),
+  style: ownRecordSchema(z.string(), jsonValueSchema).optional(), frame: componentFrameSchema.optional(),
   childIds: z.array(id).optional(), attachments: z.array(behaviorAttachmentSchema).optional(),
   implementationOverride: componentImplementationSchema.optional(),
 }).strict()
 export const componentDefinitionSchema = z.object({
   id, role: z.enum(['content', 'behavior', 'mixed']), implementation: componentImplementationSchema,
-  dataSchema: z.record(z.string(), jsonValueSchema).optional(), version: z.string().optional(), title: z.string().optional(),
+  dataSchema: ownRecordSchema(z.string(), jsonValueSchema).optional(), version: z.string().optional(), title: z.string().optional(),
+  library: z.object({ packageId: id, version: z.string().optional() }).strict().optional(),
   professionalBuiltinKey: id.optional(),
 }).strict()
 export const componentAssetSchema = z.object({ id, path: id, mimeType: z.string().optional(), filename: z.string().optional(),
@@ -110,6 +113,7 @@ export const componentContainerSchema = z.discriminatedUnion('kind', [
 ])
 export const componentSpatialPoseSchema = z.object({ x: finite, y: finite, zoom: finite.positive(), rotation: finite.optional() }).strict()
 export const componentSpatialAuthoringSchema = z.object({
+  defaultPathId: id.nullable().optional(),
   home: componentSpatialPoseSchema,
   frames: z.array(z.object({ id, title: z.string().optional(), pose: componentSpatialPoseSchema, targetInstanceId: id.optional() }).strict()),
   paths: z.array(z.object({ id, title: z.string().optional(), frameIds: z.array(id), instanceIds: z.array(id).optional(),
@@ -118,6 +122,7 @@ export const componentSpatialAuthoringSchema = z.object({
   relations: z.array(z.object({ id, sourceInstanceId: id, targetInstanceId: id, label: z.string().optional(), kind: z.enum(['line', 'arrow', 'bidirectional']) }).strict()).optional(),
   semanticZoom: z.array(z.object({ id, instanceIds: z.array(id), minZoom: finite.nonnegative(), maxZoom: finite.positive(), visible: z.boolean() }).strict()).optional(),
 }).strict().superRefine((spatial, context) => {
+  if (spatial.defaultPathId && !spatial.paths?.some(path => path.id === spatial.defaultPathId)) context.addIssue({ code: 'custom', path: ['defaultPathId'], message: '默认播放路径已不存在' })
   const frames = new Set(spatial.frames.map(frame => frame.id))
   if (frames.size !== spatial.frames.length) context.addIssue({ code: 'custom', message: '镜头身份重复' })
   if (new Set((spatial.paths ?? []).map(path => path.id)).size !== spatial.paths?.length && spatial.paths) context.addIssue({ code: 'custom', message: '镜头路径身份重复' })
@@ -138,11 +143,11 @@ export const courseProjectV10Schema: z.ZodType<CourseProjectV10> = z.object({
   schemaVersion: z.literal(10), id, revision: z.number().int().nonnegative(), title: z.string(),
   background: componentBackgroundSchema.optional(), designTokens: courseProjectDesignTokensSchema.optional(), theme: courseThemeSchema.optional(),
   playback: projectPlaybackSettingsSchema.optional(), media: projectMediaSettingsSchema.optional(), logic: courseProjectLogicSchema.optional(),
-  definitions: z.record(z.string(), componentDefinitionSchema),
-  instances: z.record(z.string(), componentInstanceSchema),
+  definitions: ownRecordSchema(z.string(), componentDefinitionSchema),
+  instances: ownRecordSchema(z.string(), componentInstanceSchema),
   surfaces: z.array(componentSurfaceSchema),
   global: z.object({ underlay: z.array(id), overlay: z.array(id) }).strict(),
-  assets: z.record(z.string(), componentAssetSchema),
+  assets: ownRecordSchema(z.string(), componentAssetSchema),
 }).strict().superRefine((project, context) => {
   const issue = (message: string, path: (string | number)[] = []) => context.addIssue({ code: 'custom', message, path })
   for (const [key, definition] of Object.entries(project.definitions)) if (key !== definition.id) issue('定义索引与身份不一致', ['definitions', key])
@@ -168,7 +173,7 @@ export const courseProjectV10Schema: z.ZodType<CourseProjectV10> = z.object({
     if (instance.childIds) claim(instance.childIds)
     for (const attachment of instance.attachments ?? []) {
       if (!Object.hasOwn(project.instances, attachment.instanceId)) issue(`行为实例不存在：${attachment.instanceId}`)
-      if (attachment.target.kind === 'instance' && !Object.hasOwn(project.instances, attachment.target.instanceId)) issue('行为目标不存在')
+      if ((attachment.target.kind === 'instance' || attachment.target.kind === 'text-range') && !Object.hasOwn(project.instances, attachment.target.instanceId)) issue('行为目标不存在')
       if (attachment.target.kind === 'surface' && !surfaceIds.has(attachment.target.surfaceId)) issue('行为表面不存在')
     }
   }
@@ -182,8 +187,8 @@ export const courseProjectV10Schema: z.ZodType<CourseProjectV10> = z.object({
   for (const instanceId of Object.keys(project.instances)) if (!visited.has(instanceId)) issue(`对象未归属或形成循环：${instanceId}`)
 })
 
-const fieldPath = z.array(id).min(1).refine(path => path.every(part => !['__proto__', 'prototype', 'constructor'].includes(part)), '字段路径无效')
-const dataPath = z.array(id).refine(path => path.every(part => !['__proto__', 'prototype', 'constructor'].includes(part)), '字段路径无效')
+const fieldPath = z.array(id).min(1)
+const dataPath = z.array(id)
 export const componentExpectationSchema = z.object({ path: fieldPath, exists: z.boolean(), value: jsonValueSchema.optional() }).strict()
 export const componentOperationBatchSchema: z.ZodType<ComponentOperationBatch> = z.object({
   type: z.literal('component-platform.apply'),
@@ -204,7 +209,7 @@ export const componentOperationBatchSchema: z.ZodType<ComponentOperationBatch> =
     z.object({ type: z.literal('surface.presentation.set'), surfaceId: id, presentation: componentPresentationSchema.nullable() }).strict(),
     z.object({ type: z.literal('flow.set'), surfaceId: id, flow: componentFlowAuthoringSchema }).strict(),
     z.object({ type: z.literal('spatial.set'), surfaceId: id, spatial: componentSpatialAuthoringSchema }).strict(),
-    z.object({ type: z.literal('definition.set'), definition: componentDefinitionSchema }).strict(),
+    z.object({ type: z.literal('definition.set'), definition: componentDefinitionSchema, sourceOriginId: id.optional() }).strict(),
     z.object({ type: z.literal('definition.remove'), definitionId: id }).strict(),
     z.object({ type: z.literal('asset.remove'), assetId: id }).strict(),
     z.object({ type: z.literal('asset.add'), asset: componentAssetSchema,
@@ -218,13 +223,19 @@ export const componentOperationBatchSchema: z.ZodType<ComponentOperationBatch> =
         .transform(value => Uint8Array.from(value)),
     }).strict(),
     z.object({ type: z.literal('component.files.set'), ownerId: id,
-      files: z.record(id, z.custom<Uint8Array>(value => ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === '[object Uint8Array]')).nullable(),
-      expectedFiles: z.record(id, z.custom<Uint8Array>(value => ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === '[object Uint8Array]')).nullable(),
+      files: ownRecordSchema(id, z.custom<Uint8Array>(value => ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === '[object Uint8Array]')).nullable(),
+      expectedFiles: ownRecordSchema(id, z.custom<Uint8Array>(value => ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === '[object Uint8Array]')).nullable(),
+      sourceScope: z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('instance'), instanceId: id }).strict(),
+        z.object({ kind: z.literal('definition'), definitionId: id }).strict(),
+      ]).optional(),
+      forkOwnerId: id.optional(),
     }).strict(),
     z.object({ type: z.literal('data.set'), instanceId: id, path: dataPath, value: jsonValueSchema }).strict(),
+    z.object({ type: z.literal('authoring.set'), instanceId: id, path: dataPath, value: jsonValueSchema }).strict(),
     z.object({ type: z.literal('style.set'), instanceId: id, path: dataPath, value: jsonValueSchema }).strict(),
     z.object({ type: z.literal('frame.set'), instanceId: id, frame: componentFrameSchema.nullable() }).strict(),
-    z.object({ type: z.literal('instance.patch'), instanceId: id, patch: z.object({ name: z.string().nullable().optional(), visible: z.boolean().optional(), locked: z.boolean().optional(), playbackInitialVisibility: z.enum(['inherit', 'hidden']).optional(), visibility: componentVisibilitySchema.nullable().optional() }).strict() }).strict(),
+    z.object({ type: z.literal('instance.patch'), instanceId: id, patch: z.object({ name: z.string().nullable().optional(), visible: z.boolean().optional(), locked: z.boolean().optional(), viewportPinned: z.boolean().nullable().optional(), playbackInitialVisibility: z.enum(['inherit', 'hidden']).optional(), visibility: componentVisibilitySchema.nullable().optional() }).strict() }).strict(),
     z.object({ type: z.literal('instance.definition.set'), instanceId: id, definitionId: id }).strict(),
     z.object({ type: z.literal('instance.flowLayout.set'), instanceId: id, flowLayout: componentFlowBodyLayoutSchema.nullable() }).strict(),
     z.object({ type: z.literal('instance.flowPlacement.set'), instanceId: id, flowPlacement: componentFlowPlacementSchema.nullable() }).strict(),

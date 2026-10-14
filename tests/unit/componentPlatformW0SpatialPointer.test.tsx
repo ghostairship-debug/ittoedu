@@ -5,6 +5,8 @@ import type { CapturedCourseTarget } from '../../src/renderer/documents/CourseV1
 import type { SlideContentEdit } from '../../src/renderer/store/slices/slideAuthoringSlice'
 import { initialSpatialSurfaceView } from '../../src/renderer/store/slices/spatialAuthoringSlice'
 import { SpatialLocationWorkspace, type SpatialLocationWorkspaceProps } from '../../src/renderer/ui/workspaces/SpatialLocationWorkspace'
+import { EDITOR_PAGE_INSETS, fitPage } from '../../src/shared/pageFrame'
+import { invertMatrix, transformPoint, type AffineMatrix } from '../../src/core/components/geometry'
 
 // N0 owns the real ProseMirror ACK checks; this test exercises the Spatial consumer gesture.
 vi.mock('../../src/renderer/ui/workspaces/useSlideNativeTextEditor', () => ({ useSlideNativeTextEditor: () => ({ begin: () => false, editor: null }) }))
@@ -17,7 +19,9 @@ beforeAll(() => {
     constructor(type: string, init: PointerEventInit) { super(type, init); this.pointerId = init.pointerId ?? 0 }
   })
   const box = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 800, 400))
-  restoreBox = () => box.mockRestore()
+  const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800)
+  const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400)
+  restoreBox = () => { box.mockRestore(); width.mockRestore(); height.mockRestore() }
 })
 afterAll(() => { restoreBox(); vi.unstubAllGlobals() })
 afterEach(cleanup)
@@ -61,7 +65,11 @@ it('continues the first neighboring drag after the original text ACK, including 
   await act(async () => h.accept())
   expect(h.select).toHaveBeenLastCalledWith(['neighbor'])
   expect(h.edits).toHaveBeenCalledTimes(1)
-  expect(h.edits.mock.calls[0][0]).toEqual([expect.objectContaining({ type: 'frame.set', instanceId: 'neighbor', frame: expect.objectContaining({ transform: [1, 0, 0, 1, 220, 0] }) })])
+  const edit = h.edits.mock.calls[0][0][0]
+  expect(edit).toMatchObject({ type: 'frame.set', instanceId: 'neighbor' })
+  if (edit.type !== 'frame.set' || !edit.frame) throw new Error('Expected a canonical frame edit')
+  expect(edit.frame.transform[4]).toBeCloseTo(200 + 20 / .84)
+  expect(edit.frame.transform[5]).toBe(0)
   expect(h.edits.mock.calls[0][1]).toBe(h.captured)
 })
 
@@ -78,4 +86,81 @@ it('does not replay a pending old-document drag into the newly active document',
   h.ui.rerender(<SpatialLocationWorkspace {...h.props} documentId="b" captureTarget={() => ({ ...h.captured, documentId: 'b', epoch: 'epoch-b' })} />)
   await act(async () => h.accept())
   expect(h.select).not.toHaveBeenCalled(); expect(h.edits).not.toHaveBeenCalled()
+})
+
+it('keeps the world editor open outside a user camera frame and edits there without changing the camera', async () => {
+  const h = fixture(), surface = { ...h.props.surface, spatial: { ...h.props.surface.spatial!, frames: [{ id: 'detail', title: '细节', pose: { x: 0, y: 0, zoom: 4 } }] } }
+  h.ui.rerender(<SpatialLocationWorkspace {...h.props} surface={surface} contentEdit={null}
+    contentEditor={{ ...h.props.contentEditor!, read: () => null }} />)
+  expect(h.stage.style.inset).toBe('0px')
+  expect(h.stage.style.width).toBe(''); expect(h.stage.style.height).toBe('')
+  const outline = h.stage.querySelector('[data-spatial-camera-frame="detail"] polygon')!
+  expect(outline.getAttribute('points')).toBe('316,168 484,168 484,252 316,252')
+  // The neighbor is at x=620, beyond the right edge of the camera's dashed box.
+  fireEvent.pointerDown(h.stage, { pointerId: 8, button: 0, clientX: 620, clientY: 220 })
+  fireEvent.pointerMove(h.stage, { pointerId: 8, button: 0, clientX: 650, clientY: 230 })
+  await act(async () => fireEvent.pointerUp(h.stage, { pointerId: 8, button: 0, clientX: 650, clientY: 230 }))
+  expect(h.select).toHaveBeenLastCalledWith(['neighbor'])
+  const edit = h.edits.mock.calls[0][0][0]
+  expect(edit).toMatchObject({ type: 'frame.set', instanceId: 'neighbor' })
+  if (edit.type !== 'frame.set' || !edit.frame) throw new Error('Expected a canonical frame edit')
+  expect(edit.frame.transform[4]).toBeCloseTo(200 + 30 / .84)
+  expect(edit.frame.transform[5]).toBeCloseTo(10 / .84)
+  expect(surface.spatial.frames[0].pose).toEqual({ x: 0, y: 0, zoom: 4 })
+  const onCamera = vi.fn()
+  h.ui.rerender(<SpatialLocationWorkspace {...h.props} surface={surface} canvasMode="run" contentEdit={null} onCamera={onCamera}
+    contentEditor={{ ...h.props.contentEditor!, read: () => null }} />)
+  expect(Number.parseFloat(h.stage.style.width) / Number.parseFloat(h.stage.style.height)).toBe(2)
+  expect(h.stage.style.inset).toBe('auto')
+  fireEvent.wheel(h.stage, { ctrlKey: true, deltaY: 10, clientX: 400, clientY: 200 })
+  expect(onCamera.mock.calls[0][0]).toMatchObject({ x: 0, y: 0 })
+  expect(onCamera.mock.calls[0][0].zoom).toBeCloseTo(.9)
+  expect(surface.spatial.frames[0].pose).toEqual({ x: 0, y: 0, zoom: 4 })
+})
+
+it('shows a whole default camera frame in a smaller open workspace, leaving visible room outside it', () => {
+  const h = fixture(), surface = { ...h.props.surface, designSize: { width: 1280, height: 720 },
+    spatial: { ...h.props.surface.spatial!, frames: [{ id: 'full', title: '镜头 1', pose: { x: 0, y: 0, zoom: 1 } }] } }
+  h.ui.rerender(<SpatialLocationWorkspace {...h.props} surface={surface} contentEdit={null} view={{ ...h.props.view, activeCameraFrameId: 'full' }} />)
+  const outline = h.stage.querySelector('[data-spatial-camera-frame="full"] polygon')!
+  const corners = outline.getAttribute('points')!.split(' ').map(pair => pair.split(',').map(Number))
+  const xs = corners.map(point => point[0]), ys = corners.map(point => point[1])
+  expect(Math.min(...xs)).toBeGreaterThan(0); expect(Math.max(...xs)).toBeLessThan(800)
+  expect(Math.min(...ys)).toBeGreaterThan(0); expect(Math.max(...ys)).toBeLessThan(400)
+  expect((Math.max(...xs) - Math.min(...xs)) / (Math.max(...ys) - Math.min(...ys))).toBeCloseTo(16 / 9)
+  expect(h.stage.style.inset).toBe('0px')
+  expect(surface.spatial.frames[0].pose).toEqual({ x: 0, y: 0, zoom: 1 })
+})
+
+it('keeps a Slides-sized live camera preview through free pan and zoom without creating a saved frame', () => {
+  const h = fixture(), surface = { ...h.props.surface, designSize: { width: 1280, height: 720 } }
+  const source = structuredClone(surface), onCamera = vi.fn()
+  const view = { ...h.props.view, camera: { x: 120, y: -80, zoom: 2, rotation: 25 }, showCameraFrames: false }
+  h.ui.rerender(<SpatialLocationWorkspace {...h.props} surface={surface} contentEdit={null} view={view} onCamera={onCamera} />)
+  const readCorners = () => h.stage.querySelector('[data-spatial-camera-preview] polygon')!.getAttribute('points')!
+    .split(' ').map(pair => pair.split(',').map(Number))
+  const fitted = fitPage({ width: 800, height: 400 }, surface.designSize, EDITOR_PAGE_INSETS, 'contain')
+  const expected = [[fitted.left, fitted.top], [fitted.left + 1280 * fitted.scale, fitted.top],
+    [fitted.left + 1280 * fitted.scale, fitted.top + 720 * fitted.scale], [fitted.left, fitted.top + 720 * fitted.scale]]
+  const assertPreview = () => readCorners().forEach((point, index) => point.forEach((coordinate, axis) => expect(coordinate).toBeCloseTo(expected[index][axis])))
+  const anchorInWorld = () => {
+    const value = (h.stage.querySelector('[data-spatial-world]') as HTMLElement).style.transform
+    const matrix = value.slice(7, -1).split(',').map(Number) as unknown as AffineMatrix
+    return transformPoint(invertMatrix(matrix), { x: 600, y: 150 })
+  }
+  assertPreview()
+  expect(h.stage.querySelector('[data-spatial-camera-frame]')).toBeNull()
+  // Zoom at an off-centre point must retain its world coordinate with the same fitted camera origin.
+  const beforeAnchor = anchorInWorld()
+  fireEvent.wheel(h.stage, { ctrlKey: true, deltaY: -10, clientX: 600, clientY: 150 })
+  const camera = onCamera.mock.calls[0][0]
+  h.ui.rerender(<SpatialLocationWorkspace {...h.props} surface={surface} contentEdit={null} view={{ ...view, camera }} onCamera={onCamera} />)
+  assertPreview()
+  expect(anchorInWorld().x).toBeCloseTo(beforeAnchor.x); expect(anchorInWorld().y).toBeCloseTo(beforeAnchor.y)
+  h.ui.rerender(<SpatialLocationWorkspace {...h.props} surface={surface} contentEdit={null}
+    view={{ ...view, camera: { x: -400, y: 250, zoom: .7, rotation: -35 } }} />)
+  assertPreview()
+  expect(surface).toEqual(source); expect(h.edits).not.toHaveBeenCalled()
+  h.ui.rerender(<SpatialLocationWorkspace {...h.props} surface={surface} canvasMode="run" contentEdit={null} view={view} />)
+  expect(h.stage.querySelector('[data-spatial-camera-preview]')).toBeNull()
 })

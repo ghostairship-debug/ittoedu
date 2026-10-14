@@ -1,5 +1,6 @@
 import type { ModelJson, ModelSelection } from './modelProvider'
 import type { ExecutionRoleSelection, ExecutionSettingsView } from './executionSettings'
+import { effectiveModelProtocol } from './modelRouting'
 
 /** Observations of document tool arguments, never inferred from chat/SSE capability flags. */
 export interface BodyStreamingObservation {
@@ -23,7 +24,7 @@ function canonical(value: ModelJson): string {
 }
 export function bodyStreamingIdentity(selection: ModelSelection): Omit<BodyStreamingRecord, 'latest' | 'progressive'> {
   return { connectionId: selection.connection.id, connectionRevision: selection.connection.revision,
-    model: selection.model, parametersKey: canonical(selection.parameters ?? {}) }
+    model: selection.model, parametersKey: canonical({ protocol: effectiveModelProtocol(selection), parameters: selection.parameters ?? {} }) }
 }
 export function bodyStreamingRecord(records: readonly BodyStreamingRecord[], selection: ModelSelection): BodyStreamingRecord | undefined {
   const key = bodyStreamingIdentity(selection)
@@ -41,7 +42,7 @@ export function configuredBodyStreamingAlternatives(settings: ExecutionSettingsV
     if (!value) return false
     const entry = settings.connections.find(entry => entry.connection.id === value.connectionId)
     if (!entry?.hasCredential || entry.revoked || entry.connection.capabilities.tools === 'unsupported') return false
-    const selection = { connection: entry.connection, model: value.model, parameters: value.parameters }
+    const selection = { connection: entry.connection, model: value.model, parameters: value.parameters, capabilityModel: value.capabilityModel }
     const key = JSON.stringify(bodyStreamingIdentity(selection))
     if (seen.has(key) || current && key === JSON.stringify(bodyStreamingIdentity(current))) return false
     seen.add(key)

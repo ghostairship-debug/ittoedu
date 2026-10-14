@@ -1,9 +1,22 @@
 // @vitest-environment node
+import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http'
 import { setImmediate as nextTurn } from 'node:timers/promises'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AnthropicMessagesProvider, serializeAnthropicMessagesRequest } from '../../src/main/workbench/providers/AnthropicMessagesProvider'
 import type { ModelEvent, ModelJsonObject, ModelRequest } from '../../src/shared/workbench/modelProvider'
+import { modelContextBudget } from '../../src/core/execution/modelContextBudget'
+
+it('R01 maps foreign output caps to Messages while preserving the native cap and its budget', () => {
+  const input = request('https://fixture.invalid/v1')
+  input.selection.parameters = { max_output_tokens: 3200, max_completion_tokens: 2400 }
+  expect(JSON.parse(serializeAnthropicMessagesRequest(input)).max_tokens).toBe(3200)
+  input.selection.parameters.max_tokens = 1600
+  const wire = JSON.parse(serializeAnthropicMessagesRequest(input))
+  expect(wire.max_tokens).toBe(1600)
+  expect(wire).not.toHaveProperty('max_output_tokens'); expect(wire).not.toHaveProperty('max_completion_tokens')
+  expect(modelContextBudget(input.selection).outputReserve).toBe(wire.max_tokens)
+})
 
 const servers: Server[] = []
 afterEach(async () => {
@@ -110,12 +123,12 @@ it('uses real Messages HTTP and preserves thinking, signatures, redacted blocks 
     { type: 'thinking', thinking: '思考😀', signature: 'opaque-signature' },
     { type: 'redacted_thinking', data: 'opaque-redacted-payload' },
     { type: 'text', text: '局部修改中文😀\n' },
-    { type: 'tool_use', id: 'tool-one', name: 'text_replace', input: { content: '新文😀' } },
+    { type: 'tool_use', id: 'tool-one', name: modelToolWireName('text.replace'), input: { content: '新文😀' } },
   ])
   expect(first.filter(event => event.type === 'reasoning.delta').map(event => event.text).join('')).toBe('思考😀')
   expect(JSON.stringify(received[0])).toBe(serialized)
   expect(received[0]).toMatchObject({ model: 'claude-fixture', max_tokens: 64000, system: '全局指令\n\n开发指令',
-    tools: [{ name: 'text_replace', input_schema: { type: 'object' } }], output_config: { effort: 'high' }, thinking: { type: 'adaptive' } })
+    tools: [{ name: modelToolWireName('text.replace'), input_schema: { type: 'object' } }], output_config: { effort: 'high' }, thinking: { type: 'adaptive' } })
   expect((received[0]!.messages as ModelJsonObject[])[0]).toEqual({ role: 'user', content: [
     { type: 'text', text: '测试中文 😀\n下一行' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AA==' } },
   ] })
@@ -141,7 +154,7 @@ it('uses explicit native max_tokens before the model output window and converts 
   const body = JSON.parse(serializeAnthropicMessagesRequest(input))
   expect(body.max_tokens).toBe(23000)
   expect(body.messages[0].content[0]).toEqual({ type: 'image', source: { type: 'url', url: 'https://example.com/image.png' } })
-  expect(body.messages[1].content).toEqual([{ type: 'tool_use', id: 'canonical-call', name: 'text_replace', input: { content: '改写' } }])
+  expect(body.messages[1].content).toEqual([{ type: 'tool_use', id: 'canonical-call', name: modelToolWireName('text.replace'), input: { content: '改写' } }])
   delete input.selection.outputLimit; delete input.selection.parameters!.max_tokens
   expect(() => serializeAnthropicMessagesRequest(input)).toThrow('missing-model-output-window')
 })
@@ -185,7 +198,7 @@ it('does not publish incomplete tool calls when native message_stop is missing',
   const root = await serve(async (req, res) => {
     await bodyOf(req)
     res.writeHead(200, { 'Content-Type': 'text/event-stream' })
-    res.end([start(), { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'partial-call', name: 'text_replace', input: {} } },
+    res.end([start(), { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'partial-call', name: modelToolWireName('text.replace'), input: {} } },
       { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"content":' } }].map(frame).join(''))
   })
   const result = await collect(new AnthropicMessagesProvider({ credentialResolver: async () => 'fixture-private-key' }), request(root))

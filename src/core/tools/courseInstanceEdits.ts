@@ -19,7 +19,7 @@ export { componentDataPropertyFields } from '../course/componentDataEdits'
 export function readCourseInstanceAppearance(model: DocumentModel, target: CourseInstanceTarget, fields: readonly string[]): {
   appearance: Record<string, JsonValue>; style: Record<string, JsonValue>
 } {
-  if (target.dataPath || target.from !== undefined || target.to !== undefined) throw new Error('外观来源需要已观察的整对象，文字范围不授权读取整对象外观')
+  if (target.authorField || target.dataPath || target.from !== undefined || target.to !== undefined) throw new Error('外观来源需要已观察的整对象，文字范围不授权读取整对象外观')
   const { project, instance } = courseInstanceContext(model, target)
   const builtin = componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
   const data = instance.data as Record<string, JsonValue>
@@ -68,7 +68,7 @@ export function courseInstanceAppearanceEdits(model: DocumentModel, target: Cour
 /** Selected instance properties use the same public operations as the inspector. */
 export function courseInstancePropertyEdits(model: DocumentModel, target: CourseInstanceTarget,
   properties: Omit<z.infer<typeof objectUpdatePropertiesInputSchema>, 'implementation'>): ComponentEdit[] {
-  if (target.dataPath || target.from !== undefined || target.to !== undefined) throw new Error('属性修改需要整对象授权，文字范围请使用 text.replace 或 text.format')
+  if (target.authorField || target.dataPath || target.from !== undefined || target.to !== undefined) throw new Error('属性修改需要整对象授权，文字范围请使用 text.replace 或 text.format')
   const { project, instance } = courseInstanceContext(model, target)
   if (instance.locked && Object.keys(properties).some(key => key !== 'locked')) throw new Error('所选对象已锁定，请先解锁')
   const edits: ComponentEdit[] = []
@@ -92,7 +92,7 @@ export function courseInstancePropertyEdits(model: DocumentModel, target: Course
   const style = { ...properties.style, ...(properties.opacity !== undefined ? { opacity: properties.opacity } : {}) }
   for (const [name, value] of Object.entries(style)) if (!equalComponentValue(instance.style?.[name], value))
     edits.push({ type: 'style.set', instanceId: instance.id, path: [name], value })
-  const patch = { ...(properties.visible !== undefined ? { visible: properties.visible } : {}),
+  const patch = { ...(properties.viewportPinned !== undefined ? { viewportPinned: properties.viewportPinned } : {}), ...(properties.visible !== undefined ? { visible: properties.visible } : {}),
     ...(properties.playbackInitialVisibility !== undefined ? { playbackInitialVisibility: properties.playbackInitialVisibility } : {}),
     ...(properties.locked !== undefined ? { locked: properties.locked } : {}), ...(properties.label !== undefined ? { name: properties.label } : {}) }
   if (Object.keys(patch).length) edits.push({ type: 'instance.patch', instanceId: instance.id, patch })
@@ -104,7 +104,7 @@ export type CourseInstanceConversionInput = z.infer<typeof objectConvertOptionsI
 /** Convert the selected table through professional chart algorithms and the same History writer. */
 export function courseInstanceConversionEdits(model: DocumentModel, target: CourseInstanceTarget,
   input: CourseInstanceConversionInput): ComponentEdit[] {
-  if (target.dataPath || target.from !== undefined || target.to !== undefined) throw new Error('类型转换需要整对象授权')
+  if (target.authorField || target.dataPath || target.from !== undefined || target.to !== undefined) throw new Error('类型转换需要整对象授权')
   const { project, instance } = courseInstanceContext(model, target)
   if (instance.locked) throw new Error('所选对象已锁定，请先解锁')
   if (componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) !== 'guoling.table') throw new Error('当前转换入口需要一个表格对象')

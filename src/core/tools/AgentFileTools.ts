@@ -27,8 +27,8 @@ export const agentFileSchemas = {
   'file.patch': z.object({ path, expectedVersion: version.optional(), oldText: z.string().min(1), newText: content,
     range: z.object({ from: z.number().int().min(0), to: z.number().int().min(0) }).strict().optional() }).strict(),
   'file.mkdir': z.object({ path: path.optional(), name: z.string().min(1) }).strict(),
-  'file.copy': z.object({ sources: paths, destination: path, sourceVersion: z.enum(['disk', 'current']).optional(), flushFirst: z.boolean().optional() }).strict(),
-  'file.move': z.object({ sources: paths, destination: path }).strict(),
+  'file.copy': z.object({ sources: paths, destination: path, sourceVersion: z.enum(['disk', 'current']).optional(), flushFirst: z.boolean().optional(), resourcePolicy: z.enum(['copy', 'cancel']).optional() }).strict(),
+  'file.move': z.object({ sources: paths, destination: path, resourcePolicy: z.enum(['copy', 'cancel']).optional() }).strict(),
   'file.rename': z.object({ path, name: z.string().min(1) }).strict(),
   'file.trash': z.object({ paths }).strict(),
 } as const

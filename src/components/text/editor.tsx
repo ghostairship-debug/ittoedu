@@ -1,3 +1,4 @@
+import { projectDataTextRanges } from '../../shared/document/textInteraction'
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../../renderer/document/SharedDocumentEditor'
 import type { DocumentCommitResult, DocumentOperation } from '../../renderer/document/editorSession'
 import { normalizeDocumentText, type DocumentBlock, type FlowInline } from '../../shared/document/content'
@@ -48,7 +49,7 @@ export function TextComponentEditor(props: TextComponentEditorOwner<TextComponen
     onCompositionChange={active => props.onCompositionChange?.(active)}
     onDraft={(_source, diagnostics) => { if (diagnostics.length) props.onDiagnostic?.(diagnostics[0].message) }}
     onChange={(document, operation) => {
-      try { return props.onChange(textDataFromEditor(props.data, document), operation) }
+      try { const data = textDataFromEditor(props.data, document); return props.onChange(data, { ...operation, dataRangeProjection: projectDataTextRanges(data) }) }
       catch (error) { props.onDiagnostic?.(error instanceof Error ? error.message : String(error)); return false }
     }} /></div></div>
 }

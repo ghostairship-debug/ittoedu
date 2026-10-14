@@ -1,3 +1,5 @@
+import { componentDataEdits } from '../../course/componentDataEdits'
+import { allDocumentTextSlots, inlineComponentIds, documentTextRanges, projectDataTextRanges, type DocumentRangeProjection } from '../../../shared/document/textInteraction'
 import type { ComponentEdit, ComponentInstance, CourseProjectV10, JsonValue } from '../../../shared/contracts/component-platform'
 import { documentBlockSchema, documentContentSchema, type DocumentBlock } from '../../../shared/document/content'
 import { documentResourceReferences } from '../../../shared/document/resources'
@@ -5,6 +7,8 @@ import type { MarkdownDocument } from '../../../shared/document/markdown'
 import { createTextComponentData, textComponentDataSchema, formulaComponentDataSchema, createFormulaComponentData } from '../../../components/text/data'
 import { TEXT_DEFINITION, FORMULA_DEFINITION } from '../../../components/text/adapters'
 import { IMAGE_DEFINITION, imageDataSchema, createImageData } from '../../../components/image'
+import { replaceImageSource } from '../../../components/image/data'
+import { clampCrop } from '../../../shared/imageCrop'
 import { VIDEO_DEFINITION, AUDIO_DEFINITION, createVideoData, createAudioData } from '../../../components/media'
 import { CHART_DEFINITION, chartDataSchema } from '../../../components/chart'
 import { TABLE_DEFINITION } from '../../../components/table/adapters'
@@ -33,7 +37,8 @@ export function projectFlowBlock(project: CourseProjectV10, instanceId: string):
   const implementation = project.definitions[instance.definitionId]?.implementation
   if (implementation?.kind === 'builtin' && implementation.key === 'guoling.text' && !instance.implementationOverride) {
     const text = textComponentDataSchema.parse(instance.data)
-    return { id: instance.id, type: 'paragraph', content: text.content, textAlign: text.appearance.align,
+    const defaults = Object.fromEntries(Object.entries(text.appearance).filter(([key]) => ['fontFamily','fontSize','color','bold','italic','underline','strike','emphasis','highlightColor'].includes(key)))
+    return { id: instance.id, type: 'paragraph', content: text.content, textAlign: text.appearance.align, textDefaults: defaults,
       ...(text.appearance.lineSpacing!==undefined ? {lineSpacing:text.appearance.lineSpacing}:{}) }
   }
   if (implementation?.kind === 'builtin' && implementation.key === DOCUMENT_BLOCK_DEFINITION.id && !instance.implementationOverride) {
@@ -50,14 +55,17 @@ export function projectFlowBlock(project: CourseProjectV10, instanceId: string):
     return {id:instance.id,type:'media',assetId:data.assetId,mediaKind,altText:mediaKind==='image' ? data.alt:data.title,
       layout:instance.flowLayout?.width ?? 'content-width',...(instance.flowLayout?.wrap ? {wrap:instance.flowLayout.wrap}:{}),
       ...(instance.flowLayout?.caption ? {caption:instance.flowLayout.caption}:{}),
-      ...(mediaKind==='image' ? {crop:data.crop,cropX:data.cropX,cropY:data.cropY}:{})}
+      ...(mediaKind==='image' ? {crop:clampCrop(data.crop),cropX:data.cropX,cropY:data.cropY}:{})}
   }
   if(implementation?.kind==='builtin' && implementation.key===TABLE_DEFINITION.id && !instance.implementationOverride) {
     const data=parseTableData(instance.data) as any
-    return {id:instance.id,type:'table',headerEnabled:data.headerEnabled ?? data.columns.some((column:any)=>column.header),
+    return {id:instance.id,type:'table',headerEnabled:data.headerEnabled ?? data.columns.some((column:any)=>column.header?.inlines.length),
       columns:data.columns.map((column:any)=>({id:column.id,header:column.header ?? {inlines:[]}})),
       rows:data.rows.map((row:any)=>({id:row.id,cells:Object.fromEntries(row.cells.map((cell:any)=>[cell.columnId,cell.content ?? {inlines:[{type:'text',text:cell.text}]}]))})),
       ...(data.caption ? {caption:data.caption}:{}),...(data.merges ? {merges:data.merges}:{})}
+  }
+  if (implementation?.kind === 'builtin' && implementation.key === CHART_DEFINITION.id && !instance.implementationOverride) {
+    return { id: instance.id, type: 'chart', chart: chartDataSchema.parse(instance.data), height: instance.frame?.height ?? 400 }
   }
   // The shared editor treats an arbitrary component as one object; its actual implementation stays in R0.
   const title = project.definitions[instance.definitionId]?.title
@@ -94,8 +102,9 @@ function blockInstance(project: CourseProjectV10, block: DocumentBlock): Compone
   if (previous && projectFlowBlock(project, block.id).type === 'course-instance') throw new Error('专业对象的内容请在组件属性中修改；正文源码仅保留该对象的正式引用和阅读顺序')
   if (block.type === 'paragraph') {
     const text = key === TEXT_DEFINITION.id ? textComponentDataSchema.parse(previous.data) : createTextComponentData()
+    const { align: _align, lineSpacing: _lineSpacing, ...appearance } = text.appearance
     return { ...previous, id: block.id, definitionId: definitionId(TEXT_DEFINITION.id), data: json({ ...text, content: block.content,
-      appearance: { ...text.appearance, align: block.textAlign ?? text.appearance.align,
+      appearance: { ...appearance, ...block.textDefaults, align: block.textAlign ?? 'left',
         ...(block.lineSpacing!==undefined ? {lineSpacing:block.lineSpacing}:{}) } }) }
   }
   if(block.type==='formula') {
@@ -108,14 +117,16 @@ function blockInstance(project: CourseProjectV10, block: DocumentBlock): Compone
     if(!assetId)throw new Error(`媒体素材未找到：${block.source ?? block.id}`)
     const builtin=block.mediaKind==='image' ? IMAGE_DEFINITION.id : block.mediaKind==='video' ? VIDEO_DEFINITION.id : AUDIO_DEFINITION.id
     const initial=key===builtin ? previous.data as any : block.mediaKind==='image' ? createImageData(assetId) : block.mediaKind==='video' ? createVideoData(assetId):createAudioData(assetId)
-    const data=block.mediaKind==='image' ? imageDataSchema.parse({...initial,assetId,alt:block.altText ?? initial.alt,...(block.crop ? {crop:block.crop}:{}),...(block.cropX!==undefined ? {cropX:block.cropX}:{}),...(block.cropY!==undefined ? {cropY:block.cropY}:{})}) : {...initial,assetId,title:block.altText ?? initial.title}
+    const imageInitial = block.mediaKind === 'image' && initial.assetId !== assetId ? replaceImageSource(imageDataSchema.parse(initial), assetId) : initial
+    const data=block.mediaKind==='image' ? imageDataSchema.parse({...imageInitial,assetId,alt:block.altText ?? initial.alt,crop:block.crop ?? createImageData(assetId).crop,cropX:block.cropX ?? 0.5,cropY:block.cropY ?? 0.5}) : {...initial,assetId,title:block.altText ?? initial.title}
     return {...previous,id:block.id,definitionId:definitionId(builtin),data:json(data),flowLayout:{width:block.layout,...(block.wrap ? {wrap:block.wrap}:{}),...(block.caption ? {caption:block.caption}:{})}}
   }
-  if(block.type==='chart')return {...previous,id:block.id,definitionId:definitionId(CHART_DEFINITION.id),data:json(chartDataSchema.parse(block.chart))}
+  if(block.type==='chart')return {...previous,id:block.id,definitionId:definitionId(CHART_DEFINITION.id),data:json(chartDataSchema.parse(block.chart)),
+    frame: { ...(previous?.frame ?? { width: 640, height: block.height, transform: [1, 0, 0, 1, 0, 0] as [number, number, number, number, number, number] }), height: block.height } }
   if(block.type==='table') {
     const initial=key===TABLE_DEFINITION.id ? parseTableData(previous.data) as any : createTableData({rows:Math.max(1,block.rows.length),columns:block.columns.length}) as any
     const columns=block.columns.map(column=>({...initial.columns.find((value:any)=>value.id===column.id),id:column.id,width:initial.columns.find((value:any)=>value.id===column.id)?.width ?? 200,
-      ...(block.headerEnabled!==false || initial.columns.find((value:any)=>value.id===column.id)?.header ? {header:column.header}:{})}))
+      header:column.header}))
     const rows=block.rows.map(row=>{const old=initial.rows.find((value:any)=>value.id===row.id);return {...old,id:row.id,height:old?.height ?? 40,cells:block.columns.map(column=>{
       const cell=old?.cells.find((value:any)=>value.columnId===column.id)
       if(cell?.text!==undefined && same(row.cells[column.id],{inlines:[{type:'text',text:cell.text}]}))return cell
@@ -128,13 +139,15 @@ function blockInstance(project: CourseProjectV10, block: DocumentBlock): Compone
     ...(block.type === 'section' ? { childIds: block.blocks.map(child => child.id) } : {}) }
 }
 /** Convert one edit projection into canonical instance edits while retaining unrelated floating/behavior roots. */
-export function flowDocumentEdits(project: CourseProjectV10, surfaceId: string, blocks: DocumentBlock[], readingBaseline=project): ComponentEdit[] {
+export function flowDocumentEdits(project: CourseProjectV10, surfaceId: string, blocks: DocumentBlock[], readingBaseline=project, rangeProjection?: readonly DocumentRangeProjection[]): ComponentEdit[] {
   const parsed = documentContentSchema.parse({ blocks }).blocks
   const surface = flowSurface(project, surfaceId), edits: ComponentEdit[] = [], desired = new Map<string, ComponentInstance>(), retained = new Set<string>()
   const retain = (id: string) => { retained.add(id); for (const child of project.instances[id]?.childIds ?? []) retain(child) }
   const visit = (items: DocumentBlock[]) => { for (const block of items) {
     desired.set(block.id, blockInstance(project, block))
     if (block.type === 'course-instance') retain(block.id)
+    const previous = project.instances[block.id]
+    if (previous) for (const child of previous.childIds ?? []) if (project.definitions[project.instances[child]?.definitionId]?.role === 'behavior' || allDocumentTextSlots(desired.get(block.id)!.data).some(slot => inlineComponentIds(slot.content).includes(child))) retain(child)
     if (block.type === 'section') visit(block.blocks)
   } }
   visit(parsed)
@@ -188,22 +201,36 @@ export function flowDocumentEdits(project: CourseProjectV10, surfaceId: string, 
         // Keep identity/frame/style through an in-place professional type change.
         edits.push({ type: 'instance.definition.set', instanceId: block.id, definitionId: instance.definitionId })
       }
-      if (!same(previous.data, instance.data)) edits.push({ type: 'data.set', instanceId: block.id, path: [], value: instance.data as JsonValue })
+      if (!same(previous.data, instance.data)) edits.push(...componentDataEdits(project, { surfaceId, instanceId: block.id }, { kind: 'replace', data: instance.data as JsonValue, ...(rangeProjection?.some(field => field.blockId === block.id) ? { rangeProjection: projectDataTextRanges(instance.data) } : {}) }))
+      if (!same(previous.frame, instance.frame)) edits.push({ type: 'frame.set', instanceId: block.id, frame: instance.frame ?? null })
       if (!same(previous.flowLayout,instance.flowLayout)) edits.push({type:'instance.flowLayout.set',instanceId:block.id,flowLayout:instance.flowLayout ?? null})
       const siblings = currentChildren.get(parent) ?? []
       if (container.kind === 'surface' ? !siblings.includes(block.id) : siblings[index] !== block.id) {
-        edits.push({ type: 'instance.move', instanceId: block.id, container, index: insertionIndex }); place(block.id, parent, insertionIndex)
+        edits.push({ type: 'instance.move', instanceId: block.id, container, index: insertionIndex, ...(instance.frame ? { frame: instance.frame } : {}) }); place(block.id, parent, insertionIndex)
       }
       if (block.type === 'section') ordered(block.blocks, { kind: 'instance', instanceId: block.id })
     }
   }
   ordered(parsed, { kind: 'surface', surfaceId })
-  for (const id of oldIds) if (!desired.has(id) && !retained.has(id) && ![...oldIds].some(parent => !desired.has(parent) && !retained.has(parent) && project.instances[parent]?.childIds?.includes(id))) {
+  // A partial paste lands in its actual destination paragraph, not in its staged clone shell.
+  for (const [ownerId, instance] of desired) for (const slot of allDocumentTextSlots(instance.data)) {
+    for (const childId of inlineComponentIds(slot.content)) if (project.instances[childId]) {
+      retain(childId)
+      if (!(currentChildren.get(ownerId) ?? []).includes(childId)) { edits.push({ type: 'instance.move', instanceId: childId, container: { kind: 'instance', instanceId: ownerId }, index: currentChildren.get(ownerId)?.length ?? 0 }); place(childId, ownerId, currentChildren.get(ownerId)?.length ?? 0) }
+    }
+    for (const candidate of Object.values(project.instances)) {
+      const attachments = candidate.attachments?.map(attachment => attachment.target.kind === 'text-range' && documentTextRanges(slot.content).has(attachment.target.rangeId) ? { ...attachment, target: { ...attachment.target, instanceId: ownerId, dataPath: slot.path } } : attachment)
+      if (!attachments || same(attachments, candidate.attachments)) continue
+      retain(candidate.id); edits.push({ type: 'attachments.set', instanceId: candidate.id, attachments })
+      if (!(currentChildren.get(ownerId) ?? []).includes(candidate.id) && candidate.definitionId === 'guoling.range-popover') { edits.push({ type: 'instance.move', instanceId: candidate.id, container: { kind: 'instance', instanceId: ownerId }, index: currentChildren.get(ownerId)?.length ?? 0 }); place(candidate.id, ownerId, currentChildren.get(ownerId)?.length ?? 0) }
+    }
+  }
+  for (const id of oldIds) if (!edits.some(edit => edit.type === 'instance.remove' && edit.instanceId === id) && !desired.has(id) && !retained.has(id) && ![...oldIds].some(parent => !desired.has(parent) && !retained.has(parent) && project.instances[parent]?.childIds?.includes(id))) {
     edits.push({ type: 'instance.remove', instanceId: id })
     for (const children of currentChildren.values()) { const index = children.indexOf(id); if (index >= 0) children.splice(index, 1) }
   }
   const moveRoot = (id: string, index: number) => {
-    edits.push({ type: 'instance.move', instanceId: id, container: { kind: 'surface', surfaceId }, index })
+    edits.push({ type: 'instance.move', instanceId: id, container: { kind: 'surface', surfaceId }, index, ...(desired.get(id)?.frame ? { frame: desired.get(id)!.frame } : {}) })
     place(id, 'surface', index)
   }
   const siblings = currentChildren.get('surface')!
@@ -214,5 +241,10 @@ export function flowDocumentEdits(project: CourseProjectV10, surfaceId: string, 
       while (siblings[index] !== id) moveRoot(siblings[index], rootOrder.indexOf(siblings[index]))
     }
   }
-  return edits
+  const linked = new Set<string>()
+  for (const [ownerId, instance] of desired) for (const slot of allDocumentTextSlots(instance.data)) {
+    for (const childId of inlineComponentIds(slot.content)) linked.add(childId)
+    for (const candidate of Object.values(project.instances)) if (candidate.attachments?.some(attachment => attachment.target.kind === 'text-range' && documentTextRanges(slot.content).has(attachment.target.rangeId))) linked.add(candidate.id)
+  }
+  return edits.filter(edit => edit.type !== 'instance.remove' || !linked.has(edit.instanceId))
 }

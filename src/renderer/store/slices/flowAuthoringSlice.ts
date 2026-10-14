@@ -91,7 +91,7 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
     else if (spec.kind === 'list-ordered') { if (block.type !== 'list') throw new Error('请选择列表'); block.ordered = spec.ordered }
     else if (spec.kind === 'text-style') {
       for (const slot of documentTextSlots(block)) {
-        const length = slot.content.inlines.reduce((size, inline) => size + (inline.type === 'math' ? 1 : Array.from(inline.text).length),0)
+        const length = slot.content.inlines.reduce((size, inline) => size + (inline.type !== 'text' ? 1 : Array.from(inline.text).length),0)
         const from = typeof spec.range === 'object' ? spec.range.start : 0, to = typeof spec.range === 'object' ? spec.range.end : length
         slot.content.inlines = formatTextComponentRange(createTextComponentData(slot.content),from,to,spec.style).content.inlines
       }

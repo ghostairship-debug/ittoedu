@@ -204,7 +204,7 @@ it('creates an HTML file through the existing file service request and opens its
 })
 
 it('offers HTML creation and browser opening without replacing the import action', () => {
-  const ports: ExplorerCommandPorts = { create: vi.fn(), newFromPptx: vi.fn(), importPptx: vi.fn(), importHtml: vi.fn(), openHtmlExternal: vi.fn(),
+  const ports: ExplorerCommandPorts = { create: vi.fn(), importHtml: vi.fn(), openHtmlExternal: vi.fn(),
     rename: vi.fn(), copy: vi.fn(), cut: vi.fn(), paste: vi.fn(), copyTo: vi.fn(), moveTo: vi.fn(), trash: vi.fn(), copyPath: vi.fn(), reveal: vi.fn() }
   explorerNewCommands(null, ports).find(item => item.id === 'file.new-html')?.run()
   expect(ports.create).toHaveBeenCalledWith('create-html')

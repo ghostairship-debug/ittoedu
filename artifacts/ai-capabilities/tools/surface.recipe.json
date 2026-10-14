@@ -1,5 +1,5 @@
 {
-  "description": "在已观察页面后应用现有教学配方，创建可编辑页面。course.recipes 返回模板和正文槽位；只提供配方与文案，分类/排序使用项目文字和正确顺序，软件装配组件、规则和身份。需要整课写入授权。",
+  "description": "应用 course.recipes 实际返回的可深改预置。选择反馈含单选/多选，揭示分步，拖拽匹配/排序，continuous-variable-v1连续变量联动；内容配方在已观察页后创建可编辑页面。static-background-v1/dynamic-background-v1仅添加单份全局底层，不新建页，可选current/include/exclude/all范围、图像/颜色/运动强度与内容联动，不抢前景输入。软件装配正式组件、配置、依赖和身份，一次撤销；需要整课写入授权。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -20,7 +20,10 @@
           "worked-example-v1",
           "step-reveal-v1",
           "choice-feedback-v1",
-          "classify-sort-v1"
+          "classify-sort-v1",
+          "continuous-variable-v1",
+          "static-background-v1",
+          "dynamic-background-v1"
         ],
         "type": "string"
       },
@@ -47,7 +50,7 @@
   "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
   "manual": {
     "group": "edit",
-    "label": "应用教学配方",
+    "label": "应用互动预置",
     "targetKinds": [
       "course-surface"
     ]

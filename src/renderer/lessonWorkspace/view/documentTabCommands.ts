@@ -8,6 +8,7 @@ export interface DocumentTabPorts {
   copyPath(): void
   reveal(): void
   openExternal(): void
+  rename?(): void
 }
 
 const UNSAVED = '尚未保存到文件'
@@ -16,6 +17,7 @@ const UNSAVED = '尚未保存到文件'
 export function documentTabCommands(tab: { index: number; count: number; saved: boolean }, ports: DocumentTabPorts): MenuCommand[] {
   const file = tab.saved ? null : UNSAVED
   return [
+    ...(ports.rename ? [{ id: 'tab.rename', label: '重命名', group: 'file', run: ports.rename }] : []),
     { id: 'tab.close', label: '关闭', group: 'close', run: ports.close },
     { id: 'tab.close-others', label: '关闭其他', group: 'close', run: ports.closeOthers, disabledReason: tab.count < 2 ? '没有其他标签' : null },
     { id: 'tab.close-right', label: '关闭右侧', group: 'close', run: ports.closeRight, disabledReason: tab.index >= tab.count - 1 ? '右侧没有标签' : null },

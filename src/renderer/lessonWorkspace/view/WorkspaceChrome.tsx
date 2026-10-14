@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeftRight, ChevronDown, PanelsTopLeft } from 'lucide-react'
+import { ArrowLeftRight, ChevronDown, PanelsTopLeft, Sparkles } from 'lucide-react'
+import { NutChimeMark } from '../../ui/NutChimeMark'
 import type { LessonWorkspaceViewProps } from './lessonWorkspaceViewTypes'
 import type { WorkbenchLayoutController } from './useWorkbenchLayoutPrefs'
 import { proEditorRailController, type ProEditorPanel } from '../../ui/proEditorRailController'
 import { REVEAL_IN_EXPLORER_EVENT } from '../../workbench/revealInExplorer'
 import { useDismissableDetails } from '../../ui/useDismissableDetails'
+import '../../ui/workbenchChrome.css'
 const basename = (path: string) => path.replace(/[\\/]$/, '').split(/[\\/]/).pop() || path;
 const lower = (value: string) => value.replace(/\\/g, '/').toLowerCase();
 const join = (directory: string, name: string) => `${directory.replace(/[\\/]$/, '')}/${name}`;
@@ -54,6 +56,10 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
  }, [editorFocus, setExplorerOpen]);
  return <>
       <header className="lesson-workspace-toolbar">
+        <div className="toolbar__brand" aria-label="果铃">
+          <span className="toolbar__brand-mark"><NutChimeMark size={25} /></span>
+          <strong>果铃</strong><span className="toolbar__brand-divider" aria-hidden="true">｜</span>
+        </div>
         <details
           ref={switcherMenu}
           className="lesson-workspace-switcher lesson-workspace-more"
@@ -74,15 +80,11 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
             aria-label="切换工作空间"
             title={state.workspace ?? "选择工作空间"}
           >
-            <span className="lesson-workspace-brand" aria-hidden="true">
-              果
-            </span>
             <strong>
-              {state.workspace ? workspaceName : "果铃工作台"}
+              {state.workspace ? workspaceName : "选择工作空间"}
             </strong>
             <span className="lesson-workspace-switch-tag" aria-hidden="true">
               <ArrowLeftRight size={12} />
-              切换
             </span>
             <ChevronDown size={14} aria-hidden="true" />
           </summary>
@@ -151,7 +153,7 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
           {(narrow || editorFocus) && <button type="button" aria-pressed={explorerVisible && (!narrow || editorFocus || state.mobilePane === 'navigation')} onClick={() => selectRegion('resources')}>资源管理器</button>}
           {(narrow || editorFocus) && <button type="button" aria-pressed={conversationsVisible && (!narrow || editorFocus || state.mobilePane === 'navigation')} onClick={() => selectRegion('conversations')}>会话列表</button>}
           {!editorFocus && narrow && <button type="button" aria-pressed={contentOpen && state.mobilePane === 'workbench'} onClick={() => selectRegion('workbench')}>内容</button>}
-          <button type="button" aria-pressed={assistantVisible && (!narrow || editorFocus || state.mobilePane === 'chat')} onClick={() => selectRegion('chat')}>AI 助手</button>
+          <button type="button" aria-label="果铃AI" title="果铃AI" aria-pressed={assistantVisible && (!narrow || editorFocus || state.mobilePane === 'chat')} onClick={() => selectRegion('chat')}><Sparkles size={18} /></button>
           <details
             ref={layoutMenu}
             className="lesson-workspace-more lesson-layout-menu"
@@ -164,7 +166,6 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
           >
             <summary aria-label="布局" title="按你的习惯安排工作区">
               <PanelsTopLeft size={14} aria-hidden="true" />
-              布局
             </summary>
             {layoutMenuOpen && (
               <div
@@ -174,6 +175,11 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
               />
             )}
             <div className="lesson-layout-popover">
+              {!editorFocus && <div className="lesson-layout-presets" role="group" aria-label="常用布局">
+                <button type="button" aria-pressed={!layout.prefs.navCollapsed && !layout.prefs.contentClosed && !layout.prefs.chatClosed && explorerVisible && conversationsVisible} onClick={() => { layout.applyPreset('standard'); setLayoutMenuOpen(false) }}><LayoutPresetPreview preset="standard" /><span>标准工作台</span></button>
+                <button type="button" aria-pressed={layout.prefs.navCollapsed && !layout.prefs.contentClosed && layout.prefs.chatClosed} onClick={() => { layout.applyPreset('content'); setLayoutMenuOpen(false) }}><LayoutPresetPreview preset="content" /><span>专注内容</span></button>
+                <button type="button" aria-pressed={layout.prefs.navCollapsed && !layout.prefs.contentClosed && !layout.prefs.chatClosed} onClick={() => { layout.applyPreset('content-ai'); setLayoutMenuOpen(false) }}><LayoutPresetPreview preset="content-ai" /><span>内容＋果铃AI</span></button>
+              </div>}
               <button type="button" onClick={() => { toggleExplorer(); setLayoutMenuOpen(false) }}>
                 {explorerVisible ? "收起" : "展开"}资源管理器
               </button>
@@ -181,7 +187,7 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
                 {conversationsVisible ? "收起" : "展开"}会话列表
               </button>
               <button type="button" onClick={() => { toggleAssistant(); setLayoutMenuOpen(false) }}>
-                {assistantVisible ? "收起" : "展开"}AI 助手
+                {assistantVisible ? "收起" : "展开"}果铃AI
               </button>
               {!editorFocus && <button
                 type="button"
@@ -256,4 +262,22 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
         </div>
       )}
 </>;
+}
+
+/** Diagrams describe the existing presets; visibility remains owned by the layout controller. */
+function LayoutPresetPreview({ preset }: { preset: 'standard' | 'content' | 'content-ai' }) {
+  return <svg className="lesson-layout-preview" viewBox="0 0 64 42" aria-hidden="true" focusable="false">
+    <rect x="1" y="1" width="62" height="40" rx="4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    <path d="M2 8h60" fill="none" stroke="currentColor" opacity=".6" />
+    <path d="M5 5h8m3 0h4" fill="none" stroke="currentColor" strokeLinecap="round" />
+    {preset === 'standard' ? <>
+      <rect x="3" y="10" width="13" height="29" rx="1" fill="currentColor" opacity=".16" />
+      <path d="M3 24h13M18 9v31M47 9v31" fill="none" stroke="currentColor" opacity=".5" />
+      <rect x="49" y="10" width="12" height="29" rx="1" fill="currentColor" opacity=".22" />
+      <rect x="22" y="15" width="21" height="18" rx="1" fill="currentColor" opacity=".08" />
+    </> : <>
+      <rect x="6" y="12" width={preset === 'content' ? 52 : 36} height="25" rx="2" fill="currentColor" opacity=".08" />
+      {preset === 'content-ai' && <><path d="M46 9v31" fill="none" stroke="currentColor" opacity=".5" /><rect x="48" y="10" width="13" height="29" rx="1" fill="currentColor" opacity=".22" /></>}
+    </>}
+  </svg>
 }

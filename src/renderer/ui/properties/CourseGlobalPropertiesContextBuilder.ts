@@ -11,11 +11,12 @@ import type { SlideNativePropertiesContext } from './SlideNativePropertiesPanel'
 import type { CourseGlobalPropertiesContext } from './CourseGlobalPropertiesPanel'
 import { courseSettingsEdits, surfaceSettingsEdits, defaultCoursePlayback as defaults } from '../../../core/course/courseSemanticEdits'
 import { courseGlobalPlacementEdits } from '../../../core/course/courseObjectEdits'
+import { componentNavigationScene } from '../../interactions/componentInteractionAuthoring'
 export { globalVisibilityAtSurface } from '../../../core/course/courseSemanticEdits'
 export function buildCourseGlobalPropertiesOwner(input: {
   read: PropertiesOwnerReadModel; selectedContext: SlideNativePropertiesContext | null; assets: Record<string, AssetMeta>; key: string
   liveTarget(): CapturedCourseTarget
-  submit(edits: ComponentEdit[], target?: CapturedCourseTarget): void
+  submit(edits: ComponentEdit[], target?: CapturedCourseTarget): void | Promise<void>
   preview(edits: ComponentEdit[] | null, owner?: BackgroundPreviewTarget['owner']): void
   ensureTeacherController(): Promise<void>
   editSource(): void; openAutomation(): void; report(error: unknown): void
@@ -47,8 +48,7 @@ export function buildCourseGlobalPropertiesOwner(input: {
       locations: project.surfaces.map(surface => ({ id: surface.id, label: surface.title })) } : null,
     selected: selected && native ? { view: native.view, notices: native.notices, contentEditingEnabled: true, spatialMode: native.spatialMode,
       videoDiagnostics: [], controller: controller && native.view.type === 'external-component' ? readTeacherControllerConfig(native.view.props) : null,
-      controllerComponent: controller, controllerScenes: project.surfaces.map(surface => ({ id: surface.id, name: surface.title,
-        presentation: surface.presentation ? { states: surface.presentation.states.map(state => ({ id: state.id, name: state.title })) } : undefined })), component: native.component } : null,
+      controllerComponent: controller, controllerScenes: project.surfaces.map(componentNavigationScene), component: native.component } : null,
     runtime: native?.runtime ?? null, interaction: null,
     commands: { patch: native?.commands.patch ?? (() => {}), preview: native?.commands.preview, replaceImage: native?.commands.replaceImage ?? (() => {}),
       clearPresentationOverride: native?.commands.clearPresentationOverride ?? (() => {}), text: native?.commands.text ?? { beginEdit() {}, commitEdit() {}, cancelEdit() {}, updateDraft() {}, toggleStyle() {} },
@@ -61,10 +61,13 @@ export function buildCourseGlobalPropertiesOwner(input: {
         return submit(surfaceSettingsEdits(target.project, target.surfaceId, { resize: { ...options, designSize } }), target)
       }),
       updatePlayback: value => run(() => { const target = liveTarget(); submit(courseSettingsEdits(target.project, { playback: value }), target) }),
-      ensureTeacherController: () => run(async () => { const target = liveTarget(); await input.ensureTeacherController(); submit(courseSettingsEdits(target.project, { playback: { controls: 'canvas' } }), target) }),
+      ensureTeacherController: () => run(() => input.ensureTeacherController()),
       manageTeacherControllerComponent: (id, _operation) => run(() => submit([{ type: 'implementation.set', instanceId: id, implementation: null }])),
       editControllerSource: input.editSource,
-      updateDesignTokens: designTokens => run(() => { const target = liveTarget(); submit(courseSettingsEdits(target.project, { designTokens }), target) }),
+      updateDesignTokens: async designTokens => {
+        try { const target = liveTarget(); await submit(courseSettingsEdits(target.project, { designTokens }), target) }
+        catch (error) { report(error); throw error }
+      },
       setVisibleAtLocation: (id, visible) => run(() => { const target = liveTarget(); if (!target.surfaceId) return;
         submit(courseGlobalPlacementEdits(target.project, id, { atSurface: { surfaceId: target.surfaceId, visible } }), target)
       }),

@@ -102,6 +102,12 @@ interface CardRecord {
 
 /** One card per element: an object, or a document block, of one document. */
 export function elementCardKey(documentId: string, target: ExecutionSelectionTarget): string {
+  if (target.kind === 'course-instance' && target.authorField) {
+    const field = target.authorField
+    const address = field.authorKey ? ['record', field.authorKey, field.kind] : field.sourceRegion
+      ? ['source', field.sourceRegion.kind, field.sourceRegion.path, field.sourceRegion.start, field.kind] : [field.fieldScope ?? 'data', field.dataPath]
+    return `${documentId}:instance:${target.instanceId}:state:${target.stateId ?? ''}:author:${JSON.stringify(address)}`
+  }
   if (target.kind === 'course-instance') return `${documentId}:instance:${target.instanceId}:state:${target.stateId ?? ''}${target.dataPath ? `:${target.fieldScope ?? 'data'}:${JSON.stringify(target.dataPath)}` : ''}`
   if (target.kind === 'course-object') return `${documentId}:object:${target.itemId}${target.compositionNodeId ? `:composition:${target.compositionNodeId}` : ''}`
   if (target.kind === 'flow-block') return `${documentId}:block:${target.surfaceId}:${target.blockId}`
@@ -137,6 +143,7 @@ export class ElementCardController {
   private version = 0
   private workspace: { workspaceId: string } | null = null
   private permission: ExecutionPermissionMode = DEFAULT_PERMISSION_MODE
+  private advancementPreferenceOwner: Pick<ConversationRecord, 'workspaceId' | 'conversationId'> | null = null
   private events: { api: ExecutionDesktopAPI; stop(): void } | null = null
   private documents: { api: Pick<DocumentHostAPI, 'subscribe'>; stop(): void } | null = null
   private views = new Map<string, ElementCardView>()
@@ -165,6 +172,8 @@ export class ElementCardController {
       && (!surfaceId || !this.focus.surfaceId || surfaceId === this.focus.surfaceId)
   }
   setPermission(mode: ExecutionPermissionMode) { this.permission = mode }
+  /** Only newly created cards inherit this conversation's current preference; existing cards retain their own owner. */
+  setAdvancementPreferenceOwner(owner: Pick<ConversationRecord, 'workspaceId' | 'conversationId'> | null) { this.advancementPreferenceOwner = owner }
 
   view(key: string): ElementCardView | null {
     const card = this.cards.get(key)
@@ -364,7 +373,7 @@ export class ElementCardController {
     if (!api || !workspaceId) throw new Error('AI 执行服务或工作空间尚未就绪。')
     card.workspaceId = workspaceId
     if (card.kind === 'text' && this.view(key)?.busy) throw new Error('请等 AI 改完这一次再继续追问。')
-    const submissionId = crypto.randomUUID(), previous = card.sending, permission = this.permission
+    const submissionId = crypto.randomUUID(), previous = card.sending, permission = this.permission, preferenceOwner = this.advancementPreferenceOwner
     let settle!: () => void
     const done = new Promise<void>(resolve => { settle = resolve })
     const pending: PendingSend = { cancelled: false, invoked: false, done, settle }
@@ -397,6 +406,14 @@ export class ElementCardController {
         current = await api.createConversation(workspaceId, card.label, undefined, { kind: 'element', documentId: card.documentId, label: card.label })
         card.conversation = current
         card.projection = emptyExecutionProjection(current.conversationId); this.listen(api); alive()
+        const owner = preferenceOwner
+        if (owner?.workspaceId === workspaceId) {
+          const preference = await api.conversation(owner.workspaceId, owner.conversationId); alive()
+          if (preference?.advancementMode && api.setAdvancementMode) {
+            current = await api.setAdvancementMode({ workspaceId, conversationId: current.conversationId, advancementMode: preference.advancementMode })
+            card.conversation = current; alive()
+          }
+        }
       }
       const contentOutput = card.kind === 'text' ? capture.contentOutput : undefined
       const request = { workspaceId, conversationId: current.conversationId, submissionId, text,
@@ -406,7 +423,7 @@ export class ElementCardController {
       let result: ExecutionSendResult
       for (let attempt = 0; ; attempt++) {
         current = await api.conversation(current.workspaceId, current.conversationId) ?? current; alive()
-        try { pending.request = { ...request, expectedRevision: current.revision }; pending.invoked = true; result = await api.send(pending.request); break }
+        try { pending.request = { ...request, expectedRevision: current.revision, ...(current.advancementMode ? { advancementMode: current.advancementMode } : {}) }; pending.invoked = true; result = await api.send(pending.request); break }
         catch (error) {
           // Known draft-CAS rejection happened before a task was accepted.
           if (!isExecutionInputError(error, 'conversation-draft-changed') || attempt >= 3) throw error

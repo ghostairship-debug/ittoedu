@@ -208,6 +208,52 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     expect(ports.commitStatus).not.toHaveBeenCalled()
   })
 
+  it('saves the clicked course after a queued action and tab switch, including later edits to that course', async () => {
+    const host = await createCourseDocumentHost(), release = deferred()
+    await host.editTitle('A clicked save')
+    const target = host.read()
+    const { result, ports } = await mount(host, {
+      async runBusy(work) { await release.promise; return work() },
+    })
+    let save!: Promise<boolean>
+    act(() => { save = result.current.saveProject() })
+    await host.documents.create('flow')
+    await host.editTitle('B remains unsaved')
+    const other = host.read()
+    await host.bridge.edit([{ type: 'project.title.set', title: 'A draft admitted while queued' }], undefined, target.documentId)
+    await act(async () => { release.resolve(); expect(await save).toBe(false) })
+    expect(host.driver.load(host.disk.get('initial.h5lesson')!)).toMatchObject({ project: { title: 'A draft admitted while queued' } })
+    expect(host.registry.get(target.documentId).read().dirty).toBe(false)
+    expect(host.read()).toEqual(other)
+    expect(host.read().dirty).toBe(true)
+    expect(ports.onProjectSaved).not.toHaveBeenCalled()
+    expect(ports.commitStatus).not.toHaveBeenCalled()
+  })
+
+  it('cancels a queued save when the clicked session has closed instead of saving the new active course', async () => {
+    const host = await createCourseDocumentHost(), release = deferred()
+    await host.editTitle('A unsaved input')
+    const target = host.read()
+    const { result, ports } = await mount(host, {
+      async runBusy(work) {
+        await release.promise
+        try { return await work() }
+        catch (error) { ports.reportError(error instanceof Error ? error.message : String(error)); return undefined }
+      },
+    })
+    let save!: Promise<boolean>
+    act(() => { save = result.current.saveProject() })
+    await host.documents.create('flow')
+    await host.editTitle('B remains unsaved')
+    const other = host.read(), oldFile = host.disk.get('initial.h5lesson')!
+    await host.api.close(target.documentId, true)
+    await Promise.resolve()
+    await act(async () => { release.resolve(); expect(await save).toBe(false) })
+    expect(host.read()).toEqual(other)
+    expect(host.driver.load(host.disk.get('initial.h5lesson')!)).toEqual(host.driver.load(oldFile))
+    expect(ports.reportError).toHaveBeenCalledWith('原课件会话已关闭，已取消保存')
+  })
+
   it('preserves the actual session when temporary-input preparation refuses switching or its scope is stale', async () => {
     const host = await createCourseDocumentHost()
     await host.editTitle('protected draft')

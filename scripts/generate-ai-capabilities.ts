@@ -79,7 +79,7 @@ async function methodSkillResourceFiles(projectRoot: string, skillName: string):
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name, 'en'))) {
       const child = `${relative}/${entry.name}`
       if (entry.isDirectory()) await walk(child)
-      else if (/\.(?:md|mjs|py|ps1)$/.test(entry.name)) await read(child)
+      else if (/\.(?:md|mjs|py|ps1|html)$/.test(entry.name)) await read(child)
     }
   }
   await read('SKILL.md')
@@ -153,6 +153,7 @@ export async function generateAiCapabilityArtifacts(
     'src/shared/contracts/component-platform/project.ts',
     'src/shared/contracts/component-platform/frame.ts',
     'src/shared/contracts/component-platform/motion.ts',
+    'src/shared/contracts/component-platform/navigationMotion.ts',
     'src/shared/contracts/component-platform/teacherController.ts',
     'src/shared/contracts/interaction-v1/types.ts',
   ]
@@ -162,7 +163,7 @@ export async function generateAiCapabilityArtifacts(
     implementationSchema: z.toJSONSchema(componentImplementationSchema, { io: 'input' }),
     types: Object.fromEntries(await Promise.all(runtimeSources.map(async source => [source, await fs.readFile(path.join(projectRoot, source), 'utf8')]))),
     source: 'src/shared/contracts/component-platform/runtime.ts',
-    note: '组件 mount/update/dispose 和 scope、目标、事件、状态、媒体、互动、教师控制器端口取自正式合同。相关类型保留原源码引用路径；实际端口由当前宿主提供。',
+    note: '组件 mount/update/dispose、可选 suspend/resume 和 scope、目标、事件、状态、媒体、互动、教师控制器端口取自正式合同。__runtime.activity 按实例回放 active/visible/playing，暂时离屏保留同一 mount；暂停为程序协作，不是任意网页硬冻结。相关类型保留原源码引用路径；实际端口由当前宿主提供。',
   }))
   entries.push({ id: 'component-api5', kind: 'protocol', label: 'Component API 5', path: 'protocols/component-api5.json',
     scopes: allScopes, carriers, summary: '统一组件源码运行接口、生命周期和实际宿主端口；作者数据使用 Project V10。', dependencies: ['course-project-v10'] })

@@ -1,6 +1,8 @@
 import { useRef } from 'react'
+import { backgroundImportHandler } from '../../ui/properties/SharedBackgroundProperties'
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
 import type { ComponentInstance, JsonValue } from '../../../shared/contracts/component-platform/project'
+import { resolveComponentPresentation } from '../../../shared/contracts/component-platform'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import type { TextRunEdit } from '../../../shared/textRuns'
 import { formatTextComponentRange, replaceTextComponentRange, textComponentDataSchema, type TextComponentData } from '../../../components/text/data'
@@ -26,6 +28,8 @@ import { componentDataEdits, componentTableDataEdits } from '../../../core/cours
 import { inspectComponentInputRules, configureComponentInputRules } from '../../../components/input/authoring'
 import { chartDataSchema } from '../../../components/chart/data'
 import { useCourseEditorActions } from '../../documents/CourseEditorActionsContext'
+import { componentClickNavigationEdits, componentClickNavigationView } from '../../../shared/componentInteractionData'
+import { componentNavigationScene } from '../../interactions/componentInteractionAuthoring'
 
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
 const STALE = '属性草稿对应的编辑目标已经改变，请按 Esc 放弃草稿后重试。'
@@ -39,6 +43,7 @@ interface TextPropertySession {
   group: string
   composing: boolean
   sharedDraft: boolean
+  pending?: Promise<void>
 }
 
 function rangeReplacement(before: string, after: string): TextRunEdit {
@@ -172,7 +177,15 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       session.current = replaceTextComponentRange(session.current, edit.start, edit.end,
         { inlines: edit.replacement ? [{ type: 'text', text: edit.replacement, ...(inherited ? { style: inherited } : {}) }] : [] })
       if (session.composing && !session.sharedDraft) return kernel.bridge.updateComposition(json(session.current.content), session.target.documentId)
-      submit([{ type: 'data.set', instanceId: session.instanceId, path: ['content'], value: json(session.current.content) }], target, session.group)
+      const edits: ComponentEdit[] = [{ type: 'data.set', instanceId: session.instanceId, path: ['content'], value: json(session.current.content) }]
+      const command = kernel.capture(edits, target), owner = session
+      const { documentId: _documentId, epoch: _epoch, ...operation } = command
+      const acceptedProject = applyComponentOperation(target.project, operation)
+      owner.pending = submit(edits, target, owner.group).then(() => {
+        owner.target = { ...target, project: acceptedProject,
+          editingProject: resolveComponentPresentation(acceptedProject, target.surfaceId, target.activeStateId) }
+      })
+      return owner.pending
     }),
     setComposing: composing => run(() => {
       const session = textSession.current
@@ -185,7 +198,7 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
     }),
     commitEdit: () => run(() => { const session = textSession.current; if (session?.key !== key || session.composing) return;
       textSession.current = null; if (session.sharedDraft) return useEditorStore.getState().commitSlideContentEdit() }),
-    cancelEdit: () => run(() => {
+    cancelEdit: () => run(async () => {
       const session = textSession.current
       if (!session || session.key !== key) return
       if (session.sharedDraft) {
@@ -194,17 +207,23 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
           useEditorStore.getState().cancelTextEdit()
         textSession.current = null; return
       }
-      const target = liveTarget()
-      submit([{ type: 'data.set', instanceId: session.instanceId, path: ['content'], value: json(session.initial.content) }], target, session.group)
+      await session.pending
+      await submit([{ type: 'data.set', instanceId: session.instanceId, path: ['content'], value: json(session.initial.content) }], session.target, session.group)
       textSession.current = null
     }),
     toggleStyle: (field, range) => run(() => {
       const target = liveTarget(), instanceId = target.instanceId
       if (!instanceId) return
-      const data = textComponentDataSchema.parse(read.project!.instances[instanceId].data)
+      const data = textComponentDataSchema.parse(editingInstance(target, instanceId)!.data)
       const display = propertiesText(data), from = Array.from(display.slice(0, range.start)).length, to = Array.from(display.slice(0, range.end)).length
       if (from === to) { patch({ style: { [field]: !data.appearance[field] } } as PropertiesPatch); return }
-      const styled = formatTextComponentRange(data, from, to, { [field]: !data.appearance[field] })
+      let offset = 0
+      const selected = data.content.inlines.filter(inline => {
+        const start = offset; offset += inline.type === 'text' ? Array.from(inline.text).length : 1
+        return inline.type === 'text' && start < to && offset > from
+      })
+      const allOn = selected.length > 0 && selected.every(inline => inline.type === 'text' && (inline.style?.[field] ?? data.appearance[field]))
+      const styled = formatTextComponentRange(data, from, to, { [field]: !allOn })
       submit([{ type: 'data.set', instanceId, path: ['content'], value: json(styled.content) }], target)
       if (textSession.current?.key === key) textSession.current.current = styled
     }),
@@ -310,6 +329,13 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       presentationStateName: read.surface?.presentation?.states.find(state => state.id === read.activeStateId)?.title ?? null,
       stateOverrideApplied: Boolean(read.activeStateId && read.surface?.presentation?.states.find(state => state.id === read.activeStateId)?.overrides[selected.id]) },
     videoDiagnostics: [], animation: null, interaction: null, globalInteraction: null,
+    clickNavigation: read.project && read.surface ? {
+      ...componentClickNavigationView({ project: read.baseProject ?? read.project, surfaceId: read.surface.id,
+        instanceId: selected.id, activeStateId: read.activeStateId }),
+      surfaceId: read.surface.id, scenes: read.project.surfaces.map(componentNavigationScene),
+      onChange: action => commit(() => { const target = liveTarget(); return submit(componentClickNavigationEdits(target, action), target) }),
+      onOpenProfessional: openAutomation,
+    } : null,
     component: read.project?.definitions[selected.definitionId] ? { definition: read.project.definitions[selected.definitionId], instance: selected, assets: read.project.assets,
       onChange: data => commit(() => submit([{ type: 'data.set', instanceId: selected.id, path: [], value: data }])),
       onPreview: data => run(() => preview(data===null?null:[{type:'data.set',instanceId:selected.id,path:[],value:data}])) } : null,
@@ -350,7 +376,7 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       setLocked: locked => run(() => submit(read.selectedInstanceIds.map(instanceId => ({ type: 'instance.patch', instanceId, patch: { locked } })))),
       align: mode => run(() => { liveTarget(); return useEditorStore.getState().alignSelectedNodes(mode) }),
       distribute: axis => run(() => { liveTarget(); return useEditorStore.getState().distributeSelectedNodes(axis) }),
-      duplicate: () => run(() => { liveTarget(); return useEditorStore.getState().duplicateSelectedNodes() }), remove: () => run(() => { liveTarget(); return useEditorStore.getState().deleteSelectedNodes() }) },
+      duplicate: () => run(() => { liveTarget(); return useEditorStore.getState().duplicateSelectedNodes() }), remove: read.selectedViews.some(view => view.locked) ? null : () => run(() => { liveTarget(); return useEditorStore.getState().deleteSelectedNodes() }) },
   }
   if (selectedContext) return selectedContext
   if (read.selectedInstanceIds.length) return { kind: 'stale-target', reason: read.error ?? '所选组件已不存在。' }
@@ -368,9 +394,9 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       ...(value.backgroundAssetId === undefined ? {} : { assetId: value.backgroundAssetId, mode: 'own' }),
     } }), target)
   })
-  const importBackground = (file: { name: string; mimeType: string; bytes: Uint8Array }) => run(() => {
-    const target = liveTarget(), id = crypto.randomUUID()
-    submit([{ type: 'asset.add', asset: { id, path: `assets/${id}/${file.name}`, mimeType: file.mimeType }, bytes: file.bytes },
+  const importBackground = backgroundImportHandler(liveTarget, (target, file) => {
+    const id = crypto.randomUUID()
+    return submit([{ type: 'asset.add', asset: { id, path: `assets/${id}/${file.name}`, mimeType: file.mimeType }, bytes: file.bytes },
       ...surfaceSettingsEdits(target.project, surface.id, { background: { mode: 'own', assetId: id } })], target)
   })
   const changeStateBackground = (value: { backgroundColor?: string; backgroundAssetId?: string | null }, inherit?: 'color' | 'assetId') => run(() => {

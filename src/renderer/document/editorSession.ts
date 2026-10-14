@@ -1,15 +1,18 @@
+import { projectDocumentRanges, type DocumentRangeProjection, type TextRangeProjection } from '../../shared/document/textInteraction'
 import type { MarkdownSourceMap } from '../../shared/document/markdownSourceMap'
 import { Plugin, EditorState, NodeSelection, TextSelection, type Transaction } from 'prosemirror-state'
 import { Decoration, DecorationSet, EditorView } from 'prosemirror-view'
-import { baseKeymap, chainCommands, exitCode, splitBlock } from 'prosemirror-commands'
+import { baseKeymap, chainCommands, exitCode, newlineInCode, splitBlock } from 'prosemirror-commands'
 import { keymap } from 'prosemirror-keymap'
 import { parseDocumentMarkdown, type MarkdownDocument } from '../../shared/document/markdown'
 import type { DocumentPoint, DocumentSelection } from '../../shared/document/ports'
-import { toEditorDocument, fromEditorDocument, renewEditorIdentities, editorPositionToPoint } from './documentAdapter'
+import { toEditorDocument, fromEditorDocument, renewEditorIdentities, editorPositionToPoint, readEditorMath } from './documentAdapter'
 import { documentEditorSchema as schema } from './editorSchema'
 import { CellSelection, tableEditing } from 'prosemirror-tables'
 import { Fragment, Slice } from 'prosemirror-model'
-import type { DocumentBlock } from '../../shared/document/content'
+import { dropPoint } from 'prosemirror-transform'
+import { parseFlowHtml } from '../../shared/document/html'
+import { walkDocument, type DocumentBlock } from '../../shared/document/content'
 import { prepareDocumentClipboard, type DocumentClipboardResourcePort } from './documentClipboard'
 import { documentResourceReferences } from '../../shared/document/resources'
 import { resolveFlowParagraphPresentation } from '../../shared/flowBodyPresentation'
@@ -18,12 +21,15 @@ import { flowFormulaBlockElement, flowInlineFormulaHtml } from '../../shared/doc
 import { previewCaretTransaction } from './editPreviewWidgets'
 import { createDocumentInputRuleResult, matchDocumentInputRule, type DocumentFormulaDraftRequest } from './documentInputRules'
 import { MermaidCodeBlockView } from './mermaidCodeBlockView'
+import { documentComponentKey } from './documentClipboardContext'
 
 /** Sent from a document object (picture, chart, component) that was right-clicked, after selecting it (M21). */
 export const DOCUMENT_OBJECT_CONTEXT_MENU_EVENT = 'document-object-context-menu'
 export interface DocumentObjectContextMenuDetail { x: number; y: number; blockId: string }
 
 export interface DocumentOperation {
+  rangeProjection?: DocumentRangeProjection[]
+  dataRangeProjection?: TextRangeProjection[]
   operationId: string; historyGroup: string; source: 'layout' | 'source'
   preparedResources?: unknown
   /** All still-local resource batches; the canonical caller assembles them with the body. */
@@ -89,6 +95,7 @@ export interface LayoutEditorOptions {
   /** Shared by layout/source views of one editor; it owns no formal history. */
   draftSession?: DocumentDraftSession
   contentScope?: DocumentContentScope
+  hiddenBlockIds?:readonly string[]
   stateChanged?(state: EditorState): void
   requestMathDraft?(draft: DocumentFormulaDraftRequest): void
   selection?(selection: DocumentSelection | null): void
@@ -98,8 +105,10 @@ export interface LayoutEditorOptions {
   presentation?: 'flow'
   /** View-only space after document blocks; it is absent from the ProseMirror document and history. */
   runtimeSpacers?: readonly { readonly blockId: string; readonly height: number }[]
+  renderInline?(instanceId: string, container: HTMLElement): (() => void) | void
   renderObject?(block: DocumentBlock, container: HTMLElement): (() => void) | void
   objectRevision?: unknown
+  objectRevisionFor?(block:DocumentBlock):unknown
   beforeProjectionMutation?():void
   afterProjectionMutation?():void
   clipboardContext?: unknown
@@ -122,21 +131,41 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   const clearPlainPaste = () => { plainPastePending = false; if (plainPasteTimer) clearTimeout(plainPasteTimer); plainPasteTimer = null }
   const clipboardType = 'application/x-cw-document-slice'
   const boundary = () => { group = crypto.randomUUID(); lastInput = 0 }
+  const tablePlugin=tableEditing()
+  const bookmarks=new Set<{bookmark:import('prosemirror-state').SelectionBookmark}>()
+  const objectRefreshers=new Set<()=>void>()
+  const mapBookmarks=(transactions:readonly Transaction[])=>{for(const target of bookmarks)for(const transaction of transactions)target.bookmark=target.bookmark.map(transaction.mapping)}
+  const clearCells=(state:EditorState,dispatch?: (transaction:Transaction)=>void)=>{
+    if(!(state.selection instanceof CellSelection))return false
+    const tr=state.tr
+    state.selection.forEachCell((cell,pos)=>{tr.delete(tr.mapping.map(pos+2),tr.mapping.map(pos+cell.nodeSize-2))})
+    dispatch?.(tr);return true
+  }
+  const hiddenBoundary=(state:EditorState,direction:-1|1)=>{
+    if(!state.selection.empty)return false
+    const point=state.selection.$from
+    if(!point.parent.isTextblock || (direction<0 ? point.parentOffset!==0:point.parentOffset!==point.parent.content.size))return false
+    const at=direction<0 ? point.before():point.after(),neighbor=direction<0 ? state.doc.resolve(at).nodeBefore:state.doc.resolve(at).nodeAfter
+    return Boolean(neighbor?.attrs.id && options.hiddenBlockIds?.includes(neighbor.attrs.id))
+  }
   const view = new EditorView(element, {
     state: EditorState.create({ doc: toEditorDocument(initial.document.content), plugins: [...(initial.projectionPlugins ?? []), new Plugin({ view(view) { options.stateChanged?.(view.state); return { update(view) { options.stateChanged?.(view.state) } } } }), keymap({
       'Mod-z': () => { boundary(); void navigateHistory('undo'); return true },
       'Mod-Shift-z': () => { boundary(); void navigateHistory('redo'); return true },
       'Mod-y': () => { boundary(); void navigateHistory('redo'); return true },
-      'Shift-Enter': chainCommands(exitCode, (state, dispatch) => { dispatch?.(state.tr.replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView()); return true }),
+      'Shift-Enter': (state,dispatch,currentView)=>options.contentScope==='formula' || chainCommands(exitCode,(state,dispatch)=>{dispatch?.(state.tr.replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView());return true})(state,dispatch,currentView),
+      Delete:(state,dispatch)=>clearCells(state,dispatch)||hiddenBoundary(state,1), Backspace:(state,dispatch)=>clearCells(state,dispatch)||hiddenBoundary(state,-1),
       Enter: (state, dispatch, currentView) => {
         if (options.contentScope === 'formula') return true
+        if(newlineInCode(state,dispatch,currentView))return true
         if (options.contentScope === 'inline-text') {
           boundary(); dispatch?.(state.tr.replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView()); return true
         }
         if (state.selection.$from.parent.type.name === 'slot') {
           if (state.selection.$from.parent.attrs.key.startsWith('item:')) {
             const tr = state.tr.deleteSelection()
-            tr.split(tr.selection.from, 1, [{ type: schema.nodes.slot, attrs: { key: `item:${crypto.randomUUID()}` } }])
+            const sourceSlot=options.sourceMap?.blocks.flatMap(block=>block.slots).find(slot=>slot.key===state.selection.$from.parent.attrs.key)
+            tr.split(tr.selection.from, 1, [{ type: schema.nodes.slot, attrs: { key: `item:${crypto.randomUUID()}`,depth:sourceSlot?.depth ?? state.selection.$from.parent.attrs.depth,ordered:sourceSlot?.ordered ?? state.selection.$from.parent.attrs.ordered } }])
             boundary(); dispatch?.(tr); return true
           }
           dispatch?.(state.tr.replaceSelectionWith(schema.nodes.hard_break.create()))
@@ -144,7 +173,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         }
         boundary(); return splitBlock(state, dispatch, currentView)
       },
-    }), keymap(baseKeymap), tableEditing()] }),
+    }), keymap(baseKeymap), tablePlugin] }),
     attributes: { role: 'textbox', 'aria-label': '正文编辑', 'aria-multiline': 'true' },
     editable: () => !options.readOnly,
     decorations: state => {
@@ -170,6 +199,13 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       return DecorationSet.create(state.doc, decorations)
     },
     nodeViews: {
+      inline_component: node => {
+        const dom = document.createElement('span'); dom.dataset.inlineInstance = node.attrs.data.instanceId; dom.contentEditable = 'false'
+        dom.style.display = 'inline-block'; dom.style.verticalAlign = 'baseline'
+        let release = options.renderInline?.(node.attrs.data.instanceId, dom)
+        if (!options.renderInline) dom.textContent = node.attrs.data.accessibleText
+        return { dom, ignoreMutation: () => true, stopEvent: event => event.target instanceof Element && Boolean(event.target.closest('input,button,select,textarea')), destroy: () => release?.() }
+      },
       object: (node, view, getPos) => objectView(node, false, view, getPos),
       compound: (node, view, getPos) => objectView(node, true, view, getPos),
       code_block: (node, current) => new MermaidCodeBlockView(node, current),
@@ -177,8 +213,9 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         const key = node.attrs.key as string, dom = document.createElement(key.startsWith('item:') ? 'li' : 'div')
         dom.dataset.documentSlot = key
         const slot = options.sourceMap?.blocks.flatMap(block => block.slots).find(slot => slot.key === key)
-        if (slot?.depth) dom.style.marginLeft = `${slot.depth * 1.5}em`
-        if (slot?.ordered !== undefined) dom.style.listStyleType = slot.ordered ? 'decimal' : 'disc'
+        const depth=slot?.depth ?? node.attrs.depth,ordered=slot?.ordered ?? node.attrs.ordered
+        if (depth) dom.style.marginLeft = `${depth * 1.5}em`
+        if (ordered !== null && ordered !== undefined) dom.style.listStyleType = ordered ? 'decimal' : 'disc'
         return { dom, contentDOM: dom }
       } } : {}),
       ...(initial.presentation === 'flow' ? {
@@ -203,6 +240,11 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       } : {}),
     },
     handleDOMEvents: {
+      click: current => {
+        const selected = describeSelection(current.state)
+        if (selected !== undefined) options.selection?.(selected)
+        return false
+      },
       compositionstart: () => { composing = true; return false },
       compositionend: () => { composing = false; queueMicrotask(() => { if (view.isDestroyed) return; publish(); if (deferred) { const next = deferred; deferred = null; update(next) } }); return false },
       blur: () => { boundary(); return false },
@@ -230,8 +272,31 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       } catch (error) { options.diagnostic(error instanceof Error ? error.message : String(error)) }
       return true
     },
-    handlePaste: (_view, event) => {
+    handleDrop: (current,event,slice,move)=>{
+      if(move || options.readOnly)return false
+      const point=current.posAtCoords({left:event.clientX,top:event.clientY})
+      if(!point)return false
+      const position=dropPoint(current.state.doc,point.pos,slice) ?? point.pos
+      const formal = formalDocumentSlice(slice)
+      if(formal && options.clipboardResourcePort){const preparation=pastePrepared(clipboardPayload(slice),'copy',position);preparations.add(preparation);void preparation.finally(()=>preparations.delete(preparation));return true}
+      const copied=renewEditorIdentities(schema.nodes.doc.create(null,slice.content),()=>crypto.randomUUID(),true)
+      boundary();current.dispatch(current.state.tr.replaceRange(position,position,new Slice(copied.content,slice.openStart,slice.openEnd)).scrollIntoView())
+      return true
+    },
+    handlePaste: (_view, event, parsedSlice) => {
       boundary()
+      const slotPaste=(slice:Slice)=>{
+        if(tablePlugin.props.handlePaste?.call(tablePlugin,view,event,slice))return true
+        if(view.state.selection.$from.parent.type.name!=='slot')return false
+        const nodes:import('prosemirror-model').Node[]=[]
+        slice.content.forEach(node=>{
+          if(nodes.length)nodes.push(schema.nodes.hard_break.create())
+          if(node.isInline)nodes.push(node)
+          else node.descendants(child=>{if(child.isInline){nodes.push(child);return false}return true})
+        })
+        view.dispatch(view.state.tr.replaceSelection(new Slice(Fragment.from(nodes),0,0)).scrollIntoView())
+        return true
+      }
       if (plainPastePending) {
         clearPlainPaste()
         const text = event.clipboardData?.getData('text/plain') ?? ''
@@ -241,6 +306,19 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       }
       const data = event.clipboardData?.getData(clipboardType)
       if (!data) {
+        const html=event.clipboardData?.getData('text/html')
+        if(html && view.state.selection.$from.parent.type.name!=='code_block') {
+          try {
+            const parsed=parseFlowHtml(html,{assets:{}})
+            if(!parsed.blocks.length)return false
+            const slice=new Slice(toEditorDocument({blocks:parsed.blocks}).content,0,0)
+            event.preventDefault()
+            if(!slotPaste(slice))view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView())
+            parsed.diagnostics.forEach(value=>options.diagnostic(value.message))
+            return true
+          } catch(error){options.diagnostic(error instanceof Error ? error.message:String(error));return true}
+        }
+        if(slotPaste(parsedSlice)){event.preventDefault();return true}
         const text = event.clipboardData?.getData('text/plain') ?? ''
         // Explicit fences carry structure in rich document paste. Within a code block, or
         // for explicit plain paste above, keep the user's literal input.
@@ -258,16 +336,15 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         if (moved) {
           const assets = new Map(options.document.resources.assets.map(asset => [asset.assetId, asset]))
           payload.resources.assets.forEach((asset: MarkdownDocument['resources']['assets'][number]) => assets.set(asset.assetId, asset))
-          const components = new Map(options.document.resources.components.map(component => [`${component.packageId}@${component.version}`, component]))
-          payload.resources.components.forEach((component: MarkdownDocument['resources']['components'][number]) => components.set(`${component.packageId}@${component.version}`, component))
+          const components = new Map(options.document.resources.components.map(component => [documentComponentKey(component), component]))
+          payload.resources.components.forEach((component: MarkdownDocument['resources']['components'][number]) => components.set(documentComponentKey(component), component))
           options = { ...options, document: { ...options.document, resources: { assets: [...assets.values()], components: [...components.values()] } } }
         }
         const slice = Slice.fromJSON(schema, payload.slice)
-        let formalInstances = false
-        slice.content.descendants(node => { if (node.attrs.data?.type === 'course-instance') formalInstances = true })
+        const formalInstances = formalDocumentSlice(slice)
         const formalContext = payload.context?.kind === 'cw-course-v10-resources'
-        const needsPreparation = payload.resources.assets.length || payload.resources.components.length || formalInstances || formalContext
-        const requiresPreparation = payload.editorId !== editorId || formalInstances && !moved || formalContext
+        const needsPreparation = payload.resources.assets.length || payload.resources.components.length || formalInstances
+        const requiresPreparation = payload.editorId !== editorId || formalInstances && !moved || formalContext && Boolean(needsPreparation)
         if (needsPreparation && options.clipboardResourcePort && requiresPreparation) {
           const preparation = pastePrepared(payload, moved ? 'move' : 'copy')
           preparations.add(preparation)
@@ -279,20 +356,21 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         pendingCut = null
         const doc = schema.nodes.doc.create(null, slice.content)
         const copied = renewEditorIdentities(doc, () => crypto.randomUUID(), !moved)
-        view.dispatch(view.state.tr.replaceSelection(new Slice(copied.content, slice.openStart, slice.openEnd)).scrollIntoView())
+        const pasted=new Slice(copied.content,slice.openStart,slice.openEnd)
+        if(!slotPaste(pasted))view.dispatch(view.state.tr.replaceSelection(pasted).scrollIntoView())
       } catch (error) { options.diagnostic(error instanceof Error ? error.message : String(error)) }
       return true
     },
     dispatchTransaction(transaction: Transaction) {
       const applied = view.state.applyTransaction(transaction)
       const state = applied.transactions.some(item => item.docChanged) ? identifyEditorState(applied.state) : applied.state
-      applyState(state)
+      mapBookmarks(applied.transactions); applyState(state)
       if (transaction.docChanged && !composing) publish(transaction.getMeta('preparedResources'))
       else if (transaction.selectionSet && !transaction.docChanged) boundary()
       // Decoration refreshes and preview-owned caret relocation must not become
       // manual AI context. Inspect appended transactions too: applyTransaction
       // can replace an ordinary caret with a synthetic NodeSelection.
-      if (!transaction.selectionSet || transaction.docChanged || applied.transactions.some(item => item.getMeta(previewCaretTransaction))) return
+      if ((!transaction.selectionSet && !transaction.docChanged) || applied.transactions.some(item => item.getMeta(previewCaretTransaction))) return
       const described = describeSelection(state)
       if (described !== undefined) options.selection?.(described)
     },
@@ -337,7 +415,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     if (state.selection instanceof CellSelection) {
       const a = state.selection.$anchorCell.nodeAfter?.firstChild?.attrs.key as string | undefined
       const h = state.selection.$headCell.nodeAfter?.firstChild?.attrs.key as string | undefined
-      if (!a?.startsWith('cell:') || !h?.startsWith('cell:')) return undefined
+      if (!a?.startsWith('cell:') || !h?.startsWith('cell:')) return null
       const [rowId, columnId] = JSON.parse(a.slice(5)); const [headRow, headColumn] = JSON.parse(h.slice(5))
       let depth = state.selection.$anchorCell.depth
       while (depth > 0 && !state.selection.$anchorCell.node(depth).attrs.id) depth--
@@ -363,28 +441,35 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         return
       }
       const assets = new Map(options.document.resources.assets.map(asset => [asset.assetId, asset])); prepared.document.resources.assets.forEach(asset => assets.set(asset.assetId, asset))
-      const components = new Map(options.document.resources.components.map(component => [`${component.packageId}@${component.version}`, component])); prepared.document.resources.components.forEach(component => components.set(`${component.packageId}@${component.version}`, component))
+      const components = new Map(options.document.resources.components.map(component => [documentComponentKey(component), component])); prepared.document.resources.components.forEach(component => components.set(documentComponentKey(component), component))
       options = { ...options, document: { ...options.document, resources: { assets: [...assets.values()], components: [...components.values()] } } }
       const fragment = toEditorDocument(prepared.document.content).content
-      const transaction = (insertAt === undefined ? view.state.tr.replaceSelection(new Slice(fragment, slice.openStart, slice.openEnd)) : view.state.tr.insert(insertAt, fragment))
+      const transaction = (insertAt === undefined ? view.state.tr.replaceSelection(new Slice(fragment, slice.openStart, slice.openEnd)) : view.state.tr.replaceRange(insertAt, insertAt, new Slice(fragment, slice.openStart, slice.openEnd)))
         .setMeta('preparedResources', { value: prepared.prepared, discard: () => port!.discard(prepared!.prepared) })
       pendingCut = null
       view.dispatch(transaction)
     } catch (error) { if (prepared) await port?.discard(prepared.prepared); targetOptions.diagnostic(error instanceof Error ? error.message : String(error)) }
   }
   function objectView(node: import('prosemirror-model').Node, editableSlots: boolean, owner: EditorView, getPos: () => number | undefined) {
-    const block = { ...node.attrs.data, id: node.attrs.id } as DocumentBlock
+    let block = { ...node.attrs.data, id: node.attrs.id } as DocumentBlock
     const flow = options.presentation === 'flow'
     // Flow draws a divider as playback does: a real rule, not a label.
     const tag = block.type === 'list' ? block.ordered ? 'ol' : 'ul' : block.type === 'quote' ? 'blockquote' : flow && block.type === 'divider' ? 'hr' : flow && block.type === 'callout' ? 'aside' : flow && ['media', 'chart', 'component', 'course-component', 'course-instance'].includes(block.type) ? 'figure' : 'section'
     const dom = flow ? flowBlockElement(node, tag) : document.createElement(tag)
     if (!flow) dom.className = `document-object document-${node.attrs.data.type}`
     dom.dataset.documentId = node.attrs.id
+    if(block.type==='list' && block.ordered)(dom as HTMLOListElement).start=block.start ?? 1
+    if(!flow && (block.type==='quote' || block.type==='heading')) {
+      const presentation=resolveFlowParagraphPresentation(block);dom.style.textAlign=presentation.textAlign;dom.style.lineHeight=String(presentation.lineHeight)
+    }
     // renderObject runs before ProseMirror applies outer decorations.
     dom.dataset.flowBlockId = node.attrs.id
     let destroy: (() => void) | void
+    let objectHost:HTMLElement|undefined
+    let renderedBlock=JSON.stringify(block),renderedVersion=options.objectRevisionFor ? options.objectRevisionFor(block) : options.objectRevision
     if (options.renderObject && ['media', 'chart', 'component', 'course-component', 'course-instance'].includes(block.type)) {
       const object = document.createElement('div'); object.contentEditable = 'false'; dom.append(object)
+      objectHost=object
       // A click on the picture, chart or component itself (not its caption) selects the whole block, so its quick bar
       // opens as it does for objects on a page (M21). ProseMirror alone selects such a block only on Ctrl+click.
       const selectBlock = () => {
@@ -414,7 +499,15 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     const ownsRenderedObject = Boolean(options.renderObject && ['media', 'chart', 'component', 'course-component', 'course-instance'].includes(block.type))
     const contentDOM = editableSlots ? (flow || block.type === 'list') && !ownsRenderedObject ? dom : document.createElement('div') : undefined
     if (contentDOM && contentDOM !== dom) dom.append(contentDOM)
-    return { dom, contentDOM, ignoreMutation: (mutation: MutationRecord | { type: 'selection'; target: globalThis.Node }) => mutation.type !== 'selection' && (!contentDOM || !contentDOM.contains(mutation.target)), destroy: () => destroy?.() }
+    const refresh=()=>{
+      if(!objectHost)return
+      const version=options.objectRevisionFor ? options.objectRevisionFor(block) : options.objectRevision,next=JSON.stringify(block)
+      if(renderedBlock===next && Object.is(renderedVersion,version))return
+      renderedBlock=next;renderedVersion=version;destroy?.();objectHost.replaceChildren();destroy=options.renderObject?.(block,objectHost)
+    }
+    if(objectHost)objectRefreshers.add(refresh)
+    return { dom, contentDOM, ...(objectHost ? {update(next:import('prosemirror-model').Node){if(next.type!==node.type || next.attrs.id!==node.attrs.id)return false;block={...next.attrs.data,id:next.attrs.id};refresh();return true}} : {}),
+      ignoreMutation: (mutation: MutationRecord | { type: 'selection'; target: globalThis.Node }) => mutation.type !== 'selection' && (!contentDOM || !contentDOM.contains(mutation.target)), destroy: () => {objectRefreshers.delete(refresh);destroy?.()} }
   }
   function flowBlockElement(node: import('prosemirror-model').Node, tag: string) {
     const dom = document.createElement(tag)
@@ -435,7 +528,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     return { dom }
   }
   function flowInlineMathView(node: import('prosemirror-model').Node) {
-    const data = node.attrs.data
+    const data = readEditorMath(node)
     const dom = document.createElement('span')
     dom.className = 'document-math'; dom.contentEditable = 'false'; dom.dataset.formulaId = data.formulaId
     try { dom.innerHTML = flowInlineFormulaHtml(data) } catch { dom.textContent = data.latex }
@@ -445,15 +538,30 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   function textView(node: import('prosemirror-model').Node, tag: string) {
     const dom = flowBlockElement(node, tag), contentDOM = richTextHost(); dom.append(contentDOM); return { dom, contentDOM }
   }
+  function formalDocumentSlice(slice: Slice): boolean {
+    let formal = false
+    slice.content.descendants(node => { if (node.attrs.data?.type === 'course-instance' || node.type.name === 'inline_component' || node.marks.some(mark => mark.type.name === 'range')) formal = true })
+    return formal
+  }
   function clipboardPayload(slice: Slice) {
-    const assets = new Set<string>(); const components = new Set<string>()
+    const assets = new Set<string>(); const components = new Set<string>(); const formal = formalDocumentSlice(slice)
     slice.content.descendants(node => {
       const data = node.attrs.data
       if (data?.type === 'media' && data.assetId) assets.add(data.assetId)
-      if (data?.type === 'component') { assets.add(data.staticFallbackAssetId); components.add(`${data.component.packageId}@${data.component.version}`) }
+      if (node.type.name !== 'inline_component' && data?.type === 'component') { assets.add(data.staticFallbackAssetId); components.add(documentComponentKey(data.component)) }
     })
-    const resources = { assets: options.document.resources.assets.filter(asset => assets.has(asset.assetId)), components: options.document.resources.components.filter(component => components.has(`${component.packageId}@${component.version}`)) }
-    const context = typeof options.clipboardContext === 'function' ? options.clipboardContext(resources, fromEditorDocument(schema.nodes.doc.create(null, slice.content))) : options.clipboardContext
+    const resources = { assets: options.document.resources.assets.filter(asset => assets.has(asset.assetId)), components: options.document.resources.components.filter(component => components.has(documentComponentKey(component))) }
+    const tableSlice=['table_row','table_cell','table_header'].includes(slice.content.firstChild?.type.name ?? '')
+    const pureOpenText=(slice.openStart>0 || slice.openEnd>0) && !assets.size && !components.size && !formal
+    // A table cell/row slice is not itself a document block. Its actual editor
+    // ancestor supplies the formal source owner; the payload stays the selected slice.
+    let sourceBlocks: DocumentBlock[] | undefined
+    if (tableSlice && formal) {
+      const owners = new Set<string>()
+      for (const point of [view.state.selection.$from, view.state.selection.$to]) for (let depth = point.depth; depth > 0; depth--) { const id = point.node(depth).attrs.id; if (typeof id === 'string') owners.add(id) }
+      sourceBlocks = []; walkDocument(options.document.content.blocks, block => { if (owners.has(block.id)) sourceBlocks!.push(block) })
+    }
+    const context = (tableSlice && !formal) || pureOpenText ? undefined : typeof options.clipboardContext === 'function' ? options.clipboardContext(resources, sourceBlocks ? { blocks: sourceBlocks } : fromEditorDocument(schema.nodes.doc.create(null, slice.content))) : options.clipboardContext
     return { slice: slice.toJSON(), resources, context }
   }
   async function duplicateBlock(blockId: string) {
@@ -481,7 +589,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     event.clipboardData.setData(clipboardType, JSON.stringify({ editorId, cutToken, ...payload }))
     event.clipboardData.setData('text/plain', slice.content.textBetween(0, slice.content.size, '\n', node => node.attrs.data?.accessibleText ?? ''))
     event.preventDefault()
-    if (cut) { boundary(); view.dispatch(view.state.tr.deleteSelection()) }
+    if (cut) { boundary(); if(!clearCells(view.state,view.dispatch))view.dispatch(view.state.tr.deleteSelection()) }
     return true
   }
   function publish(prepared?: { value: unknown; discard(): Promise<void> }) {
@@ -499,7 +607,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       } }
       options = { ...options, document }
       const owner = options
-      const result = draftSession.publish(document, { operationId: crypto.randomUUID(), historyGroup: group, source: 'layout', ...(prepared ? { preparedResources: prepared.value } : {}) }, owner.change)
+      const result = draftSession.publish(document, { operationId: crypto.randomUUID(), historyGroup: group, source: 'layout', rangeProjection: projectDocumentRanges(content), ...(prepared ? { preparedResources: prepared.value } : {}) }, owner.change)
       if (result instanceof Promise) void result.catch(error => owner.diagnostic(error instanceof Error ? error.message : String(error)))
     } catch (error) { options.diagnostic(error instanceof Error ? error.message : String(error)) }
   }
@@ -623,12 +731,12 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
           ? view.state.tr.replaceWith(closed.from, closed.beforeEnd, document.content.cut(closed.from, closed.afterEnd))
           : view.state.tr.replace(from, to, document.slice(from, nextTo))
         transaction.setMeta('canonicalUpdate', true)
-        applyState(view.state.apply(transaction))
+        mapBookmarks([transaction]); applyState(view.state.apply(transaction))
         if (closed) restoreTextSelection(kept)
         reselect(kept)
       }
     }
-    if (refreshObjects) projectionMutation(()=>view.setProps({ nodeViews: { ...view.props.nodeViews, object: (node, current, getPos) => objectView(node, false, current, getPos), compound: (node, current, getPos) => objectView(node, true, current, getPos) } }))
+    if (refreshObjects) projectionMutation(()=>{for(const refresh of objectRefreshers)refresh()})
     if (refreshSpacers) view.setProps({ decorations: view.props.decorations })
   }
   async function drain() {
@@ -651,6 +759,10 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     return drain().then(ready => { if (ready) return invoke() })
   }
   return { view, update, boundary, syncDomTextSelection, paintProjection, duplicateBlock,
+    trackSelection(selection=view.state.selection) {
+      const target={bookmark:selection.getBookmark()};bookmarks.add(target)
+      return {resolve:()=>target.bookmark.resolve(view.state.doc),release:()=>bookmarks.delete(target)}
+    },
     requestPlainPaste: () => { clearPlainPaste(); plainPastePending = true; plainPasteTimer = setTimeout(clearPlainPaste, 3000); return clearPlainPaste },
     flush: () => { if (composing || view.composing || preparations.size) return false; publish(); boundary(); return !draftSession.rejected },
     drain,

@@ -31,7 +31,7 @@ export interface ComponentInteractionPort {
   currentStateId(): string | null
   courseState: { get(key: string): unknown; set(key: string, value: unknown): void }
   subscribeTrigger(trigger: InteractionTrigger, listener: (payload?: unknown) => boolean | void | PromiseLike<boolean | void>): () => void
-  executeAction(action: InteractionAction, context: { signal: AbortSignal; ruleId: string; stepId: string; restartFromBeginning: boolean }): boolean | void | PromiseLike<boolean | void>
+  executeAction(action: InteractionAction, context: { signal: AbortSignal; ruleId: string; stepId: string; restartFromBeginning: boolean; onNavigationCommit?: () => void }): boolean | void | PromiseLike<boolean | void>
   report(message: string): void
 }
 export interface ComponentPresentationPort {
@@ -45,11 +45,13 @@ export interface ComponentRuntimeScope {
   readonly instanceId: string
   readonly generation: number
   readonly signal: AbortSignal
+  /** Whether this mount survives; temporary offscreen pause does not revoke it. */
   isActive(): boolean
   cleanup(dispose: () => void): void
   target(reference: ComponentTarget): ComponentRuntimeTarget | null
   events: {
     emit(name: string, value: JsonValue): void
+    /** __runtime.activity replays the current {active, visible, playing} for this instance. */
     subscribe(name: string, listener: (value: JsonValue) => void): () => void
   }
   state: {
@@ -63,6 +65,8 @@ export interface ComponentRuntimeTarget {
   readonly instanceId: string
   /** Headless targets and behavior instances need no DOM root. */
   readonly element?: HTMLElement
+  /** A semantic range can span several formatted runs. */
+  readonly elements?: readonly HTMLElement[]
   readonly motion?: ComponentMotionPort
   readonly presentation?: ComponentPresentationPort
   read(): JsonValue
@@ -109,6 +113,7 @@ export interface ComponentAuthorSpotInput {
   binding?: ComponentAuthorBinding
   bindingStatus?: 'bound' | 'unmounted' | 'unresolved' | 'source-required'
   geometry?: ComponentAuthorGeometryObservation
+  fieldScope?: 'data' | 'authoring'
   dataPath?: string[]
   sourceRegion?: { kind: 'implementation' | 'data'; path?: string[]; start: number; end: number;
     encoding?: 'html-text' | 'html-attribute' }
@@ -120,6 +125,9 @@ export interface ComponentAuthorSpot extends ComponentAuthorSpotInput {
   instanceId: string
   mountGeneration: number
 }
+/** A frozen semantic author address, without display geometry or a live mount identity. */
+export type ComponentAuthorField = Pick<ComponentAuthorSpotInput, 'kind' | 'authorKey' | 'scope' | 'binding' | 'bindingStatus'
+  | 'fieldScope' | 'dataPath' | 'sourceRegion' | 'initialValue'>
 /** A live registration may preview one gesture; callbacks never enter author data or cloned observations. */
 export interface ComponentAuthorPreviewCallbacks {
   previewGeometry(geometry: ComponentAuthorGeometry | null): void
@@ -145,6 +153,8 @@ export interface ComponentLayoutPort {
 }
 
 export interface ComponentRuntimeContext<Data = JsonValue> {
+  /** Host mounts a referenced owned child in its authored inline position. */
+  inline?: { mount(instanceId: string, root: HTMLElement): () => void }
   readonly instance: ComponentInstance<Data>
   readonly scope: ComponentRuntimeScope
   readonly root?: HTMLElement
@@ -157,12 +167,26 @@ export interface ComponentRuntimeContext<Data = JsonValue> {
   readonly layout?: ComponentLayoutPort
 }
 
+/** Latest per-instance __runtime.activity event; survival is still scope.isActive(). */
+export interface ComponentRuntimeActivity {
+  active: boolean
+  visible: boolean
+  playing: boolean
+}
+
 export interface MountedComponent<Data = JsonValue> {
   update(instance: ComponentInstance<Data>): void | Promise<void>
   updatePlacement?(frame: ComponentFrame | undefined): void
+  /** Cooperative offscreen pause; retains this mount and its local state. */
+  suspend?(): void | Promise<void>
+  /** Continue this same mount after it becomes active and visible again. */
+  resume?(): void | Promise<void>
   dispose(): void | Promise<void>
 }
 
 export interface ComponentRuntimeImplementation<Data = JsonValue> {
+  /** Explicit Source opt-in: prepare its Web data in this realm before mount, without re-importing the module.
+   * DOM and listeners belong to mount; parser preparation replaces the initial document. */
+  document?: 'web'
   mount(context: ComponentRuntimeContext<Data>): MountedComponent<Data> | Promise<MountedComponent<Data>>
 }

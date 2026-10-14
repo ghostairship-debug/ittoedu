@@ -44,7 +44,7 @@ describe('G20 tool catalog and target mapping', () => {
     expect(mapMarkdownRange('abcDEFghi', 'a-long-bcDEFghi', range)).toEqual({ ...range, from: 9, to: 12 })
     expect(mapMarkdownRange('abcDEFghi', 'abcDEF-more', range)).toEqual(range)
     expect(() => mapMarkdownRange('abcDEFghi', 'abcDE!Fghi', range)).toThrow('重叠')
-    expect(() => mapMarkdownRange('abcDEFghi', '!abcDEFghi!', range)).toThrow('重叠')
+    expect(mapMarkdownRange('abcDEFghi', '!abcDEFghi!', range)).toEqual({ ...range, from: 4, to: 7 })
     expect(() => mapMarkdownRange('aaaa', 'aaaaa', { kind: 'markdown-range', from: 1, to: 2 })).toThrow('不唯一')
   })
 })

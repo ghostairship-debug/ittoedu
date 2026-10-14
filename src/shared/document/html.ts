@@ -87,6 +87,8 @@ export function inlineHtml(content: FlowTextContent): string {
       const labelled = inline.accessibleText !== defaultAccessibleText(inline.latex)
       const css = [inline.style?.fontSize !== undefined ? `font-size:${inline.style.fontSize}px` : '', inline.style?.color ? `color:${inline.style.color}` : ''].filter(Boolean).join(';')
       html = !labelled && !css ? math : `<span class="math"${labelled ? ` aria-label="${escapeAttribute(inline.accessibleText)}"` : ''}${css ? ` style="${escapeAttribute(css)}"` : ''}>${math}</span>`
+    } else if (inline.type === 'component') {
+      html = `<span data-inline-instance="${escapeAttribute(inline.instanceId)}" aria-label="${escapeAttribute(inline.accessibleText)}" contenteditable="false">${escapeText(inline.accessibleText)}</span>`
     } else {
       html = textHtml(inline.text)
       const { css, rest } = styleCss(inline.style ?? {})
@@ -96,12 +98,13 @@ export function inlineHtml(content: FlowTextContent): string {
       if (inline.code) html = `<code>${html}</code>`
     }
     if (inline.link) html = `<a href="${escapeAttribute(inline.link.href)}"${inline.link.title !== undefined ? ` title="${escapeAttribute(inline.link.title)}"` : ''}>${html}</a>`
+    for (const id of inline.rangeIds ?? []) html = `<span data-document-range="${escapeAttribute(id)}">${html}</span>`
     return html
   }).join('')
 }
 
 function paragraphStyle(block: ParagraphStyle): string {
-  const css = [block.textAlign ? `text-align:${block.textAlign}` : '', block.lineSpacing !== undefined ? `line-height:${block.lineSpacing}` : ''].filter(Boolean)
+  const css = [block.textAlign ? `text-align:${block.textAlign}` : '', block.lineSpacing !== undefined ? `line-height:calc(1.22em + ${block.lineSpacing}px)` : ''].filter(Boolean)
   return css.length ? ` style="${css.join(';')}"` : ''
 }
 
@@ -124,7 +127,7 @@ export function blockHtml(block: Block, context: FlowHtmlContext): string {
     case 'quote': return `<blockquote${paragraphStyle(block)}><p>${inlineHtml(block.content)}</p>${block.citation ? `<footer>${inlineHtml(block.citation)}</footer>` : ''}</blockquote>`
     case 'list': {
       const tag = block.ordered ? 'ol' : 'ul'
-      return `<${tag}>\n${block.items.map(item => `<li>${inlineHtml(item.content)}</li>`).join('\n')}\n</${tag}>`
+      return `<${tag}${block.ordered && block.start !== undefined && block.start !== 1 ? ` start="${block.start}"` : ''}>\n${block.items.map(item => `<li>${inlineHtml(item.content)}</li>`).join('\n')}\n</${tag}>`
     }
     case 'divider': return '<hr>'
     case 'media': {
@@ -191,6 +194,12 @@ export function parseFlowHtml(html: string, options: { parse?: PageParsePort; as
   const parsed = (options.parse ?? parseDocumentHtml)({ html })
   if (parsed.kind === 'program') throw new FlowContentError('讲义不能包含脚本或事件属性；互动请写成 components/ 下的组件，放在演示页中')
   for (const item of parsed.diagnostics) if (item.level !== 'info') diagnostics.push(item)
+  const programs = (node: PageNode): void => {
+    if (node.kind !== 'element') return
+    if (Object.keys(node.attributes).some(name => /^on[a-z]+$/i.test(name))) warn('flow-program', '正文中的事件程序需作为独立组件运行；已保留可用正文和完整原件，程序源文可继续修复。')
+    node.children.forEach(programs)
+  }
+  programs(parsed.composition.root)
 
   const byPath = new Map<string, CourseAssetMeta>(), byFilename = new Map<string, CourseAssetMeta | null>()
   for (const meta of Object.values(options.assets)) {
@@ -202,7 +211,7 @@ export function parseFlowHtml(html: string, options: { parse?: PageParsePort; as
     return path ? byPath.get(path) ?? byFilename.get(path.slice('assets/'.length)) ?? undefined : undefined
   }
 
-  const content = (nodes: readonly PageNode[], hoisted: ElementNode[] = []) => {
+  const content = (nodes: readonly PageNode[], hoisted: ElementNode[] = [], initialStyle: TextRunStyle = {}, blockSeparators = false) => {
     const sources = new Map<DocumentHtmlElement, ElementNode>()
     const project = (node: PageNode): DocumentHtmlNode[] => {
       if (node.kind === 'text' || node.kind === 'comment') return [{ kind: node.kind, text: node.text }]
@@ -212,14 +221,22 @@ export function parseFlowHtml(html: string, options: { parse?: PageParsePort; as
       sources.set(element, node)
       return [element]
     }
-    return readHtmlDocumentText(nodes.flatMap(project), { createFormulaId: () => stableFlowId('formula'), warn,
+    return readHtmlDocumentText(nodes.flatMap(project), { createFormulaId: () => stableFlowId('formula'), warn, initialStyle, blockSeparators,
       onMedia: element => { const source = sources.get(element); if (source) hoisted.push(source) } })
   }
   function paragraphStyleOf(element: ElementNode): ParagraphStyle {
     const style: ParagraphStyle = {}
     for (const [name, value] of declarations(element.attributes.style)) {
       if (name === 'text-align' && (value === 'left' || value === 'center' || value === 'right')) style.textAlign = value
-      if (name === 'line-height') { const number = Number(value); if (Number.isFinite(number) && number > 0) style.lineSpacing = number }
+      if (name === 'line-height' && value !== 'normal') {
+        const size = applyCss({}, element).fontSize ?? 24
+        const extra = /^calc\(\s*1\.22em\s*\+\s*([\d.]+)px\s*\)$/i.exec(value)
+        const multiplier = /^[\d.]+$/.test(value) ? Number(value) : undefined
+        const height = multiplier === undefined ? cssLength(value, size) : multiplier * size
+        const spacing = extra ? Number(extra[1]) : height === undefined ? undefined : height - 1.22 * size
+        if (spacing !== undefined && Number.isFinite(spacing) && spacing >= 0 && spacing <= 200) style.lineSpacing = Math.round(spacing * 10000) / 10000
+        else warn('flow-line-height', `段落行距暂不能等价承载：${value}；原文保留供修复`)
+      }
     }
     return style
   }
@@ -290,27 +307,37 @@ export function parseFlowHtml(html: string, options: { parse?: PageParsePort; as
   }
 
   function table(element: ElementNode): Of<'table'> {
-    const rows: ElementNode[] = [], headerRows: ElementNode[] = []
+    const rows: ElementNode[] = [], headerRows: ElementNode[] = [], groups = new Map<ElementNode, ElementNode>()
     let caption: ElementNode | undefined
-    const visit = (node: PageNode, inHead: boolean) => {
+    const visit = (node: PageNode, inHead: boolean, group = element) => {
       if (node.kind !== 'element') return
       const tag = tagOf(node)
       if (tag === 'caption') caption = node
-      else if (tag === 'tr') (inHead ? headerRows : rows).push(node)
-      else if (tag === 'thead') node.children.forEach(child => visit(child, true))
-      else if (tag === 'tbody' || tag === 'tfoot') node.children.forEach(child => visit(child, false))
+      else if (tag === 'tr') { (inHead ? headerRows : rows).push(node); groups.set(node, group) }
+      else if (tag === 'thead') node.children.forEach(child => visit(child, true, node))
+      else if (tag === 'tbody' || tag === 'tfoot') node.children.forEach(child => visit(child, false, node))
     }
     element.children.forEach(child => visit(child, false))
     // Without a <thead>, a first row of <th> cells is the header.
     if (!headerRows.length && rows[0]?.children.every(child => child.kind !== 'element' || tagOf(child) === 'th')) headerRows.push(rows.shift()!)
+    // The formal table has one header row. Keep a multi-row header as ordinary
+    // rows (including its merges) rather than dropping its later rows.
+    const multiHeader = headerRows.length > 1
+    if (multiHeader) {
+      rows.unshift(...headerRows.splice(0))
+      warn('flow-table-header', '多行表头已完整保留为表格行；原表头结构保留在原文中')
+    }
     const cellsOf = (row: ElementNode) => row.children.filter((child): child is ElementNode => tagOf(child) === 'td' || tagOf(child) === 'th')
     const grid: { node: ElementNode; anchor: boolean; rowSpan: number; columnSpan: number }[][] = rows.map(() => [])
     rows.forEach((row, rowIndex) => {
       let column = 0
       for (const cell of cellsOf(row)) {
         while (grid[rowIndex]![column]) column++
-        const rowSpan = Math.max(1, Math.min(rows.length - rowIndex, Number(cell.attributes.rowspan) || 1))
-        const columnSpan = Math.max(1, Number(cell.attributes.colspan) || 1)
+        let groupEnd = rowIndex + 1
+        while (groupEnd < rows.length && groups.get(rows[groupEnd]!) === groups.get(row)) groupEnd++
+        const declaredSpan = Number(cell.attributes.rowspan ?? 1)
+        const rowSpan = Math.max(1, Math.min(groupEnd - rowIndex, declaredSpan === 0 ? groupEnd - rowIndex : Math.floor(declaredSpan) || 1))
+        const columnSpan = Math.max(1, Math.floor(Number(cell.attributes.colspan)) || 1)
         for (let r = 0; r < rowSpan; r++) for (let c = 0; c < columnSpan; c++) grid[rowIndex + r]![column + c] = { node: cell, anchor: !r && !c, rowSpan, columnSpan }
         column += columnSpan
       }
@@ -329,8 +356,25 @@ export function parseFlowHtml(html: string, options: { parse?: PageParsePort; as
     })) }))
     const header = element.attributes['data-header']
     return { id: stableFlowId('block'), type: 'table', ...(caption ? { caption: content(caption.children) } : {}),
-      ...(header === 'on' || header === 'off' ? { headerEnabled: header === 'on' } : {}),
+      ...(multiHeader ? { headerEnabled: false } : header === 'on' || header === 'off' ? { headerEnabled: header === 'on' } : {}),
       columns, rows: tableRows, ...(merges.length ? { merges } : {}) }
+  }
+
+  // Split only at media boundaries, retaining the wrappers which supply text
+  // styles. The formal flow can then carry text/media in their written order.
+  function mediaParts(nodes: readonly PageNode[]): (PageNode[] | ElementNode)[] {
+    const parts: (PageNode[] | ElementNode)[] = []
+    const append = (node: PageNode) => { const last = parts.at(-1); if (Array.isArray(last)) last.push(node); else parts.push([node]) }
+    for (const node of nodes) {
+      if (node.kind !== 'element') { append(node); continue }
+      if (['img', 'video', 'audio', 'figure', 'iframe'].includes(tagOf(node))) { parts.push(node); continue }
+      const nested = mediaParts(node.children)
+      if (nested.some(part => !Array.isArray(part))) for (const part of nested) {
+        if (Array.isArray(part)) append({ ...node, children: part })
+        else parts.push(part)
+      } else append(node)
+    }
+    return parts
   }
 
   function blocks(nodes: readonly PageNode[]): Block[] {
@@ -352,22 +396,29 @@ export function parseFlowHtml(html: string, options: { parse?: PageParsePort; as
       const block = (value: Block | Block[] | undefined) => { flush(); if (value) result.push(...(Array.isArray(value) ? value : [value])) }
       if (/^h[1-6]$/.test(tag)) {
         const hoisted: ElementNode[] = []
-        block({ id: stableFlowId('block'), type: 'heading', level: Number(tag[1]) as 1, content: content(node.children, hoisted), ...paragraphStyleOf(node) })
+        block({ id: stableFlowId('block'), type: 'heading', level: Number(tag[1]) as 1, content: content([node], hoisted), ...paragraphStyleOf(node) })
         result.push(...hoisted.flatMap(element => blocks([element])))
       } else if (tag === 'p') {
         const formula = displayFormula(node)
         if (formula) { block(formula); continue }
         const hoisted: ElementNode[] = []
-        const text = content(node.children, hoisted)
+        const text = content([node], hoisted)
         block(text.inlines.length || !hoisted.length ? { id: stableFlowId('block'), type: 'paragraph', content: text, ...paragraphStyleOf(node) } : undefined)
         result.push(...hoisted.flatMap(element => blocks([element])))
       } else if (tag === 'blockquote') {
         const citation = node.children.find((child): child is ElementNode => tagOf(child) === 'footer' || tagOf(child) === 'cite')
-        const paragraphs = node.children.filter(child => child !== citation)
-        const parts = paragraphs.some(child => tagOf(child) === 'p')
-          ? paragraphs.filter(child => tagOf(child) === 'p').map(child => content((child as ElementNode).children)) : [content(paragraphs)]
-        block({ id: stableFlowId('block'), type: 'quote', content: normalizeDocumentText({ inlines: parts.flatMap((part, index) => index ? [{ type: 'text' as const, text: '\n' }, ...part.inlines] : part.inlines) }),
-          ...(citation ? { citation: content(citation.children) } : {}), ...paragraphStyleOf(node) })
+        const parts = mediaParts(node.children.filter(child => child !== citation)), quotes: Block[] = []
+        for (const part of parts) {
+          if (!Array.isArray(part)) { quotes.push(...blocks([part])); continue }
+          const text = content(part, [], applyCss({}, node), true)
+          if (text.inlines.length) quotes.push({ id: stableFlowId('block'), type: 'quote', content: text, ...paragraphStyleOf(node) })
+        }
+        if (citation) {
+          const last = [...quotes].reverse().find((item): item is Of<'quote'> => item.type === 'quote')
+          if (last) last.citation = content([citation])
+          else quotes.push({ id: stableFlowId('block'), type: 'quote', content: { inlines: [] }, citation: content([citation]) })
+        }
+        block(quotes)
       } else if (tag === 'ul' || tag === 'ol') {
         const items: { id: string; content: FlowTextContent }[] = []
         const visit = (list: ElementNode) => list.children.forEach(child => {
@@ -378,13 +429,25 @@ export function parseFlowHtml(html: string, options: { parse?: PageParsePort; as
           nested.forEach(visit)
         })
         visit(node)
-        block(items.length ? { id: stableFlowId('block'), type: 'list', ordered: tag === 'ol', items } : undefined)
+        const start = Number(node.attributes.start)
+        block(items.length ? { id: stableFlowId('block'), type: 'list', ordered: tag === 'ol', items,
+          ...(tag === 'ol' && node.attributes.start !== undefined && Number.isSafeInteger(start) ? { start } : {}) } : undefined)
       } else if (tag === 'hr') block({ id: stableFlowId('block'), type: 'divider' })
       else if (tag === 'img' || tag === 'video' || tag === 'audio') block(media(node))
       else if (tag === 'figure') {
-        const inner = node.children.find((child): child is ElementNode => ['img', 'video', 'audio'].includes(tagOf(child)))
+        const mediaChildren = (nodes: readonly PageNode[]): ElementNode[] => nodes.flatMap(child => child.kind !== 'element' ? [] : ['img', 'video', 'audio'].includes(tagOf(child)) ? [child] : mediaChildren(child.children))
+        const candidates = mediaChildren(node.children.filter(child => tagOf(child) !== 'figcaption'))
+        const inner = candidates.length === 1 ? candidates[0] : undefined
         const chart = node.children.find((child): child is ElementNode => tagOf(child) === 'guoling-chart')
-        block(inner ? media(inner, node) : chart ? blocks([chart]) : blocks(node.children.filter(child => tagOf(child) !== 'figcaption')))
+        if (inner) {
+          for (const part of mediaParts(node.children.filter(child => tagOf(child) !== 'figcaption'))) {
+            if (Array.isArray(part)) block(blocks(part))
+            else block(part === inner ? media(inner, node) : blocks([part]))
+          }
+        } else {
+          if (node.children.some(child => tagOf(child) === 'figcaption')) warn('flow-figure-caption', '多媒体题注暂不能确定对应对象；题注正文和原文已保留')
+          block(chart ? blocks([chart]) : blocks(node.children))
+        }
       } else if (tag === 'table') block(table(node))
       else if (tag === 'pre') {
         const code = node.children.find((child): child is ElementNode => tagOf(child) === 'code')
@@ -393,11 +456,16 @@ export function parseFlowHtml(html: string, options: { parse?: PageParsePort; as
       } else if (tag === 'aside') {
         const title = node.children.find((child): child is ElementNode => ['header', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong'].includes(tagOf(child)))
         const rest = node.children.filter(child => child !== title)
-        const parts = rest.some(child => tagOf(child) === 'p') ? rest.filter(child => tagOf(child) === 'p').map(child => content((child as ElementNode).children)) : [content(rest)]
         const tone = node.attributes['data-tone']
-        block({ id: stableFlowId('block'), type: 'callout', tone: tone === 'example' || tone === 'warning' || tone === 'conclusion' ? tone : 'note',
-          ...(title ? { title: content(title.children) } : {}),
-          body: normalizeDocumentText({ inlines: parts.flatMap((part, index) => index ? [{ type: 'text' as const, text: '\n' }, ...part.inlines] : part.inlines) }) })
+        const callouts: Block[] = []
+        for (const part of mediaParts(rest)) {
+          if (!Array.isArray(part)) { callouts.push(...blocks([part])); continue }
+          const body = content(part, [], applyCss({}, node), true)
+          if (body.inlines.length || !callouts.length) callouts.push({ id: stableFlowId('block'), type: 'callout', tone: tone === 'example' || tone === 'warning' || tone === 'conclusion' ? tone : 'note',
+            ...(!callouts.some(block => block.type === 'callout') && title ? { title: content([title]) } : {}), body })
+        }
+        if (!callouts.length) callouts.push({ id: stableFlowId('block'), type: 'callout', tone: 'note', ...(title ? { title: content([title]) } : {}), body: { inlines: [] } })
+        block(callouts)
       } else if (tag === 'details') {
         const summary = node.children.find((child): child is ElementNode => tagOf(child) === 'summary')
         block({ id: stableFlowId('block'), type: 'section', title: summary ? content(summary.children) : { inlines: [] }, collapsedByDefault: node.attributes.open === undefined,
@@ -532,7 +600,8 @@ export function alignFlowBlocks(next: readonly Block[], previous: readonly Block
     return clone
   }
   const align = (blocks: readonly Block[], prior: readonly Block[]): Block[] => {
-    const paired = pairItems(blocks, prior, signature, (a, b) => a.type === b.type && a.type !== 'component')
+    const paired = pairItems(blocks, prior, signature, (a, b) => a.type === b.type && a.type !== 'component'
+      || ['paragraph', 'heading'].includes(a.type) && ['paragraph', 'heading'].includes(b.type))
     return blocks.flatMap((block, index): Block[] => {
       const old = paired[index]
       if (old && signature(old) === signature(block)) return [old]

@@ -14,6 +14,8 @@ const noteSchema = z.object({ goal: z.string().max(MAX_GOAL_CHARS),
 
 /** Replaces only supplied model-owned sections. No goal, user constraint, permission or result field is accepted. */
 export const taskNoteInputSchema = z.object({
+  /** A model-recognized continuation of a host-delivered history source; Engine validates and carries the note. */
+  continuationRunId: z.string().min(1).max(512).describe('宿主已提供历史的 runId 或完整 sourceId（run:<runId>:<消息序号>）；软件解析来源身份，不需拆解编号。').optional(),
   decisions: z.array(decision).max(16).optional(),
   remaining: z.array(line).max(24).optional(),
   openQuestions: z.array(line).max(12).optional(),
@@ -22,7 +24,7 @@ export const taskNoteInputSchema = z.object({
 
 export const taskNoteTool: ModelToolDefinition = {
   name: 'task.note',
-  description: '更新本次任务的简短工作笔记：已作取舍、待办、待确认和风险。只写当前 run 的检查点，不修改用户原话、冻结约束、权限、文档或真实工具回执。笔记中的“完成”不作为交付证明。sourceRefs 可省略；需要引用时使用 task:instruction 或已返回工具的调用编号，宿主自动定位来源。',
+  description: '更新本次任务的简短工作笔记：已作取舍、待办、待确认和风险。用户当前请求明确续作先前目标时，用 continuationRunId 指向宿主已提供的历史 runId 或完整 sourceId（run:<runId>:<消息序号>），不用自行拆解来源编号；宿主承接原目标和最近笔记，不扩大权限或重放操作。新讨论或只要求新阶段时不声明续作；显式 remaining=[] 保持为空。只写当前 run 检查点，不修改用户原话、冻结约束、权限、文档或真实回执。笔记中的“完成”不作为交付证明。sourceRefs 可省略；需要引用时使用 task:instruction 或已返回工具调用编号。',
   inputSchema: z.toJSONSchema(taskNoteInputSchema) as ModelToolDefinition['inputSchema'],
 }
 

@@ -6,11 +6,14 @@ import type { DocumentRegistry } from '../../core/documents/DocumentRegistry'
 import type { createDocumentJournal } from './documentJournal'
 import type { WorkspaceAroundMutation, WorkspaceMutationAction } from './WorkspaceFiles'
 import { FileAccessQueue } from './FileAccessQueue'
+import { readDocumentFileVersion } from './documentJournal'
 
 type FileBinding = Extract<DocumentBinding, { kind: 'file' }>
-interface BindingIntent { schemaVersion: 1; operationId: string; source: string; target?: string; kind: 'rename' | 'move' | 'trash'; entries: { documentId: string; before: FileBinding; after: DocumentBinding }[] }
+interface BindingIntent { schemaVersion: 1; operationId: string; source: string; target?: string; kind: 'rename' | 'move' | 'trash'; action?: WorkspaceMutationAction;
+  entries: { documentId: string; before: FileBinding; after: DocumentBinding; fileIdentity?: string; fileVersion?: string | null; documentKind?: DurableDocumentState['model']['kind'] }[] }
 const key = (filename: string) => process.platform === 'win32' ? path.resolve(filename).toLowerCase() : path.resolve(filename)
 const exists = async (filename: string) => { try { await fs.lstat(filename); return true } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error } }
+const physicalIdentity = async (filename: string) => { try { const stat = await fs.lstat(filename, { bigint: true }); return `${stat.dev}:${stat.ino}:${stat.birthtimeNs}` } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error } }
 const inside = (filename: string, parent: string) => { const relative = path.relative(key(parent), key(filename)); return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)) }
 
 /** Relocate an existing identity only through the exact formal file-operation source. */
@@ -88,6 +91,7 @@ export class DocumentFileCoordinator {
     if (result.status !== 'success' || action.kind !== 'rename' && action.kind !== 'move') return result
     try {
       for (const listener of this.relocationListeners) await listener(action)
+      if (action.sources[0]) await fs.rm(this.filename(action.operationId, action.sources[0].resolvedPath), { force: true })
       return result
     } catch (error) {
       // The physical move and document rebind already succeeded. Throwing here would
@@ -108,8 +112,9 @@ export class DocumentFileCoordinator {
       (source.kind === 'directory' ? inside(state.binding.path, source.resolvedPath) : key(state.binding.path) === key(source.resolvedPath)))
     if (!affected.length) return perform()
     const live = new Set(this.registry.list().map(snapshot => snapshot.documentId))
-    const entries = affected.map(state => ({ documentId: state.documentId, before: state.binding as FileBinding,
-      after: this.destination(action, state.binding as FileBinding) }))
+    const entries = await Promise.all(affected.map(async state => ({ documentId: state.documentId, before: state.binding as FileBinding,
+      after: this.destination(action, state.binding as FileBinding), fileIdentity: await physicalIdentity((state.binding as FileBinding).path) ?? undefined,
+      fileVersion: await readDocumentFileVersion((state.binding as FileBinding).path, state.model.kind), documentKind: state.model.kind })))
     const destinations = entries.flatMap(entry => [entry.before, ...(entry.after.kind === 'file' ? [entry.after] : [])])
     return this.registry.withFileBindings(entries.filter(entry => live.has(entry.documentId)).map(entry => entry.documentId), destinations, async leases => {
       // Capture after any earlier save finished; do not erase an existing external-file conflict.
@@ -123,7 +128,7 @@ export class DocumentFileCoordinator {
       }
       if (!entries.length) return perform()
       const intent: BindingIntent = { schemaVersion: 1, operationId: action.operationId, source: source.resolvedPath,
-        ...(action.target ? { target: action.target.resolvedPath } : {}), kind: action.kind as BindingIntent['kind'], entries }
+        ...(action.target ? { target: action.target.resolvedPath } : {}), kind: action.kind as BindingIntent['kind'], action, entries }
       const filename = this.filename(action.operationId, source.resolvedPath)
       await this.record(filename, intent)
       const result = await perform()
@@ -146,7 +151,7 @@ export class DocumentFileCoordinator {
             ...(entry.after.kind === 'untitled' ? { savedRevision: null } : {}) })
         }
       }
-      if (!choices.includes('unknown')) await fs.rm(filename, { force: true })
+      if (!choices.includes('unknown') && action.kind === 'trash') await fs.rm(filename, { force: true })
       return result
     })
   }
@@ -172,8 +177,18 @@ export class DocumentFileCoordinator {
       const choices = await Promise.all(intent.entries.map(async entry => {
         const atSource = await exists(entry.before.path)
         const atTarget = entry.after.kind === 'file' && await exists(entry.after.path)
+        const matchesOriginal = async (filename: string) => entry.fileIdentity && await physicalIdentity(filename) === entry.fileIdentity
+        const sourceOriginal = atSource && await matchesOriginal(entry.before.path)
+        const targetOriginal = atTarget && entry.after.kind === 'file' && await matchesOriginal(entry.after.path)
+        const versionMatches = async (filename: string) => entry.documentKind && entry.fileVersion != null && await readDocumentFileVersion(filename, entry.documentKind) === entry.fileVersion
+        const sourceVersion = !sourceOriginal && !targetOriginal && atSource && await versionMatches(entry.before.path)
+        const targetVersion = !sourceOriginal && !targetOriginal && atTarget && entry.after.kind === 'file' && await versionMatches(entry.after.path)
+        const physical = sourceOriginal && !targetOriginal || sourceVersion && !targetVersion ? 'before' as const
+          : targetOriginal && !sourceOriginal || targetVersion && !sourceVersion ? 'after' as const
+            : atSource && atTarget || entry.fileIdentity && (atSource || atTarget) ? 'unknown' as const
+              : atSource ? 'before' as const : intent!.kind === 'trash' || atTarget ? 'after' as const : 'unknown' as const
         return { atSource, atTarget,
-          physical: atSource ? 'before' as const : intent!.kind === 'trash' || atTarget ? 'after' as const : 'unknown' as const }
+          physical }
       }))
       const live = new Set(this.registry.list().map(snapshot => snapshot.documentId))
       const bindings = intent.entries.flatMap(entry => [entry.before, ...(entry.after.kind === 'file' ? [entry.after] : [])])
@@ -186,8 +201,7 @@ export class DocumentFileCoordinator {
             ? current.kind === 'file' && current.bindingVersion === candidate.bindingVersion && key(current.path) === key(candidate.path)
             : current.kind === 'untitled' && current.suggestedName === candidate.suggestedName)
           if (!matches(entry.before) && !matches(entry.after)) continue // A later Save As owns this binding now.
-          const choice = matches(entry.after) && (entry.after.kind === 'untitled' || choices[index]!.atTarget)
-            ? 'after' : choices[index]!.physical
+          const choice = choices[index]!.physical
           if (choice === 'unknown') { pending.add(index); continue } // Keep only still-owned unresolved bindings.
           const binding = choice === 'after' ? entry.after : entry.before
           if (lease) await lease.rebind(binding)
@@ -195,6 +209,9 @@ export class DocumentFileCoordinator {
         }
       })
       if (pending.size) throw new Error('文件位置尚未确认，已保留相关路径与恢复稿；其他文件可继续使用')
+      if (intent.action && (intent.kind === 'rename' || intent.kind === 'move') && choices.some(choice => choice.physical === 'after')) {
+        for (const listener of this.relocationListeners) await listener(intent.action)
+      }
       await fs.rm(filename, { force: true }); this.unresolved.delete(filename)
       } catch (error) {
         const entries = Array.isArray(intent?.entries) ? intent.entries : []

@@ -4,14 +4,17 @@ import type { FormulaComponentData, TextAppearance, TextComponentData, TextSizin
 
 export interface TextComponentSize { width: number; height: number }
 export interface TextLayoutResult {
-  /** Only this height may be proposed to the host geometry owner; no position or width mutation. */
+  /** Only the automatic block axis may grow; author position and inline axis remain fixed. */
+  width: number
   height: number
   scale: number
   overflows: boolean
 }
-export function resolveTextComponentLayout(size: TextComponentSize, sizing: TextSizing, measured: TextComponentSize): TextLayoutResult {
-  if (sizing.mode === 'grow-height') return { height: Math.max(size.height, sizing.minHeight, measured.height), scale: 1, overflows: measured.width > size.width + 0.5 }
-  return { height: size.height, scale: 1, overflows: measured.width > size.width + 0.5 || measured.height > size.height + 0.5 }
+export function resolveTextComponentLayout(size: TextComponentSize, sizing: TextSizing, measured: TextComponentSize, vertical = false): TextLayoutResult {
+  if (sizing.mode === 'grow-height') return vertical
+    ? { width: Math.max(size.width, sizing.minHeight, measured.width), height: size.height, scale: 1, overflows: measured.height > size.height + 0.5 }
+    : { width: size.width, height: Math.max(size.height, sizing.minHeight, measured.height), scale: 1, overflows: measured.width > size.width + 0.5 }
+  return { width: size.width, height: size.height, scale: 1, overflows: measured.width > size.width + 0.5 || measured.height > size.height + 0.5 }
 }
 const escapeAttribute = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
 const kebab = (value: string) => value.replace(/[A-Z]/g, character => `-${character.toLowerCase()}`)
@@ -54,7 +57,7 @@ function componentHtml(markup: string, appearance: TextAppearance, sizing: TextS
   const styles = textAppearanceStyles(appearance, sizing)
   return `<div data-text-component="true" style="${escapeAttribute(css(styles.box))}"${accessibleText === undefined ? '' : ` aria-label="${escapeAttribute(accessibleText)}"`}><div data-text-component-content="true" style="${escapeAttribute(css(styles.content))}">${markup}</div></div>`
 }
-export function textComponentHtml(data: TextComponentData): string { return componentHtml(renderDocumentText(styledTextContent(data)), data.appearance, data.sizing) }
+export function textComponentHtml(data: TextComponentData): string { return componentHtml(renderDocumentText(styledTextContent(data), ['content']), data.appearance, data.sizing) }
 export function formulaComponentHtml(data: FormulaComponentData): string {
   const appearance = { ...data.appearance, ...data.formula.style }
   return componentHtml(renderDocumentMath(data.formula.latex, true), appearance, data.sizing, data.formula.accessibleText)
@@ -77,7 +80,8 @@ export function measureTextComponent(element: HTMLElement, size: TextComponentSi
   Object.assign(probe.style, { position: 'absolute', visibility: 'hidden', pointerEvents: 'none', left: '0', top: '0',
     width: `${size.width}px`, height: 'auto', minHeight: '0', maxHeight: 'none', overflow: 'visible' })
   const content = probe.querySelector<HTMLElement>('[data-text-component-content]')
-  if (content?.style.writingMode.startsWith('vertical')) probe.style.height = `${size.height}px`
+  const vertical = Boolean(content?.style.writingMode.startsWith('vertical'))
+  if (vertical) { probe.style.height = `${size.height}px`; probe.style.width = 'auto'; if (content) content.style.width = 'auto' }
   element.ownerDocument.body.appendChild(probe)
   const read = (): TextComponentSize => {
     const horizontalEdges = Number.parseFloat(probe.style.padding || '0') * 2 + Number.parseFloat(probe.style.borderWidth || '0') * 2
@@ -85,7 +89,7 @@ export function measureTextComponent(element: HTMLElement, size: TextComponentSi
       height: Math.max(probe.getBoundingClientRect().height, probe.scrollHeight) }
   }
   try {
-    let result = resolveTextComponentLayout(size, sizing, read())
+    let result = resolveTextComponentLayout(size, sizing, read(), vertical)
     if (sizing.mode === 'shrink-text' && result.overflows) {
       // Scale every inline font, including explicitly styled math/text runs, then remeasure wrapping.
       const fonts = [probe, ...probe.querySelectorAll<HTMLElement>('[style]')].filter(node => node.style.fontSize)
@@ -95,17 +99,18 @@ export function measureTextComponent(element: HTMLElement, size: TextComponentSi
       for (let iteration = 0; iteration < 16; iteration++) {
         const scale = (low + high) / 2
         apply(scale)
-        if (resolveTextComponentLayout(size, sizing, read()).overflows) high = scale
+        if (resolveTextComponentLayout(size, sizing, read(), vertical).overflows) high = scale
         else low = scale
       }
       apply(low)
-      result = { ...resolveTextComponentLayout(size, sizing, read()), scale: low }
+      result = { ...resolveTextComponentLayout(size, sizing, read(), vertical), scale: low }
     }
     return result
   } finally { probe.remove() }
 }
 /** Apply the measured presentation without persisting reduced font sizes into authored content. */
 export function applyTextComponentLayout(element: HTMLElement, result: TextLayoutResult): void {
+  element.style.width = `${result.width}px`
   element.style.height = `${result.height}px`
   if (result.scale !== 1) {
     for (const node of [element, ...element.querySelectorAll<HTMLElement>('[style]')]) {

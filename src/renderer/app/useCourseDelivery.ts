@@ -6,6 +6,7 @@ import type { PublishedCourseV3 } from '../../shared/contracts/component-platfor
 import type { SingleHtmlExportMode } from '../export/course/coursePackagePreflight'
 import { SINGLE_HTML_WARNING_BYTES, utf8ByteLength } from '../export/exportSize'
 import { mountPublishedCourseV3 } from '../../player/componentPlatform/publishedPlayer'
+import { installedBundledFontFaceCss } from '../../shared/fonts/installedBundledFontFaceCss'
 import { beginSerializedSessionMount, enqueueSerial } from '../ui/serializedSessionMount'
 import { createComponentDeliveryCapture, type ComponentScreenshot } from '../export/componentPlatform/capture'
 import type { ExportPageOptions } from '../../shared/workbench/toolPorts'
@@ -26,10 +27,10 @@ export interface CourseDeliveryPorts {
   commitStatus(message: string | null): void
   reportError(message: string): void
   navigateFinding(item: ComponentDeliveryFinding): void
-  exportHtml(input: { suggestedName: string; html: string }): Promise<{ path: string } | null>
-  exportWebPackage(input: { suggestedName: string; bytes: Uint8Array }): Promise<{ path: string } | null>
-  exportPdf(input: { suggestedName: string; html: string }): Promise<{ path: string } | null>
-  exportBinary(input: { suggestedName: string; extension: 'pptx' | 'json' | 'docx'; bytes: Uint8Array }): Promise<{ path: string } | null>
+  exportHtml(input: { suggestedName: string; html: string; projectPath?: string }): Promise<{ path: string } | null>
+  exportWebPackage(input: { suggestedName: string; bytes: Uint8Array; projectPath?: string }): Promise<{ path: string } | null>
+  exportPdf(input: { suggestedName: string; html: string; projectPath?: string }): Promise<{ path: string } | null>
+  exportBinary(input: { suggestedName: string; extension: 'pptx' | 'json' | 'docx'; bytes: Uint8Array; projectPath?: string }): Promise<{ path: string } | null>
 }
 export interface CourseDeliveryWatch { readonly documentTrigger: unknown; readonly sidecarTrigger: unknown; readonly componentPackagesTrigger: unknown }
 export interface CourseDeliveryApi {
@@ -37,6 +38,7 @@ export interface CourseDeliveryApi {
   cancelExport(): void
   readonly previewOpen: boolean
   readonly previewFeedback: CourseDeliveryPreviewFeedback | null
+  readonly previewDiagnostics: readonly string[]
   readonly exportPreflightReport: ComponentDeliveryReport | null
   readonly largeHtmlByteLength: number | null
   bindPreviewHost(host: HTMLDivElement | null): void
@@ -67,6 +69,7 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
   const [previewOpen, setPreviewOpen] = useState(false), [previewHost, setPreviewHost] = useState<HTMLDivElement | null>(null)
   const [previewSnapshot, setPreviewSnapshot] = useState<CourseDeliverySnapshot | null>(null)
   const [previewFeedback, setPreviewFeedback] = useState<CourseDeliveryPreviewFeedback | null>(null)
+  const [previewDiagnostics, setPreviewDiagnostics] = useState<readonly string[]>([])
   const [exportPreflightReport, setExportPreflightReport] = useState<ComponentDeliveryReport | null>(null)
   const [largeHtmlByteLength, setLargeHtmlByteLength] = useState<number | null>(null)
   const [settingsSnapshot, setSettingsSnapshot] = useState<CourseDeliverySnapshot | null>(null)
@@ -96,13 +99,15 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
         ? payload => createComponentDeliveryCapture(payload, ref.current.captureAuthoringObservation!) : undefined), signal, singleHtmlMode: mode }), [])
   const write = useCallback(async (value: PendingDelivery, beforeSave: () => void) => {
     const paths: string[] = []
+    const binding = value.snapshot.snapshot.binding
+    const location = binding.kind === 'file' ? { projectPath: binding.path } : {}
     for (const artifact of value.built.artifacts) {
       beforeSave()
       const result = artifact.extension === 'html'
-        ? await ref.current.exportHtml({ suggestedName: artifact.suggestedName, html: artifact.html! })
-        : artifact.extension === 'zip' ? await ref.current.exportWebPackage({ suggestedName: artifact.suggestedName, bytes: artifact.bytes! })
-        : artifact.extension === 'pdf' ? await ref.current.exportPdf({ suggestedName: artifact.suggestedName, html: artifact.html! })
-        : await ref.current.exportBinary({ suggestedName: artifact.suggestedName, extension: artifact.extension, bytes: artifact.bytes! })
+        ? await ref.current.exportHtml({ suggestedName: artifact.suggestedName, html: artifact.html!, ...location })
+        : artifact.extension === 'zip' ? await ref.current.exportWebPackage({ suggestedName: artifact.suggestedName, bytes: artifact.bytes!, ...location })
+        : artifact.extension === 'pdf' ? await ref.current.exportPdf({ suggestedName: artifact.suggestedName, html: artifact.html!, ...location })
+        : await ref.current.exportBinary({ suggestedName: artifact.suggestedName, extension: artifact.extension, bytes: artifact.bytes!, ...location })
       if (!result) break
       paths.push(result.path)
     }
@@ -158,7 +163,10 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
   }, [build, cancelLargeHtml, capture, generate, write])
   const savePreflightReport = useCallback(() => {
     if (!exportPreflightReport) return
-    void ref.current.runBusy(async () => { await ref.current.exportBinary({ suggestedName: `${pending.current?.snapshot.project.title ?? '课程'}-导出说明.json`, extension: 'json', bytes: new TextEncoder().encode(JSON.stringify(exportPreflightReport, null, 2)) }) }, '输出说明保存失败。')
+    const snapshot = pending.current?.snapshot
+    const binding = snapshot?.snapshot.binding
+    void ref.current.runBusy(async () => { await ref.current.exportBinary({ suggestedName: `${snapshot?.project.title ?? '课程'}-导出说明.json`, extension: 'json', bytes: new TextEncoder().encode(JSON.stringify(exportPreflightReport, null, 2)),
+      ...(binding?.kind === 'file' ? { projectPath: binding.path } : {}) }) }, '输出说明保存失败。')
   }, [exportPreflightReport])
   const openPreview = useCallback(() => {
     void ref.current.runBusy(async () => { const snapshot = await capture(); setPreviewSnapshot(snapshot); setPreviewOpen(true) }, '整课预览不可用。')
@@ -169,23 +177,29 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
       if (old) enqueueSerial(chain, () => old.dispose())
       return
     }
+    let active = true
+    setPreviewDiagnostics([])
     setPreviewFeedback({ kind: 'loading', title: '正在准备整课预览', message: '正在载入当前课程…' })
-    return beginSerializedSessionMount(chain, async () => {
+    const report = (message: string) => {
+      if (active) setPreviewDiagnostics(current => current.includes(message) ? current : [...current, message])
+    }
+    const dispose = beginSerializedSessionMount(chain, async () => {
       const result = await buildComponentPublished(previewSnapshot.snapshot, ref.current.compileComponent)
-      if (result.diagnostics.length) setPreviewFeedback({ kind: 'error', title: '部分内容待修复', message: result.diagnostics.map(item => item.message).join('；') })
-      const player = await mountPublishedCourseV3(result.payload, previewHost, { report: message => setPreviewFeedback({ kind: 'error', title: '部分内容尚未运行', message }) })
+      for (const item of result.diagnostics) report(`${item.path.length ? `${item.path.join(' / ')}：` : ''}${item.message}`)
+      const player = await mountPublishedCourseV3(result.payload, previewHost, { fontFaceCss: installedBundledFontFaceCss(document), report })
       return { ...player, destroy: player.dispose }
     }, {
-      onReady: player => { preview.current = player; setPreviewFeedback(current => current?.kind === 'error' ? current : null) },
+      onReady: player => { preview.current = player; setPreviewFeedback(null) },
       onError: error => setPreviewFeedback({ kind: 'error', title: '整课预览启动失败', message: error instanceof Error ? error.message : String(error) }),
       onCleanup: () => { preview.current = null },
     })
+    return () => { active = false; dispose() }
   }, [previewHost, previewOpen, previewSnapshot])
   // An open preview is a frozen run. Author updates do not remount its answer state.
   void watch
   return {
     exportProgress, cancelExport: () => { if (phase.current === 'generating') { job.current?.abort(); phase.current = 'cancelling'; setExportProgress('cancelling') } },
-    previewOpen, previewFeedback, exportPreflightReport, largeHtmlByteLength, bindPreviewHost: setPreviewHost,
+    previewOpen, previewFeedback, previewDiagnostics, exportPreflightReport, largeHtmlByteLength, bindPreviewHost: setPreviewHost,
     previousPreview: () => { void preview.current?.previous() }, nextPreview: () => { void preview.current?.next() },
     closePreview: () => setPreviewOpen(false), openPreview, exportCourse, cancelPreflight, continuePreflightExport,
     exportSettingsOpen: settingsSnapshot !== null, exportSettingsPages: settingsSnapshot ? componentDeliveryPages(settingsSnapshot.project.surfaces) : [],

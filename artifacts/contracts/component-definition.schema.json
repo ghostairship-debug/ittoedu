@@ -121,6 +121,22 @@
     "title": {
       "type": "string"
     },
+    "library": {
+      "type": "object",
+      "properties": {
+        "packageId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "packageId"
+      ],
+      "additionalProperties": false
+    },
     "professionalBuiltinKey": {
       "type": "string",
       "minLength": 1

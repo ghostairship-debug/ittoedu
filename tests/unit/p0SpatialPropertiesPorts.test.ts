@@ -22,7 +22,7 @@ it('P0 sends frame follow, camera session edits and exclusive path sources throu
   expect(actions.updateActiveSpatialCameraFrameFromSession).toHaveBeenCalledExactlyOnceWith('world',target)
   context.commands.reorderPathFrames!('path',['frame']);context.commands.reorderPathWaypoints('path',['object'])
   expect(actions.updateSpatialPath.mock.calls).toEqual([
-    ['world','path',{frameIds:['frame'],instanceIds:[]},target],['world','path',{frameIds:[],instanceIds:['object']},target],
+    ['world','path',{frameIds:['frame'],instanceIds:undefined},target],['world','path',{frameIds:[],instanceIds:['object']},target],
   ])
   const path={title:'保留名字',instanceIds:[],frameIds:['frame']}
   await expect(context.commands.addPath(path)).rejects.toThrow('正式路径提交失败')

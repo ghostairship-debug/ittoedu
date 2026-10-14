@@ -83,10 +83,92 @@ function deferred<T>() {
   const promise = new Promise<T>(done => { resolve = done })
   return { promise, resolve }
 }
+
+it('does not pin or save a late current-document capture into a different conversation', async () => {
+  const { api, state } = executionFixture([conversation('a', '原会话', '原稿'), conversation('b', '新会话', '另一稿')])
+  const incoming = deferred<any>()
+  const capture = vi.fn((_writable: boolean, prepare?: boolean) => prepare === false ? Promise.resolve([]) : incoming.promise)
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(true)} captureDocuments={capture} prepareSend={async () => true} />)
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('原稿'))
+  fireEvent.click(screen.getByRole('button', { name: '添加' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '引用当前文档' }))
+  expect(capture).toHaveBeenCalledWith(true)
+  fireEvent.click(screen.getByRole('button', { name: '新会话' }))
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('另一稿'))
+  fireEvent.change(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { target: { value: '另一稿的新输入' } })
+  await act(async () => incoming.resolve([{ documentId: 'original-document', epoch: 'epoch-a', revision: 1, displayLabel: '文档', writable: [{ kind: 'document' }] }]))
+  expect(screen.queryByRole('button', { name: /移除引用.*文档/ })).toBeNull()
+  expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('另一稿的新输入')
+  expect(state.get('a')!.frozenContextRefs).toEqual([])
+  expect(state.get('b')!.frozenContextRefs).toEqual([])
+  expect(vi.mocked(api.draft).mock.calls.flatMap(([input]) => input.documents)).toEqual([])
+  expect(api.send).not.toHaveBeenCalled()
+})
+
+it('finishes attachment intake in the original conversation after switching, keeping both text drafts', async () => {
+  const { api, state } = executionFixture([conversation('a', '原会话', '原稿'), conversation('b', '新会话', '另一稿')])
+  const incoming = deferred<any>()
+  const prior = window.desktopAPI
+  Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { ...prior, attachments: {
+    receive: vi.fn(() => incoming.promise), snapshot: vi.fn(async () => ({ id: 'snap', name: '材料.txt', gaps: [], source: { kind: 'drop' }, representations: [{ id: 'text', kind: 'text' }] })),
+    release: vi.fn(async () => {}), cancel: vi.fn(async () => {}),
+  } } })
+  try {
+    render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(true)} captureDocuments={async () => []} prepareSend={async () => true} />)
+    const input = await screen.findByRole('textbox', { name: '给果铃AI发消息' })
+    fireEvent.change(input, { target: { value: '原稿的新输入' } })
+    fireEvent.drop(input, { dataTransfer: { files: [new File(['材料'], '材料.txt')], getData: () => '' } })
+    await waitFor(() => expect(window.desktopAPI!.attachments!.receive).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: '新会话' }))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('另一稿'))
+    fireEvent.change(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { target: { value: '另一稿的新输入' } })
+    await act(async () => incoming.resolve({ id: 'snap', name: '材料.txt', gaps: [], source: { kind: 'drop' }, representations: [{ id: 'text', kind: 'text' }] }))
+    await waitFor(() => expect(state.get('a')!.inputAttachments).toHaveLength(1))
+    expect(state.get('a')!.inputDraft).toBe('原稿的新输入')
+    expect(state.get('b')!.inputAttachments).toEqual([])
+    expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('另一稿的新输入')
+    expect(window.desktopAPI!.attachments!.cancel).not.toHaveBeenCalled()
+  } finally { Object.defineProperty(window, 'desktopAPI', { configurable: true, value: prior }) }
+})
 const streamEvent = (sequence: number, text: string, endedRun?: string): ExecutionEvent => ({
   conversationId: 'a', taskId: endedRun ?? 'task', runId: endedRun ?? 'run', time: sequence, source: 'builtin',
   eventId: `event-${sequence}`, sequence, itemId: endedRun ? 'end' : 'answer', type: endedRun ? 'run.end' : 'text',
   update: endedRun ? 'snapshot' : 'append', data: endedRun ? { status: 'failed' } : { text },
+})
+
+it('keeps queued intake and unsaved text on the original workspace after the view changes', async () => {
+  const { api, state } = executionFixture([conversation('a', '原会话', '原稿')])
+  const intake = deferred<any>(), queued = deferred<void>()
+  const write = api.draft
+  vi.mocked(api.draft).mockImplementationOnce(async input => { await queued.promise; return write(input) })
+  const other = { ...workspace, workspaceId: 'other', rootPath: 'C:/other' }
+  const otherConversation = { ...conversation('b', '其他工作空间', '另一稿'), workspaceId: 'other' }
+  state.set('b', otherConversation)
+  vi.mocked(api.workspace).mockImplementation(async root => root === other.rootPath ? { workspace: other, conversations: [otherConversation] } : { workspace, conversations: [state.get('a')!] })
+  const prior = window.desktopAPI
+  Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { ...prior, attachments: {
+    receive: vi.fn(() => intake.promise), snapshot: vi.fn(async () => ({ id: 'snap', name: '材料.txt', gaps: [], source: { kind: 'drop' }, representations: [{ id: 'text', kind: 'text' }] })), release: vi.fn(async () => {}), cancel: vi.fn(async () => {}),
+  } } })
+  try {
+    const handle = createRef<ExecutionAssistantHandle>()
+    const props = { api, settingsAPI: settingsFixture(false), captureDocuments: async () => [], prepareSend: async () => true }
+    const view = render(<ExecutionAssistant ref={handle} root={workspace.rootPath} {...props} />)
+    const input = await screen.findByRole('textbox', { name: '给果铃AI发消息' })
+    fireEvent.change(input, { target: { value: '切换前未保存文字' } })
+    fireEvent.drop(input, { dataTransfer: { files: [new File(['材料'], '材料.txt')], getData: () => '' } })
+    await waitFor(() => expect(window.desktopAPI!.attachments!.receive).toHaveBeenCalled())
+    let preservation!: Promise<unknown>
+    act(() => { preservation = handle.current!.preserveDraft() })
+    await waitFor(() => expect(api.draft).toHaveBeenCalled())
+    await act(async () => intake.resolve({ id: 'snap', name: '材料.txt', gaps: [], source: { kind: 'drop' }, representations: [{ id: 'text', kind: 'text' }] }))
+    view.rerender(<ExecutionAssistant ref={handle} root={other.rootPath} {...props} />)
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('另一稿'))
+    await act(async () => { queued.resolve(); await preservation })
+    await waitFor(() => expect(state.get('a')!.inputAttachments).toHaveLength(1))
+    expect(state.get('a')!.inputDraft).toBe('切换前未保存文字')
+    expect(state.get('b')!.inputDraft).toBe('另一稿')
+    expect(state.get('b')!.inputAttachments).toEqual([])
+  } finally { Object.defineProperty(window, 'desktopAPI', { configurable: true, value: prior }) }
 })
 
 const settingsView = (configured: boolean): ExecutionSettingsView => ({
@@ -115,6 +197,27 @@ function ScopeControls() {
     <button onClick={() => dock.setScope?.(null)}>全部会话</button>
   </>
 }
+
+it('observes automatic references without draining inputs, but prepares them when sending', async () => {
+  const { api } = executionFixture([conversation('observation', '引用观察')])
+  const settingsAPI = settingsFixture(true)
+  const drain = vi.fn(async () => {})
+  const capture = vi.fn(async (_writable: boolean, prepare = true) => {
+    if (prepare) await drain()
+    return [{ documentId: 'document-a', epoch: 'epoch', revision: 1, writable: [{ kind: 'document' as const }] }]
+  })
+  const host = () => <ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
+    captureDocuments={(writable, prepare) => capture(writable, prepare)} prepareSend={async () => { await drain(); return true }} />
+  const view = render(host())
+  await waitFor(() => expect(capture).toHaveBeenCalledWith(true, false))
+  view.rerender(host()) // The real host creates a new callback on document-view publication.
+  await waitFor(() => expect(capture.mock.calls.length).toBeGreaterThan(1))
+  expect(drain).not.toHaveBeenCalled()
+  fireEvent.change(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { target: { value: '修改当前稿' } })
+  fireEvent.click(screen.getByRole('button', { name: /^发送$/ }))
+  await waitFor(() => expect(api.send).toHaveBeenCalled())
+  expect(drain).toHaveBeenCalledTimes(1)
+})
 
 it('keeps middle and tail text flowing through notification bursts while an old failed run refreshes only once', async () => {
   const initial = conversation('a', '有失败历史的会话')
@@ -168,17 +271,19 @@ it('refreshes new terminal messages without replacing local draft attachments, n
   ] }
   const { api, state, emit } = executionFixture([initial, conversation('b', '会话 B', '乙会话草稿')])
   const terminalReads = [deferred<ConversationRecord | null>(), deferred<ConversationRecord | null>(), deferred<ConversationRecord | null>()]
-  let readIndex = 0
-  vi.mocked(api.conversation).mockImplementation(async (_workspaceId, id) => id === 'a'
-    ? terminalReads[readIndex++]!.promise : structuredClone(state.get(id) ?? null))
+  let readIndex = 0, terminalReadPending = false
+  vi.mocked(api.conversation).mockImplementation(async (_workspaceId, id) => {
+    if (id === 'a' && terminalReadPending) { terminalReadPending = false; return terminalReads[readIndex++]!.promise }
+    return structuredClone(state.get(id) ?? null)
+  })
   const events: ExecutionEvent[] = []
   vi.mocked(api.events).mockImplementation(async (id, after = 0) => ({ events: events.filter(event => event.conversationId === id && event.sequence > after), cursor: id === 'a' ? events.length : 0, hasMore: false }))
   const ref = createRef<ExecutionAssistantHandle>()
   render(<ExecutionAssistant ref={ref} root="C:/workspace" api={api} settingsAPI={settingsFixture(true)}
     captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
   await waitFor(() => expect(api.events).toHaveBeenCalledTimes(1))
-  const composer = screen.getByRole('textbox', { name: '给创作助手发消息' })
-  const end = (sequence: number) => { const event = streamEvent(sequence, '', `ended-${sequence}`); events.push(event); emit(event) }
+  const composer = screen.getByRole('textbox', { name: '给果铃AI发消息' })
+  const end = (sequence: number) => { terminalReadPending = true; const event = streamEvent(sequence, '', `ended-${sequence}`); events.push(event); emit(event) }
   await act(async () => end(1))
   fireEvent.change(composer, { target: { value: '正在编辑的新草稿' } })
   const replied: ConversationRecord = { ...initial, revision: 2, inputDraft: '', inputAttachments: [], messages: [
@@ -204,9 +309,9 @@ it('refreshes new terminal messages without replacing local draft attachments, n
 
   await act(async () => end(3))
   fireEvent.click(screen.getByRole('button', { name: '会话 B' }))
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue('乙会话草稿'))
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('乙会话草稿'))
   await act(async () => terminalReads[2]!.resolve({ ...replied, revision: 6 }))
-  expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue('乙会话草稿')
+  expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('乙会话草稿')
   expect(screen.getByRole('button', { name: '会话 B' })).toHaveAttribute('aria-current', 'page')
 })
 
@@ -214,8 +319,8 @@ it('preserves a focused unsent composer through the existing close handle and wa
   const { api, state } = executionFixture([conversation('a', '未发送要求')])
   const ref = createRef<ExecutionAssistantHandle>()
   render(<ExecutionAssistant ref={ref} root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).not.toBeDisabled())
-  const input = screen.getByRole('textbox', { name: '给创作助手发消息' })
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).not.toBeDisabled())
+  const input = screen.getByRole('textbox', { name: '给果铃AI发消息' })
   input.focus()
   fireEvent.change(input, { target: { value: '保持焦点，关闭后还要继续写。' } })
   expect(input).toHaveFocus()
@@ -233,7 +338,7 @@ it('continues on a conversation revision Main wrote after a task ended instead o
   const reply = (revision: number) => state.set('a', { ...state.get('a')!, revision, messages: [...state.get('a')!.messages,
     { messageId: `reply-${revision}`, role: 'assistant' as const, text: '任务回复', runId: 'run', createdAt: revision, attachmentIds: [] }] })
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(true)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
-  const composer = () => screen.getByRole('textbox', { name: '给创作助手发消息' })
+  const composer = () => screen.getByRole('textbox', { name: '给果铃AI发消息' })
   await waitFor(() => expect(composer()).toHaveValue('继续'))
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-model'))
   // The restored input sent unchanged is exactly the stored draft, so the same payload goes once more on the new revision.
@@ -248,7 +353,7 @@ it('continues on a conversation revision Main wrote after a task ended instead o
   fireEvent.change(composer(), { target: { value: '新的问题' } })
   fireEvent.blur(composer())
   await waitFor(() => expect(state.get('a')!.inputDraft).toBe('新的问题'))
-  expect(vi.mocked(api.draft).mock.calls.map(([input]) => input.expectedRevision)).toEqual([3, 4])
+  expect(vi.mocked(api.draft).mock.calls.map(([input]) => input.expectedRevision)).toEqual([4])
   expect(screen.queryByRole('alert')).toBeNull()
 })
 
@@ -257,9 +362,9 @@ it('labels a send Main refused before acceptance as not executed and keeps "unco
   vi.mocked(api.send).mockRejectedValue(new Error(`消息尚未发送：${executionInputMessages['vision-unsupported'][0]}`))
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(true)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
   // The composer remounts once the conversation is loaded.
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toBeEnabled())
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toBeEnabled())
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-model'))
-  const composer = screen.getByRole('textbox', { name: '给创作助手发消息' })
+  const composer = screen.getByRole('textbox', { name: '给果铃AI发消息' })
   fireEvent.change(composer, { target: { value: '这张图是什么？' } })
   fireEvent.keyDown(composer, { key: 'Enter' })
   const refused = await screen.findByRole('article', { name: '待处理消息' })
@@ -282,14 +387,14 @@ it('labels a send Main refused before acceptance as not executed and keeps "unco
 it('shows the specific reason Main gives when a blurred draft or a session rename is not saved', async () => {
   const { api } = executionFixture([conversation('a', '会话 A')])
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toBeEnabled())
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toBeEnabled())
   const draftRefusal = `草稿未保存：${executionInputMessages['attachment-unavailable'][0]}\n${executionInputMessages['attachment-unavailable'][1]}`
   vi.mocked(api.draft).mockRejectedValueOnce(new Error(draftRefusal))
-  fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '要保留的草稿' } })
-  fireEvent.blur(screen.getByRole('textbox', { name: '给创作助手发消息' }))
+  fireEvent.change(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { target: { value: '要保留的草稿' } })
+  fireEvent.blur(screen.getByRole('textbox', { name: '给果铃AI发消息' }))
   await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(executionInputMessages['attachment-unavailable'][0]))
   expect(screen.getByRole('alert')).toHaveTextContent('草稿未保存')
-  expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue('要保留的草稿')
+  expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('要保留的草稿')
   vi.mocked(api.renameConversation).mockRejectedValueOnce(new Error('会话名称未保存：会话刚被另一项操作更新（例如任务结束时写入的回复），这次操作没有生效。\n请再操作一次，会按最新记录处理。'))
   fireEvent.click(screen.getByRole('button', { name: '管理会话 会话 A' }))
   fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
@@ -306,7 +411,7 @@ it('restoring an old failed message keeps a different new draft until an explici
     failure: { code: 'model-not-configured', message: '未连接' }, model: { provider: 'fixture', model: 'fixture', accountId: 'fixture', billing: 'unknown' } }])
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
   const restore = await screen.findByRole('button', { name: '恢复到输入框' })
-  const input = screen.getByRole('textbox', { name: '给创作助手发消息' })
+  const input = screen.getByRole('textbox', { name: '给果铃AI发消息' })
   fireEvent.change(input, { target: { value: '新要求要保留' } })
   fireEvent.click(restore)
   const conflict = await screen.findByRole('alertdialog', { name: '输入框已有另一份草稿' })
@@ -326,12 +431,39 @@ it('labels a recovered stale document reference and only refreshes it after expl
   const captureDocuments = vi.fn(async () => [{ documentId: 'doc', epoch: 'new-epoch', revision: 2, writable: [{ kind: 'document' as const }] }])
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={captureDocuments} prepareSend={vi.fn(async () => true)} />)
   await screen.findByText(/原引用需要重新选择/)
-  expect(captureDocuments).toHaveBeenCalledWith(true)
+  expect(captureDocuments).toHaveBeenCalledWith(true, false)
   expect(api.draft).not.toHaveBeenCalled()
-  expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue('继续改这段文字')
+  expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('继续改这段文字')
   fireEvent.click(screen.getByRole('button', { name: '重新引用当前文档' }))
   await waitFor(() => expect(api.draft).toHaveBeenCalledWith(expect.objectContaining({ text: '继续改这段文字', documents: [expect.objectContaining({ epoch: 'new-epoch' })] })))
   await waitFor(() => expect(screen.queryByText(/原引用需要重新选择/)).toBeNull())
+})
+
+it('keeps a visible reference name current after save-as without rebinding the frozen reference', async () => {
+  const { api } = executionFixture([conversation('renamed', '引用另存为')])
+  let notify!: (event: any) => void
+  const snapshot = { documentId: 'doc-rename', epoch: 'same-epoch', binding: { kind: 'file', path: 'C:/workspace/原文件.glx' } }
+  const read = vi.fn(async (_id: string) => snapshot)
+  vi.stubGlobal('desktopAPI', { documents: { read, subscribe: (listener: typeof notify) => { notify = listener; return () => {} } } })
+  const capture = vi.fn(async () => [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: 1, writable: [{ kind: 'document' as const }] }])
+  const settings = settingsFixture(false)
+  const view = render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settings} captureDocuments={capture} prepareSend={async () => true} />)
+  await screen.findByRole('button', { name: /移除引用 原文件.glx/ })
+  await act(async () => notify({ type: 'changed', snapshot: { ...snapshot, binding: { kind: 'file', path: 'C:/workspace/另存为.glx' } } }))
+  expect(screen.getByRole('button', { name: /移除引用 另存为.glx/ })).toBeInTheDocument()
+  expect(api.draft).not.toHaveBeenCalled()
+  await act(async () => notify({ type: 'closed', documentId: snapshot.documentId, epoch: snapshot.epoch }))
+  expect(screen.getByRole('button', { name: /移除引用 另存为.glx/ })).toBeInTheDocument()
+  expect(screen.getByText(/另存为.glx：原文档尚未打开/)).toBeInTheDocument()
+  read.mockImplementation(async id => {
+    if (id === snapshot.documentId) throw new Error('文档已关闭')
+    return { ...snapshot, documentId: id, binding: { kind: 'file', path: 'C:/workspace/另一文档.txt' } }
+  })
+  view.rerender(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settings} captureDocuments={async () => [
+    ...(await capture()), { documentId: 'another-document', epoch: snapshot.epoch, revision: 1, writable: [{ kind: 'document' }] },
+  ]} prepareSend={async () => true} />)
+  await screen.findByRole('button', { name: /移除引用 另一文档.txt/ })
+  expect(screen.getByRole('button', { name: /移除引用 另存为.glx/ })).toBeInTheDocument()
 })
 
 it('offers an explicit resume for a user-paused queue through the existing resume operation', async () => {
@@ -346,34 +478,21 @@ it('offers an explicit resume for a user-paused queue through the existing resum
   expect(screen.getByRole('button', { name: '立即执行（先停止当前任务）' })).toBeVisible()
 })
 
-it('keeps the active conversation and draft while explorer selection filters homes and new sessions inherit the scope', async () => {
+it('keeps sessions parallel in the workspace and preserves historical homes without using them as filters', async () => {
   const a = { ...conversation('a', '甲', '继续写'), home: { kind: 'file' as const, path: 'Unit/a.md', workspaceId: 'workspace' } }
   const b = { ...conversation('b', '乙'), home: { kind: 'folder' as const, path: 'Unit/Sub', workspaceId: 'workspace' } }
-  const c = { ...conversation('c', '丙'), home: { kind: 'file' as const, path: 'Unit/gone.md', workspaceId: 'workspace', missing: true as const } }
-  const { api } = executionFixture([a, b, c, conversation('d', '根会话')])
-  const captureDocuments = vi.fn(async () => [])
+  const { api, state } = executionFixture([a, b, conversation('d', '根会话')])
   render(<WorkbenchSessionPortalProvider><ScopeControls /><WorkbenchSessionDock /><ExecutionAssistant root="C:/workspace" api={api}
-    settingsAPI={settingsFixture(false)} captureDocuments={captureDocuments} prepareSend={vi.fn(async () => true)} /></WorkbenchSessionPortalProvider>)
+    settingsAPI={settingsFixture(false)} captureDocuments={async () => []} prepareSend={async () => true} /></WorkbenchSessionPortalProvider>)
   await waitFor(() => expect(screen.getByRole('button', { name: '甲' })).toHaveAttribute('aria-current', 'page'))
   fireEvent.click(screen.getByRole('button', { name: '筛选 Unit' }))
-  await waitFor(() => expect(screen.queryByRole('button', { name: /根会话/ })).toBeNull())
-  expect(screen.getByRole('button', { name: '甲' })).toHaveAttribute('aria-current', 'page')
-  expect(screen.getByRole('button', { name: '甲' })).toHaveTextContent('Unit/a.md')
-  expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue('继续写')
-  expect(screen.getByRole('button', { name: '乙' })).toHaveTextContent('Unit/Sub')
-  expect(screen.getByRole('button', { name: '丙' })).toHaveTextContent('已删除')
-  fireEvent.click(screen.getByRole('button', { name: '筛选 a.md' }))
-  await waitFor(() => expect(screen.queryByRole('button', { name: '乙' })).toBeNull())
-  expect(screen.queryByRole('button', { name: '丙' })).toBeNull()
+  expect(screen.getByRole('button', { name: '乙' })).toBeVisible()
+  expect(screen.getByRole('button', { name: '根会话' })).toBeVisible()
+  expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('继续写')
+  expect(state.get('a')!.home).toEqual(a.home)
   fireEvent.click(screen.getByRole('button', { name: '新建会话' }))
-  await waitFor(() => expect(api.createConversation).toHaveBeenCalledWith('workspace', undefined, { kind: 'file', path: 'Unit/a.md' }))
-  fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '关于这个文件' } })
-  expect(screen.queryByLabelText('本条消息的引用')).toBeNull()
-  expect(captureDocuments).toHaveBeenCalledWith(true)
-  fireEvent.click(screen.getByRole('button', { name: '显示全部会话' }))
-  expect(screen.getByRole('button', { name: '根会话' })).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: '丙' }))
-  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('所属文件已删除；会话和草稿仍保留'))
+  await waitFor(() => expect(api.createConversation).toHaveBeenCalledWith('workspace'))
+  expect(api.setConversationHome).not.toHaveBeenCalled()
 })
 
 it('opens ChatGPT OAuth setup directly from the assistant model menu without changing the saved model', async () => {
@@ -381,7 +500,7 @@ it('opens ChatGPT OAuth setup directly from the assistant model menu without cha
   const settingsAPI = settingsFixture(true)
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
     captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
-  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-provider · fixture-model'))
+  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveAttribute('title', expect.stringContaining('fixture-provider · fixture-model')))
   fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
   fireEvent.click(within(screen.getByRole('group', { name: '对话模型选择' })).getByRole('button', { name: '登录 ChatGPT（OAuth）…' }))
   await waitFor(() => expect(screen.getByRole('dialog', { name: '连接账号' })).toBeInTheDocument())
@@ -422,22 +541,22 @@ it('M07-T07/S10-T05 freezes the exact send without a service notice, pins the sh
   expect(screen.queryByRole('checkbox', { name: '允许修改已绑定文档' })).toBeNull()
   expect(screen.queryByText('选择范围')).toBeNull()
   expect(screen.getByRole('button', { name: '权限：完全访问（工作空间）' })).toBeInTheDocument()
-  const composer = screen.getByRole('textbox', { name: '给创作助手发消息' })
+  const composer = screen.getByRole('textbox', { name: '给果铃AI发消息' })
   fireEvent.change(composer, { target: { value: '保留这份草稿' } })
-  await waitFor(() => expect(captureDocuments).toHaveBeenCalledWith(true))
+  await waitFor(() => expect(captureDocuments).toHaveBeenCalledWith(true, false))
   fireEvent.click(screen.getByRole('button', { name: '会话 B' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '会话 B' })).toHaveAttribute('aria-current', 'page'))
   expect(api.draft).toHaveBeenCalledWith({ workspaceId: 'workspace', conversationId: 'a', expectedRevision: 1,
     text: '保留这份草稿', documents: [{ documentId: 'document-a', epoch: 'epoch', revision: 3, writable: [{ kind: 'document' }], referenceId: 'document-a:page:', pinned: false, displayLabel: '文档' }], attachments: [] })
   fireEvent.click(screen.getByRole('button', { name: '会话 A' }))
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue('保留这份草稿'))
-  expect(captureDocuments).toHaveBeenCalledWith(true)
-  expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-provider · fixture-model')
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('保留这份草稿'))
+  expect(captureDocuments).toHaveBeenCalledWith(true, false)
+  expect(screen.getByLabelText('当前模型')).toHaveAttribute('title', expect.stringContaining('fixture-provider · fixture-model'))
   const references = screen.getByLabelText('本条消息的引用')
   expect(references).toHaveTextContent('已绑定文档')
   expect(references).not.toHaveTextContent('document-a')
-  fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '直接发送' } })
-  fireEvent.blur(screen.getByRole('textbox', { name: '给创作助手发消息' }))
+  fireEvent.change(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { target: { value: '直接发送' } })
+  fireEvent.blur(screen.getByRole('textbox', { name: '给果铃AI发消息' }))
   fireEvent.click(screen.getByRole('button', { name: '发送' }))
   await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1))
   expect(screen.queryByRole('dialog')).toBeNull()
@@ -445,14 +564,14 @@ it('M07-T07/S10-T05 freezes the exact send without a service notice, pins the sh
     documents: [{ documentId: 'document-a', writable: [{ kind: 'document' }] }],
     disclosedSettings: { profileRevision: 1, roles: { conversation: { provider: 'fixture-provider', model: 'fixture-model', billingKind: 'token-plan' } } } })
   // Read-only strips writes at send; a later level change never touches a task already sent.
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toBeEnabled())
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: '权限：完全访问（工作空间）' }))
   const levels = screen.getByRole('menu', { name: '权限模式' })
   expect(within(levels).getAllByRole('menuitemradio').map(item => item.firstElementChild?.textContent)).toEqual(['完全访问', '完全访问（工作空间）', '修改前询问', '只读'])
   fireEvent.click(within(levels).getByRole('menuitemradio', { name: /^只读/ }))
   expect(screen.getByRole('button', { name: '权限：只读' })).toBeInTheDocument()
-  fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '只读发送' } })
-  fireEvent.keyDown(screen.getByRole('textbox', { name: '给创作助手发消息' }), { key: 'Enter' })
+  fireEvent.change(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { target: { value: '只读发送' } })
+  fireEvent.keyDown(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { key: 'Enter' })
   await waitFor(() => expect(api.send).toHaveBeenCalledTimes(2))
   expect(vi.mocked(api.send).mock.calls[1]![0]).toMatchObject({ permission: 'read-only', documents: [{ documentId: 'document-a', writable: [] }] })
   expect(localStorage.getItem('guoling.execution.permission.v1:workspace')).toBe('read-only')
@@ -460,9 +579,9 @@ it('M07-T07/S10-T05 freezes the exact send without a service notice, pins the sh
   const changedSettings = settingsView(true)
   changedSettings.connections[0]!.connection.revision = 2
   vi.mocked(settingsAPI.read).mockResolvedValue(changedSettings)
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toBeEnabled())
-  fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '新路由' } })
-  fireEvent.keyDown(screen.getByRole('textbox', { name: '给创作助手发消息' }), { key: 'Enter' })
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toBeEnabled())
+  fireEvent.change(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { target: { value: '新路由' } })
+  fireEvent.keyDown(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { key: 'Enter' })
   await waitFor(() => expect(api.send).toHaveBeenCalledTimes(3))
   expect(vi.mocked(api.send).mock.calls[2]![0]).toMatchObject({ disclosedSettings: { roles: { conversation: { connectionRevision: 2 } } } })
   expect(container.querySelector('.execution-assistant__toolbar')).toContainElement(screen.getByRole('button', { name: '切换模型' }))
@@ -473,7 +592,7 @@ it('shows an actionable configuration error and does not prepare or send an unco
   const prepareSend = vi.fn(async () => true)
   render(<ExecutionAssistant root={null} api={api} settingsAPI={settingsFixture(false)} captureDocuments={vi.fn(async () => [])} prepareSend={prepareSend} />)
   await screen.findByText('未配置对话模型')
-  fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '保持用户原话' } })
+  fireEvent.change(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { target: { value: '保持用户原话' } })
   fireEvent.click(screen.getByRole('button', { name: '发送' }))
   const alert = await screen.findByRole('alert')
   expect(alert).toHaveTextContent('尚未配置可用的对话模型')
@@ -508,7 +627,7 @@ it('M12 keeps a newer teacher draft when blur persistence overlaps an explicit c
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(true)}
     captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
   const retry = await screen.findByRole('button', { name: '连接恢复后继续此任务' })
-  const composer = screen.getByRole('textbox', { name: '给创作助手发消息' })
+  const composer = screen.getByRole('textbox', { name: '给果铃AI发消息' })
   fireEvent.change(composer, { target: { value: '教师刚写的新草稿' } })
   fireEvent.blur(composer)
   await waitFor(() => expect(api.draft).toHaveBeenCalled())
@@ -516,7 +635,7 @@ it('M12 keeps a newer teacher draft when blur persistence overlaps an explicit c
   expect(api.send).not.toHaveBeenCalled()
   releaseDraft()
   await screen.findByText(/输入框已有新的文字、附件或文档引用；新草稿已保留/)
-  expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue('教师刚写的新草稿')
+  expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('教师刚写的新草稿')
   expect(state.get('a')?.inputDraft).toBe('教师刚写的新草稿')
   expect(api.send).not.toHaveBeenCalled()
 })
@@ -560,7 +679,7 @@ it('M12 continues a failed selection task whose restored references differ from 
 it('M12 lets the teacher clear the restored draft and still continue the frozen task, matching Main', async () => {
   const { api, state, documents } = selectionContinuationFixture()
   const retry = await screen.findByRole('button', { name: '连接恢复后继续此任务' })
-  const composer = screen.getByRole('textbox', { name: '给创作助手发消息' })
+  const composer = screen.getByRole('textbox', { name: '给果铃AI发消息' })
   fireEvent.change(composer, { target: { value: '' } })
   fireEvent.blur(composer)
   await waitFor(() => expect(state.get('a')?.inputDraft).toBe(''))
@@ -588,7 +707,7 @@ it('explains a transport interruption and offers a manual continuation', async (
 it('keeps a newer draft when a connection fails', async () => {
   const { api } = selectionContinuationFixture('auth')
   const retry = await screen.findByRole('button', { name: '连接恢复后继续此任务' })
-  fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '新的草稿' } })
+  fireEvent.change(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { target: { value: '新的草稿' } })
   fireEvent.click(retry)
   await screen.findByText(/输入框已有新的文字、附件或文档引用；新草稿已保留/)
   expect(api.send).not.toHaveBeenCalled()
@@ -596,7 +715,7 @@ it('keeps a newer draft when a connection fails', async () => {
 
 it('does not label an unknown provider outcome as a local request limit', async () => {
   selectionContinuationFixture('unknown')
-  await screen.findByRole('textbox', { name: '给创作助手发消息' })
+  await screen.findByRole('textbox', { name: '给果铃AI发消息' })
   expect(screen.queryByRole('button', { name: '连接恢复后继续此任务' })).toBeNull()
   expect(screen.queryByText(/本次已达到.*模型请求上限/)).toBeNull()
 })
@@ -604,9 +723,9 @@ it('does not label an unknown provider outcome as a local request limit', async 
 it('gives IME and menus priority, keeps Shift+Enter multiline, and funnels Enter and the button through one submission path', async () => {
   const { api } = executionFixture([conversation('a', '输入测试')])
   render(<ExecutionAssistant root={null} api={api} settingsAPI={settingsFixture(true)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
-  await screen.findByRole('textbox', { name: '给创作助手发消息' })
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toBeEnabled())
-  const composer = screen.getByRole('textbox', { name: '给创作助手发消息' })
+  await screen.findByRole('textbox', { name: '给果铃AI发消息' })
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toBeEnabled())
+  const composer = screen.getByRole('textbox', { name: '给果铃AI发消息' })
   fireEvent.change(composer, { target: { value: '中文输入' } })
   fireEvent.compositionStart(composer)
   fireEvent.keyDown(composer, { key: 'Enter', isComposing: true })
@@ -637,7 +756,7 @@ it('keeps a long user history bounded while every older message remains reachabl
   render(<ExecutionAssistant root={null} api={api} settingsAPI={settingsFixture(true)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
 
   await screen.findByText('消息-45')
-  const composer = screen.getByRole('textbox', { name: '给创作助手发消息' })
+  const composer = screen.getByRole('textbox', { name: '给果铃AI发消息' })
   expect(screen.getAllByLabelText('用户消息')).toHaveLength(20)
   expect(screen.getByText('消息-26')).toBeInTheDocument()
   expect(screen.queryByText('消息-25')).toBeNull()
@@ -647,7 +766,7 @@ it('keeps a long user history bounded while every older message remains reachabl
   expect(screen.getAllByLabelText('用户消息')).toHaveLength(20)
   expect(screen.getByText('消息-06')).toBeInTheDocument()
   expect(screen.getByText('消息-25')).toBeInTheDocument()
-  expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toBe(composer)
+  expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toBe(composer)
 
   fireEvent.click(screen.getByRole('button', { name: '查看更早的用户消息' }))
   expect(screen.getAllByLabelText('用户消息')).toHaveLength(5)
@@ -686,8 +805,8 @@ it('keeps the assistant focused on the current conversation and composer while l
   const { api } = executionFixture([conversation('a', '课堂讨论')])
   const { container } = render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(true)}
     captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
-  await screen.findByRole('textbox', { name: '给创作助手发消息' })
-  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-provider · fixture-model · Token Plan'))
+  await screen.findByRole('textbox', { name: '给果铃AI发消息' })
+  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveAttribute('title', expect.stringContaining('fixture-provider · fixture-model')))
   expect(container.querySelector('.execution-assistant__title')).toHaveTextContent('课堂讨论')
   expect(screen.queryByRole('textbox', { name: '会话名称' })).toBeNull()
   expect(screen.queryByRole('button', { name: '保存名称' })).toBeNull()
@@ -697,7 +816,7 @@ it('keeps the assistant focused on the current conversation and composer while l
   fireEvent.click(container.querySelector('.execution-assistant__more > summary')!)
   fireEvent.click(screen.getByRole('button', { name: '搜索历史' }))
   expect(screen.getByRole('textbox', { name: '历史关键词' })).toBeInTheDocument()
-  expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toBeInTheDocument()
+  expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toBeInTheDocument()
 })
 
 it('switches a verified configured conversation model from the composer and confirms the saved route', async () => {
@@ -708,7 +827,7 @@ it('switches a verified configured conversation model from the composer and conf
   alternate.connection.provider = 'alternate-provider'
   alternate.connection.accountId = 'alternate-account'
   current.connections.push(alternate)
-  current.capabilityRecords = [{ connectionId: 'alternate', connectionRevision: 1, model: 'alternate-model', parametersKey: '{}',
+  current.capabilityRecords = [{ connectionId: 'alternate', connectionRevision: 1, model: 'alternate-model', parametersKey: '{"protocol":"openai-chat","parameters":{}}',
     facts: { tools: { status: 'supported', observedAt: 1, source: 'probe' } },
     lastProbe: { observedAt: 1, checks: ['tools'], requestCount: 1, outcomes: [] } }]
   const settingsAPI = settingsFixture(true)
@@ -719,16 +838,42 @@ it('switches a verified configured conversation model from the composer and conf
   })
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
     captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
-  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-provider · fixture-model · Token Plan'))
+  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveAttribute('title', expect.stringContaining('fixture-provider · fixture-model')))
   fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
   const choices = screen.getByRole('group', { name: '对话模型选择' })
-  fireEvent.click(within(choices).getByRole('button', { name: '更多模型' }))
   expect(choices).toHaveTextContent('alternate-account · Token Plan')
   fireEvent.click(within(choices).getByRole('button', { name: /alternate-modelalternate-provider/ }))
   await waitFor(() => expect(settingsAPI.saveProfile).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 1,
     roles: expect.objectContaining({ conversation: { connectionId: 'alternate', model: 'alternate-model', parameters: {} } }) })))
-  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('alternate-provider · alternate-model · Token Plan'))
+  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveAttribute('title', expect.stringContaining('alternate-provider · alternate-model')))
   expect(screen.queryByRole('group', { name: '对话模型选择' })).toBeNull()
+  expect(api.send).not.toHaveBeenCalled()
+})
+
+it('reports an empty directory and retries into a selectable model without losing the current choice', async () => {
+  const { api } = executionFixture([conversation('a', '课堂讨论')])
+  const settingsAPI = settingsFixture(true)
+  vi.mocked(settingsAPI.discoverModels).mockResolvedValueOnce({ connectionId: 'connection', connectionRevision: 1,
+    models: [], capabilitiesVerified: false, source: 'live', checkedAt: '2026-09-25T00:00:00.000Z' })
+    .mockResolvedValue({ connectionId: 'connection', connectionRevision: 1,
+      models: [{ id: 'retry-model', displayName: '重试模型' }], capabilitiesVerified: false,
+      source: 'live', checkedAt: '2026-09-25T00:00:00.000Z' })
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
+    captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-model'))
+  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  const menu = screen.getByRole('group', { name: '对话模型选择' })
+  const retry = await within(menu).findByRole('button', { name: '重试目录' })
+  expect(within(menu).getByText(/服务返回了空模型目录/)).toBeVisible()
+  expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-model')
+  expect(settingsAPI.saveProfile).not.toHaveBeenCalled()
+  fireEvent.click(retry)
+  const model = await within(menu).findByRole('button', { name: /重试模型/ })
+  fireEvent.click(model)
+  await waitFor(() => expect(settingsAPI.saveProfile).toHaveBeenCalledWith(expect.objectContaining({
+    roles: expect.objectContaining({ conversation: expect.objectContaining({ model: 'retry-model' }) }),
+  })))
+  expect(settingsAPI.discoverModels).toHaveBeenCalledTimes(2)
   expect(api.send).not.toHaveBeenCalled()
 })
 
@@ -749,7 +894,6 @@ it('offers a discovered model and provider-declared reasoning strengths without 
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-model'))
   fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
   const menu = screen.getByRole('group', { name: '对话模型选择' })
-  fireEvent.click(within(menu).getByRole('button', { name: '更多模型' }))
   const discovered = await within(menu).findByRole('button', { name: /目录模型/ })
   expect(discovered).toHaveTextContent('目录能力未验证')
   fireEvent.click(discovered)
@@ -889,7 +1033,7 @@ it('treats an explicit empty OAuth effort directory as authoritative', async () 
   expect(within(effort).getByRole('button', { name: '默认' })).toBeInTheDocument()
 })
 
-it('shows only explicit favorites by default and exposes searchable connection groups in More without auto-favoriting OAuth models', async () => {
+it('shows all account models immediately, pins favorites first, and searches without auto-favoriting OAuth models', async () => {
   const { api } = executionFixture([conversation('a', '课堂讨论')])
   const current = settingsView(true)
   const account = '123e4567-e89b-12d3-a456-426614173762'
@@ -911,7 +1055,7 @@ it('shows only explicit favorites by default and exposes searchable connection g
   const menu = screen.getByRole('group', { name: '对话模型选择' })
   await within(menu).findByText(/日常创作与开发/)
   const effort = within(menu).getByRole('group', { name: '推理强度' })
-  const list = within(menu).getByRole('group', { name: '收藏模型' })
+  const list = within(menu).getByRole('group', { name: '全部连接与模型' })
   expect(menu.children[1]).toBe(effort)
   expect(menu.children[2]).toBe(list)
   expect(list).toContainElement(within(menu).getByRole('button', { name: /gpt-6-solopenai/ }))
@@ -919,10 +1063,11 @@ it('shows only explicit favorites by default and exposes searchable connection g
   expect(menu).toHaveTextContent('ChatGPT 账号 · 尾号 3762')
   expect(menu).not.toHaveTextContent(account)
   expect(menu).toHaveTextContent('目录能力未验证')
-  expect(within(list).queryByRole('button', { name: /fixture-model|gpt-6-luna|gpt-6-astra/ })).toBeNull()
-  expect(within(menu).queryByRole('textbox', { name: '搜索模型' })).toBeNull()
+  expect(within(list).getByRole('button', { name: /gpt-6-lunaopenai/ })).toBeVisible()
+  expect(within(list).getByRole('button', { name: /gpt-6-astraopenai/ })).toBeVisible()
+  expect(within(menu).getByRole('textbox', { name: '搜索模型' })).toBeVisible()
+  expect(within(list).getAllByRole('button')[0]).toHaveTextContent('gpt-6-sol')
   expect(settingsAPI.setModelFavorite).not.toHaveBeenCalled()
-  fireEvent.click(within(menu).getByRole('button', { name: '更多模型' }))
   const groups = within(menu).getByRole('group', { name: '全部连接与模型' })
   expect(within(groups).getByRole('group', { name: /连接 openai/ })).toHaveTextContent('简单、快速的任务')
   expect(groups).toHaveTextContent('复杂任务与架构分析')
@@ -959,9 +1104,7 @@ it('persists favorites by route without switching models, keeps them through dir
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-model'))
   fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
   let menu = screen.getByRole('group', { name: '对话模型选择' })
-  expect(menu).toHaveTextContent('还没有收藏模型')
-  expect(within(menu).queryByRole('button', { name: /fixture-modelfixture-provider/ })).toBeNull()
-  fireEvent.click(within(menu).getByRole('button', { name: '更多模型' }))
+  expect(within(menu).getByRole('button', { name: /fixture-modelfixture-provider/ })).toBeVisible()
   const originalGroup = within(menu).getByRole('group', { name: /连接 fixture-provider/ })
   fireEvent.click(within(originalGroup).getByRole('button', { name: /收藏 fixture-model/ }))
   await waitFor(() => expect(within(originalGroup).getByRole('button', { name: /取消收藏 fixture-model/ })).toBeEnabled())
@@ -973,12 +1116,11 @@ it('persists favorites by route without switching models, keeps them through dir
   expect(menu.querySelector('button button')).toBeNull()
   expect(settingsAPI.saveProfile).not.toHaveBeenCalled()
   expect(current.profile.roles).toEqual(selected)
-  fireEvent.click(within(menu).getByRole('button', { name: '返回收藏' }))
-  expect(within(menu).getByRole('group', { name: '收藏模型' }).querySelectorAll('.execution-assistant__model-option')).toHaveLength(2)
+  expect(within(menu).getByRole('group', { name: '全部连接与模型' }).querySelectorAll('.execution-assistant__model-option')).toHaveLength(2)
   fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
   fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
   menu = screen.getByRole('group', { name: '对话模型选择' })
-  const favoriteList = within(menu).getByRole('group', { name: '收藏模型' })
+  const favoriteList = within(menu).getByRole('group', { name: '全部连接与模型' })
   expect(within(favoriteList).getByRole('button', { name: /fixture-modelfixture-provider/ })).toHaveAttribute('aria-pressed', 'true')
   fireEvent.click(within(favoriteList).getByRole('button', { name: /取消收藏 fixture-model · fixture-provider/ }))
   await waitFor(() => expect(current.modelFavorites).toEqual([{ connectionId: 'alternate', model: 'fixture-model' }]))
@@ -1007,7 +1149,7 @@ it('shows favorites for revoked or missing connections as unavailable without ch
     captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-model'))
   fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
-  const favorites = screen.getByRole('group', { name: '收藏模型' })
+  const favorites = screen.getByRole('group', { name: '全部连接与模型' })
   expect(within(favorites).getByRole('button', { name: /saved-modelfixture-provider/ })).toBeDisabled()
   expect(within(favorites).getByRole('button', { name: /missing-modelremoved/ })).toBeDisabled()
   expect(favorites).toHaveTextContent('连接不可用')
@@ -1049,117 +1191,17 @@ it('maps DeepSeek reasoning off, restored low, and default from the UI while pre
   expect(api.send).not.toHaveBeenCalled()
 })
 
-it('displays conversation home location for folder, file, unhomed, missing, other workspace, and empty session with hint, and dispatches reveal event on click', async () => {
-  const cFolder = {
-    ...conversation('c1', '会话-目录'),
-    home: { kind: 'folder' as const, path: 'Unit/Sub', workspaceId: 'workspace' },
-    messages: [{ messageId: 'm1', role: 'user' as const, text: 'hello', createdAt: 1, attachmentIds: [], runId: 'run' }],
-  }
-  const cFile = {
-    ...conversation('c2', '会话-文件'),
-    home: { kind: 'file' as const, path: 'Unit/a.md', workspaceId: 'workspace' },
-    messages: [{ messageId: 'm2', role: 'user' as const, text: 'hello', createdAt: 1, attachmentIds: [], runId: 'run' }],
-  }
-  const cUnhomed = {
-    ...conversation('c3', '会话-无所属'),
-    messages: [{ messageId: 'm3', role: 'user' as const, text: 'hello', createdAt: 1, attachmentIds: [], runId: 'run' }],
-  }
-  const cMissing = {
-    ...conversation('c4', '会话-已删除'),
-    home: { kind: 'file' as const, path: 'Unit/deleted.md', workspaceId: 'workspace', missing: true as const },
-    messages: [{ messageId: 'm4', role: 'user' as const, text: 'hello', createdAt: 1, attachmentIds: [], runId: 'run' }],
-  }
-  const cOtherWs = {
-    ...conversation('c5', '会话-其他空间'),
-    home: { kind: 'folder' as const, path: 'Shared', workspaceId: 'other-ws' },
-    messages: [{ messageId: 'm5', role: 'user' as const, text: 'hello', createdAt: 1, attachmentIds: [], runId: 'run' }],
-  }
-  const cEmpty = conversation('c6', '会话-空')
-
-  const { api } = executionFixture([cFolder, cFile, cUnhomed, cMissing, cOtherWs, cEmpty])
-  const listener = vi.fn()
-  window.addEventListener('guoling:reveal-in-explorer', listener)
-
-  const { container } = render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(true)}
-    captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
-
-  // 1. Folder session
-  await screen.findByRole('button', { name: '会话-目录' })
-  let locationBtn = container.querySelector('.execution-assistant__location')!
-  expect(locationBtn).toHaveTextContent('workspace › Unit › Sub')
-  expect(locationBtn.querySelector('.lucide-folder')).toBeInTheDocument()
-  expect(locationBtn.getAttribute('title')).toContain('C:/workspace/Unit/Sub')
-  expect(locationBtn.getAttribute('title')).toContain('所属位置用于整理会话；当前引用和连接权限决定任务可访问的内容')
-  expect(locationBtn).not.toHaveTextContent('发送首条消息后固定')
-
-  // Click reveals folder
-  fireEvent.click(locationBtn)
-  expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-    detail: { path: 'Unit/Sub', kind: 'folder' }
-  }))
-
-  // 2. File session
-  listener.mockClear()
-  fireEvent.click(screen.getByRole('button', { name: '会话-文件' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: '会话-文件' })).toHaveAttribute('aria-current', 'page'))
-  locationBtn = container.querySelector('.execution-assistant__location')!
-  expect(locationBtn).toHaveTextContent('workspace › Unit › a.md')
-  expect(locationBtn.querySelector('.lucide-file')).toBeInTheDocument()
-  expect(locationBtn.getAttribute('title')).toContain('C:/workspace/Unit/a.md')
-  fireEvent.click(locationBtn)
-  expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-    detail: { path: 'Unit/a.md', kind: 'file' }
-  }))
-
-  // 3. Unhomed session
-  listener.mockClear()
-  fireEvent.click(screen.getByRole('button', { name: '会话-无所属' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: '会话-无所属' })).toHaveAttribute('aria-current', 'page'))
-  locationBtn = container.querySelector('.execution-assistant__location')!
-  expect(locationBtn).toHaveTextContent('workspace')
-  expect(locationBtn.querySelector('.lucide-folder')).toBeInTheDocument()
-  expect(locationBtn.getAttribute('title')).toContain('C:/workspace')
-  fireEvent.click(locationBtn)
-  expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-    detail: { path: '', kind: 'folder' }
-  }))
-
-  // 4. Missing session
-  listener.mockClear()
-  fireEvent.click(screen.getByRole('button', { name: '会话-已删除' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: '会话-已删除' })).toHaveAttribute('aria-current', 'page'))
-  locationBtn = container.querySelector('.execution-assistant__location')!
-  expect(locationBtn).toHaveTextContent('workspace › Unit › deleted.md')
-  expect(locationBtn).toHaveTextContent('已删除')
-
-  // 5. Other workspace session
-  listener.mockClear()
-  fireEvent.click(screen.getByRole('button', { name: '会话-其他空间' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: '会话-其他空间' })).toHaveAttribute('aria-current', 'page'))
-  locationBtn = container.querySelector('.execution-assistant__location')!
-  expect(locationBtn).toHaveTextContent('其他工作空间 · Shared')
-  expect(locationBtn).not.toHaveTextContent('workspace › Shared')
-  expect(locationBtn.getAttribute('title')).not.toContain('C:/workspace')
-  fireEvent.click(locationBtn)
-  expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-    detail: { workspaceId: 'other-ws', path: 'Shared', kind: 'folder' }
-  }))
-
-  // 6. Empty session
-  listener.mockClear()
-  fireEvent.click(screen.getByRole('button', { name: '会话-空' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: '会话-空' })).toHaveAttribute('aria-current', 'page'))
-  locationBtn = container.querySelector('.execution-assistant__location')!
-  expect(locationBtn).toHaveTextContent('发送首条消息后固定')
-
-  // Typing a draft removes the hint
-  fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '草稿' } })
-  expect(locationBtn).not.toHaveTextContent('发送首条消息后固定')
-
-  window.removeEventListener('guoling:reveal-in-explorer', listener)
+it('does not present historical folder bindings as current workspace session constraints', async () => {
+  const old = { ...conversation('a', '历史会话', '历史草稿'), home: { kind: 'file' as const, path: 'Unit/deleted.md', workspaceId: 'workspace', missing: true as const } }
+  const { api, state } = executionFixture([old, conversation('b', '平行会话', '另一稿')])
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={async () => []} prepareSend={async () => true} />)
+  expect(await screen.findByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('历史草稿')
+  expect(screen.queryByText(/所属文件已删除/)).toBeNull()
+  expect(screen.queryByRole('button', { name: /Unit\/deleted/ })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '平行会话' }))
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('另一稿'))
+  expect(state.get('a')!.home).toEqual(old.home)
 })
-
-
 
 it('automatically maps catalog Claude effort to Messages controls on the same metered connection', async () => {
   const { api } = executionFixture([conversation('a', '课堂讨论')])
@@ -1265,8 +1307,8 @@ it('sends a text-only adjustment on the existing task without capturing temporar
   expect(api.stop).not.toHaveBeenCalled(); expect(api.prepareDocuments).not.toHaveBeenCalled()
   expect(prepareSend).not.toHaveBeenCalled(); expect(captureMaterials).not.toHaveBeenCalled()
   expect(settingsAPI.read).toHaveBeenCalledTimes(settingsReads)
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue(''))
-  fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '新授权应加入队列' } })
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue(''))
+  fireEvent.change(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { target: { value: '新授权应加入队列' } })
   fireEvent.click(screen.getByRole('button', { name: '权限：完全访问（工作空间）' }))
   fireEvent.click(screen.getByRole('menuitemradio', { name: /只读/ }))
   expect(screen.getByRole('button', { name: '调整当前任务' })).toBeDisabled()

@@ -40,7 +40,7 @@ export async function prepareDocumentClipboard<T>(
     if (block.type === 'formula') oldIds.add(block.formulaId)
     if (block.type === 'list') block.items.forEach(item => oldIds.add(item.id))
     if (block.type === 'table') { block.rows.forEach(row => oldIds.add(row.id)); block.columns.forEach(column => oldIds.add(column.id)) }
-    for (const slot of documentTextSlots(block)) for (const atom of slot.content.inlines) if (atom.type === 'math') oldIds.add(atom.formulaId)
+    for (const slot of documentTextSlots(block)) for (const atom of slot.content.inlines) { if (atom.type === 'math') oldIds.add(atom.formulaId); if (atom.type === 'component') oldIds.add(atom.instanceId); atom.rangeIds?.forEach(id => oldIds.add(id)) }
   })
   const generated = new Set<string>()
   for (const id of oldIds) {
@@ -60,6 +60,8 @@ export async function prepareDocumentClipboard<T>(
       block.id = ids.get(block.id)!
       if (block.type === 'formula') block.formulaId = ids.get(block.formulaId)!
       for (const slot of documentTextSlots(block)) for (const atom of slot.content.inlines) {
+        if (atom.type === 'component') atom.instanceId = ids.get(atom.instanceId) ?? atom.instanceId
+        if (atom.rangeIds) atom.rangeIds = atom.rangeIds.map(id => ids.get(id) ?? id)
         if (atom.type === 'math') atom.formulaId = ids.get(atom.formulaId)!
         if (atom.link?.href.startsWith('#') && ids.has(atom.link.href.slice(1))) atom.link = { ...atom.link, href: `#${ids.get(atom.link.href.slice(1))}` }
       }

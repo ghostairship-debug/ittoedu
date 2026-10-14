@@ -303,11 +303,11 @@ export function sliceFlowRichText(
   const to = Math.max(from, Math.min(documentTextLength(content), end))
   let cursor = 0
   return normalizeDocumentText({ inlines: content.inlines.flatMap(inline => {
-    const size = inline.type === 'math' ? 1 : Array.from(inline.text).length
+    const size = inline.type !== 'text' ? 1 : Array.from(inline.text).length
     const left = Math.max(0, from - cursor), right = Math.min(size, to - cursor)
     cursor += size
     if (right <= left) return []
-    return [inline.type === 'math' ? structuredClone(inline) : { ...structuredClone(inline), text: Array.from(inline.text).slice(left, right).join('') }]
+    return [inline.type !== 'text' ? structuredClone(inline) : { ...structuredClone(inline), text: Array.from(inline.text).slice(left, right).join('') }]
   }) })
 }
 

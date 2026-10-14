@@ -51,6 +51,9 @@ export function createEditorShellSlice(
     setError(message) {
       shell.patch({ errorMessage: message })
       kernel.setFeedback({ errorMessage: message })
+      if (message && typeof window !== 'undefined') void window.desktopAPI?.reportDiagnostic?.({
+        source: 'renderer', message, stack: new Error('界面操作未完成').stack, details: { operation: 'editor-feedback' },
+      }).catch(() => undefined)
     },
     setSlideDrawTool(tool) {
       shell.patch({

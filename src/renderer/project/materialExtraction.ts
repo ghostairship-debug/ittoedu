@@ -28,8 +28,8 @@ function result(format: MaterialExtraction['format']): MaterialExtraction {
 function add(out: MaterialExtraction, fragment: Omit<MaterialFragment, 'id'>) {
   out.fragments.push({ id: `fragment-${out.fragments.length + 1}`, ...fragment })
 }
-function verify(out: MaterialExtraction): MaterialExtraction {
-  if (!out.fragments.length) throw new Error('材料没有可读取内容')
+function verify(out: MaterialExtraction, allowEmpty = false): MaterialExtraction {
+  if (!out.fragments.length && !out.gaps.length && !allowEmpty) throw new Error('材料没有可读取内容')
   return out
 }
 function images(pkg: PptxPackage, node: Element, part: string, locator: MaterialFragment['locator'], out: MaterialExtraction) {
@@ -67,14 +67,14 @@ function content(pkg: PptxPackage, root: Element, part: string, out: MaterialExt
   const visit = (node: Element) => {
     const locator = { part, ...(page ? { page } : {}), paragraph: ++paragraph }
     if (node.localName === 'tbl') {
-      const text = xmlAll(node, 'tr').map(row => xmlChildren(row).filter(cell => cell.localName === 'tc').map(cell => xmlAll(cell, 't').map(t => t.textContent ?? '').join('')).join('\t')).join('\n')
+      const text = xmlAll(node, 'tr').map(row => xmlChildren(row).filter(cell => cell.localName === 'tc').map(cell => xmlAll(cell, 'p').map(paragraphText).join('\n')).join('\t')).join('\n')
       if (text.trim()) add(out, { kind: 'table', locator, text })
       images(pkg, node, part, locator, out)
       for (const formula of xmlAll(node, 'oMath')) add(out, { kind: 'formula', locator, text: new XMLSerializer().serializeToString(formula) })
       return
     }
     if (node.localName === 'p') {
-      const text = xmlAll(node, 't').filter(t => !t.closest('oMath')).map(t => t.textContent ?? '').join('')
+      const text = paragraphText(node)
       if (text.trim()) add(out, { kind: 'text', locator, text })
       images(pkg, node, part, locator, out)
       for (const formula of xmlAll(node, 'oMath')) add(out, { kind: 'formula', locator, text: new XMLSerializer().serializeToString(formula) })
@@ -84,6 +84,13 @@ function content(pkg: PptxPackage, root: Element, part: string, out: MaterialExt
     for (const child of xmlChildren(node)) visit(child)
   }
   visit(root)
+}
+function paragraphText(root: Element): string {
+  if (root.localName === 'oMath') return ''
+  if (root.localName === 't') return root.textContent ?? ''
+  if (root.localName === 'tab') return '\t'
+  if (root.localName === 'br' || root.localName === 'cr') return '\n'
+  return xmlChildren(root).map(paragraphText).join('')
 }
 export function extractOfficeMaterial(bytes: Uint8Array, format: 'docx' | 'pptx', options: MaterialExtractionOptions = {}): MaterialExtraction {
   const out = result(format)
@@ -107,26 +114,36 @@ export function extractOfficeMaterial(bytes: Uint8Array, format: 'docx' | 'pptx'
       if (index + 1 < range.from || index + 1 > range.to) return
       options.onProgress?.(index + 1, slides.length)
       const rel = relationships.find(item => item.id === pptxRelationshipId(slide) && item.type.endsWith('/slide'))
-      if (!rel || rel.external || !pkg.files[rel.target]) throw new Error(`第 ${index + 1} 页内容缺失`)
-      content(pkg, pkg.xml(rel.target).documentElement, rel.target, out, index + 1)
+      if (!rel || rel.external || !pkg.files[rel.target]) { out.gaps.push({ locator: { part: rel?.target ?? part, page: index + 1 }, reason: `第 ${index + 1} 页内容缺失` }); return }
+      let slideRoot: Element
+      try { slideRoot = pkg.xml(rel.target).documentElement }
+      catch { out.gaps.push({ locator: { part: rel.target, page: index + 1 }, reason: `第 ${index + 1} 页内容无法解析` }); return }
+      content(pkg, slideRoot, rel.target, out, index + 1)
       const inherited = new Set<string>([rel.target])
       const readInherited = (source: string) => {
         for (const relation of pkg.relationships(source).filter(item => /\/(slideLayout|slideMaster)$/.test(item.type))) {
           if (relation.external || !pkg.files[relation.target]) { out.gaps.push({ locator: { part: source, page: index + 1 }, reason: '版式或母版内容缺失' }); continue }
           if (inherited.has(relation.target)) continue
           inherited.add(relation.target)
-          content(pkg, pkg.xml(relation.target).documentElement, relation.target, out, index + 1)
-          readInherited(relation.target)
+          const root = pkg.xml(relation.target).documentElement.cloneNode(true) as Element
+          // A layout/master placeholder supplies properties, never its sample text. Match the importer visibility rule.
+          for (const placeholder of xmlAll(root, 'ph')) {
+            let object: Element | null = placeholder
+            while (object && !['sp', 'pic', 'graphicFrame', 'grpSp'].includes(object.localName)) object = object.parentElement
+            object?.remove()
+          }
+          content(pkg, root, relation.target, out, index + 1)
+          if (!['0', 'false'].includes(root.getAttribute('showMasterSp') ?? '')) readInherited(relation.target)
         }
       }
-      readInherited(rel.target)
+      if (!['0', 'false'].includes(slideRoot.getAttribute('showMasterSp') ?? '')) readInherited(rel.target)
       for (const note of pkg.relationships(rel.target).filter(item => item.type.endsWith('/notesSlide'))) {
         if (note.external || !pkg.files[note.target]) { out.gaps.push({ locator: { part: rel.target, page: index + 1 }, reason: '备注内容缺失' }); continue }
         content(pkg, pkg.xml(note.target).documentElement, note.target, out, index + 1)
       }
     })
   }
-  return verify(out)
+  return verify(out, format === 'pptx' && (options.maxPages !== undefined || options.fromPage !== undefined))
 }
 
 /** Each PDF page is also rasterized: scanned text, equations and diagrams remain readable. */

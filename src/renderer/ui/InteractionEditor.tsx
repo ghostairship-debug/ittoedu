@@ -32,6 +32,7 @@ import { requestNodeMotionPreview } from '../phaser/elementAnimationPreviewBus'
 export interface InteractionSceneListItem {
   readonly id: string
   readonly name: string
+  readonly spatial?: { readonly frames: ReadonlyArray<{ readonly id: string; readonly name: string }> }
   readonly presentation?: {
     readonly initialStateId?: string
     readonly states?: ReadonlyArray<{
@@ -49,6 +50,7 @@ export interface InteractionLocationListItem {
 export interface InteractionSceneView {
   readonly id: string
   readonly name: string
+  readonly spatial?: InteractionSceneListItem['spatial']
   readonly nodes?: readonly InteractionLayerTarget[]
   readonly interactions?: readonly InteractionRule[]
   readonly presentation?: InteractionSceneListItem['presentation']
@@ -83,7 +85,7 @@ const ACTION_TYPE_OPTIONS: ActionTypeOption[] = [
   { value: 'node.enter', label: '元素出现（入场）', needs: 'node' },
   { value: 'node.exit', label: '元素退出（退场）', needs: 'node' },
   { value: 'presentation.set', label: '切换状态', needs: 'state' },
-  { value: 'scene.go', label: '跳转场景', needs: 'scene' },
+  { value: 'scene.go', label: '跳转页面或镜头', needs: 'scene' },
   { value: 'location.go', label: '跳转课程位置', needs: 'location' },
   { value: 'step.next', label: '下一步' },
   { value: 'step.previous', label: '上一步' },
@@ -596,12 +598,13 @@ function describeAction(
       return `切换到状态“${namedReference(context.states, action.stateId, '缺失状态')}”`
     case 'scene.go': {
       const targetScene = context.scenes.find((scene) => scene.id === action.sceneId)
+      const targets = targetScene?.spatial?.frames ?? targetScene?.presentation?.states
       const targetState = action.targetStateId
-        ? targetScene?.presentation?.states?.find((state) => state.id === action.targetStateId)
+        ? targets?.find((state) => state.id === action.targetStateId)
         : undefined
       return `跳转到场景“${targetScene?.name ?? `缺失场景（${action.sceneId}）`}”${
         action.targetStateId
-          ? `的状态“${targetState?.name ?? `缺失状态（${action.targetStateId}）`}”`
+          ? `的${targetScene?.spatial ? '镜头' : '状态'}“${targetState?.name ?? `缺失目标（${action.targetStateId}）`}”`
           : ''
       }`
     }
@@ -1403,7 +1406,7 @@ function ActionEditor({
   const targetScene = action.type === 'scene.go'
     ? scenes.find((scene) => scene.id === action.sceneId)
     : undefined
-  const targetStates = targetScene?.presentation?.states ?? []
+  const targetStates = targetScene?.spatial?.frames ?? targetScene?.presentation?.states ?? []
   const targetStateIds = new Set(targetStates.map((state) => state.id))
 
   return (
@@ -1684,7 +1687,7 @@ function ActionEditor({
       {action.type === 'scene.go' ? (
         <>
           <div className="form-field">
-            <label htmlFor={`${idPrefix}-scene`}>目标场景</label>
+            <label htmlFor={`${idPrefix}-scene`}>目标页面</label>
             <select
               id={`${idPrefix}-scene`}
               className="form-input"
@@ -1701,7 +1704,7 @@ function ActionEditor({
             </select>
           </div>
           <div className="form-field">
-            <label htmlFor={`${idPrefix}-target-state`}>进入状态</label>
+            <label htmlFor={`${idPrefix}-target-state`}>{targetScene?.spatial ? '进入镜头' : '进入状态'}</label>
             <select
               id={`${idPrefix}-target-state`}
               className="form-input"
@@ -1713,7 +1716,7 @@ function ActionEditor({
                   : { type: 'scene.go', sceneId: action.sceneId })
               }}
             >
-              <option value="">场景初始状态</option>
+              <option value="">播放起点</option>
               {action.targetStateId
                 ? missingOption(
                     action.targetStateId,

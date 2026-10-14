@@ -32,6 +32,7 @@ export function flowRichTextSegments(text: string, runs?: readonly TextRun[]): F
 function sameRunStyle(left: TextRunStyle, right: TextRunStyle): boolean {
   return left.fontFamily === right.fontFamily
     && left.fontSize === right.fontSize
+    && left.baseline === right.baseline
     && left.bold === right.bold
     && left.italic === right.italic
     && left.underline === right.underline

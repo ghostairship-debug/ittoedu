@@ -1,6 +1,7 @@
-import { type ComponentAuthorSpot, type ComponentContainer, type ComponentEdit, type ComponentFrame, type ComponentImplementation, type CourseProjectV10, type JsonValue } from '../../../shared/contracts/component-platform'
+import { type ComponentAuthorSpot, type ComponentAuthoring, type ComponentContainer, type ComponentEdit, type ComponentFrame, type ComponentImplementation, type CourseProjectV10, type JsonValue } from '../../../shared/contracts/component-platform'
 import { coursePresentationEdits, type CoursePresentationInput } from '../../../core/tools/coursePresentationEdits'
 import { componentDataEdits } from '../../../core/course/componentDataEdits'
+import type { TextRangeProjection } from '../../../shared/document/textInteraction'
 import type { TextRun } from '../../../shared/contracts/native-v1'
 import type { NativeLineGeometry } from '../../../shared/contracts/native-v1/types'
 import { textComponentDataSchema } from '../../../components/text'
@@ -12,11 +13,12 @@ import { componentIsLocked } from '../../composition/crossSurfaceCommands'
 import { insertComponentDefinitionAtTarget } from '../../components/insertComponentPackages'
 import { authorSpotEdits, dataWithSpotEdit } from '../../componentPlatform/surfaces/slide/authorSpots'
 import { registerCourseDraftProvider } from '../../authoring/courseDraftLifecycle'
-import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
+import { applyComponentOperation, equalComponentValue } from '../../../core/drivers/courseV10Operations'
 import { resolveComponentPresentation } from '../../../shared/contracts/component-platform'
 import { flushPropertiesDrafts } from '../../ui/properties/PropertyControls'
 
 export interface SlideContentEdit {
+  rangeProjection?: TextRangeProjection[]
   instanceId: string
   definitionId: string
   target: CapturedCourseTarget
@@ -28,6 +30,7 @@ export interface SlideContentEdit {
   authorSpot?: ComponentAuthorSpot
   spotText?: string
   implementation?: ComponentImplementation
+  authoring?: ComponentAuthoring
   /** Restored unfinished input must receive a real input event before applying. */
   resumeRequired?: boolean
   recoveryBlocked?: string
@@ -43,6 +46,7 @@ export function projectWithSlideContentDraft(project: CourseProjectV10,
     || edit.target.surfaceId !== context.surfaceId || edit.target.activeStateId !== context.activeStateId
     || edit.target.project.id !== project.id || project.instances[edit.instanceId]?.definitionId !== edit.definitionId) return project
   const instance = { ...project.instances[edit.instanceId], data: structuredClone(edit.data),
+    ...(edit.authoring ? { authoring: structuredClone(edit.authoring) } : {}),
     ...(edit.implementation ? { implementationOverride: structuredClone(edit.implementation) } : {}) }
   if (edit.frame !== undefined) { if (edit.frame) instance.frame = structuredClone(edit.frame); else delete instance.frame }
   return { ...project, instances: { ...project.instances, [edit.instanceId]: instance } }
@@ -75,7 +79,10 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
   }
   const beginSlideDataEdit = (instanceId: string, source: 'canvas' | 'properties' = 'canvas') => {
     const previous = ports.read().slideContentEdit
-    if (previous?.instanceId === instanceId && previous.target.documentId === kernel.readView().activeDocumentId) return previous
+    const view = kernel.readView()
+    if (previous?.instanceId === instanceId && previous.target.documentId === view.activeDocumentId
+      && previous.target.epoch === view.snapshot?.epoch && previous.target.surfaceId === view.surfaceId
+      && previous.target.activeStateId === view.activeStateId) return previous
     if (previous) { kernel.setFeedback({ statusMessage: '请先完成当前文字编辑' }); return null }
     const target = kernel.captureTarget(), instance = target.project.instances[instanceId]
     if (!instance || componentIsLocked(target.editingProject, instanceId)) return null
@@ -84,16 +91,19 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
     ports.patch({ slideContentEdit: edit })
     return edit
   }
-  const updateSlideDataDraft = (data: unknown, composing?: boolean, height?: number) => {
+  const updateSlideDataDraft = (data: unknown, composing?: boolean, height?: number, width?: number, rangeProjection?: TextRangeProjection[]) => {
     const edit = ports.read().slideContentEdit
     if (!edit) return
     const originalFrame = edit.target.editingProject.instances[edit.instanceId]?.frame
     const frameBase = edit.frame === undefined ? originalFrame : edit.frame
-    const frame = frameBase && height !== undefined && Number.isFinite(height) && height > frameBase.height + 0.5 ? { ...frameBase, height } : edit.frame
+    const growHeight = frameBase && height !== undefined && Number.isFinite(height) && height > frameBase.height + 0.5
+    const growWidth = frameBase && width !== undefined && Number.isFinite(width) && width > frameBase.width + 0.5
+    const frame = frameBase && (growHeight || growWidth) ? { ...frameBase,
+      ...(growHeight ? { height } : {}), ...(growWidth ? { width } : {}) } : edit.frame
     const nextData = json(data)
     const resumed = composing === true || !equalComponentValue(nextData, edit.data)
     if (edit && (resumed && edit.resumeRequired || JSON.stringify(nextData) !== JSON.stringify(edit.data) || (composing ?? edit.composing) !== edit.composing || JSON.stringify(frame) !== JSON.stringify(edit.frame)))
-      ports.patch({ slideContentEdit: { ...edit, data: nextData, composing: composing ?? edit.composing, frame,
+      ports.patch({ slideContentEdit: { ...edit, data: nextData, rangeProjection: rangeProjection ?? (equalComponentValue(nextData, edit.data) ? edit.rangeProjection : undefined), composing: composing ?? edit.composing, frame,
         resumeRequired: resumed ? false : edit.resumeRequired } })
   }
   const updateSlideFrameDraft = (frame: ComponentFrame | null) => {
@@ -138,8 +148,13 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
     const operations = authorSpotEdits(edit.target.editingProject, edit.authorSpot, value, edit.target.resources)
     const operation = operations.find(operation => operation.type === 'data.set' || operation.type === 'implementation.set')
     const instance = edit.target.editingProject.instances[edit.instanceId]
+    let authoring = structuredClone(instance.authoring ?? {})
+    for (const change of operations) if (change.type === 'authoring.set') {
+      authoring = dataWithSpotEdit(authoring as unknown as JsonValue, { ...change, type: 'data.set' }) as unknown as ComponentAuthoring
+    }
     const originalImplementation = instance.implementationOverride ?? edit.target.editingProject.definitions[instance.definitionId]?.implementation
     ports.patch({ slideContentEdit: { ...edit, spotText: value, composing: composing ?? edit.composing, resumeRequired,
+      ...(operations.some(value => value.type === 'authoring.set') ? { authoring } : {}),
       ...(operation?.type === 'data.set' ? { data: dataWithSpotEdit(edit.data, operation) }
         : operation?.type === 'implementation.set' && operation.implementation && !operations.some(value => value.type === 'component.files.set')
           ? { implementation: JSON.stringify(operation.implementation) === JSON.stringify(originalImplementation) ? undefined : operation.implementation } : {}) } })
@@ -168,11 +183,24 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
         const edits: ComponentEdit[] = edit.authorSpot && edit.spotText !== undefined
           ? authorSpotEdits(edit.target.editingProject, edit.authorSpot, edit.spotText, edit.target.resources) : []
         if (!edit.authorSpot && JSON.stringify(edit.originalData) !== JSON.stringify(edit.data)) edits.push(...componentDataEdits(edit.target.project,
-          { instanceId: edit.instanceId, surfaceId: edit.target.surfaceId, stateId: edit.target.activeStateId }, { kind: 'replace', data: edit.data }))
+          { instanceId: edit.instanceId, surfaceId: edit.target.surfaceId, stateId: edit.target.activeStateId }, { kind: 'replace', data: edit.data, rangeProjection: edit.rangeProjection }))
         if (edit.frame !== undefined) edits.push({ type: 'frame.set', instanceId: edit.instanceId, frame: edit.frame })
         if (!edit.authorSpot && edit.implementation) edits.push({ type: 'implementation.set', instanceId: edit.instanceId, implementation: edit.implementation })
         const command = kernel.capture(edits, edit.target)
         try { await kernel.editCaptured(command) } catch (error) { report(error); throw error }
+        const successor = ports.read().slideContentEdit
+        if (successor && successor !== edit && successor.instanceId === edit.instanceId && successor.target === edit.target) {
+          // Advance only through our accepted operation. Capturing the latest project here would
+          // erase a real intervening external conflict.
+          const { documentId: _documentId, epoch: _epoch, ...operation } = command
+          const project = applyComponentOperation(edit.target.project, operation)
+          const editingProject = resolveComponentPresentation(project, edit.target.surfaceId, edit.target.activeStateId)
+          const target = { ...edit.target, project, editingProject }
+          ports.patch({ slideContentEdit: { ...successor, target, originalData: structuredClone(edit.data),
+            ...(equalComponentValue(successor.frame, edit.frame) ? { frame: undefined } : {}),
+            ...(successor.implementation === edit.implementation ? { implementation: undefined } : {}),
+            ...(successor.authorSpot ? { authorSpot: { ...successor.authorSpot, initialValue: edit.spotText ?? successor.authorSpot.initialValue } } : {}) } })
+        }
         if (edit.implementation || edit.authorSpot?.sourceRegion?.encoding)
           kernel.setFeedback({ statusMessage: '组件源码已更新并重新加载内容，程序内部运行现场可能重置。' })
       }
@@ -208,12 +236,13 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
           originalFrame: original?.frame ?? null,
           originalImplementation: original?.implementationOverride ?? edit.target.editingProject.definitions[edit.definitionId]?.implementation,
           originalSourceText: sourceSpotText(edit.target, edit.authorSpot),
-          implementation: edit.implementation, authorSpot: edit.authorSpot, spotText: edit.spotText,
+          implementation: edit.implementation, authoring: edit.authoring, originalAuthoring: original?.authoring,
+          authorSpot: edit.authorSpot, spotText: edit.spotText,
           composing: edit.composing || Boolean(edit.resumeRequired), recoveryBlocked: edit.recoveryBlocked }) }]
     },
     restore(documentId, record) {
-      const saved = record.payload as unknown as Pick<SlideContentEdit, 'instanceId' | 'definitionId' | 'data' | 'originalData' | 'frame' | 'implementation' | 'authorSpot' | 'spotText' | 'source' | 'composing' | 'recoveryBlocked'>
-        & { projectId: string; surfaceId: string | null; activeStateId: string | null; originalFrame: ComponentFrame | null; originalImplementation: ComponentImplementation; originalSourceText?: string }
+      const saved = record.payload as unknown as Pick<SlideContentEdit, 'instanceId' | 'definitionId' | 'data' | 'originalData' | 'frame' | 'implementation' | 'authoring' | 'authorSpot' | 'spotText' | 'source' | 'composing' | 'recoveryBlocked'>
+        & { projectId: string; surfaceId: string | null; activeStateId: string | null; originalFrame: ComponentFrame | null; originalImplementation: ComponentImplementation; originalSourceText?: string; originalAuthoring?: ComponentAuthoring }
       const current = kernel.captureTarget(documentId)
       if (saved.projectId !== current.project.id || !current.project.surfaces.some(surface => surface.id === saved.surfaceId))
         throw new Error('原文字恢复位置已不存在，原稿仍保留')
@@ -229,6 +258,7 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
         throw new Error('已有新的文字输入，恢复原稿仍保留')
       const implementation = instance.implementationOverride ?? target.editingProject.definitions[instance.definitionId]?.implementation
       const changed = !equalComponentValue(instance.data, saved.originalData)
+        || saved.authoring !== undefined && !equalComponentValue(instance.authoring, saved.originalAuthoring)
         || saved.frame !== undefined && !equalComponentValue(instance.frame ?? null, saved.originalFrame)
         || Boolean(saved.implementation || saved.authorSpot?.sourceRegion?.kind === 'implementation') && !equalComponentValue(implementation, saved.originalImplementation)
         || saved.originalSourceText !== undefined && sourceSpotText(target, saved.authorSpot) !== saved.originalSourceText
@@ -236,6 +266,7 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
         data: structuredClone(saved.data), originalData: structuredClone(saved.originalData),
         ...(saved.frame !== undefined ? { frame: structuredClone(saved.frame) } : {}),
         ...(saved.implementation ? { implementation: structuredClone(saved.implementation) } : {}),
+        ...(saved.authoring ? { authoring: structuredClone(saved.authoring) } : {}),
         ...(saved.authorSpot ? { authorSpot: structuredClone(saved.authorSpot), spotText: saved.spotText } : {}),
         source: saved.source, composing: false, resumeRequired: saved.composing,
         recoveryBlocked: changed ? '原文字基线已改变，恢复原稿已保留；请核对当前对象后继续编辑' : saved.recoveryBlocked } })
@@ -254,7 +285,7 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
     ...createSlideOwnedCommands(kernel, { ...ports, submit }),
     beginSlideDataEdit, updateSlideDataDraft, updateSlideFrameDraft, beginSlideSpotEdit, updateSlideSpotDraft, beginTextEdit: beginSlideDataEdit,
     async setActivePresentationState(stateId: string | null, captured = kernel.captureTarget()) {
-      if (ports.read().slideContentEdit?.target.documentId === captured.documentId) await commitTextEdit()
+      while (ports.read().slideContentEdit?.target.documentId === captured.documentId) await commitTextEdit()
       kernel.bridge.selectPresentationState(captured.documentId, stateId, captured.surfaceId ?? undefined)
     },
     async addPresentationState(name = '新状态', captured = kernel.captureTarget()) {

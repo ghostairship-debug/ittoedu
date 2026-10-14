@@ -1,10 +1,11 @@
 import katex from 'katex'
 import type { FlowTextContent } from './content'
 import { buildFlowRichTextHtml } from '../flowRichText'
+import { documentMathRenderSource } from './math'
 
 const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
 export function renderDocumentMath(latex: string, displayMode = false): string {
-  return katex.renderToString(latex, { output: 'mathml', displayMode, throwOnError: true, trust: false, strict: 'error' })
+  return katex.renderToString(documentMathRenderSource(latex), { output: 'mathml', displayMode, throwOnError: true, trust: false, strict: 'error' })
 }
 interface FormulaStyle { readonly fontSize?: number; readonly color?: string }
 const formulaStyleCss = (style: FormulaStyle | undefined) => `${style?.fontSize ? `font-size:${style.fontSize}px;` : ''}${style?.color ? `color:${style.color};` : ''}`
@@ -24,16 +25,20 @@ export function flowInlineFormulaHtml(inline: { readonly latex: string; readonly
   return `<span data-formula-id="${escape(inline.formulaId)}" aria-label="${escape(inline.accessibleText)}" style="${escape(formulaStyleCss(inline.style))}">${renderDocumentMath(inline.latex)}</span>`
 }
 /** Derived read-only markup; the product inlines remain the sole body representation. */
-export function renderDocumentText(content: FlowTextContent): string {
-  return content.inlines.map(inline => {
+export function renderDocumentText(content: FlowTextContent, dataPath?: readonly string[]): string {
+  const markup = content.inlines.map(inline => {
     let html: string
     if (inline.type === 'math') {
       html = flowInlineFormulaHtml(inline)
+    } else if (inline.type === 'component') {
+      html = `<span data-inline-instance="${escape(inline.instanceId)}" contenteditable="false" aria-label="${escape(inline.accessibleText)}" style="display:inline-block;vertical-align:baseline">${escape(inline.accessibleText)}</span>`
     } else {
       html = buildFlowRichTextHtml(inline.text, inline.style ? [{ start: 0, end: Array.from(inline.text).length, style: inline.style }] : [])
       if (inline.code) html = `<code>${html}</code>`
     }
-    if (inline.link && /^(https?:|mailto:|#)/i.test(inline.link.href)) html = `<a href="${escape(inline.link.href)}"${inline.link.title ? ` title="${escape(inline.link.title)}"` : ''} rel="noopener noreferrer">${html}</a>`
+    if (inline.link && /^(https?:|mailto:|#|\.{1,2}\/)/i.test(inline.link.href)) html = `<a href="${escape(inline.link.href)}"${inline.link.title ? ` title="${escape(inline.link.title)}"` : ''} rel="noopener noreferrer">${html}</a>`
+    for (const id of inline.rangeIds ?? []) html = `<span data-document-range="${escape(id)}" class="document-text-range">${html}</span>`
     return html
   }).join('')
+  return dataPath ? `<span data-document-path="${escape(JSON.stringify(dataPath))}" style="display:contents">${markup}</span>` : markup
 }

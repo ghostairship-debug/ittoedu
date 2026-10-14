@@ -8,6 +8,8 @@ export interface DocumentRegistryOptions {
   createId(): string
   /** Main supplies canonical realpath/case handling; the pure core does no IO. */
   bindingKey(binding: Extract<DocumentBinding, { kind: 'file' }>): string
+  /** Lifecycle consumers run after the canonical registry entry has been removed. */
+  onClosed?(documentId: string): void
 }
 
 export class DocumentRegistry {
@@ -35,6 +37,8 @@ export class DocumentRegistry {
   }
 
   list(): ReturnType<DocumentSession['read']>[] { return [...this.sessions.values()].map(session => session.read()) }
+  has(documentId: string): boolean { return this.sessions.has(documentId) }
+  get size(): number { return this.sessions.size }
 
   /** pristine is reserved for host-created automatic starter content, never an IPC option. */
   async create(model: DocumentModel, suggestedName: string, pristine = false): Promise<DocumentSession> {
@@ -170,5 +174,6 @@ export class DocumentRegistry {
     await session.close(options)
     this.sessions.delete(documentId)
     for (const [key, owner] of this.bindings) if (owner === documentId) this.bindings.delete(key)
+    try { this.options.onClosed?.(documentId) } catch { /* An auxiliary lifecycle consumer cannot turn a closed document into a retry. */ }
   }
 }

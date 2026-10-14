@@ -1,6 +1,12 @@
 {
-  "description": "把检索到的 Component API 5 条目及其实际资源插入课件。path 使用 project.list/read 返回的页面路径或对象路径；页面表示末尾插入，对象表示在该对象后插入。软件生成身份与处理依赖，一次撤销可恢复。未确认信任的目录需在组件库面板确认。",
+  "description": "把检索到的 Component API 5 对象、页面模板或结构及实际依赖插入工程。path 用 project.list/read 返回的页面或对象路径；页面表示末尾插入，对象表示其后。可用条目实际 rootIds 选择对象子树，省略完整插入；软件生成身份并映射内部导航、状态和资源，一次撤销恢复，保留原人工内容及主题。未确认信任的目录需在组件库面板确认。",
   "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
@@ -15,6 +21,13 @@
       "project": {
         "minLength": 1,
         "type": "string"
+      },
+      "rootIds": {
+        "items": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "minItems": 1,
+        "type": "array"
       },
       "version": {
         "minLength": 1,

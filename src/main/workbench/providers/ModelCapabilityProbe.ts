@@ -45,7 +45,7 @@ async function completed(provider: ModelProvider, selection: ModelSelection, req
   try {
     let completion: Extract<ModelEvent, { type: 'response.completed' }> | undefined
     for await (const event of provider.stream({ requestId, selection, messages, ...(tools ? { tools } : {}) })) {
-      if (event.type === 'response.failed') return { failure: { capability: 'vision', status: 'unknown', code: event.failure.code, message: event.failure.message } }
+      if (event.type === 'response.failed') return { failure: { capability: 'vision', status: 'unknown', code: event.failure.code, message: event.failure.message, outcome: event.failure.outcome } }
       if (event.type === 'response.completed') completion = event
     }
     return completion ? { assistant: completion.assistant, actualModel: completion.actualModel } : {}
@@ -74,7 +74,7 @@ export class ModelCapabilityProbe {
       outcomes.push(result.outcome)
       if (result.fact) facts[capability] = result.fact
     }
-    return { observedAt, checks, requestCount: checks.length, outcomes, facts }
+    return { observedAt, checks, requestCount: outcomes.filter(outcome => outcome.outcome !== 'not-sent').length, outcomes, facts }
   }
 
   private async vision(selection: ModelSelection): Promise<{ outcome: ModelCapabilityProbeOutcome; fact?: ModelCapabilityFact }> {

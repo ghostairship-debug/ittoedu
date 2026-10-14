@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { unzipSync, strFromU8 } from 'fflate'
 import { DiagnosticLog, exportDiagnosticReport } from '../../src/main/diagnosticLog'
 import { APP_NAME } from '../../src/shared/constants'
+import { diagnosticFailureDetails, privateDiagnostic, privateDiagnosticLog } from '../../src/main/diagnosticPrivacy'
+import { DesktopOperationError } from '../../src/main/errors'
+import { ZodError } from 'zod'
 const directories: string[] = []
 const native = vi.hoisted(() => ({ directory: '', showMessageBox: vi.fn(), showOpenDialog: vi.fn(), showSaveDialog: vi.fn() }))
 vi.mock('electron', () => ({ app: { isReady: () => true, getVersion: () => '2.0-fixture', getPath: () => native.directory }, dialog: native }))
@@ -15,6 +18,38 @@ afterEach(async () => { for (const directory of directories.splice(0)) {
 } })
 
 describe('DiagnosticLog', () => {
+  it('identifies a closed reference and plain Error without storing arbitrary document names', async () => {
+    const documentId = 'ad9eebee-7695-4ce4-9e5e-1d0c292b6240'
+    const failure = new Error(`文档未打开：${documentId}`)
+    const record = privateDiagnostic({ source: 'main', message: failure.message, stack: failure.stack,
+      details: { ...diagnosticFailureDetails(failure), operation: 'DOCUMENT_OPERATION_FAILED' } })
+    expect(record.category).toBe('Error')
+    expect(record.details).toMatchObject({ documentId, code: 'DOCUMENT_NOT_OPEN', errorClass: 'Error' })
+    expect(record.message).toContain('引用文档已关闭或重开')
+    expect(JSON.parse(privateDiagnosticLog(JSON.stringify(record)))).toEqual(record)
+    const privateFailure = new Error('文档未打开：我的私有教案 sk-secret')
+    expect(JSON.stringify(privateDiagnostic({ message: privateFailure.message, stack: privateFailure.stack,
+      details: diagnosticFailureDetails(privateFailure) }))).not.toMatch(/我的私有教案|sk-secret/)
+  })
+  it('retains build, original operation and application causes on export without trusting business error prose', async () => {
+    const root = process.cwd().replace(/\\/g, '/')
+    const cause = Object.assign(new Error('私有教案 Bearer sk-secret'), { code: 'extraction-exited' })
+    cause.stack = `Error: 私有教案\n    at extract (${root}/src/main/workbench/attachments/SandboxedAttachmentExtraction.ts:80:4)\n    at privateUser (C:/Users/private-name/assets/secret.js:1:3)`
+    const failure = new DesktopOperationError('attachment-extraction-failed', '提取失败', '私有教案 Bearer sk-secret', '重试', { cause })
+    const record = privateDiagnostic({ source: 'main', message: failure.message, stack: failure.stack,
+      details: { ...diagnosticFailureDetails(failure), operation: 'attachment-extraction', phase: 'extract', buildId: '2026-10-11T02-11-21-000Z-123456789abc', documentId: 'ad9eebee-7695-4ce4-9e5e-1d0c292b6240', epoch: 'fa101e8c-2e07-462e-ad2f-5260b22347be', revision: 7 } })
+    const twice = JSON.parse(privateDiagnosticLog(JSON.stringify(record)))
+    expect(twice).toEqual(record)
+    expect(twice.details).toMatchObject({ buildId: '2026-10-11T02-11-21-000Z-123456789abc', operation: 'attachment-extraction', phase: 'extract', code: 'attachment-extraction-failed', causeCode: 'extraction-exited', revision: 7 })
+    expect(twice.details.causeFrames[0]).toMatchObject({ file: 'src/main/workbench/attachments/SandboxedAttachmentExtraction.ts', function: 'extract', line: 80 })
+    expect(twice.details.causeFrames[1]).toEqual({ file: '[external]', line: 1, column: 3 })
+    const packaged = privateDiagnostic({ source: 'renderer', message: 'error', stack: `Error\n at run (file://${root}/dist-renderer/assets/index-Xyz.js:15:19)` })
+    expect(packaged.frames?.[0]).toMatchObject({ file: 'assets/index-Xyz.js', function: 'run', line: 15, column: 19 })
+    expect(JSON.stringify(twice)).not.toMatch(/私有教案|sk-secret|private-name|secret.js|privateUser/)
+    expect(privateDiagnosticLog(JSON.stringify({ message: 'old private prose', details: { name: 'Private lesson prose', documentId: 'C:/Users/private-owner/My-Private-Lesson.glx', operation: 'My personal teaching notes' } }))).not.toMatch(/Private lesson|private-owner|My personal/);
+    const invalid = new ZodError([{ code: 'custom', message: '私有教案 sk-secret', path: ['token'] }])
+    expect(JSON.stringify(privateDiagnostic({ source: 'main', message: invalid.message, stack: invalid.stack, details: diagnosticFailureDetails(invalid) }))).not.toMatch(/私有教案|sk-secret|token/)
+  })
   it('M12 removes user prose and credentials from new storage and old report entries while retaining useful diagnostics', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'courseware-log-'))
     directories.push(directory)

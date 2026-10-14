@@ -22,6 +22,14 @@ describe('lessonDocumentFiles real disk', () => {
     await fs.rm(resolved, { recursive: true, force: true })
   })
   const save = (source: string, expectedVersion: Awaited<ReturnType<typeof files.openDocument>>['version'] | null = null, operationId = source) => files.saveDocument({ ref, source, expectedVersion, operationId, attachments: [] })
+  it('reads a subdirectory Markdown resource from its actual file directory before the document exists', async () => {
+    const subdirectory = path.join(lessonDirectory, 'sub')
+    await fs.mkdir(subdirectory)
+    await fs.writeFile(path.join(lessonDirectory, 'image.png'), new Uint8Array([1]))
+    await fs.writeFile(path.join(subdirectory, 'image.png'), new Uint8Array([2]))
+    const nested = { kind: 'lesson' as const, lessonId: 'lesson-a', lessonDirectory, relativePath: 'sub/plan.md' }
+    expect(await files.readResource(nested, 'image.png')).toMatchObject({ bytes: new Uint8Array([2]) })
+  })
   it('does not treat merely viewing and preserving unchanged invalid Markdown as pending recovery', async () => {
     const source = '- 首项\n  - 嵌套项\n'
     await save(source)

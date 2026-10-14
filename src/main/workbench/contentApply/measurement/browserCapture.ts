@@ -5,6 +5,8 @@ import { cssUsesViewport } from '../../../../components/web/measuredFragmentBox'
 export async function captureHtmlDesignViewport(resourceWaitMs: number, viewportCss = cssUsesViewport): Promise<HtmlDesignCapture> {
   const diagnostics: HtmlAssemblyDiagnostic[] = []
   const styleOf = (style: CSSStyleDeclaration): Record<string, string> => Object.fromEntries(Array.from(style, name => [name, style.getPropertyValue(name)]))
+  const inheritedNames=new Set(['color','cursor','direction','visibility','text-align','text-indent','text-transform','white-space','word-break','overflow-wrap','letter-spacing','word-spacing','line-height','list-style-type','list-style-position','quotes','tab-size','writing-mode','text-orientation','text-decoration-color'])
+  const inheritedOf=(style:CSSStyleDeclaration)=>Object.fromEntries(Array.from(style).filter(name=>inheritedNames.has(name)||name.startsWith('font-')||name.startsWith('--')).map(name=>[name,style.getPropertyValue(name)]))
   const referenceOf = (image: HTMLImageElement) => image.getAttribute('src') ?? image.currentSrc
   let timedOut = false
   let timeout!: ReturnType<typeof setTimeout>
@@ -120,17 +122,27 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
     const parent = element.parentElement!
     return [...pathOf(parent), Array.from(parent.childNodes).indexOf(element)]
   }
+  const layoutBoxes = new Map<Element, DOMRect>()
   // All style/geometry reads finish before the result is converted into parent-local frames.
   for (const element of nodes) {
     const style = styles.get(element)!
     const rect = element.getBoundingClientRect()
+    layoutBoxes.set(element, rect)
     if (element !== body && style.display !== 'none' && !['hidden', 'collapse'].includes(style.visibility)) {
       includeBox(rect)
       if (style.position === 'fixed') viewportDependent = true
     }
     if ('style' in element) inspectSpecifiedStyle((element as HTMLElement).style)
-    const width = borderSize(element, style, 'width'), height = borderSize(element, style, 'height')
     const linear = linearOf(element)
+    let width = borderSize(element, style, 'width'), height = borderSize(element, style, 'height')
+    // Inline auto sizes use integer offsetWidth/Height. A single browser
+    // fragment supplies its fractional size, including inherited axis scale.
+    // Multiple line fragments still have no single affine rectangle.
+    const inlineRects = style.display === 'inline' ? element.getClientRects() : undefined
+    if (inlineRects?.length === 1 && linear && linear.b === 0 && linear.c === 0) {
+      if (!Number.isFinite(parseFloat(style.width)) && linear.a !== 0) width = rect.width / Math.abs(linear.a)
+      if (!Number.isFinite(parseFloat(style.height)) && linear.d !== 0) height = rect.height / Math.abs(linear.d)
+    }
     let frame: MeasuredHtmlElement['frame']
     let geometryIssue: string | undefined
     if (!linear) geometryIssue = 'non-affine-3d-transform'
@@ -142,7 +154,7 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
       const f = rect.top - Math.min(0, b * width, d * height, b * width + d * height)
       const corners = { width: Math.abs(a * width) + Math.abs(c * height), height: Math.abs(b * width) + Math.abs(d * height) }
       // Fragmented inline boxes or perspective must not be mislabeled as one free affine rectangle.
-      if (Math.abs(corners.width - rect.width) > 0.1 || Math.abs(corners.height - rect.height) > 0.1) geometryIssue = 'non-rectangular-layout-box'
+      if (inlineRects && inlineRects.length > 1 || Math.abs(corners.width - rect.width) > 0.1 || Math.abs(corners.height - rect.height) > 0.1) geometryIssue = 'non-rectangular-layout-box'
       else frame = { width, height, transform: [a, b, c, d, e, f] }
     }
     const pseudoElements: MeasuredHtmlElement['pseudoElements'] = {}
@@ -152,6 +164,7 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
     }
     elements.push({ sourcePath: pathOf(element), tagName: element.localName, namespace: element.namespaceURI ?? undefined,
       attributes: Object.fromEntries(Array.from(element.attributes, attribute => [attribute.name, attribute.value])), sourceHtml: element.outerHTML,
+      sourceStyle:'style' in element ? Object.fromEntries(Array.from((element as HTMLElement).style,name=>[name,(element as HTMLElement).style.getPropertyValue(name)+((element as HTMLElement).style.getPropertyPriority(name)?' !important':'')])) : {}, inheritedStyle:inheritedOf(style),
       style: styleOf(style), parentDisplay: element.parentElement ? (styles.get(element.parentElement) ?? getComputedStyle(element.parentElement)).display : undefined,
       pseudoElements, frame, geometryIssue,
       children: Array.from(element.childNodes).flatMap<MeasuredHtmlChild>(child => {
@@ -167,6 +180,7 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
   if (pageStyle['background-image'] === 'none' && ['transparent', 'rgba(0, 0, 0, 0)'].includes(pageStyle['background-color'] ?? 'transparent')) {
     for (const name of Array.from(bodyStyle).filter(name => name.startsWith('background-'))) pageStyle[name] = bodyStyle.getPropertyValue(name)
   }
+  const sourceRules:string[]=[]
   const supportRules: string[] = []
   const selectors: string[] = []
   let unreadableStylesheet = false
@@ -184,7 +198,7 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
     }
   }
   for (const sheet of Array.from(document.styleSheets)) {
-    try { collectRules(sheet.cssRules) }
+    try { sourceRules.push(...Array.from(sheet.cssRules,rule=>rule.cssText));collectRules(sheet.cssRules) }
     catch { unreadableStylesheet = true; diagnostics.push({ level: 'warning', code: 'html-stylesheet-read', message: '样式表可用于当前排版，但浏览器未开放其字体/动效规则读取。', reference: sheet.href ?? undefined }) }
   }
   for (const { element, open } of disclosures) element.open = open
@@ -229,6 +243,32 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
     || !['transparent', 'rgba(0, 0, 0, 0)'].includes(style.backgroundColor)
     || style.boxShadow !== 'none' || parseFloat(style.outlineWidth) > 0 && style.outlineStyle !== 'none'
     || ['top', 'right', 'bottom', 'left'].some(side => parseFloat(style.getPropertyValue(`border-${side}-width`)) > 0 && style.getPropertyValue(`border-${side}-style`) !== 'none')
+  const visiblePaint = (node: Element): boolean => {
+    const style = styles.get(node)!, box = layoutBoxes.get(node)!
+    return style.display !== 'none' && !['hidden', 'collapse'].includes(style.visibility)
+      && style.opacity !== '0' && box.width > 0 && box.height > 0
+      && (painted(style) || Object.keys(elements[indices.get(node)!]!.pseudoElements).length > 0
+        || ['img', 'svg', 'canvas', 'video', 'iframe', 'object', 'embed', 'input', 'button', 'select', 'textarea'].includes(node.localName)
+        || [...node.childNodes].some(child => child.nodeType === Node.TEXT_NODE && Boolean(child.textContent?.trim())))
+  }
+  const crossesPositionedPaint = (node: Element, context: Element): boolean => {
+    const outside = nodes.filter(other => context.contains(other) && !node.contains(other) && !other.contains(node) && visiblePaint(other))
+    // A sole positioned page shell has no outside paint to interleave with it.
+    // Its existing group/frame projection owns the local layout.
+    if (!outside.length) return false
+    const inside = [node, ...node.querySelectorAll('*')].filter(visiblePaint)
+    const hasEdgePaint = (member: Element) => {
+      const style = styles.get(member)!
+      return style.boxShadow !== 'none' || style.textShadow !== 'none' || parseFloat(style.outlineWidth) > 0 && style.outlineStyle !== 'none'
+    }
+    // Browser border rectangles do not bound these real paint effects. Keep the
+    // existing common source scope rather than inventing a shadow/outline parser.
+    if ([...inside, ...outside].some(hasEdgePaint)) return true
+    return inside.some(member => {
+      const a = layoutBoxes.get(member)!
+      return outside.some(other => { const b = layoutBoxes.get(other)!; return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top })
+    })
+  }
   for (const node of nodes) {
     const style = styles.get(node)!, measured = elements[indices.get(node)!]!
     if (style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)) continue
@@ -244,7 +284,8 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
     if (style.backdropFilter && style.backdropFilter !== 'none' || style.mixBlendMode && style.mixBlendMode !== 'normal') retain([paintContext(node)], 'shared-compositing')
     const blockChildren = [...node.children].some(child => !/^(?:inline(?:-block|-flex|-grid|-table)?|contents)$/.test(styles.get(child)?.display ?? ''))
     if (!createsContext(node) && node !== body && blockChildren && ['relative', 'absolute', 'sticky'].includes(style.position)) {
-      retain([paintContext(node)], 'positioned-paint-order')
+      const context = paintContext(node)
+      if (crossesPositionedPaint(node, context)) retain([context], 'positioned-paint-order')
     }
     if (createsContext(node)) {
       // A detached group cannot give a descendant its original ancestor's
@@ -357,5 +398,5 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
   const sourceScopes = [...scopes].filter(([root]) => ![...scopes.keys()].some(parent => parent !== root && parent.contains(root)))
     .map(([root, reasons]) => ({ index: indices.get(root)!, reason: [...reasons].join(', ') }))
   return { viewport: { width: innerWidth, height: innerHeight }, contentBounds, viewportDependent,
-    body: 0, pageStyle, supportCss: supportRules.join('\n'), sourceScopes, elements, diagnostics }
+    body: 0, pageStyle, sourceCss:sourceRules.join('\n'), supportCss: supportRules.join('\n'), sourceScopes, elements, diagnostics }
 }

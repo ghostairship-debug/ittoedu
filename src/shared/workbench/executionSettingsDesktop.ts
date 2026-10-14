@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { searchSettingsSchema } from './searchSettings'
 import type { ModelJson } from './modelProvider'
 import type { ModelKnowledgeEntry } from './modelKnowledge'
 import type { ExecutionConnectionConfiguration, ExecutionConnectionView, ExecutionModelFavorite, ExecutionProfile, ExecutionSettingsView, SaveExecutionConnection, SaveExecutionProfile } from './executionSettings'
@@ -22,8 +23,9 @@ export const executionSettingsConnectionSchema = z.object({
 }).strict()
 export const executionSettingsRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('read') }).strict(),
+  z.object({ type: z.literal('test-search'), query: z.string().trim().min(1) }).strict(),
   z.object({ type: z.literal('save-connection'), input: executionSettingsConnectionSchema }).strict(),
-  z.object({ type: z.literal('save-profile'), input: z.object({ expectedRevision: z.number().int().nonnegative().optional(), roles: executionSettingsRolesSchema }).strict() }).strict(),
+  z.object({ type: z.literal('save-profile'), input: z.object({ expectedRevision: z.number().int().nonnegative().optional(), roles: executionSettingsRolesSchema, search: searchSettingsSchema.optional() }).strict() }).strict(),
   z.object({ type: z.literal('set-model-favorite'), input: z.object({ connectionId: identity, model: identity, favorite: z.boolean() }).strict() }).strict(),
   z.object({ type: z.literal('revoke-connection'), id: identity }).strict(),
   z.object({ type: z.literal('discover-models'), id: identity, revision: z.number().int().positive() }).strict(),
@@ -56,12 +58,13 @@ export interface DiscoveredModels {
 }
 export type OAuthLoginStatus = { loginId: string } & (
   | { status: 'pending' }
-  | { status: 'connected'; connection: ExecutionConnectionView }
+  | { status: 'connected'; connection: ExecutionConnectionView; modelDirectoryError?: string }
   | { status: 'cancelled' }
   | { status: 'failed'; code: string; message: string }
 )
 export interface ExecutionSettingsAPI {
   read(): Promise<ExecutionSettingsView>
+  testSearch?(query: string): Promise<import('./webSearch').WebSearchResult>
   saveConnection(input: SaveExecutionConnectionDesktop): Promise<ExecutionConnectionView>
   saveProfile(input: SaveExecutionProfile): Promise<ExecutionProfile>
   setModelFavorite(input: ExecutionModelFavorite & { favorite: boolean }): Promise<ExecutionModelFavorite[]>

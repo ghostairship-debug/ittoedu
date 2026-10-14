@@ -1,3 +1,4 @@
+import type { TextRangeProjection } from '../../../shared/document/textInteraction'
 import { Hand, Maximize2, Minus, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { resolveComponentBackground, resolveComponentPresentation, isComponentVisibleAtSurface, type ComponentAuthorGeometry, type ComponentAuthorSpot, type ComponentEdit, type ComponentFrame, type CourseProjectV10 } from '../../../shared/contracts/component-platform'
@@ -15,7 +16,8 @@ import { componentFrameStyle, freeSurfaceTargets, freeTargetBounds, selectedFree
   type FreeObjectTarget, type FreeResizeHandle } from '../../componentPlatform/surfaces/slide'
 import { createSlideWorkspaceAuthoringController, listSlideWorkspaceHitTargets, proposeSlideLineHandle, type SlideWorkspaceAuthoringResult } from '../workspaceSlideAuthoring'
 import { createStageViewportTransform, clampStageViewportZoom, stageViewportPanRange } from '../../authoring/stageViewportTransform'
-import { resolveNativeLinePoints, normalizeStraightLineAuthoring, normalizeElbowLineAuthoring } from '../../../shared/nativeLineGeometry'
+import { getDefaultLineGeometry, resolveNativeLinePoints, normalizeStraightLineAuthoring, normalizeElbowLineAuthoring } from '../../../shared/nativeLineGeometry'
+import { requestComponentAuthorHit } from '../../components/componentAuthorHit'
 import { snapLinePoint, collectLineSnapAxes } from '../../authoring/slideLineAuthoring'
 import type { NativeLineGeometry } from '../../../shared/contracts/native-v1/types'
 import { shapeDataSchema } from '../../../components/shape'
@@ -26,8 +28,10 @@ import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../..
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../../lessonWorkspace/workspaceMediaDrag'
 import type { ImportedImageAsset } from '../../project/assetManager'
 import { authorSpotEdits, authorSpotGeometryEdits, authorSpotImageEdits } from '../../componentPlatform/surfaces/slide/authorSpots'
-import { createTeacherControllerHudGeometry, teacherControllerReferenceSize, isGlobalTeacherController, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, type TeacherControllerDisplayPort } from '../../../shared/teacherControllerViewportGeometry'
+import { createTeacherControllerHudGeometry, teacherControllerReferenceSize, isViewportComponent, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, type TeacherControllerDisplayPort } from '../../../shared/teacherControllerViewportGeometry'
 import { CourseNavigationControls } from './CourseNavigationControls'
+import { MIXED_GLOBAL_GEOMETRY, mixedGlobalGeometryEdits, type MixedGlobalGeometryRequest } from './mixedGlobalGeometry'
+import { ImageSafeAreaGuides } from './ImageSafeAreaGuides'
 
 export type SlideCanvasMode = 'edit' | 'run'
 export type SlideLineDrawTool = 'line' | 'elbow-arrow' | null
@@ -39,6 +43,7 @@ export interface SlideLineDrawCommit {
 export interface SlideWorkspaceSnapshot {
   project: CourseProjectV10 | null
   documentId: string | null
+  epoch?: string
   surfaceId: string | null
   selectedInstanceIds: readonly string[]
   canvasMode: SlideCanvasMode
@@ -71,7 +76,7 @@ export interface SlideWorkspacePorts {
   registerObservation?(surfaceId: string, binding: { readZoom(): number; setZoom(value: number): void; reset(): void }): () => void
   navigationChanged?(): void
   teacherController?: TeacherControllerDisplayPort
-  updateDataDraft(data: unknown, composing?: boolean, height?: number): void
+  updateDataDraft(data: unknown, composing?: boolean, height?: number, width?: number, rangeProjection?: TextRangeProjection[]): void
   setTextComposing?(active: boolean): void
   commitTextEdit(): Promise<void>
   cancelTextEdit(): void
@@ -99,17 +104,30 @@ export interface SlideLocationWorkspaceProps {
 }
 
 /** One stable professional slot per instance; geometry is exclusively the authored affine frame. */
-function SlideInstance({ id, project, surfaceId, preview, ports }: {
-  id: string; project: CourseProjectV10; surfaceId: string; preview: Record<string, ComponentFrame>; ports: SlideWorkspacePorts
+function SlideInstance({ id, project, surfaceId, preview, ports, clipCanvas, authorGuides = false }: {
+  id: string; project: CourseProjectV10; surfaceId: string; preview: Record<string, ComponentFrame>; ports: SlideWorkspacePorts; clipCanvas?: { width: number; height: number }; authorGuides?: boolean
 }) {
   const instance = project.instances[id]
   const bind = useCallback((element: HTMLDivElement | null) => ports.onElement(id, element), [id, ports.onElement])
   const bindTarget = useCallback((element: HTMLDivElement | null) => ports.onTargetElement(id, element), [id, ports.onTargetElement])
   if (!instance || project.definitions[instance.definitionId]?.role === 'behavior') return null
-  return <div ref={bindTarget} data-component-instance={id} data-layer-item-id={id} data-controller-authoring-id={isGlobalTeacherController(project, id) ? id : undefined} hidden={!isComponentVisibleAtSurface(instance, surfaceId)}
-    style={{ ...componentPaintStyle(instance, project.definitions[instance.definitionId]) as CSSProperties, ...componentFrameStyle(preview[id] ?? instance.frame), ...(isGlobalTeacherController(project, id) ? { pointerEvents: 'auto' } : {}) }}>
+  const shownFrame = preview[id] ?? instance.frame, teacher = isViewportComponent(project, id)
+  let pageClip: string | undefined
+  if (clipCanvas && shownFrame && !teacher && shownFrame.transform[0] * shownFrame.transform[3] - shownFrame.transform[1] * shownFrame.transform[2] !== 0) {
+    const inverse = invertMatrix(shownFrame.transform)
+    pageClip = 'polygon(' + [{ x: 0, y: 0 }, { x: clipCanvas.width, y: 0 }, { x: clipCanvas.width, y: clipCanvas.height }, { x: 0, y: clipCanvas.height }]
+      .map(point => { const local = transformPoint(inverse, point); return `${local.x}px ${local.y}px` }).join(',') + ')'
+  }
+  const teacherData = teacher && instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data : null
+  const variants = teacherData?.sceneStyles, variant = variants && typeof variants === 'object' && !Array.isArray(variants) ? variants[surfaceId] : null
+  const teacherEnabled = variant && typeof variant === 'object' && !Array.isArray(variant) && typeof variant.enabled === 'boolean' ? variant.enabled : teacherData?.enabled
+  const authoredStyle = componentPaintStyle(instance, project.definitions[instance.definitionId]) as CSSProperties
+  return <div ref={bindTarget} data-component-instance={id} data-layer-item-id={id} data-controller-authoring-id={isViewportComponent(project, id) ? id : undefined} hidden={!isComponentVisibleAtSurface(instance, surfaceId)}
+    style={{ ...authoredStyle, ...componentFrameStyle(shownFrame),
+      ...(pageClip ? { clipPath: pageClip } : {}), ...(teacher ? { pointerEvents: teacherEnabled === false ? 'none' : authoredStyle.pointerEvents ?? 'auto', display: teacherEnabled === false ? 'none' : undefined } : {}) }}>
     <div ref={bind} data-component-render={id} style={{ width: '100%', height: '100%' }} />
-    {instance.childIds?.map(child => <SlideInstance key={child} id={child} project={project} surfaceId={surfaceId} preview={preview} ports={ports} />)}
+    {authorGuides && <ImageSafeAreaGuides instance={{ ...instance, frame: shownFrame }} project={project} />}
+    {instance.childIds?.map(child => <SlideInstance key={child} id={child} project={project} surfaceId={surfaceId} preview={preview} ports={ports} authorGuides={authorGuides} />)}
   </div>
 }
 const emptyPreview = (): SlideWorkspaceAuthoringResult => ({ preview: {}, guides: [], marquee: null })
@@ -129,6 +147,12 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
   const [preview, setPreview] = useState(emptyPreview)
   const [drawPreview, setDrawPreview] = useState<{ start: GeometryPoint; end: GeometryPoint } | null>(null)
   const [linePreview, setLinePreview] = useState<{ instanceId: string; frame: ComponentFrame; geometry: NativeLineGeometry } | null>(null)
+  useLayoutEffect(() => {
+    if (!linePreview) return
+    const slot = [...(stageRef.current?.querySelectorAll<HTMLElement>('[data-component-render]') ?? [])].find(node => node.dataset.componentRender === linePreview.instanceId)
+    slot?.dispatchEvent(new CustomEvent('component-shape-line-preview', { detail: linePreview }))
+    return () => { slot?.dispatchEvent(new CustomEvent('component-shape-line-preview', { detail: null })) }
+  }, [linePreview])
   const [spots, setSpots] = useState<readonly ComponentAuthorSpot[]>(() => ports.authorSpots?.() ?? [])
   const [replacingSpot, setReplacingSpot] = useState<string | null>(null)
   const [hoveredSpot, setHoveredSpot] = useState<string | null>(null)
@@ -140,6 +164,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
   const suppressSpotClick = useRef(false)
   const [, refreshNavigation] = useState(0)
   useEffect(() => ports.teacherController?.subscribe(() => refreshNavigation(value => value + 1)), [ports.teacherController])
+  useEffect(() => ports.teacherController?.subscribePlacement?.(() => refreshNavigation(value => value + 1)), [ports.teacherController])
   useEffect(() => {
     const update = () => setSpots(ports.authorSpots?.() ?? [])
     const stop = ports.subscribeAuthorSpots?.(update); update()
@@ -159,7 +184,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
   useLayoutEffect(() => {
     if (surface?.kind === 'slide') visitedSurfaces.add(surface.id)
   }, [visitedSurfaces, surface?.id, surface?.kind])
-  const canvas = surface?.designSize ?? { width: 960, height: 640 }
+  const canvas = surface?.designSize ?? { width: 1280, height: 720 }
   const stageTransform = useMemo(() => createStageViewportTransform({ viewport, stage: canvas, fit: 'page', zoom: view.zoom, pan: { x: view.x, y: view.y } }),
     [viewport, canvas.width, canvas.height, view])
   const scale = stageTransform.scale
@@ -167,17 +192,33 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
   const controllerGeometry = useRef({ viewport: hudGeometry, port: ports.teacherController })
   controllerGeometry.current = { viewport: hudGeometry, port: ports.teacherController }
   const displayProject = project && projectTeacherControllerInstances(project, hudGeometry, ports.teacherController)
+  const viewportToStage: AffineMatrix = [1 / scale, 0, 0, 1 / scale, -stageTransform.stageRect.x / scale, -stageTransform.stageRect.y / scale]
+  const stageFrame = (id: string, frame: ComponentFrame): ComponentFrame => project && isViewportComponent(project, id)
+    ? { ...frame, transform: [...multiplyMatrices(viewportToStage, frame.transform)] as ComponentFrame['transform'] } : frame
+  const stageDisplayProject = displayProject && { ...displayProject, instances: Object.fromEntries(Object.entries(displayProject.instances).map(([id, instance]) =>
+    [id, isViewportComponent(displayProject, id) && instance.frame ? { ...instance, frame: stageFrame(id, instance.frame) } : instance])) }
+  const stagePreview = Object.fromEntries(Object.entries(linePreview ? { ...preview.preview, [linePreview.instanceId]: linePreview.frame } : preview.preview)
+    .map(([id, frame]) => [id, stageFrame(id, frame)]))
   const hudGesture = useRef<{ pointerId: number; value: FreeTransformGesture; edits: ComponentEdit[]; captured: CapturedCourseTarget } | null>(null)
   const gestureDisplay = useRef<{ original: CourseProjectV10; display: CourseProjectV10; geometry: typeof controllerGeometry.current; offset: { x: number; y: number } } | null>(null)
   const mapping = (): AffineMatrix => {
     const rect = stageRef.current?.getBoundingClientRect()
     return rect ? [rect.width / canvas.width, 0, 0, rect.height / canvas.height, rect.left, rect.top] : [scale, 0, 0, scale, 0, 0]
   }
+  useEffect(() => {
+    const request = (event: Event) => {
+      const input = (event as CustomEvent<MixedGlobalGeometryRequest>).detail
+      if (!input || input.edits || input.documentId !== snapshot.documentId || input.surfaceId !== snapshot.surfaceId || !workspaceRef.current?.isConnected) return
+      input.edits = mixedGlobalGeometryEdits(input.project, input.instanceIds, input.intent,
+        [scale, 0, 0, scale, stageTransform.stageRect.x, stageTransform.stageRect.y], hudGeometry, ports.teacherController)
+    }
+    window.addEventListener(MIXED_GLOBAL_GEOMETRY, request); return () => window.removeEventListener(MIXED_GLOBAL_GEOMETRY, request)
+  }, [snapshot.documentId, snapshot.surfaceId, scale, stageTransform.stageRect.x, stageTransform.stageRect.y, viewport, ports.teacherController])
   const surfacePoint = (x: number, y: number) => transformPoint(invertMatrix(mapping()), { x, y })
   const state = () => {
     const current = latest.current.ports.read()
     return current.project && current.surfaceId && current.documentId
-      ? { project: { ...current.project, global: { underlay: current.project.global.underlay.filter(id => !isGlobalTeacherController(current.project!, id)), overlay: current.project.global.overlay.filter(id => !isGlobalTeacherController(current.project!, id)) } }, surfaceId: current.surfaceId, documentId: current.documentId, selectedInstanceIds: current.selectedInstanceIds,
+      ? { project: { ...current.project, global: { underlay: current.project.global.underlay.filter(id => !isViewportComponent(current.project!, id)), overlay: current.project.global.overlay.filter(id => !isViewportComponent(current.project!, id)) } }, surfaceId: current.surfaceId, documentId: current.documentId, selectedInstanceIds: current.selectedInstanceIds,
           activeStateId: current.activeStateId, editingScope: current.editingScope } : null
   }
   const authoring = useRef<ReturnType<typeof createSlideWorkspaceAuthoringController> | null>(null)
@@ -262,7 +303,9 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
   }, [Boolean(project), setZoom])
   const nativeText = useSlideNativeTextEditor({
     project: project ?? { schemaVersion: 10, id: '', revision: 0, title: '', definitions: {}, instances: {}, surfaces: [], global: { underlay: [], overlay: [] }, assets: {} },
-    surfaceId: snapshot.surfaceId ?? '', edit: snapshot.contentEdit?.target.documentId === snapshot.documentId ? snapshot.contentEdit : null,
+    surfaceId: snapshot.surfaceId ?? '', edit: snapshot.contentEdit?.target.documentId === snapshot.documentId
+      && snapshot.contentEdit.target.surfaceId === snapshot.surfaceId && snapshot.contentEdit.target.activeStateId === snapshot.activeStateId
+      && snapshot.contentEdit.target.epoch === snapshot.epoch ? snapshot.contentEdit : null,
     begin: ports.beginTextEdit, update: ports.updateDataDraft, updateSpot: ports.updateSpotDraft, setComposing: ports.setTextComposing, commit: ports.commitTextEdit, cancel: ports.cancelTextEdit,
     undo: ports.undo, redo: ports.redo, host: () => stageRef.current, report: ports.report,
   }, snapshot.documentId + ':' + snapshot.surfaceId + ':' + snapshot.activeStateId)
@@ -297,7 +340,28 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       return { layerItemId: target.instanceId, bounds: { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height, rotation: 0 },
         hittable: true, locked: componentIsLocked(project!, target.instanceId) }
     }), exclude, canvas), scale, disabled).point
-  const spotAt = (at: GeometryPoint) => [...spotTargets].reverse().find(value => frameContainsPoint(value.frame, at))?.spot
+  const spotTargetAt = (at: GeometryPoint) => {
+    const candidates = listSlideWorkspaceHitTargets(state())
+    for (const target of [...candidates].reverse()) {
+      const spot = [...spotTargets].reverse().find(value => value.spot.instanceId === target.instanceId
+        && frameContainsPoint(value.frame, at))
+      if (spot) return spot
+      // An owner's overflow can win outside its frame; a painted foreground owner still blocks older spots.
+      if (hitFreeObject([target], at, true, mapping())) return undefined
+    }
+    return undefined
+  }
+  const spotAt = (at: GeometryPoint) => spotTargetAt(at)?.spot
+  const resolveSpotAt = async (at: GeometryPoint) => {
+    const candidate = spotTargetAt(at)
+    if (!candidate) return undefined
+    const local = transformPoint(invertMatrix(frameToSpaceMatrix(candidate.target.frame, candidate.target.parentToSurface)), at)
+    const root = [...(stageRef.current?.querySelectorAll<HTMLElement>('[data-component-render]') ?? [])]
+      .find(element => element.dataset.componentRender === candidate.spot.instanceId) ?? null
+    const key = await requestComponentAuthorHit(root, local)
+    return key === undefined ? candidate.spot : key === null ? undefined
+      : ports.authorSpots?.().find(spot => spot.instanceId === candidate.spot.instanceId && spot.authorKey === key)
+  }
   const beginSpot = async (spot: ComponentAuthorSpot, at: GeometryPoint, client: GeometryPoint, captured?: CapturedCourseTarget): Promise<boolean> => {
     if (spot.kind !== 'text') return false
     try {
@@ -359,8 +423,8 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     [id, linePreview?.instanceId === id ? { ...instance, frame: linePreview.frame } : preview.preview[id] ? { ...instance, frame: preview.preview[id] } : instance])) }
   const targets = freeSurfaceTargets(effectiveProject, surface.id), selected = selectedFreeTargets(targets, snapshot.selectedInstanceIds)
   const editableSelected = selected.filter(target => !componentIsLocked(project, target.instanceId))
-  const selectedContent = editableSelected.filter(target => !isGlobalTeacherController(project, target.instanceId))
-  const hudTargets = targets.filter(target => isGlobalTeacherController(project, target.instanceId)
+  const selectedContent = editableSelected.filter(target => !isViewportComponent(project, target.instanceId))
+  const hudTargets = targets.filter(target => isViewportComponent(project, target.instanceId)
     && isComponentVisibleAtSurface(project.instances[target.instanceId], surface.id))
   const selectedHud = editableSelected.filter(target => hudTargets.some(value => value.instanceId === target.instanceId))
   const viewportBounds = stageViewportRef.current?.getBoundingClientRect()
@@ -380,10 +444,11 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     run: () => { void ports.edit([{ type: 'instance.patch', instanceId: target.instanceId, patch: { visible: true } }]).catch(error => ports.report(String(error))) },
   }))
   const selectedInstance = selected.length === 1 ? project.instances[selected[0].instanceId] : null
-  const selectedImplementation = selectedInstance && (selectedInstance.implementationOverride ?? project.definitions[selectedInstance.definitionId]?.implementation)
-  const selectedLine = editableSelected.length === 1 && selectedImplementation?.kind === 'builtin' && selectedImplementation.key === 'guoling.shape'
+  const selectedBuiltinKey = selectedInstance && componentDefinitionPresentation(project.definitions[selectedInstance.definitionId]).builtinKey
+  const selectedLine = editableSelected.length === 1 && selectedBuiltinKey === 'guoling.shape'
     ? shapeDataSchema.safeParse(selectedInstance!.data) : null
-  const lineGeometry = selectedLine?.success ? linePreview?.geometry ?? selectedLine.data.lineGeometry : null
+  const lineGeometry = selectedLine?.success && ['line', 'elbow-arrow'].includes(selectedLine.data.shapeType)
+    ? linePreview?.geometry ?? selectedLine.data.lineGeometry ?? getDefaultLineGeometry(selectedLine.data.shapeType === 'elbow-arrow' ? 'elbow-arrow' : 'line') : null
   const linePoints = selectedLine?.success && lineGeometry && selected.length === 1
     ? resolveNativeLinePoints(lineGeometry, selected[0].frame.width, selected[0].frame.height).map(at => transformPoint(frameToSpaceMatrix(selected[0].frame, selected[0].parentToSurface), at)) : null
   const stop = (event: React.PointerEvent) => { event.preventDefault(); event.stopPropagation() }
@@ -407,11 +472,11 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         const selectedHandle = event.target instanceof Element && event.target.closest('[data-internal-selection]')
         const outerHandle = !selectedHandle && event.target instanceof Element && event.target.closest('[data-handle]')
         const at = surfacePoint(event.clientX, event.clientY)
-        const hit = selectedHandle ? selectedInternal : outerHandle ? undefined : [...spotTargets].reverse().find(value => frameContainsPoint(value.frame, at))
+        const hit = selectedHandle ? selectedInternal : outerHandle ? undefined : spotTargetAt(at)
         if (hit) {
           stop(event); suppressSpotClick.current = false
           if (componentIsLocked(project, hit.spot.instanceId)) return
-          setSelectedSpotKey(spotKey(hit.spot)); ports.select([hit.spot.instanceId])
+          setSelectedSpotKey(spotKey(hit.spot))
           // Plain professional text/image spots edit content inside an ordinary free frame.
           // Their missing internal geometry must not swallow the outer object's drag.
           if (!hit.spot.geometry || !hit.spot.authorKey || !hit.spot.binding) {
@@ -419,9 +484,16 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
             if (instance?.frame && implementation?.kind === 'builtin' && ['guoling.text', 'guoling.formula', 'guoling.image'].includes(implementation.key)) {
               pointer.current = event.pointerId; event.currentTarget.setPointerCapture(event.pointerId)
               setPreview(authoring.current!.pointerDown({ x: event.clientX, y: event.clientY, additive: event.shiftKey || event.ctrlKey || event.metaKey, altKey: event.altKey }, mapping()))
+              suppressSpotClick.current = true
             }
             return
           }
+          if (event.shiftKey || event.ctrlKey || event.metaKey) {
+            pointer.current = event.pointerId; event.currentTarget.setPointerCapture(event.pointerId)
+            setPreview(authoring.current!.pointerDown({ x: event.clientX, y: event.clientY, additive: true, altKey: event.altKey }, mapping()))
+            suppressSpotClick.current = true; return
+          }
+          ports.select([hit.spot.instanceId])
           event.currentTarget.setPointerCapture(event.pointerId)
           const handle = selectedHandle && event.target instanceof Element ? event.target.closest('[data-handle]')?.getAttribute('data-handle') as FreeResizeHandle | 'rotate' | null : null
           const instanceToSurface = frameToSpaceMatrix(hit.target.frame, hit.target.parentToSurface), captured = ports.capture()
@@ -590,14 +662,18 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       if (hudHit) {
         ports.select([hudHit.instanceId]); window.setTimeout(() => requestObjectContextMenu(root, { ...point, itemIds: [hudHit.instanceId] }), 0); return
       }
-      const at = surfacePoint(point.x, point.y), spot = spotAt(at), captured = ports.capture()
-      if (spot) {
-        ports.select([spot.instanceId])
+      const at = surfacePoint(point.x, point.y), captured = ports.capture()
+      const candidate = spotAt(at)
+      if (candidate) {
+        void resolveSpotAt(at).then(spot => {
+        if (!spot) return
+        if (!ports.read().selectedInstanceIds.includes(spot.instanceId)) ports.select([spot.instanceId])
         const locked = componentIsLocked(project, spot.instanceId)
         const extra = [{ id: 'spot.' + spot.id, label: spot.kind === 'image' ? '替换此处图片…' : spot.sourceRegion?.kind === 'implementation' ? '编辑此处源码片段' : '编辑此处文字',
           group: 'edit', disabledReason: locked ? '对象已锁定' : null,
           run: () => { if (spot.kind === 'image') void replaceSpot(spot, captured); else beginSpot(spot, at, point, captured) } }]
-        window.setTimeout(() => requestObjectContextMenu(root, { ...point, itemIds: [spot.instanceId], extra }), 0); return
+        window.setTimeout(() => requestObjectContextMenu(root, { ...point, itemIds: ports.read().selectedInstanceIds, extra }), 0)
+        }).catch(error => ports.report(String(error))); return
       }
       const hit = authoring.current!.contextTarget(point, mapping())
       if (hit) { window.setTimeout(() => requestObjectContextMenu(root, { ...point, itemIds: ports.read().selectedInstanceIds }), 0); return }
@@ -616,11 +692,14 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     }}
     onDoubleClickCapture={event => {
       if (outsideStage(event.target) || snapshot.canvasMode !== 'edit' || snapshot.contentEdit || snapshot.drawTool) return
-      const at = surfacePoint(event.clientX, event.clientY), client = { x: event.clientX, y: event.clientY }, spot = spotAt(at)
-      if (spot) {
+      const at = surfacePoint(event.clientX, event.clientY), client = { x: event.clientX, y: event.clientY }, candidate = spotAt(at)
+      if (candidate) {
         event.preventDefault(); event.stopPropagation()
+        void resolveSpotAt(at).then(spot => {
+        if (!spot) return
         if (spot.kind === 'image') void replaceSpot(spot)
-        else void beginSpot(spot, at, client).catch(error => ports.report(String(error)))
+        else void beginSpot(spot, at, client)
+        }).catch(error => ports.report(String(error)))
         return
       }
       const hit = hitFreeObject(listSlideWorkspaceHitTargets(state()), at, true)
@@ -628,7 +707,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         event.preventDefault(); event.stopPropagation(); ports.select([hit.instanceId])
       }
     }}>
-    <NativeSelectionContext documentId={snapshot.documentId} revision={project.revision} locationId={surface.id} itemIds={snapshot.selectedInstanceIds}
+    <NativeSelectionContext authorSpot={selectedInternal?.spot} documentId={snapshot.documentId} revision={project.revision} locationId={surface.id} itemIds={snapshot.selectedInstanceIds}
       stateId={snapshot.activeStateId} sceneItemIds={surface.childIds} enabled={snapshot.canvasMode === 'edit'} textEditing={Boolean(snapshot.contentEdit)}
       bounds={id => {
         if (snapshot.selectedInstanceIds.length === 1 && selectedInternal?.spot.instanceId === id) {
@@ -639,7 +718,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         const target = targets.find(value => value.instanceId === id), rect = stageRef.current?.getBoundingClientRect()
         if (!target || !rect) return null
         const bounds = freeTargetBounds(target)
-        if (isGlobalTeacherController(project, id)) return { left: (viewportBounds?.left ?? 0) + bounds.left * viewportScale,
+        if (isViewportComponent(project, id)) return { left: (viewportBounds?.left ?? 0) + bounds.left * viewportScale,
           top: (viewportBounds?.top ?? 0) + bounds.top * viewportScale, width: bounds.width * viewportScale, height: bounds.height * viewportScale }
         return { left: rect.left + bounds.left * scale, top: rect.top + bounds.top * scale, width: bounds.width * scale, height: bounds.height * scale }
       }} />
@@ -666,15 +745,15 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       data-observation-state-id={snapshot.activeStateId ?? ''} data-observation-ready="true">
       <div ref={stageRef} className="canvas-stage-stack" data-panning={panning || undefined}
         style={{ left: stageTransform.stageRect.x, top: stageTransform.stageRect.y, width: canvas.width, height: canvas.height,
-          transform: 'scale(' + scale + ')', transition: 'none', visibility: 'visible', backgroundColor: background.color,
+          transform: 'scale(' + scale + ')', transition: 'none', visibility: 'visible', overflow: 'visible', backgroundColor: background.color,
           backgroundImage: backgroundUrl ? 'url(' + JSON.stringify(backgroundUrl) + ')' : undefined, backgroundRepeat: 'no-repeat',
           backgroundPosition: 'center', backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit }}>
         <div className="canvas-stage canvas-stage--authoring" data-testid="canvas-stage" style={{ position: 'absolute', inset: 0, visibility: 'visible', pointerEvents: 'auto' }}>
-          {project.global.underlay.filter(id => !isGlobalTeacherController(project, id)).map(id => <SlideInstance key={id} id={id} project={project} surfaceId={surface.id} preview={linePreview ? { ...preview.preview, [linePreview.instanceId]: linePreview.frame } : preview.preview} ports={ports} />)}
-          {project.surfaces.filter(value => value.kind === 'slide' && (value.id === surface.id || visitedSurfaces.has(value.id))).map(value => <div key={value.id} hidden={value.id !== surface.id} style={{ position: 'absolute', inset: 0 }}>
-            {value.childIds.map(id => <SlideInstance key={id} id={id} project={project} surfaceId={value.id} preview={linePreview ? { ...preview.preview, [linePreview.instanceId]: linePreview.frame } : preview.preview} ports={ports} />)}
+          {project.global.underlay.map(id => <SlideInstance key={id} id={id} project={stageDisplayProject!} surfaceId={surface.id} preview={stagePreview} ports={ports} clipCanvas={canvas} authorGuides={snapshot.canvasMode === 'edit'} />)}
+          {project.surfaces.filter(value => value.kind === 'slide' && (value.id === surface.id || visitedSurfaces.has(value.id))).map(value => <div key={value.id} hidden={value.id !== surface.id} style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+            {value.childIds.map(id => <SlideInstance key={id} id={id} project={project} surfaceId={value.id} preview={stagePreview} ports={ports} authorGuides={snapshot.canvasMode === 'edit'} />)}
           </div>)}
-          {project.global.overlay.filter(id => !isGlobalTeacherController(project, id)).map(id => <SlideInstance key={id} id={id} project={project} surfaceId={surface.id} preview={linePreview ? { ...preview.preview, [linePreview.instanceId]: linePreview.frame } : preview.preview} ports={ports} />)}
+          {project.global.overlay.map(id => <SlideInstance key={id} id={id} project={stageDisplayProject!} surfaceId={surface.id} preview={stagePreview} ports={ports} clipCanvas={canvas} authorGuides={snapshot.canvasMode === 'edit'} />)}
         </div>
         {snapshot.canvasMode === 'edit' && <div data-slide-authoring-hit-plane="" style={{ position: 'absolute', inset: 0, zIndex: 10, pointerEvents: 'auto' }} />}
         {snapshot.canvasMode === 'edit' && !snapshot.contentEdit && <div className="canvas-authoring-targets" data-testid="runtime-authoring-targets" aria-label="画布可编辑内容" style={{ zIndex: 12 }}>
@@ -701,10 +780,6 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
               <circle key={index} data-line-handle={index === 0 ? 'start' : index === linePoints.length - 1 ? 'end' : 'elbow'}
                 cx={at.x} cy={at.y} r={5 / scale} fill="#fff" stroke="#2563eb" style={{ pointerEvents: 'auto' }} />)}</>}
         </svg>}
-      </div>
-      <div data-controller-hud="true" style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 14 }}>
-        {[...project.global.underlay, ...project.global.overlay].filter(id => isGlobalTeacherController(project, id)).map(id =>
-          <SlideInstance key={id} id={id} project={displayProject!} surfaceId={surface.id} preview={preview.preview} ports={ports} />)}
       </div>
     </div>
     {snapshot.canvasMode === 'edit' && !snapshot.contentEdit && <><SlideLayerSelectionOverlay targets={selectedContent} scale={scale} surfaceToPointer={chromeMatrix} lineHandles={Boolean(linePoints)} />

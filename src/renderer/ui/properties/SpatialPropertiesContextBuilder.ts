@@ -14,8 +14,8 @@ export function buildSpatialPropertiesOwner(input: {
     'readSpatialView' | 'setSpatialShowCameraFrames' | 'addSpatialCameraFrameFromSession' | 'renameSpatialCameraFrame'
     | 'updateSpatialCameraFrameTarget' | 'reorderSpatialCameraFrames' | 'deleteSpatialCameraFrame' | 'setSpatialCameraHomeFromSession'
     | 'updateActiveSpatialCameraFrameFromSession' | 'activateSpatialCameraFrame' | 'fitSpatialSessionToWorldContent'
-    | 'setSpatialPlaybackPathId' | 'addSpatialSemanticZoomRule' | 'updateSpatialSemanticZoomRule' | 'deleteSpatialSemanticZoomRule'
-    | 'addSpatialPath' | 'updateSpatialPath' | 'deleteSpatialPath' | 'addSpatialRelation' | 'updateSpatialRelation' | 'deleteSpatialRelation'>
+    | 'setSpatialPlaybackPathId' | 'setSpatialDefaultPathId' | 'addSpatialSemanticZoomRule' | 'updateSpatialSemanticZoomRule' | 'deleteSpatialSemanticZoomRule'
+    | 'addSpatialPath' | 'updateSpatialPath' | 'deleteSpatialPath' | 'addSpatialRelation' | 'updateSpatialRelation' | 'deleteSpatialRelation' | 'setSpatialGraphSelection'>
   assets: Readonly<Record<string, AssetMeta>>
   liveTarget(): CapturedCourseTarget
   submit(edits: ComponentEdit[], target?: CapturedCourseTarget): void
@@ -47,7 +47,7 @@ export function buildSpatialPropertiesOwner(input: {
     view: { surfaceId: surface.id, surfaceTitle: surface.title, spatial,
       backgroundMode: surface.background?.mode ?? 'inherit', backgroundColor: surface.background?.color,
       effectiveBackground: propertiesEffectiveBackground(read.project, surface),
-      backgroundAssetId: surface.background?.assetId, worldInstances: ids(surface.childIds).map(id => read.project!.instances[id]).filter(Boolean) },
+      backgroundAssetId: surface.background?.assetId, worldInstances: ids(surface.childIds).map(id => read.project!.instances[id]).filter(instance => instance?.frame && read.project!.definitions[instance.definitionId]?.role !== 'behavior') },
     course: { backgroundColor: read.project.background?.color, backgroundAssetId: read.project.background?.assetId },
     assets: input.assets, sessionCamera: view.camera, showCameraFrames: view.showCameraFrames, activeCameraFrameId: view.activeCameraFrameId, playbackPathId: view.playbackPathId,
     selectedPathId: view.graphSelection?.kind === 'path' ? view.graphSelection.id : null,
@@ -77,19 +77,22 @@ export function buildSpatialPropertiesOwner(input: {
       activateFrame: frameId => actions.activateSpatialCameraFrame(surface.id, frameId),
       fitWorldContent: scope => actions.fitSpatialSessionToWorldContent(undefined, surface.id, scope),
       setPlaybackPathId: pathId => actions.setSpatialPlaybackPathId(pathId, surface.id),
-      addSemanticZoomRule: rule => run(() => actions.addSpatialSemanticZoomRule(surface.id, rule)),
+      setDefaultPathId: pathId => run(() => actions.setSpatialDefaultPathId(surface.id, pathId, input.liveTarget())),
+      addSemanticZoomRule: rule => create(() => actions.addSpatialSemanticZoomRule(surface.id, rule)),
       updateSemanticZoomRule: (ruleId, patch) => run(() => actions.updateSpatialSemanticZoomRule(surface.id, ruleId, patch, input.liveTarget())),
       deleteSemanticZoomRule: ruleId => run(() => actions.deleteSpatialSemanticZoomRule(surface.id, ruleId, input.liveTarget())),
       addPath: path => create(target => actions.addSpatialPath(surface.id, path, target)),
       renamePath: (pathId, title) => run(() => actions.updateSpatialPath(surface.id, pathId, { title }, input.liveTarget())),
       updatePathStyle: (pathId, style) => run(() => actions.updateSpatialPath(surface.id, pathId, { style }, input.liveTarget())),
       reorderPathWaypoints: (pathId, instanceIds) => run(() => actions.updateSpatialPath(surface.id, pathId, { instanceIds, frameIds: [] }, input.liveTarget())),
-      reorderPathFrames: (pathId, frameIds) => run(() => actions.updateSpatialPath(surface.id, pathId, { frameIds, instanceIds: [] }, input.liveTarget())),
+      reorderPathFrames: (pathId, frameIds) => run(() => actions.updateSpatialPath(surface.id, pathId, { frameIds, instanceIds: undefined }, input.liveTarget())),
       deletePath: pathId => run(() => actions.deleteSpatialPath(surface.id, pathId, input.liveTarget())),
       addRelation: relation => create(target => actions.addSpatialRelation(surface.id, relation, target)),
       updateRelationLabel: (relationId, label) => run(() => actions.updateSpatialRelation(surface.id, relationId, { label }, input.liveTarget())),
       updateRelationKind: (relationId, kind) => run(() => actions.updateSpatialRelation(surface.id, relationId, { kind }, input.liveTarget())),
       deleteRelation: relationId => run(() => actions.deleteSpatialRelation(surface.id, relationId, input.liveTarget())), reportError: input.report,
+      selectPath: id => actions.setSpatialGraphSelection({ kind: 'path', id }, surface.id),
+      selectRelation: id => actions.setSpatialGraphSelection({ kind: 'relation', id }, surface.id),
     },
   }
 }

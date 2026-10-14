@@ -71,7 +71,7 @@ describe('G20 default workspace entry has no embedded CLI dependency', () => {
     })
     const tabs: DocumentTabsController = {
       isCourseActive: true, tabs: [], activeTab: 'course',
-      createMarkdown: vi.fn(async () => {}), setActiveTab: vi.fn(), focusDocument: vi.fn(async () => {}),
+      createMarkdown: vi.fn(async () => {}), createText: vi.fn(async () => {}), setActiveTab: vi.fn(), focusDocument: vi.fn(async () => {}),
       openTab: vi.fn(async () => {}), closeTab: vi.fn(async () => true), removeTab: vi.fn(),
       registerEditor: vi.fn(), editorRef: () => () => {}, mediaEditorRef: () => () => {},
       mediaFiles: async () => { throw new Error('Media is outside this workspace entry check') },

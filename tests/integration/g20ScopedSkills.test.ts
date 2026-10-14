@@ -77,6 +77,19 @@ async function fixture() {
   return { root, workspace, directory, skills, service, host, revoke: () => { authorized = false } }
 }
 
+it('previews the same scoped metadata without a fake run or file execution authority', async () => {
+  const h = await fixture()
+  const menu = await h.service.catalogForRoots([{ source: 'workspace', directory: h.skills, authorizedRoot: h.workspace }])
+  expect(menu.entries).toEqual(expect.arrayContaining([
+    { name: 'prepare-table', description: 'Built-in' },
+    { name: 'workspace/prepare-table', description: '整理表格 并核对来源', source: 'workspace' },
+  ]))
+  expect(menu.warnings).toEqual([])
+  expect(JSON.stringify(menu)).not.toContain('BODY_NOT_INDEXED')
+  expect(await h.service.read({ skill: 'workspace/prepare-table', path: 'SKILL.md', offset: 0, limit: 100 })).toEqual({ status: 'unknown-skill', skill: 'workspace/prepare-table' })
+  await h.host.tools.stop('skills-run')
+})
+
 
 it('M27 discovers only metadata without overriding bundled names and reads root resources through the actual Gateway', async () => {
   const h = await fixture()

@@ -70,10 +70,12 @@ import {
 import { SimpleEntranceAnimationEditor } from '../SimpleEntranceAnimationEditor'
 import type { SlideSimpleEntranceAnimationConfig } from '../../course/v9SlideContentCommands'
 import { FlowSpatialInteractionUnavailableSection } from './FlowSpatialInteractionUnavailableSection'
+import { ComponentClickNavigationProperties, type ComponentClickNavigationPropertiesContext } from './ComponentClickNavigationProperties'
 import {
   BufferedInput,
   FontFamilyPicker,
   PropertyDraftBoundary,
+  PropertyDraftFieldBoundary,
   RangeField,
   SelectField,
   TextContentTextarea,
@@ -105,6 +107,7 @@ export interface PropertiesItemBase {
   opacity: number
   visible: boolean
   locked: boolean
+  ownLocked?: boolean
   playbackInitialVisibility: 'inherit' | 'hidden'
 }
 
@@ -118,7 +121,7 @@ export type PropertiesRuntimeView = PropertiesItemBase & {
   type: 'runtime'
 }
 
-export type PropertiesItemView =
+export type PropertiesItemView = (
   | Exclude<NativeRenderableNode, FormulaNode | ImageNode>
   | PropertiesImageView
   | PropertiesFormulaView
@@ -128,6 +131,7 @@ export type PropertiesItemView =
   | PropertiesComponentView
   | PropertiesRuntimeView
   | (PropertiesItemBase & { type: 'composition' })
+) & { ownLocked?: boolean }
 
 export type PropertiesFormulaView = Omit<FormulaNode, 'ast'> & {
   ast: FormulaAstNode | null
@@ -137,7 +141,7 @@ export type PropertiesFormulaView = Omit<FormulaNode, 'ast'> & {
 
 export type PropertiesImageView = ImageNode & Partial<Pick<ImageData, 'originalAssetId' | 'filters'>>
 
-export type PropertiesPatch = DeepPartial<PropertiesItemView>
+export type PropertiesPatch = DeepPartial<PropertiesItemView> & { fontSizeStep?: 1 | -1; solidFillColor?: string }
 
 export interface SlideNativeTextCommands {
   /** Returns true when the control must rebind after a canonical source transition. */
@@ -183,6 +187,7 @@ export interface SlideNativePropertiesContext {
   } | null
   readonly interaction: InteractionEditorProps | null
   readonly globalInteraction: InteractionEditorProps | null
+  readonly clickNavigation?: ComponentClickNavigationPropertiesContext | null
   readonly component: {
     readonly definition: ComponentDefinition
     readonly instance: ComponentInstance
@@ -281,9 +286,9 @@ export function CommonNodeProperties({
         />
       </div>
       <ToggleRow label="显示图层" checked={node.visible} onChange={(visible) => update({ visible })} />
-      <button type="button" className="secondary-button" style={{ width: '100%' }} onClick={() => update({ locked: !node.locked })}>
-        {node.locked ? <Unlock size={14} /> : <Lock size={14} />}
-        {node.locked ? '解锁图层' : '锁定图层'}
+      <button type="button" className="secondary-button" style={{ width: '100%' }} onClick={() => update({ locked: !(node.ownLocked ?? node.locked) })}>
+        {(node.ownLocked ?? node.locked) ? <Unlock size={14} /> : <Lock size={14} />}
+        {(node.ownLocked ?? node.locked) ? '解锁图层' : '锁定图层'}
       </button>
       {showPlaybackInitialState && <div className="form-field" style={{ marginTop: 12 }}>
         <label>互动播放初始状态</label>
@@ -319,6 +324,11 @@ export function TextProperties({
 }) {
   const style = node.style
   const selectionRef = useRef({ start: 0, end: 0 })
+  const textBinding=usePropertyDraftBindingKey()
+  const ownerKey=textBinding+':'+node.id
+  const selectionOwner=useRef(ownerKey)
+  const [,refreshSelection]=useState(0)
+  if(selectionOwner.current!==ownerKey){selectionOwner.current=ownerKey;selectionRef.current={start:0,end:0}}
   const captureSelection = () => {
     const active = document.activeElement
     if (active instanceof HTMLTextAreaElement) {
@@ -326,10 +336,17 @@ export function TextProperties({
         start: active.selectionStart,
         end: active.selectionEnd,
       }
+      refreshSelection(value=>value+1)
     }
   }
+  const pressed=(key:'bold'|'italic'|'underline'|'strike')=>{
+    const {start,end}=selectionRef.current
+    if(start===end)return style[key]
+    const from=Array.from(node.text.slice(0,start)).length,to=Array.from(node.text.slice(0,end)).length
+    return Array.from(node.text).slice(from,to).every((_character,index)=>node.runs.find(run=>run.start<=from+index && run.end>from+index)?.style[key] ?? style[key])
+  }
   return (
-    <section className="property-section">
+    <section className="property-section" onSelectCapture={captureSelection}>
       <h3 className="property-title"><Type size={14} />文本</h3>
       {contentEditingEnabled ? (
         <>
@@ -379,7 +396,7 @@ export function TextProperties({
           {[
             ['bold', '加粗', Bold], ['italic', '斜体', Italic], ['underline', '下划线', Underline], ['strike', '删除线', Strikethrough],
           ].map(([key, label, Icon]) => (
-            <button type="button" key={String(key)} title={String(label)} aria-label={String(label)} className={`segment-button${style[key as 'bold'] ? ' segment-button--active' : ''}`} onMouseDown={captureSelection} onClick={() => textCommands.toggleStyle(key as 'bold' | 'italic' | 'underline' | 'strike', selectionRef.current)}>
+            <button type="button" key={String(key)} title={String(label)} aria-label={String(label)} aria-pressed={pressed(key as 'bold')} className={`segment-button${pressed(key as 'bold') ? ' segment-button--active' : ''}`} onMouseDown={captureSelection} onClick={() => textCommands.toggleStyle(key as 'bold' | 'italic' | 'underline' | 'strike', selectionRef.current)}>
               <Icon size={15} />
             </button>
           ))}
@@ -718,6 +735,7 @@ export function ImageProperties({ node, update, onReplaceImage, onTransformImage
       </div>
       {node.safeAreas.map((area, index) => (
         <div className="safe-area-card" key={area.id}>
+          <PropertyDraftFieldBoundary fieldKey={['safeArea',area.id]}>
           <div className="safe-area-card__header">
             <BufferedInput
               label={`安全区 ${index + 1} 名称`}
@@ -739,6 +757,7 @@ export function ImageProperties({ node, update, onReplaceImage, onTransformImage
           <RangeField label="顶部位置" value={area.y * 100} min={0} max={(1 - area.height) * 100} suffix="%" onChange={(y) => replaceSafeArea(index, { y: y / 100 })} />
           <RangeField label="安全区宽度" value={area.width * 100} min={1} max={(1 - area.x) * 100} suffix="%" onChange={(width) => replaceSafeArea(index, { width: width / 100 })} />
           <RangeField label="安全区高度" value={area.height * 100} min={1} max={(1 - area.y) * 100} suffix="%" onChange={(height) => replaceSafeArea(index, { height: height / 100 })} />
+          </PropertyDraftFieldBoundary>
         </div>
       ))}
     </section>
@@ -982,6 +1001,7 @@ export function SlideNativePropertiesPanel({
         />
       )}
       {afterCommon}
+      {context.clickNavigation && <ComponentClickNavigationProperties key={context.draftBindingKey} context={context.clickNavigation} />}
       {node.type === 'input' && commands.input && <SlideInputProperties
         key={context.draftBindingKey} node={node} commands={commands.input} patch={update}
       />}
@@ -1002,7 +1022,7 @@ export function SlideNativePropertiesPanel({
         tableCommands={commands.table}
         chartCommands={commands.chart}
       />
-      {flowOrSpatial && (
+      {flowOrSpatial && !context.clickNavigation && (
         <FlowSpatialInteractionUnavailableSection
           editingScopeGlobal={editingScopeGlobal}
           onOpenAutomation={commands.openProfessionalAutomation}

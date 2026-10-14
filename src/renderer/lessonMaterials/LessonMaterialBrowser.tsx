@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { LessonMaterialRead, LessonMaterialRecord, MaterialExtraction } from '../../shared/materialExtraction'
+import type { LessonMaterialList, LessonMaterialRead, LessonMaterialRecord, MaterialExtraction } from '../../shared/materialExtraction'
 import type { LessonMaterialSelectResult } from '../../shared/lessonMaterialDesktop'
 import { extractMaterial } from '../project/materialExtraction'
 
@@ -9,7 +9,7 @@ export interface LessonMaterialBrowserProps {
   selections?: { id: string; extractionVersion?: string; fragmentIds: string[] }[]
   onSelect?(record: LessonMaterialRecord, fragmentIds: string[]): void
   selectSource(): Promise<LessonMaterialSelectResult>
-  list(): Promise<LessonMaterialRecord[]>
+  list(): Promise<LessonMaterialList>
   importMaterial(input: { title: string; original: Uint8Array; extraction: MaterialExtraction }): Promise<LessonMaterialRecord>
   read(input: { id: string; extractionVersion: string; fragmentIds: string[] }): Promise<LessonMaterialRead>
 }
@@ -32,7 +32,7 @@ export function LessonMaterialBrowser(props: LessonMaterialBrowserProps) {
   useEffect(() => {
     const token = ++generation.current
     setRecords([]); setSelected(null); setError(''); setBusy(false)
-    void api.current.list().then(next => { if (token === generation.current) setRecords(next) }).catch(reason => { if (token === generation.current) setError(reason instanceof Error ? reason.message : String(reason)) })
+    void api.current.list().then(next => { if (token === generation.current) { setRecords(next.records); setError(next.diagnostics.map(issue => issue.message).join('；')) } }).catch(reason => { if (token === generation.current) setError(reason instanceof Error ? reason.message : String(reason)) })
     return () => { generation.current++ }
   }, [props.targetKey])
   async function run(action: () => Promise<void>) {
@@ -62,7 +62,7 @@ export function LessonMaterialBrowser(props: LessonMaterialBrowserProps) {
           }
           if (failures.length && token === generation.current) setError(failures.map(failure => `${failure.title}：${failure.message}`).join('；'))
           const next = await currentApi.list()
-          if (token === generation.current) setRecords(next)
+          if (token === generation.current) { setRecords(next.records); if (next.diagnostics.length) setError(next.diagnostics.map(issue => issue.message).join('；')) }
         })
       }}>添加材料（PDF / DOCX / PPTX / 文本 / 图片，可多选）</button>
     <button type="button" disabled={busy} onClick={() => {
@@ -70,8 +70,8 @@ export function LessonMaterialBrowser(props: LessonMaterialBrowserProps) {
       void run(async () => {
         const next = await currentApi.list()
         if (token !== generation.current) return
-        for (const previous of records) if (!next.some(record => record.id === previous.id)) currentApi.onSelect?.(previous, [])
-        setRecords(next); setSelected(null)
+        for (const previous of records) if (!next.records.some(record => record.id === previous.id)) currentApi.onSelect?.(previous, [])
+        setRecords(next.records); setSelected(null); setError(next.diagnostics.map(issue => issue.message).join('；'))
       })
     }}>刷新材料</button>
     {busy && <p role="status">正在读取材料…</p>}

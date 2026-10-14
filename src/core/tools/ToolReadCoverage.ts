@@ -13,7 +13,7 @@ export interface ComponentTextSplice extends SourceSplice {
   surfaceId: string
   instanceId: string
   stateId?: string | null
-  fieldScope?: 'data' | 'flowLayout'
+  fieldScope?: 'data' | 'flowLayout' | 'authoring'
   dataPath: string[]
 }
 export function mapAcknowledgedComponentRange<T extends CourseInstanceRange>(range: T, edits: readonly ComponentTextSplice[]): T {

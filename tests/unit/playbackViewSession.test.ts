@@ -20,6 +20,47 @@ function mountView() {
 }
 afterEach(() => document.body.replaceChildren())
 describe('Playback observation ownership', () => {
+  it('does not republish an unchanged view, but still observes real Flow bounds and viewport changes', () => {
+    const { view, viewport } = mountView(), root = document.createElement('div'), content = document.createElement('div'), item = document.createElement('div')
+    let width = 800
+    item.dataset.playbackBounds = 'true'
+    item.getBoundingClientRect = () => DOMRect.fromRect({ x: 0, y: 0, width, height: 500 })
+    content.append(item); root.append(content); viewport.append(root)
+    view.register({ id: 'flow', kind: 'flow', root, content }); view.activate('flow')
+    let changes = 0
+    const off = view.subscribe(() => { changes++ }), generation = view.state.generation
+    view.resize(); view.resize(); view.panTo(view.state.pan); view.zoomTo(view.state.zoom)
+    expect(changes).toBe(0); expect(view.state.generation).toBe(generation)
+    width = 1200; view.resize()
+    expect(changes).toBe(1); expect(view.state.bounds.width).toBe(1200)
+    size(viewport, 640, 480); view.resize()
+    expect(changes).toBe(2); expect(view.state.viewport).toEqual({ width: 640, height: 480 })
+    off(); view.destroy()
+  })
+  it('fits fixed-width Flow paper like Slides while keeping its longer scroll and controller in their own coordinates', () => {
+    const { view, viewport } = mountView()
+    const slide = document.createElement('div'), slideContent = document.createElement('div')
+    slide.dataset.canvasWidth = '1280'; slide.dataset.canvasHeight = '720'; slide.append(slideContent); viewport.append(slide)
+    view.register({ id: 'slide', kind: 'slide', root: slide, content: slideContent })
+    const flow = document.createElement('div'), content = document.createElement('div'), scroll = document.createElement('article'), controller = document.createElement('nav')
+    flow.dataset.canvasWidth = '1280'; flow.dataset.canvasHeight = '720'
+    scroll.dataset.flowPaperScroll = 'true'; scroll.scrollTop = 900
+    content.append(scroll); flow.append(content, controller); viewport.append(flow)
+    view.register({ id: 'flow', kind: 'flow', root: flow, content, fitViewport: () => ({ width: 800, height: 600 }) }); view.activate('flow')
+    expect(view.fitScale('flow')).toBe(view.fitScale('slide'))
+    expect(view.fitScale('flow')).toBe(.625)
+    expect(content.style.width).toBe('1280px'); expect(content.style.height).toBe('960px')
+    expect(content.style.transform).toBe('translate(0px, 0px) scale(0.625)')
+    expect(flow.style.transform).toBe('none'); expect(controller.style.transform).toBe('')
+    view.zoomTo(2)
+    expect(content.style.transform).toContain('scale(1.25)')
+    expect(scroll.scrollTop).toBe(900)
+    view.reset(); size(viewport, 800, 250); view.resize()
+    expect(view.fitScale('flow')).toBe(.625) // Tool rows affect reading height, not the common workspace fit.
+    expect(content.style.height).toBe('400px')
+    expect(scroll.scrollTop).toBe(900); expect(controller.style.transform).toBe('')
+    view.destroy()
+  })
   
   it('keeps observation bars outside the Flow document scrollbar and preserves independent scroll state', () => {
     const { view, viewport, container } = mountView()
@@ -98,7 +139,7 @@ describe('Playback observation ownership', () => {
     expect(view.state.bounds).toEqual({ x: 0, y: 0, width: 400, height: 300 })
     expect(view.state.zoom).toBe(1)
     const button = document.createElement('button'); viewport.append(button); view.openZoomPanel(button)
-    view.resize()
+    size(viewport, 410, 310); view.resize()
     expect(viewport.parentElement!.querySelector('[data-playback-chrome="zoom-panel"]')).toBeNull()
     view.destroy()
   })

@@ -56,7 +56,7 @@ it('S06-T02 edits ordinary Markdown from layout selections without changing unse
   for (const [index, edit] of edits.entries()) {
     const before = session.read()
     if (before.model.kind !== 'markdown') throw new Error('Session changed document kind')
-    const parsed = parseDocumentMarkdown(before.model.source, { target: 'file', createId: () => randomUUID(), resolveImage: href => resolveFileDocumentImage('保真检查.md', href) })
+    const parsed = parseDocumentMarkdown(before.model.source, { target: 'file', createId: () => randomUUID(), resolveImage: resolveFileDocumentImage })
     if (parsed.status !== 'valid') throw new Error(`Source invalid before ${edit.id}: ${JSON.stringify(parsed.diagnostics)}`)
     const selectedSlot = bodySlot(parsed.document.content.blocks, edit.kind)
     const utf16Offset = selectedSlot.visible.indexOf(edit.selected)

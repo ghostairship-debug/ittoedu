@@ -20,6 +20,7 @@ export interface FreeGestureStart {
   snapTargets?: readonly FreeObjectTarget[]
   designSize?: { width: number; height: number }
   snapTolerance?: number
+  allowReflection?: boolean
 }
 export interface FreeGestureUpdate { edits: ComponentEdit[]; guides: FreeSnapGuide[] }
 const frameEdit = (target: FreeObjectTarget, transform: AffineMatrix): ComponentEdit => ({ type: 'frame.set', instanceId: target.instanceId,
@@ -76,7 +77,9 @@ export class FreeTransformGesture {
       if (dragAxis === 'x') dy = 0
       else if (dragAxis === 'y') dx = 0
       if (!modifiers.alt) {
-        const boxes = (this.start.snapTargets ?? []).map(freeTargetBounds)
+        const moving = new Set(this.targets.map(target => target.instanceId))
+        const boxes = (this.start.snapTargets ?? []).filter(target => !moving.has(target.instanceId)
+          && !target.ancestors.some(id => moving.has(id))).map(freeTargetBounds)
         const xs = boxes.flatMap(box => [box.left, (box.left + box.right) / 2, box.right])
         const ys = boxes.flatMap(box => [box.top, (box.top + box.bottom) / 2, box.bottom])
         if (this.start.designSize) { xs.push(0, this.start.designSize.width / 2, this.start.designSize.width); ys.push(0, this.start.designSize.height / 2, this.start.designSize.height) }
@@ -93,6 +96,7 @@ export class FreeTransformGesture {
       if (this.start.mode === 'resize') {
         const inverse = invertMatrix(frameToSpaceMatrix(frame, target.parentToSurface))
         const factors = resizeFactors(this.start.handle!, frame.width, frame.height, transformPoint(inverse, this.initial), transformPoint(inverse, current), Boolean(modifiers.shift || target.preserveAspectRatio))
+        if (this.start.allowReflection === false) { factors.x = Math.max(.001, factors.x); factors.y = Math.max(.001, factors.y) }
         if (this.start.resizeMode === 'box') {
           const x = Math.max((this.start.minimumBoxSize?.width ?? 1) / frame.width, factors.x), y = Math.max((this.start.minimumBoxSize?.height ?? 1) / frame.height, factors.y)
           return { edits: [{ type: 'frame.set', instanceId: target.instanceId, frame: {
@@ -172,7 +176,7 @@ export class LocalAuthorTransformGesture {
   constructor(start: { geometry: ComponentAuthorGeometryObservation; kind: ComponentAuthorSpot['kind']; mode: FreeGestureStart['mode']; handle?: FreeResizeHandle;
     rootToSurface: AffineMatrix; surfaceToPointer: AffineMatrix; pointer: GeometryPoint }) {
     this.observation = structuredClone(start.geometry); this.mode = start.mode; this.kind = start.kind
-    this.gesture = new FreeTransformGesture({ ...start, resizeMode: start.kind === 'text' ? 'box' : 'scale',
+    this.gesture = new FreeTransformGesture({ ...start, allowReflection: false, resizeMode: start.kind === 'text' ? 'box' : 'scale',
       minimumBoxSize: { width: this.observation.boxInsets.width + 1, height: this.observation.boxInsets.height + 1 },
       targets: [{ instanceId: 'transient-local-geometry', frame: this.observation.frame,
         parentToSurface: multiplyMatrices(start.rootToSurface, this.observation.parentToInstance),

@@ -11,6 +11,7 @@ export interface ComponentPlayerObservation {
   readZoom(): number
   setZoom(zoom: number): void
   reset(): void
+  goToInstance?(instanceId: string | null, signal?: AbortSignal): boolean | Promise<boolean>
   subscribe?(listener: () => void): () => void
 }
 

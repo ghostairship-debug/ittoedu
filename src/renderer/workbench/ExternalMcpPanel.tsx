@@ -60,8 +60,8 @@ export function ExternalMcpPanel({ open, onClose, api }: ExternalMcpPanelProps) 
   return <div className="external-mcp-backdrop" onKeyDown={event => {
     if (event.key === 'Escape') { event.stopPropagation(); onClose() }
   }}>
-    <section className="external-mcp-panel" role="dialog" aria-modal="true" aria-label="外部 AI 连接" tabIndex={-1} ref={panel}>
-      <header><h2>外部 AI 连接</h2><button type="button" onClick={onClose} aria-label="关闭外部连接设置">关闭</button></header>
+    <section className="external-mcp-panel" role="dialog" aria-modal="true" aria-label="外部AI客户端接入（MCP）" tabIndex={-1} ref={panel}>
+      <header><h2>外部AI客户端接入（MCP）</h2><button type="button" onClick={onClose} aria-label="关闭外部连接设置">关闭</button></header>
       <p>Claude Code、Codex、OpenCode、Gemini CLI 等本机客户端可通过下面的固定地址连接正在运行的果铃，默认关闭；你主动开启后无需令牌，配置一次即可长期使用。果铃需由你启动；关闭窗口时可隐藏到系统托盘继续服务。</p>
       {!status ? <p role="status">正在读取状态…</p> : <>
         <div className="external-mcp-row" aria-label="服务状态">

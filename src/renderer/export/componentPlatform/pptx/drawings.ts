@@ -84,7 +84,9 @@ export function drawProfessional(target: PptxDrawingTarget, key: string, instanc
   if (key === 'guoling.table') {
     const data = tableOutputAdapter.data(tableDataSchema.parse(instance.data))
     const native = toNativeTableData(data)
-    const node = { ...native, style: { ...native.style, fontSize: native.style.fontSize * frame.scaleY,
+    const node = { ...native, rows: native.rows.map(row => ({ ...row, cells: row.cells.map(cell => ({ ...cell,
+      ...(cell.style?.fontSize !== undefined ? { style: { ...cell.style, fontSize: cell.style.fontSize * frame.scaleY } } : {}) })) })),
+      style: { ...native.style, fontSize: native.style.fontSize * frame.scaleY,
       borderWidth: data.style.borderWidth * frame.scaleY, cellPadding: data.style.cellPadding * frame.scaleY },
       ...base(instance, frame), type: 'table' as const }
     const layout = buildNativeTableLayout(node, { width: node.width, height: node.height })

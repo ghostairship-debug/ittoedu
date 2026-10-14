@@ -23,7 +23,7 @@
     "pretest:e2e": "npm run build:player && npm run check:examples && npm run prepare:lesson-demo:fixture && npm run build:component-catalog-matrix:fixture && npm run build:renderer && npm run build:electron",
     "test:e2e": "playwright test",
     "test:e2e:visible": "cross-env COURSEWARE_E2E_BACKGROUND=0 npm run test:e2e",
-    "build:player": "vite build --config vite.player.config.ts",
+    "build:player": "vite build --config vite.player.config.ts && node scripts/build-compiled-player.mjs",
     "build:renderer": "vite build --config vite.renderer.config.ts",
     "build:electron": "node scripts/build-electron.mjs",
     "start:quick": "node scripts/prepare-source-launch.mjs && cross-env VITE_DEV_SERVER_URL= tsx scripts/launch-electron.ts .",
@@ -85,6 +85,7 @@
     "verify:w3-portability": "npm run build:player && tsx scripts/verify-w3-windows-portability.ts"
   },
   "dependencies": {
+    "@babel/parser": "8.0.7",
     "@codemirror/lang-markdown": "6.5.2",
     "@codemirror/language": "6.12.4",
     "@codemirror/state": "6.7.4",

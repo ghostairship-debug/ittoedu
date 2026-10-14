@@ -68,7 +68,7 @@ export function AutomationTab() {
   const shared = {
     scene: view.scene, sourceNodes: view.nodes, sourceRules: view.rules,
     selectedNodeId: courseView.selectedInstanceId, sourceScope: scope,
-    activeStateId: courseView.activeStateId, scenes: view.scenes, locations: view.locations, sounds: project.media?.audio.sounds ?? {},
+    activeStateId: courseView.activeStateId, scenes: view.scenes, locations: view.locations, sounds: view.sounds,
     courseState: project.logic?.courseState ?? [],
     onAddRule: add, onUpdateRule: update, onDeleteRule: remove,
     onRunPreview: () => setCanvasMode('run'),

@@ -1,4 +1,5 @@
-import { strFromU8, unzip, unzipSync } from 'fflate'
+import { strFromU8 } from 'fflate'
+import { unzipFlatArchive } from './flatArchive'
 import { componentManifestSchema } from '../../../shared/componentSchema'
 import { COMPONENT_RUNTIME_API_VERSION, COMPONENT_SCHEMA_VERSION } from '../../../shared/constants'
 import { UserFacingError } from '../../../shared/errors'
@@ -29,7 +30,7 @@ export interface ParseComponentPackageOptions {
 }
 
 function componentArchiveFilter(): {
-  filter(file: { name: string; originalSize: number }): boolean
+  filter(file: { name: string }): boolean
 } {
   return {
     filter(file) {
@@ -303,7 +304,7 @@ export function importComponentPackage(
 
   let files: Record<string, Uint8Array>
   try {
-    files = unzipSync(bytes, componentArchiveFilter())
+    files = unzipFlatArchive(bytes, componentArchiveFilter())
   } catch (error) {
     if (error instanceof UserFacingError) throw error
     throw componentError('无法解压组件包，文件可能已损坏。', undefined, error)
@@ -319,28 +320,7 @@ export async function importComponentPackageAsync(
   if (bytes.byteLength === 0) {
     throw componentError('所选组件包为空。')
   }
-  const files = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
-    try {
-      unzip(bytes, componentArchiveFilter(), (error, output) => {
-        if (error) {
-          reject(
-            error instanceof UserFacingError
-              ? error
-              : componentError('无法解压组件包，文件可能已损坏。', undefined, error),
-          )
-          return
-        }
-        resolve(output)
-      })
-    } catch (error) {
-      reject(
-        error instanceof UserFacingError
-          ? error
-          : componentError('无法解压组件包，文件可能已损坏。', undefined, error),
-      )
-    }
-  })
-  return parseComponentPackageFiles(files, options)
+  return importComponentPackage(bytes, options)
 }
 
 export async function componentPackageSha256(bytes: Uint8Array): Promise<string> {

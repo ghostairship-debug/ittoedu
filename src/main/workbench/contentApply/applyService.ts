@@ -1,3 +1,4 @@
+import { componentDataEdits } from '../../../core/course/componentDataEdits'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { captureComponentOperation, equalComponentValue } from '../../../core/drivers/courseV10Operations'
@@ -5,7 +6,7 @@ import { assertCourseSurfaceRemoval, createCourseSurface } from '../../../core/c
 import type { InMemoryComponentCompilation } from '../../../core/components/compilation/InMemoryComponentCompilation'
 import { componentCompilationInput } from '../../../core/components/compilation/componentCompilationInput'
 import { sourceProgramAssembly, type HtmlAssembly } from '../../../core/contentApply/assembly/htmlAssembly'
-import { owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentDefinition, type ComponentEdit, type ComponentImplementation, type CourseProjectV10, type JsonObject, type JsonValue } from '../../../shared/contracts/component-platform'
+import { componentDefinitionBuiltinKey, owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentDefinition, type ComponentEdit, type ComponentImplementation, type CourseProjectV10, type JsonObject, type JsonValue } from '../../../shared/contracts/component-platform'
 import { prepareContentResources, type PreparedContentResources } from './resources/contentResources'
 import { extractHtmlResources, htmlResourceSources } from '../htmlImport/extractHtmlResources'
 import type { HtmlDesignMeasurementRequest } from './measurement/ElectronHtmlDesignMeasurement'
@@ -195,15 +196,18 @@ export class ContentApplyService {
               onMedia: () => { throw new Error('专业文字中的媒体应插入为独立对象，原文字与输入已保留') } })
               , previous.content)
             const value = textComponentDataSchema.parse({ ...previous, content })
-            if (!equalComponentValue(instance.data, value)) edits.push({ type: 'data.set', instanceId: input.instanceId, path: [], value: value as unknown as JsonValue })
+            if (!equalComponentValue(instance.data, value)) edits.push(...componentDataEdits(baseProject, { instanceId: input.instanceId, surfaceId: context?.surfaceId ?? surfaceId ?? null, stateId: context?.stateId ?? null }, { kind: 'replace', data: value as unknown as JsonValue }))
             continue
           }
-          if (definition?.implementation.kind !== 'builtin' || !['guoling.web', 'guoling.html-program'].includes(definition.implementation.key)) {
-            throw new Error(`目标需要自己的专业数据 adapter：${input.instanceId}`)
+          const webKey = implementation?.kind === 'builtin' ? implementation.key : componentDefinitionBuiltinKey(definition)
+          if (!['guoling.web', 'guoling.html-program'].includes(webKey ?? '')) {
+            const key = implementation?.kind === 'builtin' ? implementation.key : definition?.professionalBuiltinKey
+            const label = key === 'guoling.image' ? '图片' : definition?.title ?? key ?? '专业组件'
+            throw new Error(`当前 content 目标是${label}，不是可改写的 HTML 正文。修改该对象请使用其专业数据文件或 object.update；追加标题或其他新内容请使用 intent: "insert"；明确重做当前页才使用 intent: "redo"。原对象和本次输入已保留。`)
           }
           const previous = dataObject(instance.data)
           if (typeof previous.html !== 'string') throw new Error(`目标没有当前 HTML 数据：${input.instanceId}`)
-          const program = definition.implementation.key === 'guoling.html-program'
+          const program = webKey === 'guoling.html-program'
             || instance.implementationOverride?.kind === 'builtin' && instance.implementationOverride.key === 'guoling.html-program'
             || !!prepareMeasurementDocument({ html: input.html }).documentProgramReason
           const html = program ? input.html : preserveHtmlOuterStyle(previous.html, input.html)
@@ -215,12 +219,24 @@ export class ContentApplyService {
           const siblingFiles = new Map(retainedModules.map(([name, source]) => [name, new TextEncoder().encode(source)]))
           request.source.siblingFiles?.forEach((bytes, name) => siblingFiles.set(name, Uint8Array.from(bytes)))
           const { prepared, records } = await prepareHtmlAuthoring(html, siblingFiles, this.createId)
-          let authoringRecords = Object.keys(records).length ? records : previous.authoringRecords as unknown as HtmlAuthoringRecords | undefined
+          let authoringRecords = instance.authoring?.records
           if (authoringRecords && previous.html !== prepared.html) {
             const reconciled = reconcileSourceAuthoring(previous.html as string, prepared.html, authoringRecords)
             authoringRecords = reconciled.records
             if (reconciled.unresolved.length) diagnostics.push({ level: 'warning', code: 'author-record-source-unmapped', instanceId: input.instanceId,
               message: '源码已保留；部分已有作者对象在源码中没有唯一对应，原作者值和几何保留，需通过该对象的正式目标续改。', repairable: true })
+          }
+          if (Object.keys(records).length) {
+            const merged = { ...authoringRecords }
+            for (const [key, incoming] of Object.entries(records)) {
+              const previous = merged[key]
+              const sameObject = previous && previous.kind === incoming.kind && equalComponentValue(previous.scope ?? {}, incoming.scope ?? {})
+                && equalComponentValue(previous.binding, incoming.binding)
+              merged[key] = sameObject ? { ...incoming, overrides: { ...previous.overrides, ...incoming.overrides,
+                ...(previous.overrides.geometry || incoming.overrides.geometry ? { geometry: { ...previous.overrides.geometry, ...incoming.overrides.geometry } } : {}),
+                ...(previous.overrides.style || incoming.overrides.style ? { style: { ...previous.overrides.style, ...incoming.overrides.style } } : {}) } } : incoming
+            }
+            authoringRecords = merged
           }
           // A content edit keeps this instance's existing CSS. Its real font/
           // image consumers must keep their declaration when only HTML changed.
@@ -234,14 +250,17 @@ export class ContentApplyService {
           diagnostics.push(...resourceDiagnostics(prepared, input.instanceId))
           const add = (path: string[], value: JsonValue) => { if (!equalComponentValue(previous[path[0]!], value)) edits.push({ type: 'data.set', instanceId: input.instanceId, path, value }) }
           add(['html'], prepared.html)
-          if (authoringRecords) add(['authoringRecords'], authoringRecords as unknown as JsonValue)
-          if (prepared.modules || previous.modules) add(['modules'], prepared.modules ?? {})
+          if (authoringRecords && !equalComponentValue(instance.authoring?.records, authoringRecords)) edits.push({ type: 'authoring.set', instanceId: input.instanceId,
+            path: ['records'], value: authoringRecords as unknown as JsonValue })
+          // Preparation owns the executable closure, not the author's complete
+          // module workspace. Unreferenced and unfinished drafts remain editable.
+          if (prepared.modules || previous.modules) add(['modules'], { ...Object.fromEntries(retainedModules), ...prepared.modules })
           const bindings = { ...dataBindings(previous), ...resources.bindings }
           if (Object.keys(bindings).length) add(['resourceBindings'], bindings)
           if (prepared.resourceSources.length || previous.resourceSources) add(['resourceSources'], prepared.resourceSources.map(({ url, usage }) => ({ url, usage })))
           if (program) {
             unverified = true
-            if (definition.implementation.key === 'guoling.web' && !instance.implementationOverride) edits.push({ type: 'implementation.set', instanceId: input.instanceId,
+            if (definition.implementation.kind === 'builtin' && definition.implementation.key === 'guoling.web' && !instance.implementationOverride) edits.push({ type: 'implementation.set', instanceId: input.instanceId,
               implementation: { kind: 'builtin', key: 'guoling.html-program' } })
           }
         }
@@ -278,7 +297,7 @@ export class ContentApplyService {
           flowPage: request.intent === 'redo' && request.target.kind === 'container' && request.target.container.kind === 'surface',
         })
         drafts = assembled.drafts ?? [assembled.draft]
-        if (Object.keys(records).length) for (const draft of drafts) dataObject(draft.data).authoringRecords = records as unknown as JsonValue
+        if (Object.keys(records).length) for (const draft of drafts) draft.authoring = { records }
         const persistSources = (draft: ContentObjectDraft): void => {
           const definition = assembled.definitions.find(value => value.id === draft.definitionId) ?? project.definitions[draft.definitionId]
           if (prepared.resourceSources.length && definition?.implementation.kind === 'builtin'
@@ -357,7 +376,10 @@ export class ContentApplyService {
       try {
         const compiled = await this.options.compilation.compile(componentCompilationInput(project, implementation, resources))
         const compilationDiagnostics = compiled.status === 'ready' ? compiled.artifact.diagnostics : compiled.diagnostics
-        diagnostics.push(...compilationDiagnostics.map(item => ({ level: item.severity, code: `component-${item.stage}`, message: item.message, repairable: true } as ContentApplyDiagnostic)))
+        diagnostics.push(...compilationDiagnostics.map(item => ({ level: item.severity, code: `component-${item.stage}`, message: item.message, repairable: true,
+          ...(item.file !== undefined ? { file: item.file } : {}), ...(item.line !== undefined ? { line: item.line } : {}),
+          ...(item.column !== undefined ? { column: item.column } : {}), ...(item.lineText !== undefined ? { lineText: item.lineText } : {}),
+        } as ContentApplyDiagnostic)))
         // Author source remains in the canonical operation; a failed compile is never called usable.
         failed ||= compiled.status === 'failed'
       } catch (error) {
@@ -438,12 +460,18 @@ export class ContentApplyService {
   private planSurfaceApply(project: CourseProjectV10, request: SurfaceApplyRequest): ContentApplyPlan {
     const edits: ComponentEdit[] = [], insertedIds: string[] = []
     if (request.intent === 'surface.add') {
-      const index = request.beforeSurfaceId === undefined ? project.surfaces.length
-        : project.surfaces.findIndex(surface => surface.id === request.beforeSurfaceId)
-      if (index < 0) throw new Error('插入位置的页面已不存在')
-      const surface = createCourseSurface(project, { kind: request.kind, title: request.title,
-        referenceSurfaceId: request.beforeSurfaceId }, this.createId)
-      edits.push({ type: 'surface.insert', surface, index }); insertedIds.push(surface.id)
+      const pages = 'pages' in request ? request.pages : [request]
+      if (!pages.length) throw new Error('批量建页需要至少一个页面')
+      const planning = structuredClone(project)
+      for (const page of pages) {
+        const index = page.beforeSurfaceId === undefined ? planning.surfaces.length
+          : planning.surfaces.findIndex(surface => surface.id === page.beforeSurfaceId)
+        if (index < 0) throw new Error('插入位置的页面已不存在')
+        const surface = createCourseSurface(planning, { kind: page.kind, title: page.title,
+          referenceSurfaceId: page.beforeSurfaceId }, this.createId)
+        edits.push({ type: 'surface.insert', surface, index }); insertedIds.push(surface.id)
+        planning.surfaces.splice(index, 0, surface)
+      }
     } else {
       const index = project.surfaces.findIndex(surface => surface.id === request.surfaceId)
       const surface = project.surfaces[index]

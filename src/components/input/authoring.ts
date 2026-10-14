@@ -36,8 +36,9 @@ export function inputContentPatchEdits(instance: ComponentInstance,
   return [{ type: 'data.set', instanceId: instance.id, path: [], value: JSON.parse(JSON.stringify(data)) as JsonValue }]
 }
 export type ComponentInputRuleRequest = { mode: 'apply' | 'rebuild'; config: InputRuleConfig } | { mode: 'unmanage' }
-export function componentInputRuleEdits(target: Pick<CapturedCourseTarget, 'project' | 'surfaceId' | 'instanceId'>, request: ComponentInputRuleRequest, references?: CourseAuthoringReferences): ComponentEdit[] {
-  const { project, surfaceId, instanceId } = target
+export function componentInputRuleEdits(target: Pick<CapturedCourseTarget, 'project' | 'surfaceId' | 'instanceId'> & Partial<Pick<CapturedCourseTarget, 'editingProject'>>, request: ComponentInputRuleRequest, references?: CourseAuthoringReferences): ComponentEdit[] {
+  const { surfaceId, instanceId } = target
+  const project = target.editingProject ?? target.project
   if (!instanceId || !project.instances[instanceId]) throw new Error('填空目标已不存在')
   const instance = project.instances[instanceId], current = inputDataSchema.parse(instance.data), content = inputAnswerContent(instanceId, current)
   const owner = inputRuleOwner(project, surfaceId, instanceId), rules = interactionRules(interactionBehavior(project, owner))

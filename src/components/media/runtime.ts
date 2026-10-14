@@ -1,12 +1,14 @@
 import type { ComponentInstance, ComponentMediaRegistration, ComponentRuntimeImplementation } from '../../shared/contracts/component-platform'
-import type { AudioManager, BackgroundAudioInterruption, VideoAudioRegistration } from '../../player/AudioManager'
+import type { AudioManager, BackgroundAudioInterruption, VideoAudioRegistration, ManagedMediaPlayback } from '../../player/AudioManager'
+import { registerPublishedCaptureResource } from '../../player/surfaces/publishedCapture'
 import { audioDataSchema, videoDataSchema, type AudioData, type VideoData, type MediaData, type MediaKind } from './data'
 import { applyMediaPresentation, renderMedia, type ResolveMediaAssetUrl } from './render'
 
 export interface MediaDiagnostic { code: string; assetId: string; message: string }
 export interface MediaRuntimeOptions {
   resolveAssetUrl: ResolveMediaAssetUrl
-  audioManager?: Pick<AudioManager, 'muted' | 'masterVolume' | 'channelVolume' | 'registerAudio' | 'registerVideo' | 'beginBackgroundAudioInterruption'>
+  audioManager?: Pick<AudioManager, 'muted' | 'masterVolume' | 'channelVolume' | 'registerPlaybackAudio' | 'registerPlaybackVideo' | 'beginBackgroundAudioInterruption'>
+  isPlaying?(): boolean
   subscribeAudioChange?: (listener: () => void) => () => void
   report?: (diagnostic: MediaDiagnostic) => void
 }
@@ -23,7 +25,7 @@ function createMediaRuntimeImplementation(kind: MediaKind, options: MediaRuntime
       let current: ComponentInstance<MediaData> = { ...instance, data: parse(instance.data) }
       let disposed = false, source: string | undefined, sourceVersion = 0
       let videoRegistration: VideoAudioRegistration | undefined
-      let audioRegistration: ReturnType<AudioManager['registerAudio']> | undefined
+      let audioRegistration: ReturnType<AudioManager['registerPlaybackAudio']> | undefined
       // Local professional defaults register their DOM directly. Source realms
       // register the same playback through the document's public media port.
       const sourcePort = options.audioManager ? undefined : mediaPort
@@ -31,7 +33,46 @@ function createMediaRuntimeImplementation(kind: MediaKind, options: MediaRuntime
       let interruption: BackgroundAudioInterruption | undefined
       let clipEnded = false
       let hasStarted = false
+      let playing = options.isPlaying?.() ?? !sourcePort, playVersion = 0, metadataReady = false
+      let effectiveLoop = current.data.loop
       const live = () => !disposed && scope.isActive() && !scope.signal.aborted
+      const captureWaits = new Set<() => void>()
+      const waitForDecodedFrame = (): Promise<void> => {
+        if (kind !== 'video' || ('poster' in current.data && current.data.poster.mode === 'image')) return Promise.resolve()
+        if (!live()) return Promise.reject(new Error('视频捕获已取消'))
+        if (!source || media.error) return Promise.reject(new Error(`视频资源 ${current.data.assetId} 无法加载或解码，原始引用已保留。`))
+        if (metadataReady && media.readyState >= 2 && !media.seeking) return Promise.resolve()
+        const version = sourceVersion, previousPreload = media.preload
+        return new Promise<void>((resolve, reject) => {
+          let settled = false
+          const events = ['loadeddata', 'canplay', 'seeked', 'error', 'emptied', 'abort']
+          const finish = (error?: Error) => {
+            if (settled) return
+            settled = true
+            for (const event of events) media.removeEventListener(event, check)
+            scope.signal.removeEventListener('abort', cancel); captureWaits.delete(cancel)
+            if (version === sourceVersion) media.preload = previousPreload
+            if (error) reject(error); else resolve()
+          }
+          const cancel = () => finish(new Error('视频捕获已取消或资源已更新'))
+          const check = () => {
+            if (!live() || version !== sourceVersion) { cancel(); return }
+            if (media.error || !source) { finish(new Error(`视频资源 ${current.data.assetId} 无法加载或解码，原始引用已保留。`)); return }
+            if (metadataReady && media.readyState >= 2 && !media.seeking) finish()
+          }
+          for (const event of events) media.addEventListener(event, check)
+          scope.signal.addEventListener('abort', cancel, { once: true }); captureWaits.add(cancel)
+          // Metadata preload need not decode a frame. Request it only for the
+          // visible capture target, without starting playback or changing time.
+          media.preload = 'auto'
+          check()
+        })
+      }
+      const releaseCapture = kind === 'video' ? registerPublishedCaptureResource(root, {
+        waitForCaptureReady: waitForDecodedFrame, waitForObservationReady: waitForDecodedFrame,
+      }) : undefined
+      const canPlay = () => live() && (options.isPlaying?.() ?? playing)
+      const syncLoop = () => { media.loop = effectiveLoop && current.data.startTime === 0 && current.data.endTime === null }
       const report = (code: string, message: string, assetId = current.data.assetId) => {
         if (!live()) return
         media.dataset.mediaDiagnostic = code
@@ -41,7 +82,7 @@ function createMediaRuntimeImplementation(kind: MediaKind, options: MediaRuntime
       const interruptBackground = (mode: 'none' | 'duck' | 'pause' | 'stop') =>
         options.audioManager?.beginBackgroundAudioInterruption(mode) ?? sourcePort?.interruptBackground(mode)
       const reportState = (event?: 'play' | 'pause' | 'ended') => sourceRegistration?.report({
-        paused: media.paused, currentTime: media.currentTime, loop: media.loop,
+        paused: media.paused, currentTime: media.currentTime, loop: effectiveLoop,
       }, event)
       const syncVolume = () => {
         if (!live()) return
@@ -62,48 +103,52 @@ function createMediaRuntimeImplementation(kind: MediaKind, options: MediaRuntime
         catch (error) { report('media-seek-unavailable', `媒体定位尚不可用：${error instanceof Error ? error.message : String(error)}`); return false }
       }
       const play = async (): Promise<boolean> => {
-        if (!live() || !source) return false
-        const version = sourceVersion
+        if (!canPlay() || !source) return false
+        const version = sourceVersion, request = ++playVersion
         try {
           await media.play()
-          return live() && version === sourceVersion && !media.paused
+          if (!canPlay() || version !== sourceVersion || request !== playVersion) { media.pause(); return false }
+          return !media.paused
         } catch (error) {
           if (live() && version === sourceVersion) report('media-playback-blocked', `浏览器未能播放媒体：${error instanceof Error ? error.message : String(error)}`)
           return false
         }
       }
-      const notify = (event: string) => {
+      const notify = (event: string, seconds = media.currentTime) => {
         if (live()) {
           reportState(event === 'started' ? 'play' : event === 'paused' ? 'pause' : event === 'ended' ? 'ended' : undefined)
-          scope.events.emit(`${kind}.${event}`, { instanceId: current.id, seconds: media.currentTime })
+          scope.events.emit(`${kind}.${event}`, { instanceId: current.id, seconds })
         }
       }
       const listeners: [string, EventListener][] = []
       const listen = (name: string, listener: EventListener) => { media.addEventListener(name, listener); listeners.push([name, listener]) }
       listen('loadedmetadata', () => {
         if (!live()) return
+        metadataReady = true
         const data = current.data
-        seek('poster' in data && data.poster.mode === 'video-frame' && !data.autoplay ? data.poster.time : data.startTime)
+        if (!hasStarted && media.currentTime === 0) seek('poster' in data && data.poster.mode === 'video-frame' && !data.autoplay ? data.poster.time : data.startTime)
         reportState()
-        if (data.autoplay) play()
+        if (data.autoplay && canPlay()) void play()
       })
       listen('play', () => {
-        if (!live()) return
+        if (!canPlay()) { media.pause(); return }
         const data = current.data
         clipEnded = false
-        if (!hasStarted || media.currentTime < data.startTime || (data.endTime !== null && media.currentTime >= data.endTime)) seek(data.startTime)
+        if (media.currentTime < data.startTime || (data.endTime !== null && media.currentTime >= data.endTime)) seek(data.startTime)
         hasStarted = true
         if ('backgroundAudioMode' in data && !interruption) interruption = interruptBackground(data.backgroundAudioMode)
         notify('started')
       })
-      listen('pause', () => { releaseInterruption(); notify('paused') })
-      listen('ended', () => { releaseInterruption(); notify('ended'); if (live() && current.data.loop) { seek(current.data.startTime); play() } })
+      listen('pause', () => { playVersion++; releaseInterruption(); notify('paused') })
+      listen('ended', () => { releaseInterruption(); notify('ended'); if (canPlay() && effectiveLoop) { seek(current.data.startTime); void play() } })
       listen('timeupdate', () => {
         if (!live()) return
         const data = current.data
         if (!media.paused && media.currentTime < data.startTime) seek(data.startTime)
         if (data.endTime !== null && media.currentTime >= data.endTime && !clipEnded) {
-          if (data.loop && data.endTime > data.startTime) { seek(data.startTime); if (media.paused) play() }
+          // Deliver the clip endpoint before rewinding, so sparse browser samples cannot skip it.
+          notify('time', data.endTime)
+          if (effectiveLoop && data.endTime > data.startTime) { seek(data.startTime); if (media.paused && canPlay()) void play() }
           else { clipEnded = true; media.pause(); if (media.currentTime !== data.endTime) seek(data.endTime); releaseInterruption(); notify('ended') }
         }
         if (data.endTime === null || media.currentTime < data.endTime) clipEnded = false
@@ -111,6 +156,19 @@ function createMediaRuntimeImplementation(kind: MediaKind, options: MediaRuntime
       })
       listen('click', () => { if (live() && current.data.clickToToggle && !current.data.showControls) { if (media.paused) play(); else media.pause() } })
       listen('error', () => { releaseInterruption(); report('media-resource-unavailable', `媒体资源 ${current.data.assetId} 无法加载或解码，原始引用已保留。`) })
+      const unsubscribePlaying = scope.events.subscribe('__runtime.playing', value => {
+        playing = value === true
+        if (!playing) { playVersion++; media.pause() }
+        else if (metadataReady && current.data.autoplay && !hasStarted) void play()
+      })
+      const playback: ManagedMediaPlayback = {
+        get paused() { return media.paused }, get currentTime() { return media.currentTime }, set currentTime(value) { seek(value) },
+        get loop() { return effectiveLoop }, set loop(value) { effectiveLoop = value; syncLoop() },
+        get volume() { return media.volume }, set volume(value) { media.volume = value },
+        get muted() { return media.muted }, set muted(value) { media.muted = value },
+        async play() { if (!await play()) throw new Error('媒体播放未完成') }, pause() { playVersion++; media.pause() },
+        addEventListener: media.addEventListener.bind(media), removeEventListener: media.removeEventListener.bind(media), dispatchEvent: media.dispatchEvent.bind(media),
+      }
       const unsubscribeAudio = options.subscribeAudioChange?.(syncVolume)
       const update = (next: ComponentInstance<MediaData>) => {
         if (!live()) return
@@ -118,16 +176,18 @@ function createMediaRuntimeImplementation(kind: MediaKind, options: MediaRuntime
         const previous = current.data
         current = { ...next, data: parse(next.data) }
         const data = current.data
+        if (previous.loop !== data.loop) effectiveLoop = data.loop
         if (previous.startTime !== data.startTime || previous.endTime !== data.endTime) clipEnded = false
         delete media.dataset.mediaDiagnostic
         applyMediaPresentation(media, data, options.resolveAssetUrl)
+        media.autoplay = false; syncLoop()
         try { media.playbackRate = data.playbackRate }
         catch (error) { report('media-playback-rate-unavailable', `浏览器不支持当前播放速度：${error instanceof Error ? error.message : String(error)}`) }
-        if (kind === 'video' && options.audioManager && !videoRegistration) videoRegistration = options.audioManager.registerVideo(media as HTMLVideoElement, { nodeId: instance.id, volume: data.volume, muted: data.muted })
-        if (kind === 'audio' && options.audioManager && !audioRegistration && 'channel' in data) audioRegistration = options.audioManager.registerAudio(media as HTMLAudioElement, { nodeId: instance.id, soundId: instance.id, channel: data.channel, volume: data.volume, muted: data.muted })
+        if (kind === 'video' && options.audioManager && !videoRegistration) videoRegistration = options.audioManager.registerPlaybackVideo(playback, { nodeId: instance.id, volume: data.volume, muted: data.muted })
+        if (kind === 'audio' && options.audioManager && !audioRegistration && 'channel' in data) audioRegistration = options.audioManager.registerPlaybackAudio(playback, { nodeId: instance.id, soundId: instance.id, channel: data.channel, volume: data.volume, muted: data.muted })
         if (sourcePort && !sourceRegistration) sourceRegistration = sourcePort.register({
           kind, channel: 'channel' in data ? data.channel : 'video', volume: data.volume, muted: data.muted,
-          initial: { paused: media.paused, currentTime: media.currentTime, loop: media.loop },
+          initial: { paused: media.paused, currentTime: media.currentTime, loop: effectiveLoop },
         }, async command => {
           if (!live()) return false
           try {
@@ -135,7 +195,7 @@ function createMediaRuntimeImplementation(kind: MediaKind, options: MediaRuntime
             if (command.type === 'pause') media.pause()
             else if (command.type === 'seek') {
               if (!seek(command.seconds)) return false
-            } else if (command.type === 'loop') media.loop = command.value
+            } else if (command.type === 'loop') { effectiveLoop = command.value; syncLoop() }
             else {
               // These are effective values from the sole AudioManager, including
               // mute, channel mix, duck and fades. Do not multiply them again.
@@ -155,7 +215,8 @@ function createMediaRuntimeImplementation(kind: MediaKind, options: MediaRuntime
         }
         const url = options.resolveAssetUrl(data.assetId)
         if (url !== source) {
-          sourceVersion++; clipEnded = false; hasStarted = false; media.pause(); releaseInterruption(); source = url
+          for (const cancel of captureWaits) cancel()
+          sourceVersion++; playVersion++; clipEnded = false; hasStarted = false; metadataReady = false; media.pause(); releaseInterruption(); source = url
           if (url) media.src = url
           else media.removeAttribute('src')
         }
@@ -163,11 +224,14 @@ function createMediaRuntimeImplementation(kind: MediaKind, options: MediaRuntime
         if ('poster' in data && data.poster.mode === 'image' && data.poster.assetId && !options.resolveAssetUrl(data.poster.assetId)) report('media-poster-missing', `视频封面 ${data.poster.assetId} 缺失，视频内容仍可使用。`, data.poster.assetId)
         reportState()
       }
+      const unsubscribeResources = scope.events.subscribe('__runtime.resources', () => update(current))
       const dispose = () => {
         if (disposed) return
         disposed = true; sourceVersion++
+        for (const cancel of captureWaits) cancel()
+        releaseCapture?.()
         for (const [name, listener] of listeners) media.removeEventListener(name, listener)
-        unsubscribeAudio?.(); releaseInterruption(); videoRegistration?.dispose(); audioRegistration?.dispose(); sourceRegistration?.dispose()
+        unsubscribeAudio?.(); unsubscribePlaying(); unsubscribeResources(); releaseInterruption(); videoRegistration?.dispose(); audioRegistration?.dispose(); sourceRegistration?.dispose()
         media.pause(); media.removeAttribute('src'); media.load(); media.remove()
       }
       scope.cleanup(dispose)

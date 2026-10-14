@@ -1,7 +1,11 @@
+import { componentTextRelationshipCleanupEdits } from '../course/componentTextRelationshipEdits'
+import { allDocumentTextSlots, documentComponentDataVersions, inlineComponentIds } from '../../shared/document/textInteraction'
 import { componentAssetIds } from '../components/library/references'
+import { liveSourceOwners } from '../components/compilation/liveSourceReferences'
+import type { DocumentResources } from '../../shared/workbench/document'
 import type { ComponentAppliedChanges, ComponentEdit, ComponentExpectation, ComponentOperationBatch } from '../../shared/contracts/component-platform/operations'
 import { componentDefinitionBuiltinKey, componentIsLocked, resolveComponentPresentation, containerChildIds, owningContainer, type ComponentContainer, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
-import { componentOperationBatchSchema, courseProjectV10Schema, jsonValueSchema } from '../../shared/contracts/component-platform/schema'
+import { componentOperationBatchSchema, componentAuthoringSchema, courseProjectV10Schema, jsonValueSchema } from '../../shared/contracts/component-platform/schema'
 import { componentInteractionDataSchema } from '../../shared/componentInteractionData'
 import type { ComponentFrame } from '../../shared/contracts/component-platform/frame'
 import { DEFAULT_SLIDE_CANVAS, sharedSlideFrameMapping } from '../../shared/slideCanvas'
@@ -59,7 +63,7 @@ export function componentValueAt(project: CourseProjectV10, path: string[]): { e
 export function componentFieldIdentityPaths(project: CourseProjectV10, path: readonly string[]): string[][] {
   const identities: string[][] = []
   // An internal authorKey is local to its instance; rebinding it changes the selected object.
-  if (path[0] === 'instances' && path[2] === 'data' && path[3] === 'authoringRecords' && path.length > 5) {
+  if (path[0] === 'instances' && path[2] === 'authoring' && path[3] === 'records' && path.length > 5) {
     const record = path.slice(0, 5)
     identities.push(...['kind', 'scope', 'binding'].map(field => [...record, field]))
   }
@@ -278,7 +282,7 @@ function dependencyPaths(project: CourseProjectV10, edits: ComponentEdit[]): str
       for (const id of removed) paths.push(['instances', id])
       paths.push(...removalReferencePaths(project, removed, edit.surfaceId))
       for (const instance of Object.values(project.instances)) if (instance.attachments?.some(attachment => removed.has(attachment.instanceId)
-        || attachment.target.kind === 'instance' && removed.has(attachment.target.instanceId)
+        || (attachment.target.kind === 'instance' || attachment.target.kind === 'text-range') && removed.has(attachment.target.instanceId)
         || attachment.target.kind === 'surface' && attachment.target.surfaceId === edit.surfaceId)) paths.push(['instances', instance.id, 'attachments'])
       structure.surfaces = structure.surfaces.filter(value => value.id !== edit.surfaceId)
       for (const id of removed) delete structure.instances[id]
@@ -293,7 +297,11 @@ function dependencyPaths(project: CourseProjectV10, edits: ComponentEdit[]): str
       }
       paths.push(['@surface', edit.surfaceId, 'id'], ['@surface', edit.surfaceId, field]); continue
     }
-    if (edit.type === 'definition.set') { paths.push(['definitions', edit.definition.id]); continue }
+    if (edit.type === 'definition.set') {
+      paths.push(['definitions', edit.definition.id])
+      if (edit.sourceOriginId) paths.push(['definitions', edit.sourceOriginId])
+      continue
+    }
     if (edit.type === 'definition.remove') { paths.push(['definitions', edit.definitionId], ['instances'], ['definitions']); continue }
     if (edit.type === 'asset.remove') { paths.push(['assets', edit.assetId], ['instances'], ['surfaces'], ['background'], ['media'], ['theme']); continue }
     if (edit.type === 'asset.add' || edit.type === 'asset.replace') { paths.push(['assets', edit.asset.id]); continue }
@@ -308,10 +316,10 @@ function dependencyPaths(project: CourseProjectV10, edits: ComponentEdit[]): str
       continue
     }
     instanceDependency(edit.instanceId)
-    if (edit.type === 'data.set' || edit.type === 'style.set') {
-      const field = ['instances', edit.instanceId, edit.type === 'data.set' ? 'data' : 'style', ...edit.path]
+    if (edit.type === 'data.set' || edit.type === 'style.set' || edit.type === 'authoring.set') {
+      const field = ['instances', edit.instanceId, edit.type === 'data.set' ? 'data' : edit.type === 'authoring.set' ? 'authoring' : 'style', ...edit.path]
       paths.push(field)
-      if (edit.type === 'data.set') paths.push(...componentFieldIdentityPaths(project, field))
+      if (edit.type === 'data.set' || edit.type === 'authoring.set') paths.push(...componentFieldIdentityPaths(project, field))
     }
     else if (edit.type === 'frame.set') paths.push(['instances', edit.instanceId, 'frame'])
     else if (edit.type === 'instance.patch') for (const key of Object.keys(edit.patch)) paths.push(['instances', edit.instanceId, key])
@@ -341,7 +349,7 @@ function dependencyPaths(project: CourseProjectV10, edits: ComponentEdit[]): str
         for (const id of removed) paths.push(['instances', id])
         paths.push(...removalReferencePaths(project, removed))
         for (const instance of Object.values(project.instances)) if (instance.attachments?.some(attachment => removed.has(attachment.instanceId)
-          || attachment.target.kind === 'instance' && removed.has(attachment.target.instanceId))) paths.push(['instances', instance.id, 'attachments'])
+          || (attachment.target.kind === 'instance' || attachment.target.kind === 'text-range') && removed.has(attachment.target.instanceId))) paths.push(['instances', instance.id, 'attachments'])
         const sourceChildren = children(source)
         sourceChildren.splice(sourceChildren.indexOf(edit.instanceId), 1)
         for (const id of removed) delete structure.instances[id]
@@ -481,7 +489,7 @@ export function presentationComponentEdits(project: CourseProjectV10, surfaceId:
         changed = true; continue
       }
     }
-    if (!(edit.type === 'data.set' || edit.type === 'style.set' || edit.type === 'frame.set' || edit.type === 'instance.patch') || !project.instances[edit.instanceId]) {
+    if (!(edit.type === 'data.set' || edit.type === 'authoring.set' || edit.type === 'style.set' || edit.type === 'frame.set' || edit.type === 'instance.patch') || !project.instances[edit.instanceId]) {
       result.push(edit); continue
     }
     if (edit.type === 'instance.patch' && edit.patch.visible === undefined && edit.patch.playbackInitialVisibility === undefined) { result.push(edit); continue }
@@ -492,6 +500,9 @@ export function presentationComponentEdits(project: CourseProjectV10, surfaceId:
     if (edit.type === 'data.set') {
       if (!edit.path.length) override.data = structuredClone(edit.value)
       else { override.data ??= structuredClone(effective.instances[edit.instanceId].data); writeField(override.data, edit.path, edit.value) }
+    } else if (edit.type === 'authoring.set') {
+      if (!edit.path.length) override.authoring = componentAuthoringSchema.parse(edit.value)
+      else { override.authoring ??= structuredClone(effective.instances[edit.instanceId].authoring ?? {}); writeField(override.authoring, edit.path, edit.value) }
     } else if (edit.type === 'style.set') {
       if (!edit.path.length) {
         if (!edit.value || typeof edit.value !== 'object' || Array.isArray(edit.value)) throw new Error('样式必须是对象')
@@ -507,7 +518,17 @@ export function presentationComponentEdits(project: CourseProjectV10, surfaceId:
     changed = true
   }
   if (changed) result.push({ type: 'surface.presentation.set', surfaceId, presentation })
-  return result
+  // Reconcile the same body relations against the final author versions. Domain
+  // planners can run on a disposable effective projection before state retargeting.
+  const bodies = new Set(edits.filter((edit): edit is Extract<ComponentEdit, { type: 'data.set' }> => edit.type === 'data.set').map(edit => edit.instanceId))
+  const finalProject = { ...project, surfaces: project.surfaces.map(value => value.id === surfaceId ? { ...value, presentation } : value) }
+  const finalEffective = resolveComponentPresentation(finalProject, surfaceId, stateId)
+  const related = new Set<string>()
+  for (const id of bodies) for (const slot of allDocumentTextSlots(effective.instances[id]?.data)) for (const child of inlineComponentIds(slot.content)) related.add(child)
+  for (const instance of Object.values(project.instances)) if (instance.attachments?.some(attachment => attachment.target.kind === 'text-range' && bodies.has(attachment.target.instanceId))) related.add(instance.id)
+  const reconciled = [...bodies].flatMap(id => effective.instances[id] && finalEffective.instances[id]
+    ? componentTextRelationshipCleanupEdits(effective, id, finalEffective.instances[id].data, documentComponentDataVersions(finalProject, id)) : [])
+  return [...result.filter(edit => !((edit.type === 'instance.remove' || edit.type === 'attachments.set') && related.has(edit.instanceId))), ...reconciled]
 }
 
 function isFlowBody(project: CourseProjectV10, id: string): boolean {
@@ -564,7 +585,7 @@ function flowBodyContentEdit(project: CourseProjectV10, edit: ComponentEdit): bo
   return equalComponentValue(oldFields, newFields)
 }
 
-export function applyComponentOperation(project: CourseProjectV10, raw: ComponentOperationBatch): CourseProjectV10 {
+export function applyComponentOperation(project: CourseProjectV10, raw: ComponentOperationBatch, resources?:DocumentResources): CourseProjectV10 {
   const command = componentOperationBatchSchema.parse(raw)
   checkComponentExpectations(project, command)
   const next = structuredClone(project)
@@ -586,15 +607,27 @@ export function applyComponentOperation(project: CourseProjectV10, raw: Componen
       .flatMap(id => descendantIds(next, id)).forEach(requireUnlocked)
     if (edit.type === 'definition.set' || edit.type === 'definition.remove') {
       const id = edit.type === 'definition.set' ? edit.definition.id : edit.definitionId
-      for (const instance of Object.values(next.instances)) if (instance.definitionId === id
-        && (edit.type === 'definition.remove' || !equalComponentValue(next.definitions[id], edit.definition))) requireUnlocked(instance.id)
+      const before=next.definitions[id]
+      const implementationOnly=edit.type==='definition.set' && before && equalComponentValue({...before,implementation:null},{...edit.definition,implementation:null})
+      const changed=edit.type==='definition.remove' || !equalComponentValue(before,edit.definition)
+      if(changed)for(const instance of Object.values(next.instances)) {
+        const implementation=instance.implementationOverride ?? next.definitions[instance.definitionId]?.implementation
+        if(!implementation)continue
+        const direct=instance.definitionId===id && (!implementationOnly || !instance.implementationOverride)
+        if(direct || liveSourceOwners(next,implementation,resources).definitions.has(id))requireUnlocked(instance.id)
+      }
     }
     if (edit.type === 'component.files.set') for (const instance of Object.values(next.instances)) {
       const implementation = instance.implementationOverride ?? next.definitions[instance.definitionId]?.implementation
-      if (implementation?.kind === 'source' && implementation.workspace?.ownerId === edit.ownerId) requireUnlocked(instance.id)
+      if (implementation && liveSourceOwners(next,implementation,resources).owners.has(edit.ownerId)) requireUnlocked(instance.id)
     }
     if (edit.type === 'asset.replace') for (const instance of Object.values(next.instances)) {
-      if (componentAssetIds(instance, next.definitions[instance.definitionId]).includes(edit.asset.id)) requireUnlocked(instance.id)
+      const versions = [instance, ...next.surfaces.flatMap(surface => surface.presentation?.states.flatMap(state => {
+        const override = state.overrides[instance.id]
+        return override ? [{ ...instance, ...(override.data !== undefined ? { data: override.data } : {}),
+          ...(override.authoring !== undefined ? { authoring: override.authoring } : {}) }] : []
+      }) ?? [])]
+      if (versions.some(value => componentAssetIds(value, next.definitions[instance.definitionId],next,resources).includes(edit.asset.id))) requireUnlocked(instance.id)
     }
     if (edit.type === 'surface.presentation.set') {
       const old = next.surfaces.find(surface => surface.id === edit.surfaceId)?.presentation
@@ -632,7 +665,7 @@ export function applyComponentOperation(project: CourseProjectV10, raw: Componen
         next.surfaces.splice(index, 1)
         for (const id of removed) { delete next.instances[id]; removedInBatch.add(id) }
         for (const other of Object.values(next.instances)) if (other.attachments) other.attachments = other.attachments.filter(attachment => !removed.has(attachment.instanceId)
-          && !(attachment.target.kind === 'instance' && removed.has(attachment.target.instanceId))
+          && !((attachment.target.kind === 'instance' || attachment.target.kind === 'text-range') && removed.has(attachment.target.instanceId))
           && !(attachment.target.kind === 'surface' && attachment.target.surfaceId === edit.surfaceId))
       }
       continue
@@ -666,12 +699,13 @@ export function applyComponentOperation(project: CourseProjectV10, raw: Componen
     }
     if (edit.type === 'asset.remove') {
       if (!Object.hasOwn(next.assets, edit.assetId)) throw new Error('素材已不存在')
-      const referenced = Object.values(next.instances).some(instance => componentAssetIds(instance, next.definitions[instance.definitionId]).includes(edit.assetId))
+      const referenced = Object.values(next.instances).some(instance => componentAssetIds(instance, next.definitions[instance.definitionId],next,resources).includes(edit.assetId))
         || next.background?.assetId === edit.assetId || next.surfaces.some(surface => surface.background?.assetId === edit.assetId
           || surface.presentation?.states.some(state => state.background?.assetId === edit.assetId || Object.entries(state.overrides).some(([instanceId, override]) => {
-            if (override.data === undefined) return false
+            if (override.data === undefined && override.authoring === undefined) return false
             const instance = next.instances[instanceId]
-            return instance && componentAssetIds({ ...instance, data: override.data }, next.definitions[instance.definitionId]).includes(edit.assetId)
+            return instance && componentAssetIds({ ...instance, ...(override.data !== undefined ? { data: override.data } : {}),
+              ...(override.authoring !== undefined ? { authoring: override.authoring } : {}) }, next.definitions[instance.definitionId],next,resources).includes(edit.assetId)
           })))
         || Object.values(next.media?.audio.sounds ?? {}).some(sound => sound.assetId === edit.assetId)
         || Object.values(next.theme?.assets ?? {}).some(asset => asset.assetId === edit.assetId)
@@ -704,6 +738,9 @@ export function applyComponentOperation(project: CourseProjectV10, raw: Componen
     if (edit.type === 'data.set') {
       if (!edit.path.length) instance.data = structuredClone(edit.value)
       else writeField(instance.data, edit.path, edit.value)
+    } else if (edit.type === 'authoring.set') {
+      if (!edit.path.length) instance.authoring = componentAuthoringSchema.parse(edit.value)
+      else { instance.authoring ??= {}; writeField(instance.authoring, edit.path, edit.value) }
     } else if (edit.type === 'style.set') {
       if (!edit.path.length) {
         if (!edit.value || typeof edit.value !== 'object' || Array.isArray(edit.value)) throw new Error('样式必须是对象')
@@ -712,8 +749,10 @@ export function applyComponentOperation(project: CourseProjectV10, raw: Componen
     }
     else if (edit.type === 'frame.set') { if (edit.frame === null) delete instance.frame; else instance.frame = structuredClone(edit.frame) }
     else if (edit.type === 'instance.patch') {
-      const { visibility, name, ...patch } = edit.patch
+      const { visibility, name, viewportPinned, ...patch } = edit.patch
       Object.assign(instance, patch)
+      if (viewportPinned === null) delete instance.viewportPinned
+      else if (viewportPinned !== undefined) instance.viewportPinned = viewportPinned
       if (name === null) delete instance.name
       else if (name !== undefined) instance.name = name
       if (visibility === null) delete instance.visibility
@@ -750,7 +789,7 @@ export function applyComponentOperation(project: CourseProjectV10, raw: Componen
         const removed = new Set(descendantIds(next, edit.instanceId))
         for (const id of removed) { delete next.instances[id]; removedInBatch.add(id) }
         for (const other of Object.values(next.instances)) if (other.attachments) other.attachments = other.attachments.filter(attachment => !removed.has(attachment.instanceId)
-          && !(attachment.target.kind === 'instance' && removed.has(attachment.target.instanceId)))
+          && !((attachment.target.kind === 'instance' || attachment.target.kind === 'text-range') && removed.has(attachment.target.instanceId)))
       }
     }
   }

@@ -11,7 +11,7 @@ import { ViewObservationDesktopService } from '../observation/ViewObservationDes
 
 const captureSchema = z.object({ kind: z.literal('published'), published: publishedCourseV3Schema,
   surfaceId: z.string().min(1), stateId: z.string().min(1).nullable().optional(),
-  instanceId: z.string().min(1).optional(), spatialFrameId: z.string().min(1).optional() }).strict()
+  instanceId: z.string().min(1).optional(), spatialFrameId: z.string().min(1).optional(), staticExport: z.literal(true).optional() }).strict()
 
 /** A build-only, one-request worker. Its narrow preload cannot open or mutate documents. */
 export class HeadlessDocumentExportWorker {
@@ -35,7 +35,7 @@ export class HeadlessDocumentExportWorker {
     const capture = captureSchema.parse(input.capture)
     if (capture.published.id !== expected.projectId) throw new Error('输出捕获工程与当前导出请求不一致')
     const result = await this.observations.capturePublished({ published: capture.published, locationId: capture.surfaceId,
-      stateId: capture.stateId, instanceId: capture.instanceId, spatialFrameId: capture.spatialFrameId, signal: active.controller.signal })
+      stateId: capture.stateId, instanceId: capture.instanceId, spatialFrameId: capture.spatialFrameId, staticExport: true, signal: active.controller.signal })
     active.controller.signal.throwIfAborted()
     return { dataUrl: `data:image/png;base64,${Buffer.from(result.png).toString('base64')}`, width: result.width, height: result.height }
   }

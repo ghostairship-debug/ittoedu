@@ -113,8 +113,14 @@ export class ResidentMcpServer {
       const client = { name: typeof info.name === 'string' && info.name.trim() ? info.name.trim() : '未命名客户端', version: typeof info.version === 'string' ? info.version : '',
         ...(typeof info.title === 'string' && info.title.trim() ? { title: info.title.trim() } : {}) }
       let opened: { sessionId: string; instructions: string }
+      let disconnected = response.destroyed
+      const onClose = () => { disconnected = true }
+      response.once('close', onClose)
       try { opened = await this.handler.initialize(client) }
-      catch (cause) { return this.respond(response, 200, rpcError(id, cause instanceof McpProtocolError ? cause.code : -32603, cause instanceof Error ? cause.message : '初始化未完成')) }
+      catch (cause) { response.off('close', onClose); if (disconnected) return; return this.respond(response, 200, rpcError(id, cause instanceof McpProtocolError ? cause.code : -32603, cause instanceof Error ? cause.message : '初始化未完成')) }
+      if (disconnected || response.destroyed) { response.off('close', onClose); await this.handler.terminate(opened.sessionId); return }
+      response.off('close', onClose)
+      response.once('close', () => { if (!response.writableFinished) { this.sessions.delete(opened.sessionId); void this.handler.terminate(opened.sessionId) } })
       this.sessions.set(opened.sessionId, { version, initialized: false, inflight: new Map() })
       return this.respond(response, 200, { jsonrpc: '2.0', id, result: { protocolVersion: version, capabilities: { tools: { listChanged: true } },
         serverInfo: { name: 'guoling', title: '果铃', version: '2.0.0' }, instructions: opened.instructions } }, { 'MCP-Session-Id': opened.sessionId })

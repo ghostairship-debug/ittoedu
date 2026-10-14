@@ -1,9 +1,11 @@
-import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
+import { strFromU8, strToU8 } from 'fflate'
 import { courseProjectV10Schema } from '../../../shared/contracts/component-platform/schema'
 import type { CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
 import type { DocumentResources } from '../../../shared/workbench/document'
 import { assertSafeArchivePath } from './archivePath'
 import { validateDocumentResources } from '../resources'
+import { unzipFlatArchive, zipFlatArchive } from './flatArchive'
+import { normalizeWebAuthoring } from '../../components/authoring/normalizeWebAuthoring'
 
 export interface CourseProjectV10ArchiveData {
   project: CourseProjectV10
@@ -19,18 +21,19 @@ export function validateCourseProjectV10Archive(data: CourseProjectV10ArchiveDat
 export function validateCourseProjectV10Resources(project: CourseProjectV10, resources: DocumentResources): void {
   validateDocumentResources(resources)
   const claimed = new Set<string>(['project.json'])
-  const claim = (path: string) => {
+  const physicalClaimed = new Set<string>(['project.json'])
+  const claim = (path: string, virtual = false) => {
     assertSafeArchivePath(path, 'project')
-    const folded = path.toLowerCase()
-    if (claimed.has(folded)) throw new Error(`工程资源路径重复：${path}`)
-    claimed.add(folded)
+    if (claimed.has(path) || !virtual && physicalClaimed.has(path.toLowerCase())) throw new Error(`工程资源路径重复：${path}`)
+    claimed.add(path)
+    if (!virtual) physicalClaimed.add(path.toLowerCase())
   }
   for (const [id, asset] of Object.entries(project.assets)) {
     claim(asset.path)
     if (!Object.hasOwn(resources.assets, id)) throw new Error(`工程素材字节缺失：${id}`)
   }
   for (const id of Object.keys(resources.assets)) if (!Object.hasOwn(project.assets, id)) throw new Error(`素材字节缺少工程归属：${id}`)
-  for (const [id, files] of Object.entries(resources.components)) for (const path of Object.keys(files)) claim(`components/${encodeURIComponent(id)}/${path}`)
+  for (const [id, files] of Object.entries(resources.components)) for (const path of Object.keys(files)) claim(`components/${encodeURIComponent(id)}/${path}`, true)
 }
 
 export function createCourseProjectV10Archive(data: CourseProjectV10ArchiveData): Uint8Array {
@@ -39,16 +42,16 @@ export function createCourseProjectV10Archive(data: CourseProjectV10ArchiveData)
   files['project.json'] = strToU8(JSON.stringify(data.project))
   for (const [id, asset] of Object.entries(data.project.assets)) files[asset.path] = data.resources.assets[id]
   for (const [id, component] of Object.entries(data.resources.components)) for (const [path, bytes] of Object.entries(component)) files[`components/${encodeURIComponent(id)}/${path}`] = bytes
-  return zipSync(files)
+  return zipFlatArchive(files)
 }
 
 export function openCourseProjectV10Archive(bytes: Uint8Array): CourseProjectV10ArchiveData {
-  const files = unzipSync(bytes)
+  const files = unzipFlatArchive(bytes)
   for (const path of Object.keys(files)) assertSafeArchivePath(path, 'project', { allowDirectory: true })
   if (!files['project.json']) throw new Error('工程包缺少 project.json')
   const raw: unknown = JSON.parse(strFromU8(files['project.json']))
   if (!raw || typeof raw !== 'object' || !('schemaVersion' in raw) || raw.schemaVersion !== 10) throw new Error('此入口仅支持独立 Project V10；旧工程原件未改变')
-  const project = courseProjectV10Schema.parse(raw)
+  const project = normalizeWebAuthoring(courseProjectV10Schema.parse(raw))
   const resources: DocumentResources = { assets: Object.create(null), components: Object.create(null) }
   const consumed = new Set(['project.json'])
   for (const [id, asset] of Object.entries(project.assets)) {

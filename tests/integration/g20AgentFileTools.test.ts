@@ -3,6 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
+import { randomUUID } from 'node:crypto'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { createCourseProjectV10Archive, openCourseProjectV10Archive } from '../../src/core/drivers/codecs/courseProjectV10Archive'
+import type { WorkspaceFilesDependencies } from '../../src/main/workbench/WorkspaceFiles'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { AgentFileService } from '../../src/main/workbench/execution/AgentFileService'
 import { AgentFileMissingParent, AgentFileOutcomeUnknown, type AgentFileContext, type AgentFileService as AgentFilePort } from '../../src/core/tools/AgentFileTools'
@@ -19,14 +23,14 @@ import { SelectionContextController } from '../../src/renderer/workbench/Selecti
 const cleanup: string[] = []
 afterEach(async () => { for (const root of cleanup.splice(0)) await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }) })
 
-async function fixture() {
+async function fixture(fileDependencies: WorkspaceFilesDependencies = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'g20-files-')); cleanup.push(root)
   const workspace = path.join(root, 'workspace'), outside = path.join(root, 'outside')
   await mkdir(workspace); await mkdir(outside)
   await mkdir(path.join(workspace, 'lesson'))
   await writeFile(path.join(workspace, 'lesson', 'existing.md'), '正文')
   await writeFile(path.join(outside, 'external.md'), '外部')
-  const host = new DocumentHostService(path.join(root, 'journal'))
+  const host = new DocumentHostService(path.join(root, 'journal'), fileDependencies)
   const files = new AgentFileService(host)
   const context: AgentFileContext = { runId: 'run', workspaceRoot: workspace, conversationHome: { kind: 'file', path: 'lesson/existing.md' }, permission: 'workspace' }
   return { root, workspace, outside, host, files, context }
@@ -685,6 +689,82 @@ it('M27 stop before final file replacement leaves original bytes and no temp fil
     expectedVersion: version, content: 'after' }, 'stopped-write')).rejects.toThrow('任务已停止')
   expect(await readFile(filename, 'utf8')).toBe('before')
   expect((await readdir(path.dirname(filename))).some(name => name.endsWith('.tmp'))).toBe(false)
+})
+
+it.each([
+  ['file.rename', { path: 'lesson/existing.md', name: 'renamed.md' }, 'lesson/renamed.md'],
+  ['file.mkdir', { path: 'lesson', name: 'new-directory' }, 'lesson/new-directory'],
+  ['file.copy', { sources: ['lesson/existing.md'], destination: 'destination' }, 'destination/existing.md'],
+  ['file.move', { sources: ['lesson/existing.md'], destination: 'destination' }, 'destination/existing.md'],
+  ['file.trash', { paths: ['lesson/existing.md'] }, 'recycled.md'],
+  ['file.write', { path: 'lesson/new.txt', mode: 'create', content: 'after stop' }, 'lesson/new.txt'],
+] as const)('CA-101 %s queued before Stop does not commit after the queue is released', async (name, input, relativeTarget) => {
+  const recycled = vi.fn(async () => { throw new Error('Stopped trash must not reach the physical callback') })
+  const h = await fixture({ trashItem: recycled }); await mkdir(path.join(h.workspace, 'destination'))
+  let entered!: () => void, release!: () => void, checked!: () => void, stopped = false
+  const acquired = new Promise<void>(resolve => { entered = resolve }), held = new Promise<void>(resolve => { release = resolve })
+  const asserted = new Promise<void>(resolve => { checked = resolve })
+  const blocker = h.host.fileCoordinator.withFileOperation(async () => { entered(); await held })
+  await acquired
+  const assertActive = vi.fn(() => { checked(); if (stopped) throw new Error('任务已停止') })
+  const pending = h.files.execute({ ...h.context, assertActive }, name, input, `queued-stop-${name}`)
+  try {
+    await asserted; stopped = true; release()
+    expect((await pending).data).toMatchObject({ operation: { status: 'failed' } })
+    expect(assertActive.mock.calls.length).toBeGreaterThan(1)
+    expect(await readFile(path.join(h.workspace, 'lesson/existing.md'), 'utf8')).toBe('正文')
+    await expect(stat(path.join(h.workspace, relativeTarget))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(recycled).not.toHaveBeenCalled()
+    expect((await readdir(path.join(h.workspace, 'lesson'))).some(value => value.endsWith('.tmp'))).toBe(false)
+    expect((await readdir(path.join(h.workspace, 'destination'))).some(value => value.endsWith('.tmp'))).toBe(false)
+  } finally { release(); await blocker }
+})
+
+it('CA-101 rename checks Stop after asynchronous coordination and immediately before physical rename', async () => {
+  const h = await fixture()
+  await h.host.open(path.join(h.workspace, 'lesson/existing.md'))
+  let entered!: () => void, release!: () => void, stopped = false
+  const acquired = new Promise<void>(resolve => { entered = resolve }), held = new Promise<void>(resolve => { release = resolve })
+  const bindings = h.host.registry.withFileBindings.bind(h.host.registry)
+  const waiting = vi.spyOn(h.host.registry, 'withFileBindings').mockImplementationOnce(async (...args) => { entered(); await held; return bindings(...args) })
+  const assertActive = vi.fn(() => { if (stopped) throw new Error('任务已停止') })
+  const pending = h.files.execute({ ...h.context, assertActive }, 'file.rename', { path: 'lesson/existing.md', name: 'late.md' }, 'late-stop-rename')
+  try {
+    await acquired; stopped = true; release()
+    expect((await pending).data).toMatchObject({ operation: { status: 'failed' } })
+    expect(assertActive.mock.calls.length).toBeGreaterThan(1)
+    expect(await readFile(path.join(h.workspace, 'lesson/existing.md'), 'utf8')).toBe('正文')
+    await expect(stat(path.join(h.workspace, 'lesson/late.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+  } finally { release(); waiting.mockRestore() }
+})
+
+it.each([10, 12])('CA-103 adopts disk revision %s with truthful dirty/save facts and a cold reopen', async diskRevision => {
+  const h = await fixture(), filename = path.join(h.workspace, 'lesson/course.glx')
+  const project = { ...createBlankCourseProjectV10('local title', randomUUID), revision: 10 }, resources = { assets: {}, components: {} }
+  await writeFile(filename, createCourseProjectV10Archive({ project, resources }))
+  const opened = await h.host.open(filename), session = h.host.registry.get(opened.documentId)
+  await writeFile(filename, createCourseProjectV10Archive({ project: { ...project, title: 'external title', revision: diskRevision }, resources }))
+  await h.files.execute(h.context, 'file.observe', { path: filename }, 'compare-course')
+  const adopted = (await h.files.execute(h.context, 'file.reconcile', { path: filename, choice: 'disk' }, 'adopt-course')).data
+  const adoptedRevision = Math.max(11, diskRevision)
+  expect(adopted).toMatchObject({ status: 'reconciled', revision: adoptedRevision, dirty: diskRevision < adoptedRevision, undoDepth: 1 })
+  expect(session.read()).toMatchObject({ revision: adoptedRevision, model: { project: { title: 'external title', revision: adoptedRevision } } })
+  expect(session.committedChangesSince(10)).toMatchObject([{ result: { beforeRevision: 10, revision: adoptedRevision } }])
+  const coldBeforeSave = new DocumentHostService(path.join(h.root, 'cold-before-save'))
+  expect(await coldBeforeSave.open(filename)).toMatchObject({ revision: diskRevision, dirty: false, model: { project: { title: 'external title', revision: diskRevision } } })
+  const saved = await session.save()
+  expect(saved).toMatchObject({ revision: adoptedRevision, dirty: false })
+  expect(openCourseProjectV10Archive(await readFile(filename)).project).toMatchObject({ title: 'external title', revision: adoptedRevision })
+  const coldSaved = new DocumentHostService(path.join(h.root, 'cold-saved'))
+  expect(await coldSaved.open(filename)).toMatchObject({ revision: adoptedRevision, dirty: false })
+  const undo = await session.execute({ documentId: session.documentId, epoch: saved.epoch, baseRevision: adoptedRevision,
+    operationId: 'undo-adoption', actor: 'human', mutation: { type: 'undo' } })
+  expect(undo).toMatchObject({ status: 'applied', revision: adoptedRevision + 1 })
+  expect(session.read()).toMatchObject({ dirty: true, model: { project: { title: 'local title' } } })
+  const redo = await session.execute({ documentId: session.documentId, epoch: saved.epoch, baseRevision: adoptedRevision + 1,
+    operationId: 'redo-adoption', actor: 'human', mutation: { type: 'redo' } })
+  expect(redo).toMatchObject({ status: 'applied', revision: adoptedRevision + 2 })
+  expect(session.read()).toMatchObject({ model: { project: { title: 'external title' } } })
 })
 
 it.each([

@@ -39,11 +39,14 @@ export function SceneStateButtons({ documentId, surfaceId, compact = false }: { 
     try { const target = state.courseBridge.captureTarget(documentId); return { ...target, surfaceId, activeStateId: null, editingProject: target.project } }
     catch (error) { state.setError(error instanceof Error ? error.message : '状态目标已改变'); return null }
   }
-  const select = (stateId: string | null) => {
+  const select = async (stateId: string | null) => {
     const state = useEditorStore.getState()
     if (state.courseView.activeDocumentId !== documentId) return
-    state.courseBridge.selectPresentationState(documentId, stateId, surfaceId)
-    state.setEditingScope('scene')
+    try {
+      const target = state.courseBridge.captureTarget(documentId)
+      await state.setActivePresentationState(stateId, { ...target, surfaceId })
+      state.setEditingScope('scene')
+    } catch (error) { state.setError(error instanceof Error ? error.message : String(error)) }
   }
   const add = () => { const target = capture(); if (target) void useEditorStore.getState().addPresentationState(undefined, target) }
   const duplicate = (stateId: string) => { const target = capture(); if (target) void useEditorStore.getState().duplicatePresentationState(stateId, target) }

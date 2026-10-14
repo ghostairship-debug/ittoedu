@@ -13,17 +13,125 @@ import { escapeHtmlAttribute, escapeHtmlText } from '../../shared/html/htmlSourc
 import { locateHtmlAuthorRecordSource } from '../../shared/html/htmlSourceLocator'
 import { componentAuthorRecordSchema } from '../../shared/contracts/component-platform/schema'
 import { documentTextLength, documentTextContentSchema, documentVisibleTextSlots, walkDocument, normalizeDocumentText, sliceDocumentText, plainDocumentText, type FlowTextContent } from '../../shared/document/content'
+import { replaceDocumentText } from '../../shared/document/textInteraction'
 import { projectFlowDocument } from '../components/document/flowDocumentProjection'
-import { documentSourceEdits } from '../../shared/document/sourceMerge'
+import { documentSourceEdits, sequenceSourceEdits } from '../../shared/document/sourceMerge'
 import { parseDocumentMarkdown } from '../../shared/document/markdown'
 import { inlineHtml } from '../../shared/document/html'
 import { readHtmlDocumentText, type DocumentHtmlNode } from '../../shared/document/htmlText'
 import { parse, parseFragment, type DefaultTreeAdapterTypes } from 'parse5'
 import { spatialGraphItem, spatialGraphDependencyPaths } from '../course/courseSpatialEdits'
 import { formatTextContent, type TextStyle } from './textFormatting'
+import { authorSpotEdits } from '../components/authoring/componentAuthorEdits'
+import { readAuthorSourceText } from '../components/authoring/sourceAuthorText'
+import type { ComponentAuthorField, ComponentAuthorSpot } from '../../shared/contracts/component-platform/runtime'
 import { allocateTextSelectionReplacement } from '../../shared/document/textSelectionReplacement'
 
 export type CourseInstanceTarget = Extract<ToolTarget, { kind: 'course-instance' }>
+
+/** Freeze only author coordinates; runtime bounds and mount identity are never author authority. */
+export function courseAuthorFieldTarget(surfaceId: string, spot: ComponentAuthorSpot, stateId?: string | null): CourseInstanceTarget {
+  const { kind, authorKey, scope, binding, bindingStatus, fieldScope, dataPath, sourceRegion, initialValue } = spot
+  if (kind === 'text' && dataPath?.length && !sourceRegion && fieldScope !== 'authoring')
+    return { kind: 'course-instance', surfaceId, instanceId: spot.instanceId, stateId: stateId ?? null,
+      fieldScope: fieldScope ?? 'data', dataPath: [...dataPath] }
+  if (!sourceRegion && !dataPath?.length && !(authorKey && binding)) throw new Error('此处没有可编辑的精确作者地址')
+  if (typeof initialValue !== 'string') throw new Error('此处请使用专业字段编辑入口')
+  const authorField: Omit<ComponentAuthorField, 'initialValue'> & { initialValue: string } = structuredClone({ kind, authorKey, scope, binding, bindingStatus, fieldScope, dataPath, sourceRegion, initialValue })
+  return { kind: 'course-instance', surfaceId, instanceId: spot.instanceId, stateId: stateId ?? null, authorField }
+}
+function authorFieldSource(model: DocumentModel, target: CourseInstanceTarget): string {
+  const { instance, project } = courseInstanceContext(model, { ...target, authorField: undefined, dataPath: undefined })
+  const region = target.authorField?.sourceRegion
+  if (!region) throw new Error('此处没有精确源码地址')
+  if (region.kind === 'data') {
+    const value = componentValueAt(project, ['instances', instance.id, 'data', ...region.path ?? []]).value
+    if (typeof value !== 'string') throw new Error('作者字段源文已不存在')
+    return value
+  }
+  const implementation = instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation
+  if (implementation?.kind !== 'source') throw new Error('作者字段源码载体已变化')
+  if (implementation.workspace && model.kind === 'course-v10') {
+    const bytes = model.resources.components[implementation.workspace.ownerId]?.[region.path?.join('/') || implementation.workspace.entry]
+    if (!bytes) throw new Error('作者字段源码文件已不存在')
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  }
+  if (typeof implementation.source !== 'string') throw new Error('作者字段源码已不存在')
+  return implementation.source
+}
+function authorFieldIdentity(field: ComponentAuthorField) {
+  return { kind: field.kind, authorKey: field.authorKey, scope: field.scope, binding: field.binding,
+    fieldScope: field.fieldScope, dataPath: field.dataPath,
+    sourceRegion: field.sourceRegion && { kind: field.sourceRegion.kind, path: field.sourceRegion.path, encoding: field.sourceRegion.encoding } }
+}
+export function readCourseAuthorField(model: DocumentModel, target: CourseInstanceTarget) {
+  const field = target.authorField
+  if (!field) throw new Error('目标没有作者字段')
+  const context = courseInstanceContext(model, { ...target, authorField: undefined, dataPath: undefined })
+  const recorded = field.authorKey ? context.instance.authoring?.records?.[field.authorKey] : undefined
+  if (recorded && field.binding && !equalComponentValue({ kind: recorded.kind, scope: recorded.scope, binding: recorded.binding },
+    { kind: field.kind, scope: field.scope, binding: field.binding })) throw new Error('作者字段绑定已变化，请重新选择')
+  const override = recorded?.overrides[field.kind === 'text' ? 'text' : 'src']
+  if (field.sourceRegion && override !== undefined) {
+    return { ...context, value: override }
+  }
+  if (field.sourceRegion) {
+    const source = authorFieldSource(model, target), { start, end, encoding } = field.sourceRegion
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end > source.length) throw new Error('作者字段源码范围已失效')
+    return { ...context, value: readAuthorSourceText(source, field.sourceRegion) }
+  }
+  if (field.authorKey && field.binding) {
+    const current = context.instance.authoring?.records?.[field.authorKey]
+    if (current && !equalComponentValue({ kind: current.kind, scope: current.scope, binding: current.binding },
+      { kind: field.kind, scope: field.scope, binding: field.binding })) throw new Error('作者字段绑定已变化，请重新选择')
+    return { ...context, value: current?.overrides[field.kind === 'text' ? 'text' : 'src'] ?? field.binding.baseline }
+  }
+  if (!field.dataPath) throw new Error('作者字段没有可编辑地址')
+  const value = componentValueAt(context.project, ['instances', context.instance.id, field.fieldScope ?? 'data', ...field.dataPath])
+  if (!value.exists) throw new Error('作者字段已不存在')
+  return { ...context, value: value.value }
+}
+/** Current narrow identity dependencies become the final transaction CAS. */
+export function courseAuthorFieldReadPaths(model: DocumentModel, target: CourseInstanceTarget): string[][] {
+  const { instance } = readCourseAuthorField(model, target), field = target.authorField!
+  const base = ['instances', instance.id], paths = [[...base, 'definitionId'], ['@owner', instance.id]]
+  if (field.sourceRegion?.kind === 'implementation') {
+    paths.push([...base, 'implementationOverride'])
+    if (!instance.implementationOverride) paths.push(['definitions', instance.definitionId, 'implementation'])
+  } else if (field.sourceRegion) paths.push([...base, 'data', ...field.sourceRegion.path ?? []])
+  else if (field.authorKey) {
+    const record = [...base, 'authoring', 'records', field.authorKey]
+    paths.push(...['kind', 'scope', 'binding'].map(key => [...record, key]), [...record, 'overrides', field.kind === 'text' ? 'text' : 'src'])
+  } else if (field.dataPath) paths.push([...base, field.fieldScope ?? 'data', ...field.dataPath])
+  if (target.stateId) {
+    const index = model.kind === 'course-v10' ? model.project.surfaces.find(surface => surface.id === target.surfaceId)?.presentation?.states.findIndex(state => state.id === target.stateId) : -1
+    if (index === undefined || index < 0) throw new Error('展示状态已不存在')
+    const state = ['@surface', target.surfaceId, 'presentation', 'states', String(index)]
+    paths.push([...state, 'id'])
+    // Record and data values can be supplied by this state. Capture the matching
+    // override leaves too, including absence; another state remains independent.
+    for (const path of [...paths]) if (path[0] === 'instances' && ['data', 'authoring'].includes(path[2]))
+      paths.push([...state, 'overrides', instance.id, ...path.slice(2)])
+  }
+  return paths
+}
+export function replaceCourseAuthorField(model: DocumentModel, target: CourseInstanceTarget, content: string): ComponentEdit[] {
+  const { project, instance, value } = readCourseAuthorField(model, target)
+  if (model.kind !== 'course-v10' || componentIsLocked(project, instance.id)) throw new Error('所选内容已锁定，请先解锁')
+  if (target.authorField!.kind !== 'text') throw new Error('图片字段不能作为正文替换')
+  return authorSpotEdits(project, { ...target.authorField!, instanceId: instance.id, initialValue: value as JsonValue }, content, model.resources)
+}
+function mapCourseAuthorField(before: DocumentModel, after: DocumentModel, target: CourseInstanceTarget, followInside: boolean): CourseInstanceTarget {
+  const field = target.authorField!
+  if (!field.sourceRegion) { readCourseAuthorField(after, target); return target }
+  const region = field.sourceRegion, fromSource = authorFieldSource(before, target), toSource = authorFieldSource(after, target)
+  const range = mapSequenceRange(fromSource, toSource, { from: region.start, to: region.end }, followInside)
+  const next = { ...target, authorField: { ...field, sourceRegion: { ...region, start: range.from, end: range.to } } }
+  const record = after.kind === 'course-v10' && field.authorKey ? courseInstanceContext(after, { ...target, authorField: undefined }).instance.authoring?.records?.[field.authorKey] : undefined
+  if (followInside && record) next.authorField.binding = structuredClone(record.binding)
+  return { ...next, authorField: { ...next.authorField, initialValue: readCourseAuthorField(after, next).value as string } }
+}
+
 export type HtmlAuthorFieldTarget = Extract<ToolTarget, { kind: 'html-author-field' }>
 /** A dynamic HTML spot owns a decoded content field; the software wrapper is never model content. */
 export function readHtmlAuthorField(model: DocumentModel, target: HtmlAuthorFieldTarget) {
@@ -191,6 +299,7 @@ export function flowTextSelectionTarget(model: DocumentModel, surfaceId: string,
   const project = resolveComponentPresentation(model.project, surfaceId, stateId ?? null)
   const entries: { blockId: string; key: string; length: number; barrier?: boolean }[] = []
   walkDocument(projectFlowDocument(project, surfaceId).content.blocks, block => {
+    if(project.instances[block.id]?.visible===false)return
     const slots = documentVisibleTextSlots(block)
     if (!slots.length) entries.push({ blockId: block.id, key: '', length: 0, barrier: true })
     for (const slot of slots) entries.push({ blockId: block.id, key: slot.key, length: documentTextLength(slot.content) })
@@ -211,6 +320,7 @@ export function flowTextSelectionTarget(model: DocumentModel, surfaceId: string,
       : entry.key.startsWith('cell:') ? (() => { const [rowId, columnId] = JSON.parse(entry.key.slice(5)) as string[]; return { kind: 'cell' as const, rowId, columnId } })()
       : { kind: 'field', field: entry.key as Extract<DocumentSlot, { kind: 'field' }>['field'] }
     const caption = slot.kind === 'field' && slot.field === 'caption' && instance.flowLayout?.caption !== undefined
+      && componentDefinitionBuiltinKey(project.definitions[instance.definitionId])!=='guoling.table'
     const from = index === 0 ? start.offset : 0, to = index === selected.length - 1 ? end.offset : entry.length
     if (from < 0 || to > entry.length || from > to) throw new Error('正文范围已失效')
     return { kind: 'course-instance', surfaceId, instanceId: instance.id, stateId: stateId ?? null,
@@ -218,12 +328,30 @@ export function flowTextSelectionTarget(model: DocumentModel, surfaceId: string,
   }).filter(target => target.from < target.to)
   return textSelectionTarget(model, targets)
 }
+/** Preserve a rectangular PM cell selection as its real cell fields, never a whole-table grant. */
+export function flowCellSelectionTargets(model:DocumentModel,surfaceId:string,selection:Extract<DocumentSelection,{kind:'cells'}>,stateId?:string|null):CourseInstanceTarget[] {
+  if(model.kind!=='course-v10')throw new Error('当前文档不是 Project V10')
+  const project=resolveComponentPresentation(model.project,surfaceId,stateId??null)
+  let table:Extract<import('../../shared/document/content').DocumentBlock,{type:'table'}>|undefined
+  walkDocument(projectFlowDocument(project,surfaceId).content.blocks,block=>{if(block.id===selection.tableId && block.type==='table')table=block})
+  if(!table || project.instances[table.id]?.visible===false)throw new Error('所选表格已不存在或不可见')
+  const row=(id:string)=>table!.rows.findIndex(value=>value.id===id),column=(id:string)=>table!.columns.findIndex(value=>value.id===id)
+  const a=row(selection.anchor.rowId),b=row(selection.head.rowId),c=column(selection.anchor.columnId),d=column(selection.head.columnId)
+  if([a,b,c,d].some(index=>index<0))throw new Error('所选单元格已不存在')
+  return documentVisibleTextSlots(table).flatMap(slot=>{
+    const cell=slot.tableCell;if(!cell?.rowId)return []
+    const r=row(cell.rowId),col=column(cell.columnId)
+    if(r<Math.min(a,b)||r>Math.max(a,b)||col<Math.min(c,d)||col>Math.max(c,d))return []
+    const length=documentTextLength(slot.content)
+    return [{kind:'course-instance' as const,surfaceId,instanceId:table!.id,stateId:stateId??null,dataPath:courseInstanceSlotPath(project.instances[table!.id].data,{kind:'cell',rowId:cell.rowId,columnId:cell.columnId}),...(length ? {from:0,to:length}:{})}]
+  })
+}
 export function instanceRootOwner(project: CourseProjectV10, instanceId: string) {
   let owner = owningContainer(project, instanceId)
   while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
   return owner
 }
-export function courseInstanceContext(model: DocumentModel, target: CourseInstanceTarget) {
+export function courseInstanceContext(model: DocumentModel, target: CourseInstanceTarget): { project: CourseProjectV10; instance: CourseProjectV10['instances'][string]; surface: CourseProjectV10['surfaces'][number]; owner: NonNullable<ReturnType<typeof instanceRootOwner>>; value?: unknown } {
   if (model.kind !== 'course-v10') throw new Error('对象目标需要 Project V10 文档')
   if (target.stateId && !model.project.surfaces.find(value => value.id === target.surfaceId)?.presentation?.states.some(value => value.id === target.stateId)) throw new Error('捕获的展示状态已不存在')
   const project = resolveComponentPresentation(model.project, target.surfaceId, target.stateId ?? null)
@@ -231,11 +359,12 @@ export function courseInstanceContext(model: DocumentModel, target: CourseInstan
   const surface = model.project.surfaces.find(value => value.id === target.surfaceId)
   const owner = instanceRootOwner(model.project, target.instanceId)
   if (!instance || !surface || !owner || owner.kind === 'surface' && owner.surfaceId !== surface.id) throw new Error('对象不属于捕获的表面')
+  if (target.authorField) return readCourseAuthorField(model, target)
   const field = target.dataPath === undefined ? undefined : componentValueAt(project, ['instances', instance.id, target.fieldScope ?? 'data', ...target.dataPath])
-  if (field && !field.exists && (target.fieldScope ?? 'data') === 'data' && target.dataPath?.length === 4
-    && target.dataPath[0] === 'authoringRecords' && target.dataPath[2] === 'overrides') {
+  if (field && !field.exists && target.fieldScope === 'authoring' && target.dataPath?.length === 4
+    && target.dataPath[0] === 'records' && target.dataPath[2] === 'overrides') {
     const record = componentAuthorRecordSchema.safeParse(componentValueAt(project,
-      ['instances', instance.id, 'data', 'authoringRecords', target.dataPath[1]]).value)
+      ['instances', instance.id, 'authoring', 'records', target.dataPath[1]]).value)
     const property = record.success ? record.data.kind === 'text' ? 'text' : 'src' : null
     if (record.success && target.dataPath[3] === property) {
       field.exists = true
@@ -251,12 +380,41 @@ export function courseInstanceFieldIdentity(model: DocumentModel, target: Course
   const { project } = courseInstanceContext(model, target)
   if (!target.dataPath) return []
   const path = ['instances', target.instanceId, target.fieldScope ?? 'data', ...target.dataPath]
-  return componentFieldIdentityPaths(project, path).map(identity => ({ path: identity, ...componentValueAt(project, identity) }))
+  return componentFieldIdentityPaths(project, path).map(identity => ({ path: semanticComponentPath(project,identity), ...componentValueAt(project, identity) }))
+}
+function semanticComponentPath(project:CourseProjectV10,path:readonly string[]):string[] {
+  return path.map((part,index)=>{
+    const parent=componentValueAt(project,path.slice(0,index)).value
+    if(!Array.isArray(parent) || !/^\d+$/.test(part))return part
+    const value=parent[Number(part)] as Record<string,unknown>|undefined
+    return value && typeof value.id==='string' ? JSON.stringify({id:value.id,...(typeof value.columnId==='string' ? {columnId:value.columnId}:{})}):part
+  })
+}
+/** Relocate through the same captured row/item/cell identities across array insertion/reorder. */
+export function relocateCourseInstanceFieldTarget(before:DocumentModel,after:DocumentModel,target:CourseInstanceTarget):CourseInstanceTarget {
+  if(!target.dataPath)return target
+  const old=courseInstanceContext(before,target),next=courseInstanceContext(after,{...target,dataPath:undefined})
+  let a:unknown=old.instance[target.fieldScope ?? 'data'],b:unknown=next.instance[target.fieldScope ?? 'data']
+  const path:string[]=[]
+  for(const part of target.dataPath) {
+    let key=part
+    if(Array.isArray(a) && /^\d+$/.test(part)) {
+      const value=a[Number(part)] as Record<string,unknown>|undefined
+      if(value && typeof value==='object' && typeof value.id==='string') {
+        const index=Array.isArray(b) ? b.findIndex(item=>item?.id===value.id && (value.columnId===undefined || item?.columnId===value.columnId)):-1
+        if(index<0)throw new Error('原文字字段所在行、项或单元格已不存在')
+        key=String(index)
+      }
+    }
+    path.push(key);a=a && typeof a==='object' ? (a as any)[part]:undefined;b=b && typeof b==='object' ? (b as any)[key]:undefined
+  }
+  return courseInstanceTextTarget(after,{...target,dataPath:path})
 }
 /** The effective native text implementation has one body field; other objects keep explicit slots. */
 export function courseInstanceTextTarget(model: DocumentModel, target: CourseInstanceTarget): CourseInstanceTarget {
+  if (target.authorField) return target
   if (target.dataPath !== undefined || target.fieldScope === 'flowLayout') {
-    if (target.dataPath && target.fieldScope !== 'flowLayout' && model.kind === 'course-v10') {
+    if (target.dataPath && (target.fieldScope ?? 'data') === 'data' && model.kind === 'course-v10') {
       const project = resolveComponentPresentation(model.project, target.surfaceId, target.stateId ?? null), instance = project.instances[target.instanceId]
       if (instance && componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.table') {
         const field = tableCellTextField(instance.data, target.dataPath)
@@ -278,6 +436,7 @@ function isHtmlSourceTextTarget(model: DocumentModel, target: CourseInstanceTarg
 }
 /** A real data field, never text searched elsewhere in an implementation or the document. */
 export function readCourseInstanceText(model: DocumentModel, target: CourseInstanceTarget): string | FlowTextContent | null {
+  if (target.authorField?.kind === 'image') return null
   target = courseInstanceTextTarget(model, target)
   const { value } = courseInstanceContext(model, target)
   if (target.fieldScope === 'flowLayout' && (target.dataPath?.length !== 1 || target.dataPath[0] !== 'caption')) return null
@@ -330,7 +489,7 @@ export function prepareExecutionContentOutput(snapshot: DocumentSnapshot, target
 /** Content-only replacement is partitioned by the existing text diff; no source gap or platform address comes from the model. */
 export function planTextSelectionReplacement(model: DocumentModel, target: Extract<ToolTarget, { kind: 'text-selection' }>, content: string,
   format: 'text' | 'html' = 'text'): { target: TextFragmentTarget; content: string; format: 'text' | 'html' }[] {
-  const atoms = (value: FlowTextContent) => value.inlines.map(inline => inline.type === 'math' ? '\uFFFC' : inline.text).join('')
+  const atoms = (value: FlowTextContent) => value.inlines.map(inline => inline.type !== 'text' ? '\uFFFC' : inline.text).join('')
   const fragments = target.fragments.map(fragment => {
     const selected = readTarget(model, fragment.target)
     return { ...fragment, text: typeof selected === 'string' ? selected : atoms(selected as FlowTextContent) }
@@ -429,9 +588,7 @@ export function replaceCourseInstanceText(model: DocumentModel, target: CourseIn
     const selected = selection.inlines.find(inline => inline.type === 'text')
     const replacement = format === 'html' ? parseEditableInlineHtml(text, selection).inlines
       : [{ type: 'text' as const, text, ...(selected?.style ? { style: selected.style } : {}), ...(selected?.link ? { link: selected.link } : {}), ...(selected?.code ? { code: true } : {}) }]
-    next = normalizeDocumentText({ inlines: [...sliceDocumentText(value, 0, from).inlines,
-      ...replacement,
-      ...sliceDocumentText(value, to, documentTextLength(value)).inlines] })
+    next = replaceDocumentText(value, from, to, { inlines: replacement })
   }
   return courseInstanceTextEdit(model, target, next)
 }
@@ -445,6 +602,7 @@ export function courseInstanceTextEdit(model: DocumentModel, target: CourseInsta
     const upgrade = tableCellRichTextEdit(instance.data, target.dataPath, value)
     if (upgrade) return { type: 'data.set', instanceId: instance.id, path: upgrade.path, value: upgrade.value as unknown as JsonValue }
   }
+  if (target.fieldScope === 'authoring') return { type: 'authoring.set', instanceId: instance.id, path: [...target.dataPath], value: value as unknown as JsonValue }
   if ((target.fieldScope ?? 'data') === 'data') return { type: 'data.set', instanceId: instance.id, path: [...target.dataPath], value: value as unknown as JsonValue }
   if (!instance.flowLayout || target.dataPath.length !== 1 || target.dataPath[0] !== 'caption' || typeof value === 'string') throw new Error('当前 Flow 字段不是可编辑的富文本题注')
   return { type: 'instance.flowLayout.set', instanceId: instance.id, flowLayout: { ...structuredClone(instance.flowLayout), caption: structuredClone(value) } }
@@ -491,7 +649,7 @@ export function containsTarget(allowed: ToolTarget, target: ToolTarget, model?: 
   if (allowed.kind === 'course-instance' && target.kind === 'course-instance') {
     if (allowed.surfaceId !== target.surfaceId || (allowed.stateId ?? null) !== (target.stateId ?? null)) return false
     if (allowed.instanceId !== target.instanceId) {
-      if (allowed.dataPath || model?.kind !== 'course-v10') return false
+      if (allowed.authorField || allowed.dataPath || model?.kind !== 'course-v10') return false
       let owner = owningContainer(model.project, target.instanceId)
       while (owner?.kind === 'instance') {
         if (owner.instanceId === allowed.instanceId) return true
@@ -499,7 +657,10 @@ export function containsTarget(allowed: ToolTarget, target: ToolTarget, model?: 
       }
       return false
     }
+    if (allowed.authorField) return Boolean(target.authorField && equalComponentValue(authorFieldIdentity(allowed.authorField), authorFieldIdentity(target.authorField))
+      && equalComponentValue(allowed.authorField.sourceRegion, target.authorField.sourceRegion))
     if (!allowed.dataPath) return true
+    if (target.authorField) return false
     if ((allowed.fieldScope ?? 'data') !== (target.fieldScope ?? 'data')) return false
     if (!target.dataPath || !allowed.dataPath.every((part, index) => part === target.dataPath![index])) return false
     if (!isCourseInstanceRange(allowed)) return true
@@ -532,7 +693,10 @@ export function readTarget(model: DocumentModel, target: ToolTarget): unknown {
       if (content === null) throw new Error('所选字段不是文字')
       return sliceCourseInstanceText(content, target.from, target.to)
     }
-    return target.dataPath === undefined ? instance : value
+    if (target.authorField || target.dataPath !== undefined) return value
+    // Put existing geometry before large author data in every shared read projection.
+    const { id, definitionId, frame, ...fields } = instance
+    return { id, definitionId, ...(Object.hasOwn(instance, 'frame') ? { frame } : {}), ...fields }
   }
   if (target.kind === 'course-surface') {
     if (target.stateId && !model.project.surfaces.find(value => value.id === target.surfaceId)?.presentation?.states.some(value => value.id === target.stateId))
@@ -562,17 +726,29 @@ export function targetFootprint(model: DocumentModel, target: ToolTarget): strin
   }
   if (target.kind === 'course-instance' && model.kind === 'course-v10') {
     const context = courseInstanceContext(model, target)
+    if (target.authorField) {
+      const field = target.authorField
+      const sourceIdentity = !field.sourceRegion && field.binding && typeof (context.instance.data as any)?.html === 'string'
+        ? htmlAuthorFieldSourceIdentity((context.instance.data as any).html, { kind: 'html-author-field', authorKey: field.authorKey!, field: field.kind === 'text' ? 'text' : 'src', record: { kind: field.kind, scope: field.scope, binding: field.binding, overrides: {} } }) : undefined
+      return documentDigest({ definitionId: context.instance.definitionId, owner: context.owner, stateId: target.stateId ?? null,
+        identity: authorFieldIdentity(field), sourceIdentity, value: context.value })
+    }
+    const tableField=target.fieldScope!=='flowLayout' && target.dataPath && componentDefinitionBuiltinKey(context.project.definitions[context.instance.definitionId])==='guoling.table' && tableCellTextField(context.instance.data,target.dataPath)
+    const selected=isCourseInstanceRange(target) ? readTarget(model,target):undefined
+    const value=typeof selected==='string' ? normalizeDocumentText({inlines:[{type:'text',text:selected}]}):selected
+    const semanticPath=target.dataPath ? semanticComponentPath(context.project,['instances',target.instanceId,target.fieldScope ?? 'data',...target.dataPath]).slice(3):undefined
+    if(tableField && semanticPath)semanticPath[semanticPath.length-1]='#cell-text'
     return documentDigest({ definitionId: context.instance.definitionId, owner: owningContainer(model.project, target.instanceId),
-      stateId: target.stateId ?? null, ...(target.dataPath ? { fieldScope: target.fieldScope ?? 'data', dataPath: target.dataPath } : {}),
+      stateId: target.stateId ?? null, ...(target.dataPath ? { fieldScope: target.fieldScope ?? 'data', dataPath: semanticPath } : {}),
       ...(target.dataPath ? { fieldIdentity: courseInstanceFieldIdentity(model, target) } : {}),
-      value: isCourseInstanceRange(target) ? readTarget(model, target) : target.dataPath ? context.value : context.instance })
+      value: isCourseInstanceRange(target) ? value : target.dataPath ? context.value : context.instance })
   }
   if (target.kind === 'spatial-graph' && model.kind === 'course-v10') return documentDigest({
     graph: readTarget(model, target), dependencies: spatialGraphDependencyPaths(model.project, target).map(path => ({ path, ...componentValueAt(model.project, path) })) })
   return documentDigest(readTarget(model, target))
 }
 
-/** Conservative verified mapping for a single disjoint source edit; ambiguous/overlapping edits conflict. */
+/** Verified mapping of disjoint source edits; ambiguous/overlapping edits conflict. */
 export function mapMarkdownRange(before: string, after: string, range: Extract<ToolTarget, { kind: 'markdown-range' }>, followInside = false): typeof range {
   return mapSequenceRange(before, after, range, followInside)
 }
@@ -580,18 +756,46 @@ export function mapMarkdownRange(before: string, after: string, range: Extract<T
 export function mapExternalCourseTextTarget(before: DocumentModel, after: DocumentModel, target: ToolTarget, followInside = false): ToolTarget {
   if (target.kind === 'text-selection') return { ...target, fragments: target.fragments.map(fragment => ({ ...fragment,
     target: mapExternalCourseTextTarget(before, after, fragment.target, followInside) as typeof fragment.target })) }
-  if (!isCourseInstanceRange(target)) return target
-  const oldValue = readCourseInstanceText(before, target), newValue = readCourseInstanceText(after, target)
-  if (oldValue === null || newValue === null) throw new Error('正文目标已改变字段类型')
-  const tokens = (value: string | FlowTextContent): string[] => typeof value === 'string' ? Array.from(value)
-    : value.inlines.flatMap(inline => inline.type === 'text' ? Array.from(inline.text) : [`math:${inline.formulaId}:${inline.latex}`])
-  return mapSequenceRange(tokens(oldValue), tokens(newValue), target, followInside)
+  if (target.kind === 'course-instance' && target.authorField) return mapCourseAuthorField(before, after, target, followInside)
+  if(target.kind==='course-instance' && target.dataPath) {
+    const relocated=relocateCourseInstanceFieldTarget(before,after,target)
+    if(!isCourseInstanceRange(target))return relocated
+    const oldValue=readCourseInstanceText(before,target),newValue=readCourseInstanceText(after,relocated)
+    if(oldValue===null || newValue===null)throw new Error('正文目标已改变字段类型')
+    const tokens=(value:string|FlowTextContent):string[]=>typeof value==='string' ? Array.from(value):value.inlines.flatMap(inline=>inline.type==='text' ? Array.from(inline.text)
+      : inline.type==='math' ? [`math:${inline.formulaId}:${inline.latex}`] : [`component:${inline.instanceId}:${inline.accessibleText ?? ''}`])
+    return mapSequenceRange(tokens(oldValue),tokens(newValue),relocated as CourseInstanceRange,followInside)
+  }
+  return target
 }
 /** The same verified mapping for source code units or rich-text code-point/atom tokens. */
 export function mapSequenceRange<T, R extends { from: number; to: number }>(
   before: { readonly length: number; readonly [index: number]: T },
   after: { readonly length: number; readonly [index: number]: T }, range: R, followInside = false): R {
   if (before === after) return { ...range }
+  // Current-draft ACK follows this original field's complete edited range.
+  // Do this before diff decomposition: incidental equal letters inside a
+  // replacement must not split or shorten the manual draft being confirmed.
+  const currentEnd = range.to + after.length - before.length
+  if (followInside && currentEnd >= range.from && range.from <= before.length && range.to <= before.length
+    && Array.from({ length: range.from }, (_, index) => before[index] === after[index]).every(Boolean)
+    && Array.from({ length: before.length - range.to }, (_, index) => before[range.to + index] === after[currentEnd + index]).every(Boolean))
+    return { ...range, to: currentEnd }
+  const original = Array.from({ length: before.length }, (_, index) => before[index]!)
+  const edits = sequenceSourceEdits(original, Array.from({ length: after.length }, (_, index) => after[index]!))
+  if (edits.length > 1) {
+    let current = original, mapped = { ...range }
+    for (const edit of [...edits].reverse()) {
+      const next = [...current.slice(0, edit.from), ...edit.text, ...current.slice(edit.to)]
+      mapped = mapSequenceRange(current, next, mapped, followInside)
+      current = next
+    }
+    if (!followInside && ambiguousRangeCorrespondence(original,
+      Array.from({ length: after.length }, (_, index) => after[index]!), range, mapped,
+      edits.reduce((cost, edit) => cost + edit.to - edit.from + edit.text.length, 0)))
+      throw new Error('重复文字导致范围映射不唯一，请重新读取目标')
+    return mapped
+  }
   let from = 0
   while (from < before.length && from < after.length && before[from] === after[from]) from += 1
   if (from === before.length && from === after.length) return { ...range }
@@ -627,12 +831,52 @@ export function mapSequenceRange<T, R extends { from: number; to: number }>(
   throw new Error('正文目标已发生重叠修改，请重新读取目标')
 }
 
+/** Check alternate equally good alignments, without re-binding a target by text search. */
+function ambiguousRangeCorrespondence<T>(before: T[], after: T[], range: { from: number; to: number }, mapped: { from: number; to: number }, distance: number): boolean {
+  const selected = before.slice(range.from, range.to)
+  if (!selected.length) return false
+  const prefix = new Array<number>(selected.length).fill(0)
+  for (let index = 1, length = 0; index < selected.length; index++) {
+    while (length && selected[index] !== selected[length]) length = prefix[length - 1]!
+    if (selected[index] === selected[length]) length++
+    prefix[index] = length
+  }
+  const placements: number[] = []
+  for (let index = 0, length = 0; index < after.length; index++) {
+    while (length && after[index] !== selected[length]) length = prefix[length - 1]!
+    if (after[index] === selected[length]) length++
+    if (length === selected.length) { placements.push(index + 1 - length); length = prefix[length - 1]! }
+  }
+  if (placements.length < 2) return false
+  const leading = prefixEditCosts(before.slice(0, range.from), after, distance)
+  const trailing = prefixEditCosts(before.slice(range.to).reverse(), [...after].reverse(), distance)
+  const cost = (from: number) => (leading.get(from) ?? Infinity) + (trailing.get(after.length - from - selected.length) ?? Infinity)
+  const actual = cost(mapped.from)
+  return placements.some(from => from !== mapped.from && cost(from) <= actual)
+}
+
+/** Indel distance to each possible boundary, using the same bounded edit cost as the actual diff. */
+function prefixEditCosts<T>(before: T[], after: T[], limit: number): Map<number, number> {
+  let previous = new Map<number, number>()
+  for (let index = 0; index <= Math.min(after.length, limit); index++) previous.set(index, index)
+  for (let row = 1; row <= before.length; row++) {
+    const current = new Map<number, number>()
+    for (let column = Math.max(0, row - limit); column <= Math.min(after.length, row + limit); column++) {
+      const value = Math.min((previous.get(column) ?? Infinity) + 1, (current.get(column - 1) ?? Infinity) + 1,
+        column > 0 && before[row - 1] === after[column - 1] ? previous.get(column - 1) ?? Infinity : Infinity)
+      if (value <= limit) current.set(column, value)
+    }
+    previous = current
+  }
+  return previous
+}
+
 export function childTargets(model: DocumentModel, target: ToolTarget): { target: ToolTarget; label: string }[] {
   if (model.kind === 'course-v10' && (target.kind === 'course-surface' || target.kind === 'course-instance')) {
     readTarget(model, target)
     const project = target.stateId ? resolveComponentPresentation(model.project, target.surfaceId, target.stateId) : model.project
     const ids = target.kind === 'course-surface' ? project.surfaces.find(value => value.id === target.surfaceId)!.childIds
-      : target.dataPath ? [] : project.instances[target.instanceId].childIds ?? []
+      : target.authorField || target.dataPath ? [] : project.instances[target.instanceId].childIds ?? []
     const graphs = target.kind === 'course-surface' && !target.stateId
       ? (['paths', 'relations'] as const).flatMap(kind => (project.surfaces.find(value => value.id === target.surfaceId)?.spatial?.[kind] ?? []).map(item => ({
           target: { kind: 'spatial-graph' as const, surfaceId: target.surfaceId, graph: kind === 'paths' ? 'path' as const : 'relation' as const, graphId: item.id },

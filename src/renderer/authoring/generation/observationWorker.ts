@@ -3,6 +3,7 @@ import { mountPublishedCourseV3 } from '../../../player/componentPlatform/publis
 import { prepareComponentOutputRegion } from '../../../player/componentPlatform/outputCapture'
 import { installBundledFontFaces } from '../../../shared/fonts/installBundledFontFaces'
 import { ensureBundledFonts } from '../../../shared/fonts/ensureBundledFonts'
+import { installedBundledFontFaceCss } from '../../../shared/fonts/installedBundledFontFaceCss'
 
 export interface ObservationWorkerInput {
   published: PublishedCourseV3
@@ -13,6 +14,7 @@ export interface ObservationWorkerInput {
   bootstrapBaseUrl?: string
   instanceId?: string
   spatialFrameId?: string
+  staticExport?: true
 }
 export interface ObservationWorkerResult { locationId: string; stateId: string | null; structure: string[]; diagnostics: string[]; rect?: { x: number; y: number; width: number; height: number } }
 
@@ -30,6 +32,7 @@ export async function renderObservationSnapshot(input: ObservationWorkerInput): 
   document.body.replaceChildren(root)
   const diagnostics = [...(input.diagnostics ?? [])]
   const player = await mountPublishedCourseV3(input.published, root, { capture: true, keyboardNavigation: false,
+    fontFaceCss: installedBundledFontFaceCss(document),
     initialSurfaceId: input.locationId, initialStateId: input.stateId ?? null, report: message => diagnostics.push(message),
     componentBootstrap: input.bootstrapBaseUrl ? {
       async createComponentBootstrap({ leaseId, html }) { const url = new URL(encodeURIComponent(leaseId), input.bootstrapBaseUrl); url.searchParams.set('html', html); return { leaseId, url: url.href } },
@@ -37,7 +40,7 @@ export async function renderObservationSnapshot(input: ObservationWorkerInput): 
     } : undefined })
   try {
     const rect = await prepareComponentOutputRegion({ payload: input.published, root, player, surfaceId: input.locationId,
-      instanceId: input.instanceId, spatialFrameId: input.spatialFrameId })
+      instanceId: input.instanceId, spatialFrameId: input.spatialFrameId, staticExport: input.staticExport })
     const actual = player.navigation.read().locationId, stateId = player.navigation.currentStateId()
     if (actual !== input.locationId || stateId !== (input.stateId ?? null)) throw new Error('播放器未停留在请求的页面和状态')
     const structure = [surface.title, surface.kind]

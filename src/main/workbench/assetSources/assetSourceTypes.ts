@@ -4,7 +4,7 @@ export type OpenLibrary = 'openverse' | 'wikimedia-commons' | 'pixabay'
 
 /** 开放图库的一个检索结果，保留取图所需的地址，只在主进程内使用。 */
 export interface OpenImageCandidate {
-  library: OpenLibrary
+  library: OpenLibrary | 'web-page'
   /** 图库内标识：Openverse 的 UUID，或 Commons 的页面编号。 */
   providerId: string
   title: string
@@ -24,6 +24,8 @@ export interface OpenImageCandidate {
   height?: number
   /** 第三方提供的说明或标签，是不可信数据。 */
   description?: string
+  /** Image-specific date from source metadata; never the page publication date. */
+  dateCreated?: string
 }
 
 export interface ImageSearchInput {

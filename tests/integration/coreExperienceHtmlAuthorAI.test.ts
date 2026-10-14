@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -77,7 +78,7 @@ it('maps the frozen source field at Main send, follows its first drag, and resum
         .toBe('A & B')
       ready.resolve(); await release.promise
       const chunk = { id: 'fixture', model: 'fixture', choices: [{ index: 0, finish_reason: 'tool_calls', delta: { role: 'assistant', tool_calls: [
-        { index: 0, id: 'replace', type: 'function', function: { name: 'text_replace', arguments: JSON.stringify({ content: literal }) } },
+        { index: 0, id: 'replace', type: 'function', function: { name: modelToolWireName('text.replace'), arguments: JSON.stringify({ content: literal }) } },
       ] } }] }
       return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
     } })

@@ -62,7 +62,8 @@ export function MaterialLibraryDialog({ projectId, projectPath, onClose, onInser
         <ul style={{ paddingLeft: 20 }}>{records.map(record => <li key={record.id} style={{ marginBottom: 16 }}>
           <strong>{record.title}</strong><p style={{ margin: '4px 0' }}>{record.source.locator}</p>
           <p style={{ margin: '4px 0', whiteSpace: 'pre-wrap' }}>{record.text.slice(0, 180)}{record.text.length > 180 ? '…' : ''}</p>
-          <button disabled={busy} type="button" onClick={() => void operate({ ...workspace, operation: 'locate', id: record.id })}>查看原文{record.source.kind === 'file' ? '与文件位置' : ''}</button>{' '}
+          <button disabled={busy} type="button" onClick={() => { setSelected(record); setError('') }}>查看原文</button>{' '}
+          {record.source.kind === 'file' && <><button disabled={busy} type="button" onClick={() => void operate({ ...workspace, operation: 'locate', id: record.id })}>定位原文件</button>{' '}</>}
           <button disabled={busy} type="button" onClick={() => {
             setBusy(true); setError('')
             void onInsert(record).then(onClose).catch(reason => setError(reason instanceof Error ? reason.message : String(reason))).finally(() => setBusy(false))

@@ -6,15 +6,17 @@ import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import { collectCourseComponentPackageUsage, planCourseComponentPackageReplacement } from './courseComponentPackageTransactions'
 import { captureComponentInsertionTarget, insertComponentDefinitionAtTarget, insertComponentPackagesAtTarget } from './insertComponentPackages'
+import { projectLibraryDefinition } from './componentLibraryModel'
 
 export type ComponentAuthoringPorts = EditorStoreKernel
 export interface ComponentPackageReplacementTarget { captured: CapturedCourseTarget; packageId: string }
 export type ComponentPackageSourceTarget = ComponentPackageReplacementTarget
 export type ComponentPackageReplacementCommitResult = { ok: boolean; reason?: string }
 export type ComponentLightEditCommitResult = { ok: boolean; reason?: string }
-export function captureComponentPackageReplacementTarget(kernel: EditorStoreKernel, packageId: string): ComponentPackageReplacementTarget | null {
+export function captureComponentPackageReplacementTarget(kernel: EditorStoreKernel, packageId: string,libraryPackage=false): ComponentPackageReplacementTarget | null {
   const captured = kernel.captureTarget()
-  return captured.project.definitions[packageId] ? { captured, packageId } : null
+  const definition=libraryPackage ? projectLibraryDefinition(captured.project.definitions,packageId) : Object.hasOwn(captured.project.definitions,packageId) ? captured.project.definitions[packageId]:undefined
+  return definition ? { captured, packageId:definition.id } : null
 }
 export async function commitComponentReplacementAtTarget(kernel: EditorStoreKernel, target: ComponentPackageReplacementTarget,
   entry: ComponentLibraryEntry): Promise<ComponentPackageReplacementCommitResult> {

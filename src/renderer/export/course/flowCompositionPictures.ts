@@ -18,18 +18,27 @@ export interface FlowCompositionPictures {
 }
 
 /** Crop an actual rendered region into readable page pictures; never shrink a long region to one page. */
+export function flowCompositionPictureSlices(sourceWidth: number, sourceHeight: number, width: number, height: number) {
+  const scale = Math.min(1, width / sourceWidth)
+  const sourcePageHeight = Math.max(1, Math.floor(height / scale))
+  const slices: { y: number; pixels: number; width: number; height: number }[] = []
+  for (let y = 0; y < sourceHeight; y += sourcePageHeight) {
+    const pixels = Math.min(sourcePageHeight, sourceHeight - y)
+    slices.push({ y, pixels, width: Math.max(1, Math.round(sourceWidth * scale)), height: Math.max(1, Math.round(pixels * scale)) })
+  }
+  return slices
+}
+
 export async function sliceFlowCompositionPicture(dataUrl: string, id: string, width: number, height: number): Promise<FlowCompositionPicture[]> {
   const image = new Image()
   image.src = dataUrl
   await image.decode()
-  const scale = Math.min(1, width / image.naturalWidth)
-  const sourceHeight = Math.max(1, Math.floor(height / scale))
   const pictures: FlowCompositionPicture[] = []
-  for (let y = 0; y < image.naturalHeight; y += sourceHeight) {
-    const pixels = Math.min(sourceHeight, image.naturalHeight - y)
+  for (const slice of flowCompositionPictureSlices(image.naturalWidth, image.naturalHeight, width, height)) {
+    const { y, pixels } = slice
     const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
-    canvas.height = Math.max(1, Math.round(pixels * scale))
+    canvas.width = slice.width
+    canvas.height = slice.height
     const context = canvas.getContext('2d')
     if (!context) throw new Error('无法创建 Web 组合分页图片画布')
     context.drawImage(image, 0, y, image.naturalWidth, pixels, 0, 0, canvas.width, canvas.height)

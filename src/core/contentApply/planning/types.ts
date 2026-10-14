@@ -17,6 +17,7 @@ export interface HtmlContentProjection {
 export interface ContentObjectDraft {
   definitionId: string
   data: JsonValue
+  authoring?: import('../../../shared/contracts/component-platform').ComponentAuthoring
   style?: JsonObject
   frame?: ComponentFrame
   implementationOverride?: ComponentImplementation
@@ -48,6 +49,7 @@ export interface ContentChangeRequest {
 /** Paths are resolved by the project-file adapter; identities remain software-owned. */
 export type SurfaceApplyRequest =
   | { intent: 'surface.add'; kind: 'slide' | 'flow' | 'spatial'; title?: string; beforeSurfaceId?: string }
+  | { intent: 'surface.add'; pages: { kind: 'slide' | 'flow' | 'spatial'; title?: string; beforeSurfaceId?: string }[] }
   | { intent: 'surface.move'; surfaceId: string; beforeSurfaceId?: string }
   | { intent: 'surface.remove'; surfaceId: string }
   | { intent: 'surface.title'; surfaceId: string; title: string }
@@ -65,6 +67,10 @@ export type ContentApplyRequest = ContentChangeRequest | SurfaceApplyRequest | C
 export interface ContentApplyDiagnostic extends HtmlAssemblyDiagnostic {
   instanceId?: string
   repairable?: boolean
+  file?: string
+  line?: number
+  column?: number
+  lineText?: string
 }
 
 export interface ContentApplyPlan {

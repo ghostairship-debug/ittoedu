@@ -178,7 +178,7 @@ it('rejects late captured edits after the target changes or closes without mutat
   } finally { h.bridge.dispose() }
 })
 
-it('keeps a restored foreground through delayed bootstrap and gives same-project tabs independent History and cancellable close', async () => {
+it('keeps a restored foreground through delayed document listing and gives same-project tabs independent History and cancellable close', async () => {
   const h = await createV10StoreHost(fixture(), undefined, false), held = deferred()
   h.controls.bootstrap = held.promise
   try {

@@ -13,6 +13,7 @@ import { RECIPE_CATALOG } from '../course/courseRecipeEdits'
 import { shapeDataSchema } from '../../components/shape/data'
 
 const semanticId = z.string().min(1)
+const professionalAppearanceInputSchema = z.record(z.string(), jsonValueSchema)
 export const textFormatInputSchema = z.object({ target: semanticId, style: documentTextStyleSchema }).strict()
 export const objectLayoutInputSchema = z.object({ targets: z.array(semanticId).min(1), intent: z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('align'), alignment: z.enum(['left', 'center', 'right', 'top', 'middle', 'bottom']) }).strict(),
@@ -29,6 +30,7 @@ export const courseProductivityInputSchema = z.object({ target: semanticId, requ
 export const surfaceRemixInputSchema = z.object({ target: semanticId, replacements: z.record(z.string(), z.string()) }).strict()
 export const objectInsertInputSchema = z.object({ target: semanticId, kind: z.enum(['text', 'formula', 'shape', 'table', 'chart', 'input']),
   text: z.string().optional(), shapeType: shapeDataSchema.shape.shapeType.optional(), chartType: z.enum(['bar', 'line', 'area', 'pie', 'donut']).optional(),
+  appearance: professionalAppearanceInputSchema.optional().describe('可选初始专业外观，和 object.update 的 appearance 同义；只覆盖提供字段，省略时保留人工插入默认。文字/公式支持 fontSize、color、bold、lineHeight、shadows 等；图形、表格、图表使用其公开专业 style 字段，图形使用 fillColor、borderColor 等实际字段。input 当前不支持 appearance。'),
   x: z.number().finite().optional(), y: z.number().finite().optional(), width: z.number().positive().optional(), height: z.number().positive().optional(),
   center: z.object({ x: z.number().finite(), y: z.number().finite() }).strict().optional(), index: z.number().int().nonnegative().optional(),
   destination: z.enum(['document', 'paper']).optional(),
@@ -69,6 +71,10 @@ const inputRuleConfigSchema = z.discriminatedUnion('answerType', [
 export const objectAuthorInputSchema = z.object({ target: semanticId, change: z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('table'), edit: tableEditSchema }).strict(),
   z.object({ kind: z.literal('chart'), edit: chartEditSchema }).strict(),
+  z.object({ kind: z.literal('text-interaction'), intent: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('annotation'), content: z.string().min(1), label: z.string().optional() }).strict(),
+    z.object({ kind: z.literal('input'), label: z.string().optional(), placeholder: z.string().optional(), acceptedAnswers: z.array(z.string()).optional() }).strict(),
+  ]) }).strict(),
   z.object({ kind: z.literal('input-rules'), request: z.discriminatedUnion('mode', [
     z.object({ mode: z.enum(['apply', 'rebuild']), config: inputRuleConfigSchema }).strict(), z.object({ mode: z.literal('unmanage') }).strict(),
   ]) }).strict(),
@@ -146,8 +152,9 @@ export const objectUpdatePropertiesInputSchema = z.object({
   frame: z.object({ x: coordinate.optional(), y: coordinate.optional(), width: coordinate.positive().optional(), height: coordinate.positive().optional() }).strict().optional(),
   rotation: coordinate.optional(), opacity: z.number().min(0).max(1).optional(),
   visible: z.boolean().optional(), locked: z.boolean().optional(), label: z.string().min(1).optional(),
+  viewportPinned: z.boolean().optional().describe('全局对象是否固定在视口中；不授予教师导航权限'),
   playbackInitialVisibility: z.enum(['inherit', 'hidden']).optional(),
-  appearance: z.record(z.string(), jsonValueSchema).optional().describe('目标真实专业外观的局部参数；文字可用 fontFamily、fontSize、color、shadows、lineHeight 等。shadows 是对象数组，每项使用 x、y、blur、color。表格、图表与图形使用其公开专业样式。只应用提供字段，不改变正文、位置或省略参数；实际适用键与类型由目标领域数据验证。复制已观察对象的外观优先 appearanceFrom；显式 appearance 字段覆盖来源同名字段。不支持项明确反馈，文字范围格式使用 text.format。'),
+  appearance: professionalAppearanceInputSchema.optional().describe('目标真实专业外观的局部参数；文字可用 fontFamily、fontSize、color、shadows、lineHeight 等。shadows 是对象数组，每项使用 x、y、blur、color。表格、图表与图形使用其公开专业样式。只应用提供字段，不改变正文、位置或省略参数；实际适用键与类型由目标领域数据验证。复制已观察对象的外观优先 appearanceFrom；显式 appearance 字段覆盖来源同名字段。不支持项明确反馈，文字范围格式使用 text.format。'),
   appearanceFrom: z.object({
     target: semanticId.describe('已观察来源整对象的只读句柄；软件按该来源当前捕获内容读取外观。'),
     fields: z.array(z.string().min(1)).min(1).max(64)

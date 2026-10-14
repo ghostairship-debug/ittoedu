@@ -119,7 +119,7 @@ const uniqueStrings = (label: string) => z.array(z.string().min(1).max(120))
 
 const semanticVersionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?$/
 
-const componentCatalogPackageSchema = z.object({
+export const componentCatalogPackageSchema = z.object({
   packageId: z.string()
     .min(3)
     .max(200)

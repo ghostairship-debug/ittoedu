@@ -298,13 +298,14 @@ it('adopts HTML author records into the single H5 consumer with image override r
   const reopened = await new DocumentHostService(path.join(f.root, 'authored-reopened')).open((result as { data: { path: string } }).data.path)
   if (reopened.model.kind !== 'course-v10') throw new Error('Expected current course format')
   const instance = reopened.model.project.instances[reopened.model.project.surfaces[0]!.childIds[0]!]!
-  const data = instance.data as { html: string; authoringRecords: typeof records; resourceBindings: Record<string, string> }
+  const data = instance.data as { html: string; resourceBindings: Record<string, string> }
+  const imported = instance.authoring!.records!
   expect(data.html).not.toContain('cw-html-authoring-consumer'); expect(data.html).not.toContain('cw-html-authoring-records')
   expect(data.html).toContain('this.textContent=\'clicked\'')
-  expect(data.authoringRecords.caption).toEqual(records.caption)
-  expect(data.authoringRecords.picture.binding.baseline).toMatch(/^cw-resource:/)
-  expect(data.authoringRecords.picture.overrides.src).toMatch(/^cw-resource:/)
-  const replacementId = data.resourceBindings[data.authoringRecords.picture.overrides.src]!
+  expect(imported.caption).toEqual(records.caption)
+  expect(imported.picture.binding.baseline).toMatch(/^cw-resource:/)
+  expect(imported.picture.overrides.src).toMatch(/^cw-resource:/)
+  const replacementId = data.resourceBindings[imported.picture.overrides.src!]!
   expect(reopened.model.resources.assets[replacementId]).toBeDefined()
   const roundtrip = new CourseV10Driver().load(new CourseV10Driver().serialize(reopened.model))
   expect(roundtrip).toEqual(reopened.model)
@@ -316,11 +317,11 @@ it('adopts HTML author records into the single H5 consumer with image override r
   expect(next.commit).toBe('committed')
   const applied = await f.host.registry.get(current.documentId).drain()
   if (applied.model.kind !== 'course-v10') throw new Error('Expected current course format')
-  const adopted = (applied.model.project.instances[instance.id]!.data as unknown as { authoringRecords: typeof records }).authoringRecords
+  const adopted = applied.model.project.instances[instance.id]!.authoring!.records!
   expect(adopted.caption.binding.baseline).toBe('AI continued')
   expect(adopted.caption.overrides.text).toBeUndefined()
   expect(adopted.caption.overrides.geometry).toEqual(records.caption.overrides.geometry)
-  expect(adopted.picture).toEqual(data.authoringRecords.picture)
+  expect(adopted.picture).toEqual(imported.picture)
 })
 
 it('runs saved nested iframe/srcdoc modules, CSS and images through the real native document consumer', async () => {

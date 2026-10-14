@@ -37,18 +37,20 @@ export function createDocumentInputRuleResult(state: EditorState, match: Documen
   }
   const id = match.blockId
   const empty = { inlines: [] }
+  const previous=state.doc.nodeAt(match.from)?.attrs.data ?? {}
+  const presentation=Object.fromEntries(Object.entries(previous).filter(([key])=>['textAlign','lineSpacing','textDefaults'].includes(key)))
   const attrs = (data: Record<string, unknown>) => ({ id, data })
   let replacement
   let cursorOffset = 1
   switch (match.kind) {
-    case 'heading': replacement = schema.nodes.heading.create(attrs({ type: 'heading', level: match.level ?? 1 })); break
+    case 'heading': replacement = schema.nodes.heading.create(attrs({ ...presentation,type: 'heading', level: match.level ?? 1 })); break
     case 'bullet-list': case 'ordered-list': {
       const itemId = createId()
       replacement = schema.nodes.compound.create(attrs({ type: 'list', ordered: match.kind === 'ordered-list', items: [{ id: itemId, content: empty }] }), schema.nodes.slot.create({ key: `item:${itemId}` }))
       cursorOffset = 2
       break
     }
-    case 'quote': replacement = schema.nodes.compound.create(attrs({ type: 'quote', content: empty }), schema.nodes.slot.create({ key: 'content' })); cursorOffset = 2; break
+    case 'quote': replacement = schema.nodes.compound.create(attrs({ ...presentation,type: 'quote', content: empty }), schema.nodes.slot.create({ key: 'content' })); cursorOffset = 2; break
     case 'code': replacement = schema.nodes.code_block.create(attrs({ type: 'code', code: '' })); break
     case 'divider': replacement = schema.nodes.object.create(attrs({ type: 'divider' })); break
   }

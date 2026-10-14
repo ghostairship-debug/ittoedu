@@ -1,11 +1,11 @@
-/* 果铃统一工作台外壳 · V3.1 暖纸面 / 深墨绿 / 少量杏橙 */
+/* 果铃统一工作台外壳 · 暖白 / 胡桃 / 琥珀 */
 .lesson-workspace-shell{display:flex;flex-direction:column;min-width:0;min-height:0;height:100%;color:var(--ink,#17221d);background:var(--canvas,#f4f1ea);font-size:14px}
 
-/* ── 顶栏：深墨绿 ─────────────────────────────── */
-.lesson-workspace-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px;padding:0 14px;background:var(--green-deep,#173e31);color:#f4f1ea;flex-shrink:0}
+/* ── 顶栏 ─────────────────────────────────── */
+.lesson-workspace-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px;padding:0 14px;background:var(--panel-bg,#fffdf8);color:var(--text-primary,#382c24);flex-shrink:0}
 .lesson-workspace-identity,.lesson-workspace-toolbar-actions{display:flex;align-items:center;gap:8px;min-width:0}
-.lesson-workspace-identity{font-size:13px;color:rgba(244,241,234,.72)}
-.lesson-workspace-identity strong{min-width:0;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fffefa;font-size:14px;font-weight:600}
+.lesson-workspace-identity{font-size:13px;color:var(--text-secondary,#817263)}
+.lesson-workspace-identity strong{min-width:0;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-primary,#382c24);font-size:14px;font-weight:600}
 .lesson-workspace-toolbar-actions{flex-shrink:0}
 .lesson-workspace-toolbar .lesson-workspace-brand{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:8px;background:var(--apricot,#d88755);color:#fffefa;font-size:13px;font-weight:700;flex-shrink:0}
 
@@ -17,27 +17,28 @@
 :where(.lesson-workspace-shell) button:where(:not(.workspace button)):hover{background:var(--surface-muted,#ece9e1)}
 :where(.lesson-workspace-shell) button:where(:not(.workspace button)):disabled{cursor:not-allowed;opacity:.5}
 /* The shell's plain button look must not swallow the primary and danger styles (hover turned them into dark text on green). */
-.lesson-workspace-shell .primary-button{border-color:transparent;background:#245b46;color:#fff}
-.lesson-workspace-shell .primary-button:hover:not(:disabled){background:#2e7057}
+.lesson-workspace-shell .primary-button{border-color:transparent;background:var(--accent);color:#fff}
+.lesson-workspace-shell .primary-button:hover:not(:disabled){background:var(--accent-hover)}
 .lesson-workspace-shell .danger-button{border-color:transparent;background:#b34e46;color:#fff}
 .lesson-workspace-shell .danger-button:hover:not(:disabled){background:#c05a51}
 .lesson-workspace-shell .lesson-primary-action{border-color:var(--green,#245b46);background:var(--green,#245b46);color:#fffefa}
 .lesson-workspace-shell .lesson-primary-action:hover{background:var(--green-deep,#173e31);border-color:var(--green-deep,#173e31)}
-.lesson-workspace-toolbar button{border-color:rgba(244,241,234,.28);background:transparent;color:#f4f1ea}
-.lesson-workspace-toolbar button:hover{background:rgba(244,241,234,.12)}
+.lesson-workspace-toolbar button{border-color:var(--border,#dfd8cc);background:transparent;color:var(--text-primary,#382c24)}
+.lesson-workspace-toolbar button:hover:not(:disabled){background:var(--accent-soft,#f5ead6)}
+.lesson-workspace-toolbar button:disabled,.lesson-workspace-toolbar summary[aria-disabled=true]{color:var(--text-secondary,#817263);opacity:.55;cursor:not-allowed}
 .lesson-workspace-toolbar .lesson-primary-action{border-color:var(--apricot,#d88755);background:var(--apricot,#d88755);color:#fffefa}
 .lesson-workspace-toolbar .lesson-primary-action:hover{background:#c4743f;border-color:#c4743f}
 
 .lesson-workspace-more{position:relative}
 .lesson-workspace-more summary,.lesson-lesson-actions summary{list-style:none;cursor:pointer;padding:7px 10px;border:1px solid var(--border,#d9d6ce);border-radius:8px;background:var(--surface,#fffefa)}
-.lesson-workspace-toolbar .lesson-workspace-more summary{border-color:rgba(244,241,234,.28);background:transparent;color:#f4f1ea}
+.lesson-workspace-toolbar .lesson-workspace-more summary{border-color:var(--border,#dfd8cc);background:transparent;color:var(--text-primary,#382c24)}
 .lesson-workspace-more summary::-webkit-details-marker,.lesson-lesson-actions summary::-webkit-details-marker{display:none}
 
 /* 顶栏工作空间切换器 */
-.lesson-workspace-switcher>summary{display:flex;align-items:center;gap:8px;border:0;padding:4px 10px 4px 4px;border-radius:10px;font-size:13px;color:#f4f1ea;min-width:0}
-.lesson-workspace-switcher>summary strong{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fffefa;font-size:14px;font-weight:600}
-.lesson-workspace-switch-tag{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border:1px solid rgba(244,241,234,.4);border-radius:999px;font-size:11px;color:#f4f1ea;flex-shrink:0}
-.lesson-workspace-switcher>summary:hover{background:rgba(244,241,234,.12)}
+.lesson-workspace-switcher>summary{display:flex;align-items:center;gap:8px;border:0;padding:4px 10px 4px 4px;border-radius:10px;font-size:13px;color:var(--text-primary,#382c24);min-width:0}
+.lesson-workspace-switcher>summary strong{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-primary,#382c24);font-size:14px;font-weight:600}
+.lesson-workspace-switch-tag{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border:1px solid var(--border-strong,#c8bbaa);border-radius:999px;font-size:11px;color:var(--text-secondary,#817263);flex-shrink:0}
+.lesson-workspace-switcher>summary:hover{background:var(--accent-soft,#f5ead6)}
 .lesson-workspace-switcher-popover{position:absolute;left:0;top:calc(100% + 6px);z-index:14;width:300px;max-height:calc(100dvh - 140px);box-sizing:border-box;display:flex;flex-direction:column;gap:6px;padding:12px;background:var(--surface,#fffefa);border:1px solid var(--border,#d9d6ce);border-radius:12px;box-shadow:var(--shadow-md,0 10px 30px rgba(23,34,29,.12));color:var(--ink,#17221d);font-size:12px}
 .lesson-workspace-switcher-popover .lesson-eyebrow{margin:0 0 2px}
 .lesson-workspace-switcher-recent{min-width:0;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
@@ -253,10 +254,13 @@
 .lesson-workspace-workbench [role=tab]{position:relative;white-space:nowrap;border-radius:8px;color:var(--ink-muted,#66706a)}
 .lesson-workspace-workbench [role=tab][aria-selected=true]{border-color:var(--green,#245b46);background:var(--surface,#fffefa);color:var(--ink,#17221d);box-shadow:0 1px 3px rgba(23,34,29,.08)}
 .lesson-workspace-workbench [role=tab] small{margin-left:7px}
-.lesson-workbench-tab{display:flex;align-items:center}
-.lesson-workbench-tab [role=tab]{border-radius:8px 0 0 8px}
-.lesson-workbench-tab .lesson-icon-button{border-left:0;border-radius:0 8px 8px 0}
-.lesson-workbench-tab i{display:inline-block;width:6px;height:6px;margin-left:6px;border-radius:50%;background:var(--apricot,#d88755)}
+.lesson-workbench-tab{display:flex;align-items:center;flex:none;height:32px;max-width:min(300px,55vw);border:1px solid var(--border);border-radius:7px;background:var(--surface-muted);overflow:hidden}
+.lesson-workspace-workbench .lesson-workbench-tab [role=tab]{display:inline-flex;align-items:center;gap:5px;height:100%;min-width:0;border:0;border-radius:0;background:transparent;box-shadow:none;padding:4px 8px;font-size:12px;color:var(--text-secondary)}
+.lesson-workspace-workbench .lesson-workbench-tab [role=tab][aria-selected=true]{background:transparent;border:0;box-shadow:none;color:var(--text-primary)}
+.lesson-workbench-tab [role=tab]>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lesson-workspace-workbench .lesson-workbench-tab .lesson-icon-button{display:inline-flex;align-items:center;justify-content:center;flex:none;width:28px;height:28px;min-height:28px;padding:0!important;margin-right:2px;border:0;border-radius:4px;background:transparent;color:var(--text-secondary)}
+.lesson-workspace-workbench .lesson-workbench-tab .lesson-icon-button:hover{background:var(--accent-soft);color:var(--text-primary)}
+.lesson-workbench-tab i{display:inline-block;flex:none;width:6px;height:6px;margin-left:3px;border-radius:50%;background:var(--apricot,#d88755)}
 
 .lesson-course-tab,.lesson-file-tab{flex:1;min-height:0;overflow:auto}
 .lesson-course-tab{display:flex;flex-direction:column;background:var(--canvas,#f4f1ea)}
@@ -310,3 +314,17 @@
   .lesson-workspace-toolbar-actions>button{flex:1}
   .lesson-new-tab-popover{position:fixed;left:12px;right:12px;top:120px}
 }
+
+/* 胡桃案台：仅界面 chrome；作品自身的颜色和排版不受主题影响。 */
+.lesson-workspace-toolbar{background:var(--panel-bg);color:var(--text-primary);min-height:52px;padding-right:calc(100vw - env(titlebar-area-width,100vw) + 14px);-webkit-app-region:drag}
+.lesson-workspace-toolbar :is(button,summary,input,select,.lesson-layout-popover,.lesson-workspace-switcher-popover){-webkit-app-region:no-drag}
+.lesson-workspace-toolbar .lesson-workspace-brand{background:transparent;color:#f7deb0;width:30px;height:32px}
+.lesson-workspace-toolbar-actions>button,.lesson-layout-menu>summary{display:inline-flex;align-items:center;justify-content:center;min-width:34px;min-height:32px;border-radius:8px;background:transparent}
+.lesson-layout-presets{display:grid;gap:5px;padding-bottom:10px;margin-bottom:6px;border-bottom:1px solid var(--border)}
+.lesson-workspace-pane>header{display:flex;align-items:center;justify-content:space-between;flex:none;height:36px;padding:6px 10px;font-size:12px;color:var(--text-secondary);background:var(--panel-bg)}
+.lesson-workspace-pane[data-collapsed=true]{flex:0 0 36px!important;min-height:36px;max-height:36px}
+.workbench-session-region{flex:1;min-height:0;overflow:hidden}
+.workspace-document-tabs{background:var(--surface-muted);border-bottom:1px solid var(--border);padding-top:5px}
+.lesson-workbench-tab[data-selected=true]{border-color:var(--border-strong);background:var(--panel-bg);box-shadow:inset 0 2px var(--apricot)}
+.lesson-modal,.lesson-layout-popover,.lesson-new-tab-popover,.workspace-file-dialog{border-radius:14px;background:var(--panel-bg);border-color:var(--border);box-shadow:var(--shadow-lg)}
+.lesson-layout-popover button:hover,.lesson-new-tab-popover button:hover{background:var(--accent-soft)}

@@ -1,3 +1,9 @@
+import { z } from 'zod'
+
+/** A conversation preference; permission and task scope remain independent. */
+export const executionAdvancementModeSchema = z.enum(['automatic', 'stepwise'])
+export type ExecutionAdvancementMode = z.infer<typeof executionAdvancementModeSchema>
+
 /**
  * Durable space and conversation metadata.  Document contents, provider settings,
  * execution facts and run checkpoints deliberately have separate owners.
@@ -93,6 +99,7 @@ export interface ConversationRecord {
   inputDraft: string
   inputAttachments: import('./attachments').InputAttachmentReference[]
   frozenContextRefs: FrozenConversationContextRef[]
+  advancementMode?: ExecutionAdvancementMode
   home?: ConversationHome
   /** Set only for an element's AI card (M15). */
   element?: ConversationElementScope

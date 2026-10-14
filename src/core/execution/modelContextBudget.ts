@@ -1,5 +1,6 @@
 import type { ModelFailure, ModelSelection } from '../../shared/workbench/modelProvider'
 import { effectiveModelProtocol } from '../../shared/workbench/modelRouting'
+import { modelOutputParameter } from '../../shared/workbench/modelOutputParameters'
 
 /** Host-side estimate, not an exact tokenizer or a claim about an unknown provider. */
 export function estimateSerializedTokens(serialized: string): number {
@@ -12,9 +13,8 @@ export function estimateSerializedTokens(serialized: string): number {
 export function modelContextBudget(selection: ModelSelection) {
   const configured = selection.contextWindow
   const window = Number.isSafeInteger(configured) && configured! > 0 ? configured! : null
-  const native = selection.parameters
-  const explicitOutput = [native?.max_output_tokens, native?.max_completion_tokens, native?.max_tokens]
-    .find((value): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0)
+  const value = modelOutputParameter(effectiveModelProtocol(selection), selection.parameters)?.value
+  const explicitOutput = typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
   const protocolOutput = effectiveModelProtocol(selection) === 'anthropic-messages' ? selection.outputLimit : undefined
   // An unknown provider window is not a host-imposed task limit. Only declared
   // limits or an actual context rejection can cause context reduction.

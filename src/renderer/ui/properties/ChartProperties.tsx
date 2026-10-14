@@ -41,9 +41,9 @@ export type ChartStylePatch = Partial<NativeChartCommonStyle> & Partial<{
 
 export interface ChartPropertiesCommands {
   readonly connectCanvasText?: (port: ChartCanvasTextPort) => () => void
-  readonly patchTitle: (title: string) => void
-  readonly patchType: (newType: ChartType, retainedSeriesId?: string) => void
-  readonly patchStyle: (patch: ChartStylePatch) => void
+  readonly patchTitle: (title: string) => void | Promise<void>
+  readonly patchType: (newType: ChartType, retainedSeriesId?: string) => void | Promise<void>
+  readonly patchStyle: (patch: ChartStylePatch) => void | Promise<void>
   /** Null acknowledges success; a Promise retains the draft until the writer acknowledges it. */
   readonly commitTableData: (candidateData: ChartCandidateData) => string | null | Promise<string | null>
 }
@@ -750,11 +750,11 @@ export function ChartProperties({
             onCommit={(raw) => {
               const trimmed = raw.trim()
               if (!trimmed) {
-                if (style.valueMin !== undefined) commands.patchStyle({ valueMin: undefined })
+                if (style.valueMin !== undefined) return commands.patchStyle({ valueMin: undefined })
                 return
               }
               const parsed = Number(trimmed)
-              if (Number.isFinite(parsed)) commands.patchStyle({ valueMin: parsed })
+              if (Number.isFinite(parsed)) return commands.patchStyle({ valueMin: parsed })
             }}
           />
           <BufferedInput
@@ -765,11 +765,11 @@ export function ChartProperties({
             onCommit={(raw) => {
               const trimmed = raw.trim()
               if (!trimmed) {
-                if (style.valueMax !== undefined) commands.patchStyle({ valueMax: undefined })
+                if (style.valueMax !== undefined) return commands.patchStyle({ valueMax: undefined })
                 return
               }
               const parsed = Number(trimmed)
-              if (Number.isFinite(parsed)) commands.patchStyle({ valueMax: parsed })
+              if (Number.isFinite(parsed)) return commands.patchStyle({ valueMax: parsed })
             }}
           />
         </>

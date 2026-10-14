@@ -3,11 +3,12 @@ import { elementCards } from './elementCards/elementCardController'
 import './selectionContext.css'
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { File, Folder } from 'lucide-react'
+import { File, Folder, Plus, MoreHorizontal, Sparkles, Pin, PinOff, X, Send, Square, ListPlus, Pencil, Pause, Monitor, Hand, Play, Settings } from 'lucide-react'
+import { ConversationInput } from './ConversationInput'
 import { dispatchRevealInExplorer } from './revealInExplorer'
 import { useDismissableDetails } from '../ui/useDismissableDetails'
-import { homeInScope, type ConversationRecord } from '../../shared/workbench/conversations'
-import { type ExecutionRunRecord, type ExecutionContentOutput } from '../../shared/workbench/execution'
+import { type ConversationRecord, type ExecutionAdvancementMode } from '../../shared/workbench/conversations'
+import { executionAdvancementMode, type ExecutionRunRecord, type ExecutionContentOutput } from '../../shared/workbench/execution'
 import { captureRendererTiming, disclosedExecutionSettings, executionSelectionTargetSchema, type ExecutionDesktopAPI, type ExecutionDocumentReference, type ExecutionSendInput, type ExecutionSubmissionMode, type ExecutionSubmissionRecord } from '../../shared/workbench/executionDesktop'
 import { emptyExecutionProjection, foldExecutionEvents, type ExecutionProjection } from '../../shared/workbench/executionEvents'
 import type { InputAttachmentReference } from '../../shared/workbench/attachments'
@@ -18,6 +19,7 @@ import { ModelThinkingBudgetControl } from './ModelThinkingBudgetControl'
 import { ModelReferencePicker } from './ModelReferencePicker'
 import { findModelKnowledgeReference, type ModelKnowledgeEntry } from '../../shared/workbench/modelKnowledge'
 import { effectiveModelProtocol } from '../../shared/workbench/modelRouting'
+import { modelCapabilitySelection } from '../../shared/workbench/modelCapabilities'
 import type { ExternalMcpAPI } from '../../shared/workbench/external'
 import { ExecutionSettingsPanel } from './ExecutionSettingsPanel'
 import { ExternalMcpPanel } from './ExternalMcpPanel'
@@ -30,9 +32,11 @@ import { ExecutionApprovalCard } from './ExecutionApprovalCard'
 import { pendingApproval, pendingQuestion } from './executionTimelineModel'
 import { DEFAULT_PERMISSION_MODE, executionPermissionModes, permissionDescriptions, permissionLabels, permissionShortLabels, type ExecutionPermissionMode } from '../../shared/workbench/executionPermission'
 import { AttachmentComposer } from './attachments/AttachmentComposer'
+import { attachmentDraftChange } from './attachments/attachmentDraftChange'
 import { userMessageWindow } from './userMessageWindow'
 import { isExecutionInputError } from '../../shared/workbench/executionInputMessages'
 import './executionAssistant.css'
+import './executionAdvancementMode.css'
 import { bodyStreamingLabel, bodyStreamingRecord, configuredBodyStreamingAlternatives } from '../../shared/workbench/bodyStreaming'
 import { useWorkbenchSessionDock } from './WorkbenchSessionPortal'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
@@ -47,9 +51,9 @@ type BrowserControlState = Awaited<ReturnType<NonNullable<ExecutionDesktopAPI['b
 
 export interface ExecutionAssistantProps {
   root: string | null
-  captureDocuments(writable: boolean): Promise<ExecutionDocumentReference[]>
+  captureDocuments(writable: boolean, prepare?: boolean): Promise<ExecutionDocumentReference[]>
   captureMaterials?(): Promise<{ target: LessonMaterialTarget; selections: LessonAuthoringMaterialSelection[] } | undefined>
-  prepareSend(documentIds?: readonly string[]): Promise<boolean>
+  prepareSend(documents?: readonly Pick<ExecutionDocumentReference, 'documentId' | 'epoch'>[]): Promise<boolean>
   api?: ExecutionDesktopAPI
   settingsAPI?: ExecutionSettingsAPI
   externalAPI?: ExternalMcpAPI
@@ -59,9 +63,10 @@ export interface ExecutionAssistantProps {
 const billingLabels = { metered: '按量付费', 'token-plan': 'Token Plan', subscription: '订阅', prepaid: '预付费', unknown: '计费未知' }
 const checkpointStatusLabels: Record<ExecutionRunRecord['status'], string> = {
   queued: '等待中', running: '进行中', stopping: '正在停止', stopped: '已停止', partial: '部分完成',
-  completed: '已完成', failed: '失败', interrupted: '已中断',
+  completed: '本轮已结束', failed: '失败', interrupted: '已中断',
 }
 const effortLabels: Record<DiscoveredReasoningEffort, string> = { none: '关闭', minimal: '极低', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最高' }
+const advancementLabels: Record<ExecutionAdvancementMode, string> = { automatic: '自动推进', stepwise: '逐步推进' }
 const knowledgeKey = (entry: ModelKnowledgeEntry) => entry.provider ? `${entry.provider}/${entry.id}` : entry.id
 const knownModelGuidance: Record<string, string> = {
   'gpt-6-sol': '日常创作与开发',
@@ -101,10 +106,13 @@ const connectionFailure = (run: ExecutionRunRecord | null): string | null => {
   const failure = run.requests.at(-1)?.failure
   if (!failure) return null
   const status = failure.httpStatus ? `（HTTP ${failure.httpStatus}）` : ''
+  if (failure.code === 'context_length_exceeded') return '本次输入超过模型实际上下文窗口。已有成果保留，请缩小当前输入或调整必要材料后继续。'
   if (failure.kind === 'auth') return `模型连接认证失败${status}。请重新登录或检查密钥，连接恢复后可继续此任务。`
   if (failure.kind === 'quota') return `模型服务拒绝本次额度或付款${status}。请检查额度与计费设置，恢复后可继续此任务。`
   if (failure.kind === 'rate-limit') return `模型服务暂时限制请求${status}。请按连接提示稍后继续此任务。`
-  if (failure.kind === 'transport' || failure.kind === 'timeout') return '模型连接中断，本次请求结果尚未确认；不会自动重发。请检查网络后显式继续此任务。'
+  if (failure.kind === 'transport' || failure.kind === 'timeout') return '模型连接中断，生成重试未能恢复。已有成果和工具回执保留，请检查网络后继续此任务。'
+  if (failure.kind === 'server') return `模型服务异常${status}，本轮已中断。已有成果保留，服务恢复后可继续此任务。`
+  if (failure.kind === 'protocol') return `模型服务返回了无法继续处理的响应${status}。已有成果保留，请检查连接配置后继续此任务。`
   return null
 }
 const permissionKey = (workspaceId: string) => `guoling.execution.permission.v1:${workspaceId}`
@@ -137,12 +145,6 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const externalAPI = suppliedExternalAPI ?? window.desktopAPI?.externalMcp
   const [workspaceId, setWorkspaceId] = useState('')
   useExternalUiStateProvider(externalAPI, workspaceId, captureDocuments)
-  // WorkspaceFiles and conversations keep separate registries. Only the relative
-  // explorer path/kind crosses this boundary; conversation homes use this ID.
-  const conversationScope = sessionScope && workspaceId
-    ? { kind: sessionScope.kind, path: sessionScope.path, workspaceId } : null
-  const conversationHomeInput = conversationScope
-    ? { kind: conversationScope.kind, path: conversationScope.path } : undefined
   const [conversations, setConversations] = useState<ConversationRecord[]>([])
   const [active, setActive] = useState<ConversationRecord | null>(null)
   const [draft, setDraft] = useState('')
@@ -151,6 +153,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const [permission, setPermissionState] = useState<ExecutionPermissionMode>(DEFAULT_PERMISSION_MODE)
   const [permissionOpen, setPermissionOpen] = useState(false), [plusOpen, setPlusOpen] = useState(false)
   const [contextFrozen, setContextFrozen] = useState(false)
+  const [advancementBusy, setAdvancementBusy] = useState(false)
   const [projection, setProjection] = useState<ExecutionProjection>(() => emptyExecutionProjection(''))
   const [run, setRun] = useState<ExecutionRunRecord | null>(null)
   const [settings, setSettings] = useState<ExecutionSettingsView | null>(null)
@@ -163,7 +166,6 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const [checkpointBusy, setCheckpointBusy] = useState(false)
   const [forkAdvisory, setForkAdvisory] = useState<{ conversationId: string; remaining: string[] } | null>(null)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
-  const [allModelsOpen, setAllModelsOpen] = useState(false)
   const [modelQuery, setModelQuery] = useState('')
   const [favoriteBusy, setFavoriteBusy] = useState(false)
   const [favoriteError, setFavoriteError] = useState('')
@@ -205,8 +207,12 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const runRef = useRef<ExecutionRunRecord | null>(null)
   const documentsRef = useRef<ExecutionDocumentReference[]>([])
   const attachmentsRef = useRef<InputAttachmentReference[]>([])
+  const [attachmentOwners, setAttachmentOwners] = useState<{ conversation: ConversationRecord; directory?: string; value: InputAttachmentReference[] }[]>([])
+  const [attachmentBusyOwners, setAttachmentBusyOwners] = useState<ReadonlySet<string>>(new Set())
   const contextFrozenRef = useRef(false)
   const persistQueue = useRef<Promise<unknown>>(Promise.resolve())
+  const advancementWrite = useRef<Promise<unknown>>(Promise.resolve())
+  const advancementRead = useRef(0)
   const submittingRef = useRef(false), composingRef = useRef(false)
   const referenceCapture = useRef(0), removedAutomatic = useRef(new Set<string>()), automaticFocus = useRef('')
 
@@ -217,6 +223,13 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   useEffect(() => { documentsRef.current = documents; workbenchSelection.setPinned(documents) }, [documents])
   useEffect(() => () => workbenchSelection.setPinned([]), [])
   useEffect(() => { attachmentsRef.current = attachments }, [attachments])
+  useEffect(() => {
+    if (!active) return
+    setAttachmentOwners(owners => owners.some(owner => owner.conversation.conversationId === active.conversationId)
+      ? owners.map(owner => owner.conversation.conversationId === active.conversationId ? { conversation: active, directory: root ?? undefined, value: attachments } : owner)
+      : [...owners, { conversation: active, directory: root ?? undefined, value: attachments }])
+    setAttachmentBusy(attachmentBusyOwners.has(active.conversationId))
+  }, [active, attachments, root, attachmentBusyOwners])
   useEffect(() => {
     if (!modelMenuOpen) return
     const dismiss = (event: PointerEvent) => {
@@ -263,7 +276,6 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     setPlusOpen(false); setPermissionOpen(false)
     if (!modelMenuOpen) {
       setModelQuery('')
-      setAllModelsOpen(false)
       setFavoriteError('')
       const rect = modelButtonRef.current?.getBoundingClientRect()
       if (rect) {
@@ -294,12 +306,51 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     setContextFrozen(frozen); contextFrozenRef.current = frozen
   }
 
+  // Advisory metadata remains separate from the composer's revision and unsent input.
+  const applyConversationMetadata = (latest: ConversationRecord) => {
+    setConversations(list => list.map(value => value.conversationId === latest.conversationId && value.updatedAt <= latest.updatedAt
+      ? { ...value, home: latest.home, advancementMode: latest.advancementMode, updatedAt: latest.updatedAt } : value))
+    const current = activeRef.current
+    if (current?.conversationId !== latest.conversationId || current.workspaceId !== latest.workspaceId || current.updatedAt > latest.updatedAt) return
+    const next = { ...current, home: latest.home, advancementMode: latest.advancementMode, updatedAt: latest.updatedAt }
+    activeRef.current = next; setActive(next)
+  }
+  const refreshAdvancementPreference = async (owner: Pick<ConversationRecord, 'workspaceId' | 'conversationId'>) => {
+    const ticket = ++advancementRead.current
+    const latest = await api?.conversation(owner.workspaceId, owner.conversationId)
+    if (latest && ticket === advancementRead.current) applyConversationMetadata(latest)
+  }
+  const chooseAdvancementMode = async (advancementMode: ExecutionAdvancementMode) => {
+    const selected = activeRef.current
+    if (!api?.setAdvancementMode || !selected || advancementBusy || selected.advancementMode === advancementMode) return
+    setAdvancementBusy(true); setError(''); ++advancementRead.current
+    const ticket = generation.current
+    const task = persistQueue.current.then(async () => {
+      const saved = await api.setAdvancementMode!({ workspaceId: selected.workspaceId, conversationId: selected.conversationId, advancementMode })
+      if (ticket !== generation.current) return
+      applyConversationMetadata(saved)
+      // The accepted run keeps its original freeze; Main publishes ordered steering for the changed preference.
+      const currentRun = runRef.current
+      if (currentRun?.input.conversationId === selected.conversationId) {
+        const latestRun = await api.run(currentRun.runId).catch(() => null)
+        if (latestRun && activeRef.current?.conversationId === selected.conversationId && runRef.current?.runId === currentRun.runId && latestRun.version >= runRef.current.version) {
+          setRun(latestRun); runRef.current = latestRun
+        }
+      }
+    })
+    advancementWrite.current = task.catch(() => undefined)
+    persistQueue.current = task.catch(() => undefined)
+    try { await task }
+    catch (failure) { if (ticket === generation.current) setError(failure instanceof Error ? failure.message : '推进方式未保存，请重试。') }
+    finally { if (ticket === generation.current) setAdvancementBusy(false) }
+  }
+
   useEffect(() => {
     const ticket = ++generation.current
     documentsByConversation.current.clear(); frozenByConversation.current.clear()
     activeRef.current = null; draftRef.current = ''; documentsRef.current = []; attachmentsRef.current = []; contextFrozenRef.current = false
     setWorkspaceId(''); setConversations([]); setActive(null); setDraft(''); setDocuments([]); setAttachments([]); setSubmissions([]); setUserHistoryOffsets({})
-    setLatestRequest(undefined)
+    setLatestRequest(undefined); setAdvancementBusy(false); ++advancementRead.current
     setContextFrozen(false); setRun(null); setError('')
     if (!api) { setError('当前环境没有统一执行服务。'); return }
     setBusy(true)
@@ -307,8 +358,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       if (ticket !== generation.current) return
       setWorkspaceId(value.workspace.workspaceId); setConversations(value.conversations); setRecoveryIssues(value.recoveryIssues ?? [])
       let selected = value.conversations[0]
-      if (!selected) selected = await api.createConversation(value.workspace.workspaceId, undefined,
-        sessionScope ? { kind: sessionScope.kind, path: sessionScope.path } : undefined)
+      if (!selected) selected = await api.createConversation(value.workspace.workspaceId)
       if (ticket !== generation.current) return
       setConversations(list => list.some(item => item.conversationId === selected!.conversationId) ? list : [...list, selected!])
       applyConversation(selected)
@@ -323,7 +373,9 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     const selected = activeRef.current
     if (!selected) return
     const ticket = ++referenceCapture.current
-    const pending = captureDocuments(true).then(captured => {
+    // Display-only observation must not drain inputs: drain publishes a new
+    // document view, which renders the host and recaptures these references.
+    const pending = captureDocuments(true, false).then(captured => {
       if (ticket !== referenceCapture.current || activeRef.current?.conversationId !== selected.conversationId) return documentsRef.current
       const automatic = splitComposerReferences(captured)
       const focus = automatic.filter(reference => reference.displayLabel === '当前页面' || reference.displayLabel === '文档').map(referenceIdentity).join('|')
@@ -344,13 +396,12 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     return subscribe(() => {
       void api.workspace(root).then(value => {
         if (!live || value.workspace.workspaceId !== workspaceId) return
-        setConversations(value.conversations)
+        setConversations(previous => value.conversations.map(latest => {
+          const current = previous.find(item => item.conversationId === latest.conversationId)
+          return current && current.updatedAt > latest.updatedAt ? current : latest
+        }))
         const latest = value.conversations.find(item => item.conversationId === activeRef.current?.conversationId)
-        if (latest && activeRef.current) {
-          const current = activeRef.current
-          const refreshed = { ...current, home: latest.home }
-          setActive(refreshed); activeRef.current = refreshed
-        }
+        if (latest) applyConversationMetadata(latest)
       }).catch(() => undefined)
     })
   }, [api, root, workspaceId])
@@ -362,21 +413,20 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     return () => { disposed = true }
   }, [settingsAPI])
   useEffect(() => {
-    if (!modelMenuOpen || !settingsAPI || !settings) return
+    if (!settingsAPI || !settings) return
     for (const entry of settings.connections) {
       if (!entry.hasCredential || entry.revoked) continue
-      if (!allModelsOpen && entry.connection.id !== settings.profile.roles.conversation?.connectionId
-        && !(settings.modelFavorites ?? []).some(value => value.connectionId === entry.connection.id)) continue
       const key = `${entry.connection.id}:${entry.connection.revision}`
       if (modelCatalogs[key] || catalogRequested.current.has(key)) continue
       catalogRequested.current.add(key)
       void settingsAPI.discoverModels(entry.connection.id, entry.connection.revision).then(value => {
         if (value.connectionId !== entry.connection.id || value.connectionRevision !== entry.connection.revision) return
+        if (value.models.length === 0) throw new Error('服务返回了空模型目录，请重试目录或检查账号订阅权限与网络连接。已有选择已保留。')
         setModelCatalogs(current => ({ ...current, [key]: value }))
         setModelCatalogErrors(current => { const next = { ...current }; delete next[key]; return next })
-      }).catch(() => setModelCatalogErrors(current => ({ ...current, [key]: `${entry.connection.provider} 的模型目录暂不可读取。已有选择仍可使用。` })))
+      }).catch(error => setModelCatalogErrors(current => ({ ...current, [key]: error instanceof Error ? error.message : `${entry.connection.provider} 的模型目录暂不可读取。已有选择仍可使用。` })))
     }
-  }, [modelMenuOpen, allModelsOpen, modelCatalogs, settings, settingsAPI])
+  }, [modelCatalogs, settings, settingsAPI])
   useEffect(() => {
     if (!modelMenuOpen || !settingsAPI) return
     let current = true
@@ -421,17 +471,35 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     const documentsAPI = window.desktopAPI?.documents
     let disposed = false
     if (!documentsAPI || documents.length === 0) { setDocumentNames({}); setDocumentReferenceIssues({}); return }
+    const latestMetadata = new Map<string, { id: string; name: string; issue: string }>()
     void Promise.all(documents.map(async reference => {
       try {
         const snapshot = await documentsAPI.read(reference.documentId)
         const name = snapshot.binding.kind === 'file' ? snapshot.binding.path.split(/[\\/]/).at(-1) || '已绑定文档' : snapshot.binding.suggestedName
         return { id: reference.documentId, name, issue: snapshot.epoch !== reference.epoch ? '原引用需要重新选择' : '' }
-      } catch { return { id: reference.documentId, name: '原文档', issue: '原文档尚未打开' } }
+      } catch { return { id: reference.documentId, name: documentNames[reference.documentId] ?? '原文档', issue: '原文档尚未打开' } }
     })).then(entries => { if (!disposed) {
-      setDocumentNames(Object.fromEntries(entries.map(value => [value.id, value.name])))
-      setDocumentReferenceIssues(Object.fromEntries(entries.filter(value => value.issue).map(value => [value.id, value.issue])))
+      for (const entry of entries) if (!latestMetadata.has(entry.id)) latestMetadata.set(entry.id, entry)
+      const current = entries.map(value => latestMetadata.get(value.id) ?? value)
+      setDocumentNames(Object.fromEntries(current.map(value => [value.id, value.name])))
+      setDocumentReferenceIssues(Object.fromEntries(current.filter(value => value.issue).map(value => [value.id, value.issue])))
     } })
-    return () => { disposed = true }
+    const unsubscribe = documentsAPI.subscribe?.(event => {
+      const id = event.type === 'changed' ? event.snapshot.documentId : event.documentId
+      const reference = documents.find(value => value.documentId === id)
+      if (disposed || !reference) return
+      const snapshot = event.type === 'changed' ? event.snapshot : null
+      const name = snapshot ? snapshot.binding.kind === 'file' ? snapshot.binding.path.split(/[\\/]/).at(-1) || '已绑定文档' : snapshot.binding.suggestedName
+        : latestMetadata.get(id)?.name ?? documentNames[id] ?? '原文档'
+      const issue = snapshot ? snapshot.epoch !== reference.epoch ? '原引用需要重新选择' : '' : '原文档尚未打开'
+      latestMetadata.set(id, { id, name, issue })
+      setDocumentNames(previous => previous[id] === name ? previous : { ...previous, [id]: name })
+      setDocumentReferenceIssues(previous => {
+        if ((previous[id] ?? '') === issue) return previous
+        const next = { ...previous }; if (issue) next[id] = issue; else delete next[id]; return next
+      })
+    })
+    return () => { disposed = true; unsubscribe?.() }
   }, [documents])
 
   useEffect(() => {
@@ -524,6 +592,10 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           || !['queued', 'running', 'stopping'].includes(previous.status) && ['queued', 'running', 'stopping'].includes(value.status)
           : previous.createdAt > value.createdAt)) return
         setRun(value); runRef.current = value
+        if (executionAdvancementMode(value) !== (previous ? executionAdvancementMode(previous) : undefined)) {
+          const owner = activeRef.current
+          if (owner?.conversationId === conversationId) void refreshAdvancementPreference(owner).catch(() => undefined)
+        }
       }).catch(() => { if (!disposed) setError('当前任务状态暂不可读取，已保留任务内容。') })
         .finally(() => { const pending = runReads.get(runId); runReads.delete(runId); if (pending && !disposed) refreshRun(runId) })
     }
@@ -587,6 +659,10 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   // Element AI cards (M15) belong to this space and use the permission level shown here.
   useEffect(() => { elementCards.setWorkspace(workspaceId || null); return () => elementCards.setWorkspace(null) }, [workspaceId])
   useEffect(() => { elementCards.setPermission(permission) }, [permission])
+  useEffect(() => {
+    elementCards.setAdvancementPreferenceOwner(active ? { workspaceId: active.workspaceId, conversationId: active.conversationId } : null)
+    return () => elementCards.setAdvancementPreferenceOwner(null)
+  }, [active?.workspaceId, active?.conversationId])
   const choosePermission = (value: ExecutionPermissionMode) => {
     setPermissionState(value); setPermissionOpen(false)
     permissionRef.current?.querySelector<HTMLButtonElement>('button')?.focus()
@@ -605,7 +681,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     return `对话与规划 · ${connection.connection.provider} · ${conversationSelection.model} · ${accountLabel(connection)} · ${billingLabels[connection.connection.billing.kind]}`
   }, [connection, conversationSelection])
   const modelSummary = conversationSelection
-    ? `${connection?.connection.provider ?? '连接不可用'} · ${conversationSelection.model}`
+    ? conversationSelection.model
     : '未配置对话模型'
   const modelOptions = useMemo(() => {
     if (!settings) return []
@@ -623,11 +699,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     for (const record of settings.capabilityRecords ?? []) {
       const entry = settings.connections.find(value => value.connection.id === record.connectionId && value.connection.revision === record.connectionRevision)
       if (!entry?.hasCredential || entry.revoked || record.facts.tools?.status !== 'supported') continue
-      try {
-        const parsed: unknown = JSON.parse(record.parametersKey)
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
-        add({ connectionId: record.connectionId, model: record.model, parameters: parsed as ExecutionRoleSelection['parameters'] })
-      } catch { /* A malformed historical observation cannot become a route choice. */ }
+      const selection = modelCapabilitySelection(record, entry.connection)
+      if (selection) add({ connectionId: record.connectionId, ...selection })
     }
     for (const entry of settings.connections) {
       const catalog = modelCatalogs[`${entry.connection.id}:${entry.connection.revision}`]
@@ -643,14 +716,14 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     return options
   }, [settings, streamingAlternatives, modelCatalogs])
   const favorites = settings?.modelFavorites ?? []
-  const favoriteModelOptions = favorites.map(favorite => modelOptions.find(value => value.selection.connectionId === favorite.connectionId
-    && value.selection.model === favorite.model)).filter((value): value is typeof modelOptions[number] => value !== undefined)
   const query = modelQuery.trim().toLocaleLowerCase()
   const connectionDescription = (entry: ExecutionSettingsView['connections'][number]) =>
     `${entry.connection.provider} · ${accountLabel(entry)} · ${billingLabels[entry.connection.billing.kind]}`
   const modelGroups: { id: string; entry?: ExecutionSettingsView['connections'][number]; label: string; options: typeof modelOptions }[] = (settings?.connections ?? []).map(entry => ({
     id: entry.connection.id, entry, label: connectionDescription(entry),
-    options: modelOptions.filter(value => value.selection.connectionId === entry.connection.id),
+    options: modelOptions.filter(value => value.selection.connectionId === entry.connection.id).sort((a, b) =>
+      Number(favorites.some(f => f.connectionId === b.selection.connectionId && f.model === b.selection.model))
+      - Number(favorites.some(f => f.connectionId === a.selection.connectionId && f.model === a.selection.model))),
   }))
   for (const value of modelOptions) {
     if (value.connection) continue
@@ -658,6 +731,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     if (existing) existing.options.push(value)
     else modelGroups.push({ id: value.selection.connectionId, label: `${value.selection.connectionId} · 连接不可用`, options: [value] })
   }
+  modelGroups.sort((a, b) => Number(favorites.some(f => f.connectionId === b.id)) - Number(favorites.some(f => f.connectionId === a.id)))
   const matchingModelGroups = modelGroups.map(group => ({ ...group,
     options: group.options.filter(value => !query || `${group.label} ${group.id} ${value.selection.model} ${value.catalogModel?.displayName ?? ''} ${value.catalogModel?.description ?? ''}`.toLocaleLowerCase().includes(query)),
   })).filter(group => !query || group.options.length > 0 || `${group.label} ${group.id}`.toLocaleLowerCase().includes(query))
@@ -750,25 +824,28 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
 
   const persist = (documentOverride?: ExecutionDocumentReference[]) => {
     const ticket = generation.current
+    const selected = activeRef.current
+    const localDraft = draftRef.current
+    const inputAttachments = [...attachmentsRef.current]
+    const fallbackReferences = [...documentsRef.current]
+    const capture = capturePromise.current
     const task = persistQueue.current.then(async () => {
-      const selected = activeRef.current
       if (!api || !selected) return selected
-      const captured = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
-      const refs = documentOverride ?? (captured.length > 0 ? captured : documentsRef.current)
-      const localDraft = draftRef.current
-      const inputAttachments = attachmentsRef.current
-      if (localDraft === selected.inputDraft && sameAttachments(inputAttachments, selected.inputAttachments) && sameDocuments(refs, restoredDocuments(selected))) return selected
+      const captured = await (capture ?? Promise.resolve(fallbackReferences))
+      const refs = documentOverride ?? (ticket === generation.current && captured.length > 0 ? captured : fallbackReferences)
+      const base = await api.conversation(selected.workspaceId, selected.conversationId) ?? selected
+      if (localDraft === base.inputDraft && sameAttachments(inputAttachments, base.inputAttachments) && sameDocuments(refs, restoredDocuments(base))) return base
       const write = (base: ConversationRecord) => api.draft({ workspaceId: base.workspaceId, conversationId: base.conversationId,
         expectedRevision: base.revision, text: localDraft, documents: refs, attachments: inputAttachments })
       // Main also writes this record after a task ends (its reply, a restored input, the next queued run). The unsaved
       // composer stays the newer teacher draft, so it is saved once more on the latest record instead of failing every later save.
-      const saved = await write(selected).catch(async error => {
+      const saved = await write(base).catch(async error => {
         if (!isExecutionInputError(error, 'conversation-draft-changed')) throw error
         const latest = await api.conversation(selected.workspaceId, selected.conversationId).catch(() => null)
-        if (!latest || latest.revision === selected.revision) throw error
+        if (!latest || latest.revision === base.revision) throw error
         return write(latest)
       })
-      if (ticket !== generation.current) return saved
+      if (ticket !== generation.current || activeRef.current?.conversationId !== selected.conversationId) return saved
       documentsByConversation.current.set(saved.conversationId, refs)
       setConversations(value => updateConversation(value, saved)); setActive(saved); activeRef.current = saved
       return saved
@@ -778,6 +855,37 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   }
 
   useImperativeHandle(ref, () => ({ preserveDraft: async () => { await persist() } }))
+
+  const changeOwnedAttachments = (owner: ConversationRecord, previous: readonly InputAttachmentReference[], next: InputAttachmentReference[]) => {
+    const isActive = () => activeRef.current?.conversationId === owner.conversationId && activeRef.current?.workspaceId === owner.workspaceId
+    if (isActive()) {
+      const value = attachmentDraftChange(attachmentsRef.current, previous, next)
+      attachmentsRef.current = value; setAttachments(value)
+    }
+    const ownerDraft = isActive() ? { text: draftRef.current, documents: [...documentsRef.current], attachments: [...attachmentsRef.current] } : null
+    setAttachmentOwners(owners => owners.map(item => item.conversation.conversationId === owner.conversationId
+      ? { ...item, value: attachmentDraftChange(item.value, previous, next) } : item))
+    // Use the same draft queue and Main CAS as ordinary text saves; the completion carries its original owner.
+    const task = persistQueue.current.then(async () => {
+      if (!api) return
+      const latest = await api.conversation(owner.workspaceId, owner.conversationId)
+      if (!latest) return // Deleted conversations are never recreated or redirected.
+      const write = (base: ConversationRecord) => api.draft({ workspaceId: owner.workspaceId, conversationId: owner.conversationId,
+        expectedRevision: base.revision, text: ownerDraft?.text ?? base.inputDraft,
+        documents: ownerDraft?.documents ?? restoredDocuments(base),
+        attachments: ownerDraft?.attachments ?? attachmentDraftChange(base.inputAttachments, previous, next) })
+      const saved = await write(latest).catch(async failure => {
+        if (!isExecutionInputError(failure, 'conversation-draft-changed')) throw failure
+        const refreshed = await api.conversation(owner.workspaceId, owner.conversationId)
+        if (!refreshed) return null
+        return write(refreshed)
+      })
+      if (!saved) return
+      setConversations(value => updateConversation(value, saved))
+      if (isActive()) { setActive(saved); activeRef.current = saved }
+    })
+    persistQueue.current = task.catch(() => { setError('原会话的附件草稿未保存，请返回该会话重试。') })
+  }
 
   const select = async (conversation: ConversationRecord) => {
     if (!active || conversation.conversationId === active.conversationId || busy) return
@@ -795,7 +903,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     setBusy(true); setError('')
     try {
       await persist()
-      const created = await api.createConversation(workspaceId, undefined, conversationHomeInput)
+      const created = await api.createConversation(workspaceId)
       setConversations(value => [...value, created]); setSessionSearch(''); applyConversation(created)
     } catch { setError('新会话暂未创建。') }
     finally { setBusy(false) }
@@ -826,13 +934,14 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       await api.deleteConversation({ workspaceId: latest.workspaceId, conversationId: latest.conversationId, expectedRevision: latest.revision })
       documentsByConversation.current.delete(conversation.conversationId)
       frozenByConversation.current.delete(conversation.conversationId)
+      setAttachmentOwners(owners => owners.filter(owner => owner.conversation.conversationId !== conversation.conversationId))
       setUserHistoryOffsets(value => {
         const next = { ...value }
         delete next[conversation.conversationId]
         return next
       })
       let remaining = conversations.filter(value => value.conversationId !== conversation.conversationId)
-      if (remaining.length === 0) remaining = [await api.createConversation(workspaceId, undefined, conversationHomeInput)]
+      if (remaining.length === 0) remaining = [await api.createConversation(workspaceId)]
       setConversations(remaining)
       if (activeRef.current?.conversationId === conversation.conversationId) applyConversation(remaining[0]!)
       setRenamingId(null); setSessionMenuId(null)
@@ -870,9 +979,11 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     submittingRef.current = true; setBusy(true); setError('')
     let request: ExecutionSendInput | undefined, sendInvoked = false
     try {
+      await advancementWrite.current
       if (retry) request = { workspaceId: retry.workspaceId, conversationId: retry.conversationId, submissionId: retry.submissionId,
         expectedRevision: selected.revision, text: retry.text, documents: structuredClone(retry.documents), attachments: structuredClone(retry.attachments),
         mode: retry.mode, ...(retry.retryOfRunId ? { retryOfRunId: retry.retryOfRunId } : {}), ...(retry.permission ? { permission: retry.permission } : {}), ...(retry.contentOutput ? { contentOutput: retry.contentOutput } : {}),
+        ...(retry.advancementMode ? { advancementMode: retry.advancementMode } : {}),
         ...(retry.materials ? { materials: structuredClone(retry.materials) } : {}) }
       else if (continueRun) {
         const source = submissions.find(item => item.runId === continueRun.runId)
@@ -892,6 +1003,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         request = { workspaceId: source.workspaceId, conversationId: source.conversationId, submissionId: crypto.randomUUID(),
           expectedRevision: persisted.revision, text: source.text, documents: structuredClone(source.documents),
           attachments: structuredClone(source.attachments), mode: 'queue', retryOfRunId: continueRun.runId,
+          ...((persisted.advancementMode ?? executionAdvancementMode(continueRun)) ? { advancementMode: persisted.advancementMode ?? executionAdvancementMode(continueRun) } : {}),
           ...(source.permission ? { permission: source.permission } : {}), ...(source.contentOutput ? { contentOutput: source.contentOutput } : {}),
           ...(source.materials ? { materials: structuredClone(source.materials) } : {}) }
       }
@@ -900,28 +1012,30 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         if (!original || !['queued', 'running'].includes(original.status)) throw new Error('当前任务已结束，补充输入已保留，请作为新任务发送')
         if (attachmentsRef.current.length || permission !== (original.input.permission ?? DEFAULT_PERMISSION_MODE))
           throw new Error('新增材料或权限请加入队列作为新任务。')
-        await persist()
+        const persisted = await persist()
         const current = activeRef.current
-        if (!current || current.conversationId !== selected.conversationId) throw new Error('会话已切换，消息没有发送。')
+        if (!current || !persisted || current.conversationId !== selected.conversationId || persisted.conversationId !== selected.conversationId) throw new Error('会话已切换，消息没有发送。')
         // Main owns the original run's documents, provider and authority. A text adjustment captures none anew.
         request = { workspaceId: current.workspaceId, conversationId: current.conversationId, submissionId: crypto.randomUUID(),
-          expectedRevision: current.revision, text: draftRef.current, documents: [], attachments: [], mode: 'adjust', permission }
+          expectedRevision: current.revision, text: draftRef.current, documents: [], attachments: [], mode: 'adjust', permission,
+          ...((persisted.advancementMode ?? executionAdvancementMode(original)) ? { advancementMode: persisted.advancementMode ?? executionAdvancementMode(original) } : {}) }
       }
       else {
         const materials = await captureMaterials?.()
         const pinned = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
-        const ready = await prepareSend([...new Set(pinned.map(document => document.documentId))])
+        const ready = await prepareSend(pinned)
         if (!ready) { setError('引用文档的输入尚未同步；请处理对应文档后重试。'); return }
         const preparedDocuments = api.prepareDocuments ? await api.prepareDocuments({ workspaceId: selected.workspaceId,
           conversationId: selected.conversationId, documents: pinned, permission: permissionOverride ?? permission }) : pinned
         // A click blurs the textarea first. Wait for that CAS, then freeze one exact payload.
-        await persist()
+        const persisted = await persist()
         const current = activeRef.current
-        if (!current || current.conversationId !== selected.conversationId) throw new Error('会话已切换，消息没有发送。')
+        if (!current || !persisted || current.conversationId !== selected.conversationId || persisted.conversationId !== selected.conversationId) throw new Error('会话已切换，消息没有发送。')
         const captured = preparedDocuments
         const level = permissionOverride ?? permission
         request = { workspaceId: current.workspaceId, conversationId: current.conversationId, submissionId: crypto.randomUUID(),
           expectedRevision: current.revision, text: draftRef.current, documents: documentsForPermission(captured, level), attachments: structuredClone(attachmentsRef.current), mode, permission: level, ...(contentOutput ? { contentOutput } : {}),
+          ...(persisted.advancementMode ? { advancementMode: persisted.advancementMode } : {}),
           ...(materials ? { materials: structuredClone(materials) } : {}) }
       }
       // Owner 2026-09-24: no service notice. The route shown in the model menu is frozen with the task.
@@ -939,6 +1053,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         replaceSubmission({ submissionId: request.submissionId, workspaceId: request.workspaceId, conversationId: request.conversationId,
           state: 'starting', mode, text: request.text, documents: request.documents, attachments: request.attachments ?? [],
           ...(request.contentOutput ? { contentOutput: request.contentOutput } : {}),
+          ...(request.advancementMode ? { advancementMode: request.advancementMode } : {}),
           ...(request.materials ? { materials: structuredClone(request.materials) } : {}),
           ...(request.retryOfRunId ? { retryOfRunId: request.retryOfRunId } : {}), ...(request.permission ? { permission: request.permission } : {}),
           model: { provider: connection?.connection.provider ?? '当前连接', model: conversationSelection?.model ?? '当前模型',
@@ -986,6 +1101,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         replaceSubmission({ submissionId: request.submissionId, workspaceId: request.workspaceId, conversationId: request.conversationId,
           state: 'failed', mode: request.mode ?? 'queue', text: request.text, documents: request.documents, attachments: request.attachments ?? [],
           ...(request.contentOutput ? { contentOutput: request.contentOutput } : {}),
+          ...(request.advancementMode ? { advancementMode: request.advancementMode } : {}),
           ...(request.materials ? { materials: structuredClone(request.materials) } : {}),
           ...(request.retryOfRunId ? { retryOfRunId: request.retryOfRunId } : {}),
           model: { provider: connection?.connection.provider ?? '当前连接', model: conversationSelection?.model ?? '当前模型', accountId: connection?.connection.accountId ?? '', billing: connection?.connection.billing.kind ?? 'unknown' },
@@ -1014,9 +1130,13 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   useEffect(() => workbenchSelection.onRequest(request => contextualHandler.current(request)), [])
   /** "+" menu: reference the current document, or its current selection, for this message. */
   const changeSelection = async (requireSelection = true, replaceStale = false) => {
+    const owner = activeRef.current, ticket = generation.current
+    if (!owner) return
+    const stillOwned = () => ticket === generation.current && activeRef.current?.workspaceId === owner.workspaceId && activeRef.current?.conversationId === owner.conversationId
     setPlusOpen(false)
     try {
       const captured = await captureDocuments(true)
+      if (!stillOwned()) return
       if (!captured.length) throw new Error('当前没有打开的文档，原引用仍保留。')
       if (requireSelection && !captured.some(value => value.selection?.length)) throw new Error('当前没有有效选区，原引用仍保留。')
       const split = splitComposerReferences(captured)
@@ -1025,9 +1145,9 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       const base = replaceStale ? documentsRef.current.filter(reference => !captured.some(value => value.documentId === reference.documentId && value.epoch !== reference.epoch)) : documentsRef.current
       const refs = pinReferences(base, added)
       setDocuments(refs); documentsRef.current = refs; contextFrozenRef.current = true; setContextFrozen(true)
-      if (activeRef.current) { documentsByConversation.current.set(activeRef.current.conversationId, refs); frozenByConversation.current.set(activeRef.current.conversationId, true) }
-      await persist()
-    } catch (failure) { setError(failure instanceof Error ? failure.message : '选区未改变。') }
+      documentsByConversation.current.set(owner.conversationId, refs); frozenByConversation.current.set(owner.conversationId, true)
+      await persist(refs)
+    } catch (failure) { if (stillOwned()) setError(failure instanceof Error ? failure.message : '选区未改变。') }
   }
   /** Chip ×: drop one document reference (or all) from this message; the other references stay. */
   const removeDocumentReferences = async (referenceId?: string) => {
@@ -1177,19 +1297,13 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     setUserHistoryOffsets(value => ({ ...value, [active.conversationId]: offsetFromLatest }))
   }
 
-  const filteredConversations = conversations.filter(conversation =>
-    (!conversationScope || homeInScope(conversationScope, conversation.home))
-    && `${conversation.title || '新会话'} ${conversation.home?.path ?? ''}`.toLocaleLowerCase().includes(sessionSearch.trim().toLocaleLowerCase()))
+  const filteredConversations = conversations.filter(conversation => (conversation.title || '新会话').toLocaleLowerCase().includes(sessionSearch.trim().toLocaleLowerCase()))
   const sessionList = <aside className="execution-assistant__sessions" aria-label="会话列表">
-    <header><strong>会话列表</strong><button type="button" onClick={() => void create()} disabled={busy || !workspaceId}>新建会话</button></header>
-    {sessionScope && <div className="execution-assistant__session-filter" aria-label="会话筛选">
-      <span title={sessionScope.path}>{sessionScope.kind === 'file' ? '文件' : '文件夹'} · {sessionScope.path}</span>
-      <button type="button" onClick={() => sessionDock.setScope?.(null)}>显示全部会话</button>
-    </div>}
+    <header><strong>会话列表</strong><button type="button" aria-label="新建会话" title="新建会话" onClick={() => void create()} disabled={busy || !workspaceId}><Plus size={16} /></button></header>
     <input aria-label="搜索会话" value={sessionSearch} onChange={event => { setSessionSearch(event.target.value); setSessionMenuId(null) }} placeholder="搜索会话" />
     <nav aria-label="工作空间会话">
       {filteredConversations.length === 0 && <div className="execution-assistant__session-empty">
-        <p>{sessionSearch.trim() ? '没有匹配的会话。' : sessionScope ? '这个位置还没有会话，可以新建或查看全部。' : '还没有会话，点击“新建会话”开始。'}</p>
+        <p>{sessionSearch.trim() ? '没有匹配的会话。' : '还没有会话，点击“新建会话”开始。'}</p>
         {sessionSearch.trim() && <button type="button" onClick={() => setSessionSearch('')}>清除搜索</button>}
       </div>}
       {filteredConversations.map(conversation => <div className="execution-assistant__session-row" key={conversation.conversationId}>
@@ -1200,7 +1314,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         <button type="button" onClick={() => setRenamingId(null)}>取消</button>
       </form> : <button type="button" className={conversation.conversationId === active?.conversationId ? 'is-active' : ''}
         aria-current={conversation.conversationId === active?.conversationId ? 'page' : undefined}
-        onClick={() => void select(conversation)} disabled={busy} aria-label={conversation.title || '新会话'} title={conversation.title || '新会话'}><span className="execution-assistant__session-title">{conversation.title || '新会话'}</span><small className="execution-assistant__session-home">{conversation.home ? `${conversation.home.workspaceId && conversation.home.workspaceId !== conversation.workspaceId ? '其他工作空间 · ' : ''}${conversation.home.kind === 'folder' ? '文件夹' : '文件'} · ${conversation.home.path}${conversation.home.missing ? ' · 已删除' : ''}` : '工作空间'}</small></button>}
+        onClick={() => void select(conversation)} disabled={busy} aria-label={conversation.title || '新会话'} title={conversation.title || '新会话'}><span className="execution-assistant__session-title">{conversation.title || '新会话'}</span></button>}
       <div className="execution-assistant__session-menu">
         <button type="button" aria-label={`管理会话 ${conversation.title || '新会话'}`} aria-expanded={sessionMenuId === conversation.conversationId}
           onClick={() => setSessionMenuId(value => value === conversation.conversationId ? null : conversation.conversationId)} disabled={busy}>⋯</button>
@@ -1224,63 +1338,32 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     active.runIndex.builtinRunIds.length === 0 &&
     active.runIndex.externalRunIds.length === 0
   )
-  const workspaceName = root ? (root.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || '工作空间') : '工作空间'
-  const homePath = active?.home?.path ? active.home.path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '') : ''
-  const pathSegments = homePath ? homePath.split('/') : []
-  const isOtherWorkspace = Boolean(active?.home?.workspaceId && active?.workspaceId && active.home.workspaceId !== active.workspaceId)
-  // A home in another workspace must not be shown under this workspace's name or root.
-  const formattedPath = isOtherWorkspace ? pathSegments.join(' › ') : pathSegments.length > 0 ? [workspaceName, ...pathSegments].join(' › ') : workspaceName
-  const isMissing = Boolean(active?.home?.missing)
-  const locationKind = active?.home?.kind ?? 'folder'
-  const locationIcon = locationKind === 'file' ? <File size={13} className="execution-assistant__location-icon" /> : <Folder size={13} className="execution-assistant__location-icon" />
-  const fullPath = isOtherWorkspace ? homePath : [root?.replace(/[/\\]+$/, ''), homePath].filter(Boolean).join('/')
-  const locationTitle = `${fullPath ? `${fullPath}\n` : ''}所属位置用于整理会话；当前引用和连接权限决定任务可访问的内容`
-  const handleLocationClick = () => {
-    if (!active) return
-    const path = active.home?.path ?? ''
-    const kind = active.home?.kind ?? 'folder'
-    const workspaceId = active.home?.workspaceId ?? active.workspaceId
-    // Explorer roots get new ids on every run; a home in this session's own space is revealed in the current root.
-    dispatchRevealInExplorer(isOtherWorkspace ? { workspaceId, path, kind } : { path, kind })
-  }
-
   return <section className={`execution-assistant${sessionDock.inWorkspace ? ' execution-assistant--docked' : ''}`} aria-label="创作助手">
     {recoveryIssues.length > 0 && <details className="execution-assistant__notice"><summary>{recoveryIssues.length} 项历史恢复需处理；其他会话可继续使用</summary>{recoveryIssues.map((message, index) => <p key={index}>{message}</p>)}</details>}
     {sessionDock.inWorkspace ? sessionDock.target && createPortal(sessionList, sessionDock.target) : sessionList}
     <div className="execution-assistant__main">
       <header className="execution-assistant__header">
         <div className="execution-assistant__heading">
-          <div className="execution-assistant__title"><span>当前会话</span><strong title={active?.title || '新会话'}>{active?.title || '新会话'}</strong></div>
+          <div className="execution-assistant__title"><span><Sparkles size={14} /> 果铃AI</span><strong title={active?.title || '新会话'}>{active?.title || '新会话'}</strong></div>
+          <button type="button" className="execution-assistant__header-action" aria-label="新建果铃AI会话" title="新建会话" disabled={busy || !workspaceId} onClick={() => void create()}><Plus size={16} /></button>
+          <button type="button" className="execution-assistant__header-action" aria-label="模型与连接设置" title="模型与连接设置" onClick={() => { setSettingsEntry('default'); setSettingsOpen(true) }}><Settings size={16} /></button>
           <details className="execution-assistant__more" ref={moreRef}>
-            <summary aria-label="会话更多操作">更多</summary>
+            <summary aria-label="会话更多操作" title="会话更多操作"><MoreHorizontal size={18} /></summary>
             <div className="execution-assistant__more-menu" aria-label="会话次级操作">
               <button type="button" onClick={() => { moreRef.current!.open = false; setHistorySearchOpen(value => !value) }} disabled={!active || !api}>搜索历史</button>
               <button type="button" onClick={() => { moreRef.current!.open = false; setReviewRunId(value => value ? null : active?.runIndex.builtinRunIds.at(-1) ?? null) }}
                 disabled={!active?.runIndex.builtinRunIds.length || !reviewLoader || !reviewRollback}>审阅本次变更</button>
-              <button type="button" onClick={() => { moreRef.current!.open = false; setExternalOpen(true) }} disabled={!externalAPI}>外部 AI 连接</button>
+              <button type="button" onClick={() => { moreRef.current!.open = false; setExternalOpen(true) }} disabled={!externalAPI}>外部AI客户端接入（MCP）</button>
             </div>
           </details>
         </div>
-        <div className="execution-assistant__location-bar">
-          <button type="button" className="execution-assistant__location" title={locationTitle} onClick={handleLocationClick}>
-            <span className="execution-assistant__location-path">
-              {locationIcon}
-              <span className="execution-assistant__location-text">
-                {isOtherWorkspace && <span className="execution-assistant__location-prefix">其他工作空间 · </span>}
-                {formattedPath}
-                {isMissing && <span className="execution-assistant__location-missing"> · 已删除</span>}
-              </span>
-            </span>
-            {isEmptySession && <small className="execution-assistant__location-hint">发送首条消息后固定</small>}
-          </button>
-        </div>
+        {run && ['queued', 'running', 'stopping'].includes(run.status) && <small className="execution-assistant__run-route" title="本次任务保持发送时的模型；推进方式采用最新接受的选择。">当前任务：{run.input.selection.model} · <span aria-label="当前任务推进方式">{executionAdvancementMode(run) ? advancementLabels[executionAdvancementMode(run)!] : '推进方式尚未选择'}</span></small>}
       </header>
       {forkAdvisory && forkAdvisory.conversationId === active?.conversationId && <section aria-label="新会话继续提示" className="execution-assistant__submission-note">
         <p>已从检查点创建新会话。先检查并修改下方目标草稿；发送时会重新读取当前文件，原任务操作不会自动重做。</p>
         {forkAdvisory.remaining.length > 0 && <><strong>原计划提示（请核对）</strong><ul>{forkAdvisory.remaining.map((item, index) => <li key={index}>{item}</li>)}</ul></>}
       </section>}
       {error && <p className="execution-assistant__error" role="alert">{error}</p>}
-      {active?.home?.missing && <p className="execution-assistant__home-notice" role="status">所属文件已删除；会话和草稿仍保留，可调整分类。</p>}
       <div className="execution-assistant__history">
         {isEmptySession && projection.items.length === 0 && submissions.length === 0 && !historySearchOpen ? <section className="execution-assistant__welcome" aria-label="开始创作">
           <span className="execution-assistant__welcome-mark" aria-hidden="true">✦</span>
@@ -1333,7 +1416,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
 
         {submissions.filter(item => item.state !== 'accepted' && item.state !== 'cancelled').map(item => <article className={`execution-assistant__submission execution-assistant__submission--${item.state}`} key={item.submissionId} aria-label="待处理消息">
           <header><strong>{item.state === 'queued' ? `排队中${item.position ? ` · 第 ${item.position} 条` : ''}` : item.state === 'starting' ? '正在确认' : '未发送'}</strong>
-            <small>{item.model.provider} · {item.model.model}</small></header>
+            <small>{item.model.provider} · {item.model.model}{item.advancementMode ? ` · ${advancementLabels[item.advancementMode]}` : ''}</small></header>
           <p>{item.text || `附件 ${item.attachments.length} 个`}</p>
           {item.queuePausedReason === 'user' && <p className="execution-assistant__submission-note">后续任务已暂停，消息和草稿仍保留。
             <button type="button" disabled={busy} onClick={() => { void api?.resumeQueue({ workspaceId: item.workspaceId, conversationId: item.conversationId }).catch(cause => setError(String(cause))) }}>继续排队任务</button></p>}
@@ -1351,6 +1434,9 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           const currentDraft = openQuestion.question.currentDraft ? await workbenchSelection.prepareQuestion(openQuestion.question) : undefined
           const record = await api.answer!({ runId: openQuestion.runId, callId: openQuestion.callId, answer, ...(currentDraft ? { currentDraft } : {}) })
           if (runRef.current?.runId === record.runId) { setRun(record); runRef.current = record }
+          const owner = activeRef.current
+          if (openQuestion.question.purpose === 'advancement-mode' && owner?.conversationId === record.input.conversationId)
+            await refreshAdvancementPreference(owner).catch(() => undefined)
         } : undefined} />}
       {openApproval && <ExecutionApprovalCard key={`${openApproval.runId}:${openApproval.callId}`} pending={openApproval}
         onDecide={api?.approve ? async decision => {
@@ -1377,18 +1463,21 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
                 const refs = documentsRef.current.map(reference => referenceIdentity(reference) === referenceIdentity(value) ? { ...reference, pinned: !reference.pinned } : reference)
                 documentsRef.current = refs; setDocuments(refs); const frozen = refs.some(reference => reference.pinned); contextFrozenRef.current = frozen; setContextFrozen(frozen)
                 void persist().catch(() => setError('引用草稿未保存，请重试。'))
-              }}>{value.pinned ? '已固定' : '固定'}</button>
-              <button type="button" aria-label={`移除引用 ${name}${value.displayLabel ? ` ${value.displayLabel}` : ''}`} disabled={busy} onClick={() => void removeDocumentReferences(referenceIdentity(value))}>×</button>
+              }} title={value.pinned ? '取消固定' : '固定引用'}>{value.pinned ? <Pin size={13} /> : <PinOff size={13} />}</button>
+              <button type="button" aria-label={`移除引用 ${name}${value.displayLabel ? ` ${value.displayLabel}` : ''}`} title="移除引用" disabled={busy} onClick={() => void removeDocumentReferences(referenceIdentity(value))}><X size={13} /></button>
             </span>
           })}
           {contextFrozen && documents.length === 0 && <span className="execution-assistant__chip is-muted">本条消息不引用文档</span>}
         </div>}
-        <AttachmentComposer workspaceDirectory={root ?? undefined} key={active?.conversationId ?? 'no-conversation'} value={attachments} disabled={!active || busy}
-          onBusyChange={setAttachmentBusy} onChange={value => {
-            setAttachments(value); attachmentsRef.current = value
-            void persist().catch(() => setError('附件草稿未保存，请重试。'))
-          }}>
-          {actions => <div className="execution-assistant__input-row">
+        {(active && !attachmentOwners.some(owner => owner.conversation.conversationId === active.conversationId)
+          ? [...attachmentOwners, { conversation: active, directory: root ?? undefined, value: attachments }] : attachmentOwners).map(owner => <div key={owner.conversation.conversationId} hidden={owner.conversation.conversationId !== active?.conversationId}>
+        <AttachmentComposer workspaceDirectory={owner.directory} value={owner.conversation.conversationId === active?.conversationId ? attachments : owner.value}
+          disabled={owner.conversation.conversationId !== active?.conversationId || busy}
+          onBusyChange={value => setAttachmentBusyOwners(current => {
+            if (current.has(owner.conversation.conversationId) === value) return current
+            const next = new Set(current); if (value) next.add(owner.conversation.conversationId); else next.delete(owner.conversation.conversationId); return next
+          })} onChange={(value, previous) => changeOwnedAttachments(owner.conversation, previous, value)}>
+          {actions => owner.conversation.conversationId !== active?.conversationId ? null : <div className="execution-assistant__input-row">
             <div className="execution-assistant__plus" ref={plusRef}>
               <button type="button" className="execution-assistant__plus-button" aria-label="添加" aria-haspopup="menu" aria-expanded={plusOpen}
                 disabled={!active || busy} onClick={event => togglePopup('plus', event.currentTarget)}>+</button>
@@ -1400,13 +1489,25 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
                 <p>也可以直接粘贴或拖入图片、文档。</p>
               </div>}
             </div>
-            <textarea ref={composerRef} aria-label="给创作助手发消息" aria-describedby="assistant-composer-hint" data-attachment-paste-target value={draft} disabled={!active} readOnly={busy} placeholder="描述你要讨论或完成的内容"
+            <ConversationInput inputRef={composerRef} value={draft} disabled={!active} readOnly={busy} workspaceDirectory={owner.directory} actions={actions}
               onFocus={() => { setPlusOpen(false); setPermissionOpen(false) }}
               onCompositionStart={() => { composingRef.current = true }} onCompositionEnd={() => { composingRef.current = false }} onKeyDown={onComposerKeyDown}
-              onChange={event => { setDraft(event.target.value); draftRef.current = event.target.value }} onBlur={() => { void persist().catch(failure => setError(failure instanceof Error ? failure.message : '草稿未保存，请重试。')) }} />
+              onChange={value => { setDraft(value); draftRef.current = value }} onBlur={() => { void persist().catch(failure => setError(failure instanceof Error ? failure.message : '草稿未保存，请重试。')) }}
+              onModel={toggleModelMenu} onPermission={() => { const anchor = permissionRef.current?.querySelector<HTMLButtonElement>('button'); if (anchor) togglePopup('permission', anchor) }}
+              onNewConversation={() => void create()} onReference={selection => void changeSelection(selection)} />
           </div>}
-        </AttachmentComposer>
+        </AttachmentComposer></div>)}
         <div className="execution-assistant__toolbar">
+          <label className="execution-assistant__advancement">
+            <span className="execution-assistant__advancement-label">推进</span>
+            <select aria-label="推进方式" value={active?.advancementMode ?? ''} disabled={!active || busy || advancementBusy || !api?.setAdvancementMode}
+              title="自动推进持续完成授权目标；逐步推进在有选择价值的产物节点确认。可随时更改，当前任务按最新接受的选择继续。"
+              onChange={event => { const value = event.currentTarget.value; if (value === 'automatic' || value === 'stepwise') void chooseAdvancementMode(value) }}>
+              <option value="" disabled>尚未选择</option>
+              <option value="automatic">自动推进</option>
+              <option value="stepwise">逐步推进</option>
+            </select>
+          </label>
           <div className="execution-assistant__permission" ref={permissionRef}>
             <button type="button" className="execution-assistant__permission-button" aria-label={`权限：${permissionLabels[permission]}`} aria-haspopup="menu" aria-expanded={permissionOpen}
               title={`${permissionLabels[permission]}：${permissionDescriptions[permission]}`} onClick={event => togglePopup('permission', event.currentTarget)}>
@@ -1422,10 +1523,10 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
             <span className={configured ? 'is-ready' : 'is-unavailable'} aria-hidden="true" />
             {/* Like common agents, the model summary itself opens the model menu. */}
             <button ref={modelButtonRef} type="button" aria-label="切换模型" aria-describedby={modelSummaryId} aria-expanded={modelMenuOpen} aria-controls="assistant-model-choices" onClick={toggleModelMenu}>
-              <span id={modelSummaryId}>{run && ['queued', 'running', 'stopping'].includes(run.status) ? `当前任务：${run.input.selection.model} · 下次：` : ''}{modelSummary}{connection ? ` · ${billingLabels[connection.connection.billing.kind]}` : ''}{!configured && conversationSelection ? ' · 不可用' : ''}</span>
+              <span id={modelSummaryId}>{modelSummary}{!configured && conversationSelection ? ' · 不可用' : ''}</span>
               <span aria-hidden="true">▾</span>
             </button>
-            {modelMenuOpen && createPortal(<div ref={modelMenuRef} id="assistant-model-choices" className={`execution-assistant__model-menu${!allModelsOpen && favoriteModelOptions.length === 0 ? ' execution-assistant__model-menu--empty' : ''}`} role="group" aria-label="对话模型选择"
+            {modelMenuOpen && createPortal(<div ref={modelMenuRef} id="assistant-model-choices" className="execution-assistant__model-menu" role="group" aria-label="对话模型选择"
               style={{ left: modelMenuPosition.left, bottom: modelMenuPosition.bottom, width: modelMenuPosition.width }}>
               <strong>下次任务使用</strong>
               {conversationSelection && <div className="execution-assistant__model-effort" role="group" aria-label="推理强度">
@@ -1455,8 +1556,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
                 </div>}
                 {knowledgeError && <small>{knowledgeError}</small>}
               </div>}
-              <div className="execution-assistant__model-list" role="group" aria-label={allModelsOpen ? '全部连接与模型' : '收藏模型'}>
-                {allModelsOpen ? <>
+              <div className="execution-assistant__model-list" role="group" aria-label="全部连接与模型">
                   <input aria-label="搜索模型" value={modelQuery} onChange={event => setModelQuery(event.target.value)} placeholder="搜索模型或连接" />
                   {matchingModelGroups.map(group => {
                     const key = group.entry ? `${group.id}:${group.entry.connection.revision}` : undefined
@@ -1471,20 +1571,13 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
                         <button type="button" onClick={() => {
                           catalogRequested.current.delete(key)
                           setModelCatalogErrors(current => { const next = { ...current }; delete next[key]; return next })
-                          setModelCatalogs(current => ({ ...current }))
+                          setModelCatalogs(current => { const next = { ...current }; delete next[key]; return next })
                         }}>重试目录</button></div>}
                     </div>
                   })}
                   {matchingModelGroups.length === 0 && <p>{query ? '没有匹配的模型或连接。' : '还没有连接。可以接入 API 或登录 ChatGPT。'}</p>}
-                </> : <>
-                  <strong className="execution-assistant__model-list-heading">已收藏</strong>
-                  {favoriteModelOptions.map(modelChoice)}
-                  {favoriteModelOptions.length === 0 && <p>还没有收藏模型。点击“更多模型”，选择连接并收藏常用模型。</p>}
-                </>}
               </div>
               {favoriteError && <p role="alert">{favoriteError}</p>}
-              <button type="button" className="execution-assistant__more-models" onClick={() => { setAllModelsOpen(value => !value); setModelQuery('') }}>
-                {allModelsOpen ? '返回收藏' : '更多模型'}</button>
               <p>{bodyStreamingLabel(bodyStreaming)}</p>
               <button type="button" className="execution-assistant__manage-models" onClick={() => { setModelMenuOpen(false); setSettingsEntry('chatgpt-oauth'); setSettingsOpen(true) }}>登录 ChatGPT（OAuth）…</button>
               <button type="button" className="execution-assistant__manage-models" onClick={() => { setModelMenuOpen(false); setSettingsEntry('default'); setSettingsOpen(true) }}>管理模型与连接…</button>
@@ -1494,16 +1587,17 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
             {run && run.status === 'running' && api?.browserControl && taskBrowser?.runId === run.runId
               && taskBrowser.state !== 'stopped' && (taskBrowser.pageUrl || taskBrowser.state === 'human' || taskBrowser.state === 'transition')
               && <>{api.browserViewport && <button type="button" disabled={busy || taskBrowser.state === 'human' || taskBrowser.state === 'transition'}
-                onClick={() => setBrowserPanelOpen(value => !value)}>{browserPanelOpen ? '收起任务网页' : '查看任务网页'}</button>}
+                aria-label={browserPanelOpen ? '收起任务网页' : '查看任务网页'} title={browserPanelOpen ? '收起任务网页' : '查看任务网页'} onClick={() => setBrowserPanelOpen(value => !value)}><Monitor size={15} /></button>}
               <button type="button" disabled={busy || taskBrowser.state === 'transition' || (taskBrowser.state !== 'human' && !!api.browserViewport && !browserViewportReady)} title={taskBrowser.pageUrl}
+                aria-label={taskBrowser.state === 'human' ? '完成操作，继续任务' : taskBrowser.state === 'transition' ? '正在切换浏览器…' : '接管当前网页'}
                 onClick={() => void controlBrowser(taskBrowser.state === 'human' ? 'resume' : 'takeover')}>
-                {taskBrowser.state === 'human' ? '完成操作，继续任务' : taskBrowser.state === 'transition' ? '正在切换浏览器…' : '接管当前网页'}</button></>}
-            {run && ['queued', 'running', 'stopping'].includes(run.status) && <button type="button" onClick={() => void stop()} disabled={busy || run.status === 'stopping'}>{run.status === 'stopping' ? '正在停止…' : '停止当前'}</button>}
-            {run?.status === 'running' && submissions.some(item => item.state === 'queued') && <button type="button" disabled={busy} onClick={() => void stop(true)}>停止并暂停后续</button>}
+                {taskBrowser.state === 'human' ? <Play size={15} /> : <Hand size={15} />}</button></>}
+            {run && ['queued', 'running', 'stopping'].includes(run.status) && <button type="button" aria-label={run.status === 'stopping' ? '正在停止…' : '停止当前'} title="停止当前" onClick={() => void stop()} disabled={busy || run.status === 'stopping'}><Square size={15} /></button>}
+            {run?.status === 'running' && submissions.some(item => item.state === 'queued') && <button type="button" aria-label="停止并暂停后续" title="停止并暂停后续" disabled={busy} onClick={() => void stop(true)}><Pause size={15} /></button>}
             {run && ['queued', 'running'].includes(run.status) && <button type="button" onClick={() => { composerRef.current?.focus(); void submit('adjust') }}
               disabled={!active || busy || attachmentBusy || !draft.trim() || attachments.length > 0 || permission !== (run.input.permission ?? DEFAULT_PERMISSION_MODE)}
-              title="在原任务的范围内继续；新增材料或权限请加入队列。">调整当前任务</button>}
-            <button type="button" className="primary-button" onClick={() => { composerRef.current?.focus(); void submit('queue') }} disabled={!active || busy || attachmentBusy || (!draft.trim() && attachments.length === 0)}>{run && ['queued', 'running', 'stopping'].includes(run.status) ? '加入队列' : '发送'}</button>
+              aria-label="调整当前任务" title="在原任务的范围内继续；新增材料或权限请加入队列。"><Pencil size={15} /></button>}
+            <button type="button" className="primary-button" aria-label={run && ['queued', 'running', 'stopping'].includes(run.status) ? '加入队列' : '发送'} title={run && ['queued', 'running', 'stopping'].includes(run.status) ? '加入队列' : '发送'} onClick={() => { composerRef.current?.focus(); void submit('queue') }} disabled={!active || busy || attachmentBusy || (!draft.trim() && attachments.length === 0)}>{run && ['queued', 'running', 'stopping'].includes(run.status) ? <ListPlus size={16} /> : <Send size={16} />}</button>
           </div>
         </div>
         <small id="assistant-composer-hint" className="execution-assistant__composer-hint">Enter 发送 · Shift + Enter 换行</small>

@@ -9,6 +9,7 @@ import { InMemoryComponentCompilation } from '../../../core/components/compilati
 import { createEsbuildComponentCompiler } from '../contentApply/compilation/esbuildComponentCompiler'
 import { htmlPreviewResponse } from '../htmlPreview/htmlPreviewResponse'
 import type { PublishedCourseV3 } from '../../../shared/contracts/component-platform/published'
+import { waitForCaptureFramePaint } from './captureFramePaint'
 
 export interface ViewObservationDesktopOptions {
   rendererEntryUrl: string
@@ -19,7 +20,7 @@ export interface ViewObservationDesktopOptions {
 }
 
 interface PublishedCaptureTarget {
-  locationId: string; stateId?: string | null; instanceId?: string; spatialFrameId?: string; signal?: AbortSignal
+  locationId: string; stateId?: string | null; instanceId?: string; spatialFrameId?: string; staticExport?: true; signal?: AbortSignal
 }
 type PublishedCapture = Omit<ViewObservationCapture, 'identity'>
 
@@ -65,7 +66,7 @@ export class ViewObservationDesktopService {
     const bootstrapPath = `/_observation/${token}/bootstrap/`
     const payload = { published: publication.payload, locationId: input.locationId, stateId: input.stateId ?? null,
       bootstrapBaseUrl: `courseware-editor://app${bootstrapPath}`,
-      diagnostics: publication.diagnostics, instanceId: input.instanceId, spatialFrameId: input.spatialFrameId }
+      diagnostics: publication.diagnostics, instanceId: input.instanceId, spatialFrameId: input.spatialFrameId, staticExport: input.staticExport }
     const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')
 
     const isolatedSession = session.fromPartition(`observation-${randomUUID()}`)
@@ -116,13 +117,7 @@ export class ViewObservationDesktopService {
         if (outcome.locationId !== input.locationId || (outcome.stateId ?? null) !== (input.stateId ?? null)) throw new Error('观察宿主加载了错误页面或状态')
         // Mount ACKs describe DOM state. Each content realm must submit its own
         // painted frame before Chromium can compose the first complete capture.
-        await Promise.all(worker.webContents.mainFrame.framesInSubtree.filter(frame => !frame.detached).map(async frame => {
-          try {
-            // Chromium pauses rAF for display:none frames; their viewport is
-            // empty and contributes no pixels to this capture.
-            await frame.executeJavaScript('(async () => { if (!innerWidth || !innerHeight) return; await document.fonts.ready; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); })()')
-          } catch (error) { if (!frame.detached) throw error }
-        }))
+        await waitForCaptureFramePaint(workerContents.mainFrame, token)
         if (input.signal?.aborted) throw new Error('观察已取消')
         const rect = outcome.rect
         const bitmap = await worker.webContents.capturePage(rect ? { x: Math.floor(rect.x), y: Math.floor(rect.y),

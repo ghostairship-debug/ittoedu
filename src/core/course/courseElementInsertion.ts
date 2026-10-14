@@ -1,7 +1,9 @@
 import { nanoid } from 'nanoid'
 import type { ComponentContainer, ComponentDefinition, ComponentInstance, CourseProjectV10, JsonValue } from '../../shared/contracts/component-platform/project'
 import type { ComponentFrame } from '../../shared/contracts/component-platform/frame'
-import { containerChildIds, owningContainer } from '../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, containerChildIds, owningContainer } from '../../shared/contracts/component-platform/project'
+import { courseSettingsEdits } from './courseSemanticEdits'
+import { courseGlobalPlacementEdits } from './courseObjectEdits'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
 import { TEXT_DEFINITION, FORMULA_DEFINITION } from '../../components/text/adapters'
@@ -99,15 +101,24 @@ export function prepareCourseElementEdits(project: CourseProjectV10, surfaceId: 
 /** Existing controller reuse and both supported UI defaults share one preparation owner. */
 export function prepareCourseTeacherControllerEdits(project: CourseProjectV10, surfaceId: string | null,
   origin?: 'slide-authoring', selectedInstanceId?: string | null): { edits: ComponentEdit[]; instanceIds: string[] } {
-  const existing = Object.values(project.instances).find(instance => instance.definitionId === TEACHER_CONTROLLER_DEFINITION.id)
-  if (existing) return { edits: [], instanceIds: [existing.id] }
+  const existing = Object.values(project.instances).find(instance => componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.navigation')
+  const playback = courseSettingsEdits(project, { playback: { controls: 'canvas' } })
+  if (existing) {
+    const data = existing.data && typeof existing.data === 'object' && !Array.isArray(existing.data) ? existing.data : {}
+    const variants = data.sceneStyles, variant = variants && typeof variants === 'object' && !Array.isArray(variants) && surfaceId ? variants[surfaceId] : undefined
+    return { edits: [...playback, { type: 'instance.patch', instanceId: existing.id, patch: { visible: true } },
+      { type: 'data.set', instanceId: existing.id, path: ['enabled'], value: true },
+      ...(variant && typeof variant === 'object' && !Array.isArray(variant) && variant.enabled === false && surfaceId
+        ? [{ type: 'data.set' as const, instanceId: existing.id, path: ['sceneStyles', surfaceId, 'enabled'], value: true }] : []),
+      ...(surfaceId ? courseGlobalPlacementEdits(project, existing.id, { atSurface: { surfaceId, visible: true } }) : [])], instanceIds: [existing.id] }
+  }
   const surface = project.surfaces.find(value => value.id === surfaceId)
   if (!surface) throw new Error('插入的原页面已不存在')
   const canvas = origin === 'slide-authoring' ? surface.designSize ?? { width: 1280, height: 720 } : undefined
   const instance: ComponentInstance = { id: `instance_${nanoid()}`, definitionId: TEACHER_CONTROLLER_DEFINITION.id,
     ...(origin ? {} : { name: '教师控制台' }), data: courseAuthorData(createTeacherControllerData(canvas)),
     frame: origin ? createTeacherControllerFrame(canvas) : { width: 720, height: 80, transform: [1, 0, 0, 1, 20, 20] } }
-  return { instanceIds: [instance.id], edits: [...definitionInsertionEdits({ project, surfaceId }, TEACHER_CONTROLLER_DEFINITION),
+  return { instanceIds: [instance.id], edits: [...playback, ...definitionInsertionEdits({ project, surfaceId }, TEACHER_CONTROLLER_DEFINITION),
     { type: 'instance.insert', container: { kind: 'global', plane: 'overlay' },
       index: insertionIndex({ project, surfaceId, instanceId: selectedInstanceId }, { kind: 'global', plane: 'overlay' }, { origin }),
       instances: [instance], rootIds: [instance.id] }] }

@@ -5,3 +5,7 @@
 短选区修改用当前提供的文字或内容入口，不需要加载课件创作方法。只改变 Markdown 或课件原生选区的加粗、字体、字号或颜色时，用 `text.format` 的 `target` 与 `style`；软件保留原文和范围外格式。纯文本文件没有格式，普通 HTML 源文件的范围格式当前不支持，不能扩大为父元素样式。整对象外观或位置用 `object.update`，复制 A 的颜色、阴影到 B 时优先用 `properties.appearanceFrom:{target:来源整对象只读句柄,fields:["color","shadows"]}`，软件读取已观察来源，只复制指定外观字段。自行创建外观用 `properties.appearance`；文字阴影 `shadows` 是含 `x/y/blur/color` 的对象数组。可合并来源与显式参数，显式同名字段覆盖来源；未指定的外观参数、正文和人工位置保留；上述颜色、阴影复制也保留 B 的字号。不能把文字范围扩大为整对象授权。普通 HTML 文件沿用源文编辑；课件页、对象或源码修改按需读[工程内文件](project-files.md)。不要改外部整课 HTML 后重导覆盖人工修改。
 
 内容与排版范围由用户决定。局部修改保留未选内容、顺序、人工布局和未涉及行为；共享定义与当前实例源码是不同范围。若写入冲突，保留这次输入并重读受影响目标再修。正式身份、History、资源绑定与保存状态由软件维护，模型不登记编号或抄修订号。
+
+正式正文选区可用 `object.author {target,change:{kind:"text-interaction",intent:{kind:"annotation",content:"注释内容"}}}` 附点击注释；`intent:{kind:"input",placeholder:"",acceptedAnswers:["答案"]}` 在已选范围或光标插入行内填空。target 取当前正文选区句柄；软件维护范围、组件及行为身份，改字、格式和源码编辑沿同一正文 owner 映射，完全删除范围会解除对应关系。不要把正文替成整段图片或把填空放到段落后冒充行内。
+
+局部源文重做用当前 `project.apply` 的 `intent:"redo"`，普通改内容用 `content`，添加新内容用 `insert`。独立 HTML/from 不需伪装为旧投影；重做原对象保其外 frame、身份和能延续的外部控制，不默认重排邻居。返回可修诊断时只处理相应缺口。

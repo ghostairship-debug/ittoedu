@@ -123,12 +123,12 @@ export async function createCourseDocumentHost() {
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } },
   }
   const documents: NonNullable<CourseProjectLifecyclePorts['documents']> = {
-    ready: () => bridge.connect(api), snapshot: () => bridge.read().snapshot,
+    ready: () => bridge.connect(api), snapshot: documentId => documentId
+      ? bridge.read().documents.find(snapshot => snapshot.documentId === documentId) ?? null : bridge.read().snapshot,
     async create(surface, canvas) { await bridge.create({ kind: 'course-v10', ...createCourseProjectContent(surface, canvas) }) },
     async createFrom(content) { await bridge.create({ kind: 'course-v10', ...content }) },
     open: path => bridge.open(path),
-    async save(saveAs = false) {
-      const documentId = activeDocumentId()
+    async save(saveAs = false, documentId = activeDocumentId()) {
       if (!await bridge.save(saveAs, undefined, documentId)) return null
       return registry.get(documentId).read()
     },

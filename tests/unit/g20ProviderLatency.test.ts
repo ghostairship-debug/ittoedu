@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest'
 import { setImmediate as nextTurn } from 'node:timers/promises'
-import { OpenAIChatProvider } from '../../src/main/workbench/providers/OpenAIChatProvider'
+import { modelToolWireName, OpenAIChatProvider } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { ChatGPTResponsesProvider, CHATGPT_RESPONSES_BASE_URL } from '../../src/main/workbench/providers/ChatGPTResponsesProvider'
 import { serverSentEvents } from '../../src/main/workbench/providers/serverSentEvents'
 import type { ModelEvent, ModelProvider, ModelRequest } from '../../src/shared/workbench/modelProvider'
@@ -105,9 +105,13 @@ it('preserves fragmented SSE content, rejects invalid UTF-8 and releases a cance
   expect(stream.locked).toBe(false)
 })
 
-it('advertises readable aliases and maps returned calls back to the original catalog names in both protocols', async () => {
-  const originalNames = ['file.create', 'html.import', 'text.replace']
-  const aliases = ['file_create', 'html_import', 'text_replace']
+it('advertises stable unique aliases and maps returned calls back to the original catalog names in both protocols', async () => {
+  const originalNames = ['skills.read', 'file.create', 'html.import', 'text.replace']
+  const aliases = originalNames.map(modelToolWireName)
+  expect(aliases[0]).toMatch(/^skills_read_[0-9a-f]{8}$/)
+  expect(modelToolWireName('skills_read')).toBe('skills_read')
+  expect(modelToolWireName('mcp.synthetic.read.file')).not.toBe(modelToolWireName('mcp.synthetic.read_file'))
+  expect(modelToolWireName('mcp.' + 'long-name.'.repeat(10))).toMatch(/^[A-Za-z0-9_-]{1,64}$/)
   for (const oauth of [false, true]) {
     const input = request(oauth)
     input.tools = originalNames.map(name => ({ name, description: `Run ${name}`, inputSchema: { type: 'object' } }))

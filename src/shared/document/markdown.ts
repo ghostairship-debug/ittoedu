@@ -1,7 +1,7 @@
 import { retainMarkdownIdentities, type MarkdownProjection } from './markdownIdentity'
 import { Marked, Lexer, type Token, type Tokens, type TokensList, type TokenizerExtension } from 'marked'
 import { decodeHTMLStrict } from 'entities'
-import { documentBlockSchema, documentContentSchema, documentTextSlots, documentTextStyleSchema, documentMathStyleSchema, normalizeDocumentText, type DocumentBlock, type DocumentContent, type FlowInline, type FlowTextContent } from './content'
+import { documentInlineSchema, documentBlockSchema, documentContentSchema, documentTextSlots, documentTextStyleSchema, documentMathStyleSchema, normalizeDocumentText, type DocumentBlock, type DocumentContent, type FlowInline, type FlowTextContent } from './content'
 import { describeDocumentMath, DocumentMathError, parseDocumentMath } from './math'
 import { documentObjectSchema, emptyDocumentResources, resourcesForBlock, validateDocumentResources, type DocumentResources } from './resources'
 import type { DocumentDiagnostic } from './ports'
@@ -64,7 +64,8 @@ const fence = (body: string, language: string): string => {
 export function serializeMarkdownInline(content: FlowTextContent): string {
   return content.inlines.map(atom => {
     let value: string
-    if (atom.type === 'math') value = `$${atom.latex}$` + attrsText({ formulaId: atom.formulaId, accessibleText: atom.accessibleText, ...atom.style })
+    if (atom.type === 'component') value = metadata('inline', atom)
+    else if (atom.type === 'math') value = `$${atom.latex}$` + attrsText({ formulaId: atom.formulaId, accessibleText: atom.accessibleText, ...atom.style })
     else {
       value = escapeText(atom.text)
       if (atom.code) {
@@ -75,6 +76,7 @@ export function serializeMarkdownInline(content: FlowTextContent): string {
       if (atom.style && Object.keys(atom.style).length) value = `[${value}]` + attrsText({ ...atom.style })
     }
     if (atom.link) value = `[${value}](<${atom.link.href.replace(/&/g, '&amp;')}>${atom.link.title !== undefined ? ` ${JSON.stringify(atom.link.title.replace(/&/g, '&amp;'))}` : ''})`
+    if (atom.rangeIds?.length && atom.type !== 'component') value = `[${value}]` + attrsText({ rangeIds: JSON.stringify(atom.rangeIds) })
     return value
   }).join('')
 }
@@ -86,6 +88,8 @@ export function serializeDocumentMarkdown(document: MarkdownDocument, target: 'f
   return document.content.blocks.map(block => {
     // Multiline code atoms/URLs have no lossless ordinary inline representation.
     const simpleSlots = documentTextSlots(block).map(s => s.content)
+    if(simpleSlots.some(content=>content.inlines.some(inline=>inline.type==='math' && (/^\s|\s$|\n/.test(inline.latex)))))return object(block)
+    if(block.type==='heading' && block.content.inlines.some(inline=>inline.type==='text' && inline.text.includes('\n')))return object(block)
     if (simpleSlots.some(c => {
       const first = c.inlines[0]; const last = c.inlines.at(-1)
       return first?.type === 'text' && /^\s/.test(first.text) || last?.type === 'text' && /\s$/.test(last.text)
@@ -100,7 +104,7 @@ export function serializeDocumentMarkdown(document: MarkdownDocument, target: 'f
       }
       case 'list':
         if (block.items.some(i => serializeMarkdownInline(i.content).includes('\n') || !i.content.inlines.length)) return object(block)
-        return `${metadata('block', { id: block.id })}\n${block.items.map((item, index) => `${block.ordered ? `${index + 1}.` : '-'} ${metadata('item', { id: item.id })}${serializeMarkdownInline(item.content)}`).join('\n')}`
+        return `${metadata('block', { id: block.id })}\n${block.items.map((item, index) => `${block.ordered ? `${(block.start ?? 1) + index}.` : '-'} ${metadata('item', { id: item.id })}${serializeMarkdownInline(item.content)}`).join('\n')}`
       case 'table': {
         if (block.merges !== undefined || block.caption || block.headerEnabled === false || block.columns.some(c => /[|\n]/.test(serializeMarkdownInline(c.header) + c.id)) || block.rows.some(r => /[|\n]/.test(r.id) || Object.values(r.cells).some(c => /[|\n]/.test(serializeMarkdownInline(c))))) return object(block)
         const headers = block.columns.map(c => `${serializeMarkdownInline(c.header)} ${metadata('column', { id: c.id })}`)
@@ -126,6 +130,12 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
     const diagnostics: DocumentDiagnostic[] = []
     const recoverOpaque = new Set<string>()
     const extensions: TokenizerExtension[] = [
+      { name: 'cwInline', level: 'inline', start: src => src.indexOf('<!--cw:inline '), tokenizer(src) {
+        if (!src.startsWith('<!--cw:inline ')) return
+        const end = src.indexOf('-->'); if (end < 0) return error('行内组件标记未闭合', src)
+        const raw = src.slice(0, end + 3)
+        return { type: 'cwInline', raw, inline: documentInlineSchema.parse(commentJson(raw, 'inline')) }
+      } },
       {
         name: 'cwMeta', level: 'block', start: src => src.indexOf('<!--cw:block'),
         tokenizer(src) {
@@ -238,11 +248,21 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
         case 'link':
           if (link) return error('禁止嵌套链接', token.raw)
           return inlines(t.tokens as Token[], style, { href: decodeHTMLStrict(t.href as string), ...(t.title !== null && t.title !== undefined ? { title: decodeHTMLStrict(t.title as string) } : {}) })
-        case 'cwStyle': return inlines(lexInline(t.text as string), { ...style, ...documentTextStyleSchema.parse(t.attrs) }, link)
+        case 'cwInline': return [documentInlineSchema.parse(t.inline)]
+        case 'cwStyle': {
+          const { rangeIds, ...attributes } = t.attrs as Record<string, unknown>
+          const atoms = inlines(lexInline(t.text as string), { ...style, ...documentTextStyleSchema.parse(attributes) }, link)
+          if (rangeIds !== undefined) {
+            const ids = JSON.parse(String(rangeIds)) as string[]
+            if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string' || !id)) return error('范围身份无效', token.raw)
+            atoms.forEach(atom => { atom.rangeIds = [...new Set([...(atom.rangeIds ?? []), ...ids])] })
+          }
+          return atoms
+        }
         case 'cwMath': {
           const { formulaId, accessibleText, ...mathStyle } = t.attrs as Record<string, unknown>
           // Text-only marks cannot be silently discarded around a formula.
-          const resolvedStyle = documentMathStyleSchema.parse({ ...style, ...mathStyle })
+          const resolvedStyle = documentMathStyleSchema.parse({...(style.fontSize!==undefined ? {fontSize:style.fontSize}:{}),...(style.color!==undefined ? {color:style.color}:{}),...mathStyle})
           const latex = t.latex as string
           const description = mathDescription(latex)
           return [{ type: 'math', formulaId: formulaId === undefined ? options.createId('formula') : formulaId as string, latex, accessibleText: accessibleText === undefined ? description : accessibleText as string, ...(Object.keys(resolvedStyle).length ? { style: resolvedStyle } : {}), ...(link ? { link } : {}) }]
@@ -330,7 +350,7 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
             if (('task' in item && item.task) || lexer.lexer(info.source).some(c => !['paragraph', 'text', 'space'].includes(c.type))) error('此列表结构暂时不能可靠编辑，源文已保留', token.raw)
             return { id: info.id, content: text(info.source) }
           })
-          value = { ...common, type: 'list', ordered: t.ordered, items }; break
+          value = { ...common, type: 'list', ordered: t.ordered,...(list.ordered && list.start!==1 ? {start:list.start}:{}), items }; break
         }
         case 'table': {
           const table = token as Tokens.Table

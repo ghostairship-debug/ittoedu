@@ -37,9 +37,24 @@ function slotEdit(source: string, slot: SlotMap | undefined, before: FlowTextCon
   }
   return { from: start, to: end, insert }
 }
-function blockSource(block: DocumentBlock, resources: MarkdownDocument['resources']) {
+function blockSource(block: DocumentBlock, resources: MarkdownDocument['resources'], map?: MarkdownSourceMap) {
+  if(block.type==='list') {
+    const slots=map?.blocks.find(value=>value.blockId===block.id)?.slots
+    if(slots?.some(slot=>(slot.depth ?? 0)>0)) {
+      let depth=0,ordered=block.ordered
+      const ordinals = new Map<number, number>()
+      const indents = new Map<number, string>([[0, '']])
+      return block.items.map(item=>{const slot=slots.find(slot=>slot.key===`item:${item.id}`),previousDepth=depth;depth=slot?.depth ?? depth;ordered=slot?.ordered ?? ordered
+        for(const level of ordinals.keys()) if(level>depth || depth>previousDepth && level>=depth) ordinals.delete(level)
+        const ordinal=ordinals.get(depth) ?? slot?.ordinal ?? (depth===0 ? block.start ?? 1 : 1)
+        if(ordered) ordinals.set(depth,ordinal+1); else ordinals.delete(depth)
+        const marker=ordered ? `${ordinal}.`:'-',indent=indents.get(depth) ?? '  '.repeat(depth)
+        indents.set(depth+1,indent+' '.repeat(marker.length+1))
+        return `${indent}${marker} ${serializeMarkdownInline(item.content)}`}).join('\n')
+    }
+  }
   return serializeDocumentMarkdown({ content: { blocks: [block] }, resources }, 'file')
-    .replace(/^<!--cw:block [^\n]*-->\n/gm, '').replace(/<!--cw:(?:item|row|column) [^\n]*?-->/g, '').replace(/\n$/, '')
+    .replace(/<!--cw:(?:item|row|column) [^\n]*?-->/g, '').replace(/\n$/, '')
 }
 function apply(source: string, edits: Edit[]) { for (const edit of edits.sort((a, b) => b.from - a.from || b.to - a.to)) source = source.slice(0, edit.from) + edit.insert + source.slice(edit.to); return source }
 /** Preserve every untouched source byte. A fallback is limited to the structurally changed blocks, never the whole file. */
@@ -69,7 +84,7 @@ export function editMarkdownSource(source: string, before: MarkdownDocument, aft
   while (oldLast > first && newLast > first && stable(oldBlocks[oldLast - 1]) === stable(blocks[newLast - 1])) { oldLast--; newLast-- }
   const start = map.blocks[first]?.from ?? source.length
   const end = oldLast > first ? map.blocks[oldLast - 1].to : start
-  const body = blocks.slice(first, newLast).map(block => blockSource(block, after.resources)).join('\n\n')
+  const body = blocks.slice(first, newLast).map(block => blockSource(block, after.resources,map)).join('\n\n')
   const insertion = oldLast === first && body ? (start === source.length && source && !source.endsWith('\n\n') ? '\n\n' : '') + body + (start < source.length ? '\n\n' : '') : body
   const candidate = source.slice(0, start) + insertion + source.slice(end)
   if (!valid(candidate)) throw new Error('这次正文结构无法完整对应源文，输入仍保留；请撤销该步后重试。')

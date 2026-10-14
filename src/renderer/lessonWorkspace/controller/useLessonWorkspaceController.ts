@@ -9,6 +9,7 @@ import type { DocumentTabsController } from './useDocumentTabsController'
 export interface LessonWorkspaceControllerProps {
   lessonOperation(request: LessonDesktopRequest): Promise<LessonDesktopResult>
   projectPath: string | null
+  onBeforeWorkspaceChange?(): Promise<void>
   onOpenProject(path: string): Promise<boolean>
   onNewProject(): Promise<boolean>
   onNewProjectFromPptx?(file: { name: string; bytes: Uint8Array }): Promise<boolean>
@@ -57,6 +58,7 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
   }, [props.lessonOperation])
   async function run(action: () => Promise<void>) { setBusy(true); setError(null); try { await action() } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) } }
   async function stopAndFlush() {
+    await props.onBeforeWorkspaceChange?.()
     if (!(await props.tabs.drainAll())) throw new Error('请先在文档标签处理未保存稿或文件冲突，再切换课例。')
   }
   function detachLesson() {

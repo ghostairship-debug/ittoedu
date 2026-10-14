@@ -8,8 +8,8 @@ export type ModelRetryDecision = { kind: 'stop' } | { kind: 'retry'; delayMs: nu
 export function modelGenerationRetry(provider: Pick<ModelProvider, 'retrySafety'>, failure: ModelFailure, attempts: number): ModelRetryDecision {
   if (provider.retrySafety !== 'pure-generation' || attempts >= MAX_GENERATION_ATTEMPTS || attempts < 1) return { kind: 'stop' }
   const temporary = failure.kind === 'transport' || failure.kind === 'timeout'
-    || failure.kind === 'rate-limit' && failure.httpStatus === 429
-    || failure.kind === 'server' && failure.httpStatus !== undefined && failure.httpStatus >= 500 && failure.httpStatus <= 599
+    || failure.kind === 'rate-limit'
+    || failure.kind === 'server' && (failure.httpStatus !== undefined && failure.httpStatus >= 500 && failure.httpStatus <= 599 || failure.code === 'provider-transient-sse')
     || failure.kind === 'protocol' && ['incomplete-stream', 'response-incomplete', 'chatgpt-stream-truncated'].includes(failure.code)
   if (!temporary) return { kind: 'stop' }
   const retryAfter = failure.retryAfterMs !== undefined && Number.isFinite(failure.retryAfterMs) ? Math.max(0, failure.retryAfterMs) : 0

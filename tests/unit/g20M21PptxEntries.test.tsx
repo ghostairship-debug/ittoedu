@@ -8,10 +8,11 @@ import { LessonDirectoryTree } from '../../src/renderer/lessonWorkspace/view/Les
 import { LessonWorkspaceShell } from '../../src/renderer/lessonWorkspace/LessonWorkspaceShell'
 import type { RecoverableDocumentFilePort } from '../../src/renderer/documentFiles/documentFileSession'
 import type { LessonDesktopRequest } from '../../src/shared/lessonDesktopContract'
-import { openCourseProjectV10Archive } from '../../src/core/drivers/codecs/courseProjectV10Archive'
 import type { RegisteredWorkspaceRoot, WorkspaceListItem } from '../../src/shared/workbench/workspaceFiles'
 import { createMarkdownTestHost } from '../helpers/markdownDocumentHost'
 import { pptxImportFixture } from '../fixtures/pptxImport'
+import { createCourseFromPptx } from '../../src/renderer/project/pptxCourseCreation'
+import { confirmPptxLosses } from '../../src/renderer/project/confirmPptxLosses'
 
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }) })
 const roots: string[] = []
@@ -35,83 +36,7 @@ async function workspace() {
   return { directory, service, root }
 }
 
-function renderTree(directory: string, service: WorkspaceFilesDesktopService) {
-  const onFile = vi.fn()
-  render(<LessonDirectoryTree directory={directory} files={service.operate} operation={async () => ({})} onFile={onFile} onDirectory={vi.fn()} />)
-  return onFile
-}
-
-/** The only page of an H5 presentation made from the fixture. */
-async function pptCourse(file: string) {
-  const course = openCourseProjectV10Archive(new Uint8Array(await fs.readFile(file)))
-  expect(course.project.surfaces).toHaveLength(1)
-  expect(course.project.surfaces[0]!.kind).toBe('slide')
-  return course
-}
-
-it('M21 imports a .pptx from its right-click menu as a new H5 presentation beside it and opens it', async () => {
-  const { directory, service } = await workspace()
-  await fs.writeFile(path.join(directory, '第一课.pptx'), pptxImportFixture())
-  // The name is taken, so the new file is numbered; the .pptx stays as it was.
-  await fs.writeFile(path.join(directory, '第一课.glx'), 'taken')
-  const onFile = renderTree(directory, service)
-  fireEvent.contextMenu(await screen.findByRole('button', { name: '第一课.pptx' }))
-  const menu = screen.getByRole('menu', { name: '文件菜单' })
-  expect(within(menu).getAllByRole('menuitem')[0]).toHaveTextContent('导入为 果铃工程')
-  fireEvent.click(within(menu).getByRole('menuitem', { name: '导入为 果铃工程' }))
-  const created = path.join(directory, '第一课 (2).glx')
-  await waitFor(() => expect(onFile).toHaveBeenCalledWith({ name: '第一课 (2).glx', kind: 'file', path: created }))
-  const course = await pptCourse(created)
-  expect(course.project.title).toBe('第一课')
-  expect(await fs.readFile(path.join(directory, '第一课.glx'), 'utf8')).toBe('taken')
-  expect(new Uint8Array(await fs.readFile(path.join(directory, '第一课.pptx'))).byteLength).toBeGreaterThan(0)
-
-  // Other files do not offer it.
-  fireEvent.contextMenu(screen.getByRole('button', { name: '第一课.glx' }))
-  expect(within(screen.getByRole('menu', { name: '文件菜单' })).queryByRole('menuitem', { name: '导入为 果铃工程' })).toBeNull()
-})
-
-it('M21 makes a new H5 presentation from a chosen PPT in the folder the 新建 menu was opened for', async () => {
-  const { directory, service } = await workspace()
-  await fs.mkdir(path.join(directory, 'unit'))
-  const onFile = renderTree(directory, service)
-  fireEvent.click(await screen.findByRole('button', { name: 'unit' }))
-  fireEvent.click(screen.getByRole('menuitem', { name: '从 PPT 新建 果铃工程' }))
-  const bytes = pptxImportFixture()
-  const file = Object.assign(new File([bytes], '期末复习.pptx'), { arrayBuffer: async () => bytes.slice().buffer })
-  fireEvent.change(screen.getByLabelText('选择要在此文件夹新建为 果铃工程的 PPT'), { target: { files: [file] } })
-  const created = path.join(directory, 'unit', '期末复习.glx')
-  await waitFor(() => expect(onFile).toHaveBeenCalledWith({ name: '期末复习.glx', kind: 'file', path: created }))
-  expect((await pptCourse(created)).project.title).toBe('期末复习')
-
-  // A file that is not a PPT fails before anything is written.
-  const broken = Object.assign(new File(['not a zip'], '坏文件.pptx'), { arrayBuffer: async () => new TextEncoder().encode('not a zip').buffer })
-  fireEvent.click(screen.getByRole('menuitem', { name: '从 PPT 新建 果铃工程' }))
-  fireEvent.change(screen.getByLabelText('选择要在此文件夹新建为 果铃工程的 PPT'), { target: { files: [broken] } })
-  await screen.findByRole('alert')
-  expect(await fs.readdir(path.join(directory, 'unit'))).toEqual(['期末复习.glx'])
-})
-
-it('M21 main writes only a valid H5 presentation handed to create-course and reads only .pptx files', async () => {
-  const { directory, service, root } = await workspace()
-  const deck = pptxImportFixture()
-  await fs.writeFile(path.join(directory, 'deck.pptx'), deck)
-  await fs.writeFile(path.join(directory, 'notes.txt'), 'x')
-  const listed = await service.operate({ type: 'list', workspaceId: root.workspaceId, directoryEntryId: root.rootEntryId })
-  const entry = (name: string) => listed.entries.find((item): item is Extract<WorkspaceListItem, { status: 'accessible' }> => item.status === 'accessible' && item.name === name)!
-  const scope = (value: RegisteredWorkspaceRoot) => ({ workspaceId: value.workspaceId })
-
-  await expect(service.operate({ type: 'create-course', operationId: 'not-a-course', ...scope(root), targetDirectoryId: root.rootEntryId,
-    name: 'bad.glx', archive: new Uint8Array([1, 2, 3]) })).rejects.toThrow('此入口只支持 Project V10 归档，原文件未修改。')
-  await expect(fs.stat(path.join(directory, 'bad.glx'))).rejects.toThrow()
-
-  await expect(service.operate({ type: 'read-pptx', ...scope(root), entryId: entry('notes.txt').entryId })).rejects.toThrow('只能把 .pptx 文件导入为 果铃工程')
-  const read = await service.operate({ type: 'read-pptx', ...scope(root), entryId: entry('deck.pptx').entryId })
-  expect(read.name).toBe('deck.pptx')
-  expect(read.bytes).toEqual(deck)
-})
-
-it('M21 work area: the empty page and the tab bar 新建 menu both make a new H5 presentation from a chosen PPT', async () => {
+function contentImports() {
   const operation = vi.fn(async (request: LessonDesktopRequest) => {
     switch (request.operation) {
       case 'recent-workspaces': return { recent: [] }
@@ -121,43 +46,86 @@ it('M21 work area: the empty page and the tab bar 新建 menu both make a new H5
     }
   })
   const port: RecoverableDocumentFilePort = { openDocument: async () => { throw new Error('ENOENT') }, watchDocument: () => () => {}, saveDocument: vi.fn() }
-  const onNewProject = vi.fn(async () => true), onNewProjectFromPptx = vi.fn(async () => true)
+  const onNewProject = vi.fn(async () => true), completed = vi.fn(), flow = vi.fn(), html = vi.fn()
+  const onNewProjectFromPptx = vi.fn(async ({ name, bytes }: { name: string; bytes: Uint8Array }) => {
+    const course = await createCourseFromPptx(bytes, name.replace(/\.pptx$/i, ''))
+    if (!await confirmPptxLosses(name, course.issues)) return false
+    completed(course)
+    return true
+  })
   render(<LessonWorkspaceShell lessonOperation={operation} documentPort={port} projectPath={null}
-    onOpenProject={async () => true} onNewProject={onNewProject} onNewProjectFromPptx={onNewProjectFromPptx}>课程宿主</LessonWorkspaceShell>)
-  const entries = screen.getAllByRole('button', { name: '从 PPT 新建 果铃工程' })
-  // One in the 新建 popover of the tab bar, one on the empty page.
-  expect(entries).toHaveLength(2)
-  const bytes = pptxImportFixture()
-  for (const [index, entry] of entries.entries()) {
-    fireEvent.click(entry)
-    const file = Object.assign(new File([bytes], `第${index + 1}课.pptx`), { arrayBuffer: async () => bytes.slice().buffer })
-    fireEvent.change(screen.getByLabelText('选择要新建为 果铃工程的 PPT'), { target: { files: [file] } })
-    await waitFor(() => expect(onNewProjectFromPptx).toHaveBeenLastCalledWith({ name: `第${index + 1}课.pptx`, bytes }))
+    onOpenProject={async () => true} onNewProject={onNewProject} onNewProjectFromPptx={onNewProjectFromPptx} onImportFlow={flow} onImportHtml={html}>课程宿主</LessonWorkspaceShell>)
+  const choosePptx = (bytes: Uint8Array, name = '第一课.pptx') => {
+    fireEvent.click(screen.getByLabelText('导入'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /PowerPoint/ }))
+    const file = Object.assign(new File([bytes.slice().buffer], name), { arrayBuffer: async () => bytes.slice().buffer })
+    fireEvent.change(screen.getByLabelText('选择要导入的 PPT'), { target: { files: [file] } })
   }
-  expect(onNewProjectFromPptx).toHaveBeenCalledTimes(2)
-  expect(onNewProject).not.toHaveBeenCalled()
+  return { onNewProject, onNewProjectFromPptx, completed, flow, html, choosePptx }
+}
+
+it('keeps creation in folder/MD/TXT/course order and removes the explorer-only PPT writer', async () => {
+  const { directory, service } = await workspace()
+  const bytes = pptxImportFixture()
+  await fs.writeFile(path.join(directory, '第一课.pptx'), bytes)
+  const onFile = vi.fn()
+  render(<LessonDirectoryTree directory={directory} files={service.operate} operation={async () => ({})} onFile={onFile} onDirectory={vi.fn()} />)
+  const file = await screen.findByRole('button', { name: '第一课.pptx' })
+  const create = document.querySelector('.workspace-files-create-options') as HTMLElement
+  expect(within(create).getAllByRole('menuitem').map(button => button.getAttribute('aria-label')))
+    .toEqual(['新建文件夹', '新建 MD 文档', '新建 TXT 文档', '新建 果铃工程'])
+  fireEvent.contextMenu(file)
+  const menu = screen.getByRole('menu', { name: '文件菜单' })
+  expect(within(menu).queryByRole('menuitem', { name: /导入为.*果铃工程/ })).toBeNull()
+  expect(within(menu).queryByRole('menuitem', { name: /从 PPT 新建/ })).toBeNull()
+  expect(onFile).not.toHaveBeenCalled()
+  expect((await fs.readdir(directory)).filter(name => name.endsWith('.glx'))).toEqual([])
+  expect(new Uint8Array(await fs.readFile(path.join(directory, '第一课.pptx')))).toEqual(bytes)
 })
 
+it('imports PPT through the empty content import menu, preserving actual parsing and the existing course callback', async () => {
+  const fixture = contentImports(), bytes = pptxImportFixture()
+  expect(screen.queryByRole('button', { name: /从 PPT 新建/ })).toBeNull()
+  fixture.choosePptx(bytes)
+  await waitFor(() => expect(fixture.completed).toHaveBeenCalledOnce())
+  expect(fixture.onNewProjectFromPptx).toHaveBeenCalledWith({ name: '第一课.pptx', bytes })
+  expect(fixture.completed.mock.calls[0][0].project.surfaces).toHaveLength(1)
+  expect(fixture.completed.mock.calls[0][0].project.surfaces[0].kind).toBe('slide')
+  expect(fixture.onNewProject).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByLabelText('导入'))
+  fireEvent.click(screen.getByRole('menuitem', { name: /Word、MD、TXT/ }))
+  expect(fixture.flow).toHaveBeenCalledExactlyOnceWith()
+  fireEvent.click(screen.getByLabelText('导入'))
+  fireEvent.click(screen.getByRole('menuitem', { name: /HTML 页面/ }))
+  expect(fixture.html).toHaveBeenCalledExactlyOnceWith()
+})
 
-it('lists the actual source-page losses before creation and cancel makes no course file', async () => {
-  const { directory, service } = await workspace(), bytes = pptxImportFixture({ unsupported: true })
-  const original = path.join(directory, '带损失.pptx'); await fs.writeFile(original, bytes)
-  const onFile = renderTree(directory, service)
-  const begin = async () => {
-    fireEvent.contextMenu(await screen.findByRole('button', { name: '带损失.pptx' }))
-    fireEvent.click(within(screen.getByRole('menu', { name: '文件菜单' })).getByRole('menuitem', { name: '导入为 果铃工程' }))
-    return screen.findByRole('alertdialog', { name: '确认 PPT 转换结果' })
-  }
-  const dialog = await begin()
-  const details = within(dialog).getByLabelText('完整 PPT 转换损失详情') as HTMLTextAreaElement
-  expect(details.value).toContain('第 1 页'); expect(details.value.length).toBeGreaterThan(10)
+it('content import retains the existing PPT loss confirmation and cancelling makes no course', async () => {
+  const fixture = contentImports(), bytes = pptxImportFixture({ unsupported: true })
+  fixture.choosePptx(bytes, '带损失.pptx')
+  const dialog = await screen.findByRole('alertdialog', { name: '确认 PPT 转换结果' })
+  expect((within(dialog).getByLabelText('完整 PPT 转换损失详情') as HTMLTextAreaElement).value).toContain('第 1 页')
   fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
   await waitFor(() => expect(screen.queryByRole('alertdialog', { name: '确认 PPT 转换结果' })).toBeNull())
-  expect(onFile).not.toHaveBeenCalled()
-  expect((await fs.readdir(directory)).filter(file => file.endsWith('.glx'))).toEqual([])
-  expect(await fs.readFile(original)).toEqual(Buffer.from(bytes))
-  const accepted = await begin()
-  fireEvent.click(within(accepted).getByRole('button', { name: '确认并新建' }))
-  await waitFor(() => expect(onFile).toHaveBeenCalled())
-  expect(await fs.readFile(original)).toEqual(Buffer.from(bytes))
+  expect(fixture.completed).not.toHaveBeenCalled()
+  fixture.choosePptx(bytes, '带损失.pptx')
+  fireEvent.click(within(await screen.findByRole('alertdialog', { name: '确认 PPT 转换结果' })).getByRole('button', { name: '确认并新建' }))
+  await waitFor(() => expect(fixture.completed).toHaveBeenCalledOnce())
+})
+
+it('main still writes only a valid native course archive and reads actual PPTX bytes', async () => {
+  const { directory, service, root } = await workspace()
+  const deck = pptxImportFixture()
+  await fs.writeFile(path.join(directory, 'deck.pptx'), deck)
+  await fs.writeFile(path.join(directory, 'notes.txt'), 'x')
+  const listed = await service.operate({ type: 'list', workspaceId: root.workspaceId, directoryEntryId: root.rootEntryId })
+  const entry = (name: string) => listed.entries.find((item): item is Extract<WorkspaceListItem, { status: 'accessible' }> => item.status === 'accessible' && item.name === name)!
+  const scope = (value: RegisteredWorkspaceRoot) => ({ workspaceId: value.workspaceId })
+  await expect(service.operate({ type: 'create-course', operationId: 'not-a-course', ...scope(root), targetDirectoryId: root.rootEntryId,
+    name: 'bad.glx', archive: new Uint8Array([1, 2, 3]) })).rejects.toThrow('此入口只支持 Project V10 归档，原文件未修改。')
+  await expect(fs.stat(path.join(directory, 'bad.glx'))).rejects.toThrow()
+  await expect(service.operate({ type: 'read-pptx', ...scope(root), entryId: entry('notes.txt').entryId })).rejects.toThrow('只能把 .pptx 文件导入为 果铃工程')
+  const read = await service.operate({ type: 'read-pptx', ...scope(root), entryId: entry('deck.pptx').entryId })
+  expect(read.name).toBe('deck.pptx')
+  expect(read.bytes).toEqual(deck)
 })

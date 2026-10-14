@@ -39,7 +39,7 @@ export async function createV10StoreHost(project: CourseProjectV10, resources: D
   const unavailable = async (): Promise<never> => { throw new Error('File observation is outside the in-memory transport fixture') }
   const api: DocumentHostAPI = {
     async bootstrapCourse() { await controls.bootstrap; return first.read() },
-    async list() { return registry.list() },
+    async list() { await controls.bootstrap; return registry.list() },
     async read(documentId) { return registry.get(documentId).read() },
     async create(model, name) { const session = await registry.create(model, name); observe(session.documentId); return session.read() },
     async open(path) {

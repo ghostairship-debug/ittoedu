@@ -58,7 +58,7 @@ it('replaces selected Web and professional images through current short handles 
     const written = await gateway.execute('images', 'replace-web-image', { name: 'text.replace', input: { target: selected, content: url } })
     expect(written, JSON.stringify(written)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     const afterWeb = course(session.read().model), web = webDataSchema.parse(afterWeb.project.instances.picture.data)
-    expect(web.authoringRecords!.picture).toEqual({ ...source.imageRecord, overrides: { ...source.imageRecord.overrides, src: url } })
+    expect(afterWeb.project.instances.picture.authoring!.records!.picture).toEqual({ ...source.imageRecord, overrides: { ...source.imageRecord.overrides, src: url } })
     expect(web.html).toBe(webDataSchema.parse(source.project.instances.picture.data).html)
     expect(web.css).toBe(webDataSchema.parse(source.project.instances.picture.data).css)
     expect(web.resourceBindings).toEqual({ photo: 'source-photo' })
@@ -67,7 +67,7 @@ it('replaces selected Web and professional images through current short handles 
     expect(afterWeb.project.instances['shared-picture']).toEqual(source.project.instances['shared-picture'])
     expect(afterWeb.project.instances['native-picture']).toEqual(source.project.instances['native-picture'])
     expect(afterWeb.resources).toEqual(before.model.resources)
-    expect(Buffer.from(web.authoringRecords!.picture.overrides.src!.split(',')[1], 'base64')).toEqual(Buffer.from(bytes))
+    expect(Buffer.from(afterWeb.project.instances.picture.authoring!.records!.picture.overrides.src!.split(',')[1], 'base64')).toEqual(Buffer.from(bytes))
 
     const nativeWritten = await gateway.execute('images', 'replace-native-image', { name: 'media.apply',
       input: { target: await gateway.issueTarget('images', session.documentId, nativeTarget), resource } })
@@ -86,7 +86,7 @@ it('replaces selected Web and professional images through current short handles 
     expect(model.resources.components).toEqual(source.resources.components)
     expect(await session.execute(operation(after, { type: 'undo' }))).toMatchObject({ status: 'applied' })
     expect(course(session.read().model).project.instances['native-picture']).toEqual(source.project.instances['native-picture'])
-    expect(webDataSchema.parse(course(session.read().model).project.instances.picture.data).authoringRecords!.picture.overrides.src).toBe(url)
+    expect(course(session.read().model).project.instances.picture.authoring!.records!.picture.overrides.src).toBe(url)
     expect(await session.execute(operation(session.read(), { type: 'redo' }))).toMatchObject({ status: 'applied' })
     expect(imageDataSchema.parse(course(session.read().model).project.instances['native-picture'].data).assetId).toBe(assetId)
 

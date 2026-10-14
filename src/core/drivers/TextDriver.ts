@@ -1,5 +1,5 @@
-import type { DocumentCommand, DocumentDriver, DocumentModel, DocumentResources } from '../../shared/workbench/document'
-import { emptyDocumentResources } from './resources'
+import type { DocumentCommand, DocumentDriver, DocumentModel } from '../../shared/workbench/document'
+import { cloneDocumentResources, emptyDocumentResources, validateDocumentResources } from './resources'
 
 /** Decode failure is recognizable before the host wraps it for IPC. */
 export class TextEncodingError extends Error {
@@ -15,12 +15,6 @@ function sourceIsValid(source: string): void {
   if (typeof source !== 'string' || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(source)) throw new TypeError('纯文本必须是有效 Unicode 源文')
 }
 
-function assertEmptyResources(resources: DocumentResources): void {
-  if (!resources || typeof resources !== 'object' || Object.keys(resources.assets).length > 0 || Object.keys(resources.components).length > 0) {
-    throw new TypeError('纯文本文档不接受资源')
-  }
-}
-
 export const createTextDriver = (): DocumentDriver => new TextDriver()
 
 function text(model: DocumentModel): asserts model is Extract<DocumentModel, { kind: 'text' }> {
@@ -33,10 +27,16 @@ export class TextDriver implements DocumentDriver {
   validate(model: DocumentModel): void {
     text(model)
     sourceIsValid(model.source)
-    assertEmptyResources(model.resources)
+    validateDocumentResources(model.resources)
   }
   apply(model: DocumentModel, command: DocumentCommand): DocumentModel {
-    this.validate(model)
+    return this.applySource(model, command, true)
+  }
+  applyValidated(model: DocumentModel, command: DocumentCommand): DocumentModel {
+    return this.applySource(model, command, false)
+  }
+  private applySource(model: DocumentModel, command: DocumentCommand, detached: boolean): DocumentModel {
+    if (detached) this.validate(model)
     text(model)
     let source: string
     if (command.type === 'markdown.replace') source = command.source
@@ -51,8 +51,9 @@ export class TextDriver implements DocumentDriver {
       source = model.source.slice(0, from) + insert + model.source.slice(to)
     } else throw new TypeError('纯文本 Driver 不支持该操作')
     sourceIsValid(source)
-    if (command.resources) assertEmptyResources(command.resources)
-    return { kind: 'text', source, resources: emptyDocumentResources() }
+    const resources = command.resources ?? model.resources
+    if (command.resources) validateDocumentResources(resources)
+    return { kind: 'text', source, resources: detached ? cloneDocumentResources(resources) : resources }
   }
   withRevision(model: DocumentModel, revision: number): DocumentModel {
     this.validate(model)

@@ -81,10 +81,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
   const spatial = createSpatialAuthoringSlice(courseKernel, { read: get, patch, openPropertiesTab: () => patch({ activeTab: 'properties' }),
     content: { begin: slide.beginSlideDataEdit, commit: slide.commitSlideContentEdit, cancel: slide.cancelTextEdit } })
   const commands = createCrossSurfaceCommands({ kernel: courseKernel, shell: shellPorts, slide, flow, spatial: { ...slide, ...spatial }, structure, lifecycle,
-    requestClipboard: async command => {
+    requestClipboard: async (command, requestId) => {
       const clipboard = window.desktopAPI?.editorClipboard
       if (!clipboard) throw new Error('当前环境无法使用系统剪贴板')
-      await clipboard(command)
+      await clipboard(requestId && command !== 'paste' ? { command, requestId } : command)
     },
   })
   const design = createDesignProductionActions({ kernel: courseKernel, hasContentDraft: () => selectHasDirtyCourseContentDraft(get()) })

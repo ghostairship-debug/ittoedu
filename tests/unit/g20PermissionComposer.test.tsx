@@ -74,7 +74,7 @@ it('M07-T07 "+" offers attachments and references; referencing a missing selecti
   fireEvent.click(screen.getByRole('button', { name: '添加' }))
   fireEvent.click(within(screen.getByRole('menu', { name: '添加内容' })).getByRole('menuitem', { name: '引用当前文档' }))
   const chips = await screen.findByLabelText('本条消息的引用')
-  expect(within(chips).getByRole('button', { name: '移除引用 已绑定文档' })).toBeInTheDocument()
+  expect(within(chips).getByRole('button', { name: '移除引用 已绑定文档 文档' })).toBeInTheDocument()
   fireEvent.keyDown(document, { key: 'Escape' })
   expect(screen.queryByRole('menu', { name: '添加内容' })).toBeNull()
 })

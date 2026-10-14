@@ -40,6 +40,7 @@ function componentElementFields(project: CourseProjectV10, instanceId: string, s
     if (override?.visible !== undefined) fields['["visible"]'] = override.visible
     for (const root of ['data', 'style'] as const) if (override?.[root] !== undefined) fields[JSON.stringify(['override', root])] = true
   } else fields['["visible"]'] = instance.visible ?? true
+  if (instance.viewportPinned !== undefined) fields['["viewportPinned"]'] = instance.viewportPinned
   fields['["locked"]'] = instance.locked ?? false
   fields['["playbackInitialVisibility"]'] = instance.playbackInitialVisibility ?? 'inherit'
   fields['["attachments"]'] = structuredClone(instance.attachments ?? [])
@@ -146,6 +147,7 @@ export function restoreComponentElementEdits(project: CourseProjectV10, instance
     else if (root === 'visibility') edits.push({ type: 'instance.patch', instanceId, patch: { visibility: value === undefined ? null : value as NonNullable<typeof instance.visibility> } })
     else if (root === 'attachments') edits.push({ type: 'attachments.set', instanceId, attachments: value as NonNullable<typeof instance.attachments> })
     else if (root === 'name') edits.push({ type: 'instance.patch', instanceId, patch: { name: value === undefined ? null : String(value) } })
+    else if (root === 'viewportPinned') edits.push({ type: 'instance.patch', instanceId, patch: { viewportPinned: value === undefined ? null : value as boolean } })
     else if (root === 'visible' || root === 'locked' || root === 'playbackInitialVisibility') {
       if (value === undefined) throw new Error('原属性已无法确认，请用编辑器撤销。')
       edits.push({ type: 'instance.patch', instanceId, patch: { [root]: value } as Extract<ComponentEdit, { type: 'instance.patch' }>['patch'] })

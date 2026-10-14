@@ -78,6 +78,8 @@ export function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' |
       signal.removeEventListener('abort', onClosed)
       ipcMain.removeListener(resultChannel, onResult)
       window.removeListener('closed', onClosed)
+      window.webContents.removeListener('render-process-gone', onClosed)
+      window.webContents.removeListener('did-start-navigation', onNavigation)
       resolve({ ready, dirty, ...(suggestedDirectory ? { suggestedDirectory } : {}) })
     }
     const onResult = (
@@ -94,10 +96,13 @@ export function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' |
       finish(saved === true, parsed.data, dirty === true)
     }
     const onClosed = () => finish(false)
+    const onNavigation = (_event: unknown, _url: string, inPlace: boolean, isMainFrame: boolean) => { if (isMainFrame && !inPlace) finish(false) }
     signal.addEventListener('abort', onClosed, { once: true })
     if (signal.aborted) { finish(false); return }
     ipcMain.on(resultChannel, onResult)
     window.once('closed', onClosed)
+    window.webContents.once('render-process-gone', onClosed)
+    window.webContents.on('did-start-navigation', onNavigation)
     try {
       window.webContents.send(requestChannel, requestId, documentIds)
     } catch (error) {

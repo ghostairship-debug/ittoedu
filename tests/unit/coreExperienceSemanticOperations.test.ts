@@ -209,6 +209,23 @@ it('routes public input authoring and actual ContentApply data through managed g
   expect(model().project.instances).toEqual(baseline.project.instances)
 })
 
+it('keeps an existing image and full HTML input when content targets professional data, with actionable insertion guidance', async () => {
+  const project = fixture(), surfaceId = project.surfaces[0].id
+  project.definitions[WEB_DEFINITION.id] = { id: WEB_DEFINITION.id, role: 'content', implementation: { kind: 'builtin', key: 'guoling.image' } }
+  const before = structuredClone(project)
+  const html = '<main><h1>新的封面标题</h1></main>'
+  const service = new ContentApplyService({ session: { project: () => project, resources: () => ({ assets: {}, components: {} }),
+    async dispatch() { throw new Error('A rejected content edit must not reach the writer') } },
+    async measure() { throw new Error('A content edit must not reassemble the image page') },
+    compilation: { async compile() { throw new Error('A rejected edit must not compile') } } })
+  const result = await service.apply({ intent: 'content', target: { kind: 'container', container: { kind: 'surface', surfaceId } },
+    source: { kind: 'html', html, scope: 'target' }, viewport: { width: 1280, height: 720 } })
+  expect(result).toMatchObject({ commit: 'not_committed', usability: 'unusable', input: { source: { html } } })
+  expect(result.diagnostics[0].message).toContain('当前 content 目标是图片')
+  expect(result.diagnostics[0].message).toContain('intent: "insert"')
+  expect(project).toEqual(before)
+})
+
 it('commits public professional, interaction, logic and media semantics with software identities', async () => {
   const project = fixture(), surfaceId = project.surfaces[0].id
   for (const key of ['table', 'chart']) project.definitions[key] = { id: key, role: 'content', implementation: { kind: 'builtin', key: `guoling.${key}` } }
@@ -493,7 +510,8 @@ it('blocks changed interaction rules targeting a locked author object without bl
 })
 it('copies base values, all named states and local records in one undoable saved transaction', async () => {
   const project = fixture(), surfaceId = project.surfaces[0].id
-  project.instances.a.data = { html: 'Base', authoringRecords: { local: { kind: 'text', scope: { item: 'a' },
+  project.instances.a.data = { html: 'Base' }
+  project.instances.a.authoring = { records: { local: { kind: 'text', scope: { item: 'a' },
     binding: { kind: 'dom', path: [{ tag: 'p', index: 0 }], baseline: 'Original' }, overrides: { text: 'Human', geometry: { translateX: 12 } } } } }
   project.surfaces[0].presentation = { states: [
     { id: 'question', title: '问题', overrides: { a: { visible: false } }, order: ['a'] },
@@ -512,7 +530,7 @@ it('copies base values, all named states and local records in one undoable saved
   const snapshot = session.read(), model = snapshot.model
   if (model.kind !== 'course-v10') throw new Error('Expected V10')
   const id = plan.idMap.get('a')!, copied = model.project.instances[id]
-  expect(webDataSchema.parse(copied.data).authoringRecords).toEqual(webDataSchema.parse(project.instances.a.data).authoringRecords)
+  expect(copied.authoring!.records).toEqual(project.instances.a.authoring.records)
   expect(webDataSchema.parse(copied.data).html).toBe('Base')
   expect(model.project.surfaces[0].presentation?.states[0].overrides[id]).toEqual({ visible: false })
   expect(model.project.surfaces[0].presentation?.states[1].overrides[id]).toMatchObject({ data: { html: 'Answer' }, frame: { transform: [1, 0, 0, 1, 60, 80] } })

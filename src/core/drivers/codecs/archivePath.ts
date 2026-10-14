@@ -55,10 +55,7 @@ export function assertSafeArchivePath(
       (segment) =>
         segment === '' ||
         segment === '.' ||
-        segment === '..' ||
-        segment === '__proto__' ||
-        segment === 'prototype' ||
-        segment === 'constructor',
+        segment === '..',
     )
   ) {
     throw archiveError(kind, `压缩包中包含路径穿越或无效路径：“${path}”。`)

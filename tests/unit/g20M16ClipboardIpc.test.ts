@@ -29,7 +29,8 @@ vi.mock('../../src/main/workbench/images/ImageResultsDesktopService', () => ({ I
 vi.mock('../../src/main/previewNetworkPolicy', () => ({ mainPreviewNetworkPolicy: {} }))
 
 import { registerIpcHandlers, unregisterIpcHandlers } from '../../src/main/ipc'
-import { IPC_CHANNELS } from '../../src/shared/ipcTypes'
+import { IPC_CHANNELS, COURSE_OBJECT_CLIPBOARD_COMMAND_EVENT } from '../../src/shared/ipcTypes'
+import * as fileDialogs from '../../src/main/fileDialogs'
 
 function fixture() {
   const frame = { detached: false, processId: 1, frameToken: 'main', url: 'http://localhost:5173/' }
@@ -37,6 +38,7 @@ function fixture() {
     mainFrame: frame,
     isFocused: vi.fn(() => true),
     cut: vi.fn(), copy: vi.fn(), paste: vi.fn(), pasteAndMatchStyle: vi.fn(),
+    executeJavaScript: vi.fn(async () => undefined),
   }
   const window = { isDestroyed: () => false, isFocused: vi.fn(() => true), webContents: Object.assign(sender, { id: 1, once: vi.fn() }) }
   const event = { sender, senderFrame: frame }
@@ -46,6 +48,16 @@ function fixture() {
 }
 
 beforeEach(() => { unregisterIpcHandlers(); state.handlers.clear() })
+
+it('CA237 a valid long course title reaches the existing filename/save owner through IPC', async () => {
+  const { event } = fixture(), suggestedName = '长标题'.repeat(60)
+  const save = vi.spyOn(fileDialogs, 'saveProjectFile').mockResolvedValue(null)
+  try {
+    const result = await state.handlers.get(IPC_CHANNELS.saveProject)!(event, { suggestedName, bytes: new Uint8Array([80, 75, 3, 4]) })
+    expect(result).toEqual({ ok: true, value: null })
+    expect(save.mock.calls[0]![1].suggestedName).toBe(suggestedName)
+  } finally { save.mockRestore() }
+})
 
 it.each([
   ['cut', 'cut'], ['copy', 'copy'], ['paste', 'paste'], ['paste-plain', 'pasteAndMatchStyle'],
@@ -63,10 +75,35 @@ it('rejects unknown commands and extra arguments through the IPC envelope', asyn
   expect(sender.copy).not.toHaveBeenCalled()
 })
 
+it('runs the correlated course-object command in one renderer gesture and waits for its result', async () => {
+  const { sender, event, handle } = fixture()
+  const request = { command: 'cut', requestId: 'original-request' }
+  expect(await handle(event, request)).toEqual({ ok: true, value: undefined })
+  const [script, userGesture] = sender.executeJavaScript.mock.calls[0] as unknown as [string, boolean]
+  const rendererWindow = { dispatchEvent: vi.fn((event: CustomEvent) => {
+    expect(event.type).toBe(COURSE_OBJECT_CLIPBOARD_COMMAND_EVENT)
+    expect(event.detail).toMatchObject({ command: request.command, requestId: request.requestId })
+    event.detail.handled = true; event.detail.ok = true
+  }) }
+  const NativeCustomEvent = class { constructor(readonly type: string, readonly init: { detail: unknown }) {} get detail() { return this.init.detail } }
+  expect(new Function('window', 'CustomEvent', `return ${script}`)(rendererWindow, NativeCustomEvent)).toBeUndefined()
+  expect(userGesture).toBe(true)
+  expect(sender.cut).not.toHaveBeenCalled()
+})
+
+it('reports a cancelled or missing course-object request instead of running a later native cut', async () => {
+  const { sender, event, handle } = fixture()
+  sender.executeJavaScript.mockRejectedValueOnce(new Error('original selection changed'))
+  expect((await handle(event, { command: 'cut', requestId: 'stale' }) as { ok: boolean }).ok).toBe(false)
+  expect(sender.cut).not.toHaveBeenCalled()
+  expect((await handle(event, { command: 'paste', requestId: 'unsupported' }) as { ok: boolean }).ok).toBe(false)
+})
+
 it('rejects unfocused windows, foreign senders and subframes', async () => {
   const { sender, window, event, handle } = fixture()
   window.isFocused.mockReturnValue(false)
   expect((await handle(event, 'copy') as { ok: boolean }).ok).toBe(false)
+  expect((await handle(event, { command: 'copy', requestId: 'original' }) as { ok: boolean }).ok).toBe(false)
   window.isFocused.mockReturnValue(true)
   sender.isFocused.mockReturnValue(false)
   expect((await handle(event, 'copy') as { ok: boolean }).ok).toBe(false)

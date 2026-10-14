@@ -5,6 +5,7 @@ import type { AvailableComponentCatalogPackage, ComponentCatalogIssue, Component
 import { exportComponentLibraryArchive, importComponentLibraryArchive } from '../core/components/library/archive'
 import type { ComponentLibraryArchiveMetadata } from '../core/components/library/archive'
 import type { ComponentLibraryEntry } from '../shared/contracts/component-platform/library'
+import { componentCatalogPackageSchema } from '../shared/componentCatalog'
 
 export class ComponentCatalogScanError extends Error {
   constructor(readonly code: 'catalog-unreadable' | 'catalog-invalid', message: string, options?: ErrorOptions) { super(message, options); this.name = 'ComponentCatalogScanError' }
@@ -66,7 +67,12 @@ export async function scanComponentCatalogDirectory(rootPath: string, trust: Com
         issues.push({ sourceId, sourceLabel: label, packageId: pkg.packageId, code: 'package-hash-mismatch', message: `${relative}：组件包 SHA-256 与目录声明不一致。` })
         continue
       }
-      if (extra) Object.assign(pkg, { description: extra.description ?? pkg.description, subject: extra.subject ?? pkg.subject, schoolStage: extra.schoolStage ?? pkg.schoolStage, tags: extra.tags ?? pkg.tags, category: extra.category, thumbnailPath: extra.thumbnailPath ?? '', license: extra.license, source: extra.source ?? pkg.source })
+      if (extra) for (const field of ['description', 'subject', 'schoolStage', 'tags', 'category', 'thumbnailPath', 'license', 'source'] as const) {
+        if (extra[field] === undefined) continue
+        const parsed = componentCatalogPackageSchema.shape[field].safeParse(extra[field])
+        if (parsed.success) Object.assign(pkg, { [field]: parsed.data })
+        else issues.push({ sourceId, sourceLabel: label, packageId: pkg.packageId, code: 'catalog-invalid', message: `${relative}：catalog.${field} 格式不可用，已忽略；组件内容仍可使用。` })
+      }
       let thumbnailDataUrl: string | undefined
       if (pkg.thumbnailPath) {
         try {
@@ -75,7 +81,12 @@ export async function scanComponentCatalogDirectory(rootPath: string, trust: Com
           thumbnailDataUrl = `data:image/${extension === 'svg' ? 'svg+xml' : extension === 'jpg' ? 'jpeg' : extension};base64,${Buffer.from(thumbnail).toString('base64')}`
         } catch (cause) { issues.push({ sourceId, sourceLabel: label, packageId: pkg.packageId, code: 'thumbnail-unreadable', message: `缩略图缺失；组件仍可使用：${String(cause)}` }) }
       }
-      index.set(catalogPackageIdentity(pkg.packageId, pkg.version), pkg)
+      const identity = catalogPackageIdentity(pkg.packageId, pkg.version), existing = index.get(identity)
+      if (existing) {
+        issues.push({ sourceId, sourceLabel: label, packageId: pkg.packageId, code: 'catalog-invalid', message: `${relative}：同一组件版本已有 ${existing.packagePath}；目录显示和读取均使用该记录，其余原文件保留。` })
+        continue
+      }
+      index.set(identity, pkg)
       packages.push({ ...pkg, sourceId, sourceLabel: label, sourceTrust: trust, thumbnailDataUrl })
     } catch (cause) { issues.push({ sourceId, sourceLabel: label, code: 'package-unreadable', message: `${relative}：${cause instanceof Error ? cause.message : String(cause)}` }) }
   }

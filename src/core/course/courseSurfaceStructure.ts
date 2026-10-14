@@ -1,7 +1,7 @@
+import { createProfessionalDocumentIdentityCopy } from '../components/library/professionalCopy'
 import type { ComponentInstance, ComponentSurface, CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform/project'
-import { rebindDeclaredTargets } from '../components/library/references'
 import { componentInteractionDataSchema, createComponentInteractionCopyIdentities, remapComponentInteractionData } from '../../shared/componentInteractionData'
 import { remapComponentInputData } from '../../components/input/authoring'
 
@@ -13,12 +13,14 @@ export function createCourseSurface(project: CourseProjectV10,
   createId: () => string = () => crypto.randomUUID()): ComponentSurface {
   const { kind } = input
   const reference = project.surfaces.find(surface => surface.id === input.referenceSurfaceId)
+  const design = reference?.designSize ?? project.surfaces.find(surface => surface.kind === 'slide')?.designSize ?? { width: 1280, height: 720 }
   const title = input.title === undefined
     ? kind === 'slide' ? '第 ' + (project.surfaces.filter(surface => surface.kind === 'slide').length + 1) + ' 页'
       : kind === 'flow' ? '新流式讲义' : '新无限画布'
     : input.title.trim()
   return { id: createId(), kind, title, childIds: [],
-    ...(kind === 'slide' ? { designSize: structuredClone(reference?.designSize ?? { width: 1280, height: 720 }) } : {}),
+    designSize: structuredClone(design),
+    ...(kind === 'flow' ? { flow: { layout: { widthMode: 'reading' as const, readingWidth: design.width, wideContentWidth: design.width, paperBackgroundColor: '#ffffff' } } } : {}),
     ...(kind === 'spatial' ? { spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [] } } : {}) }
 }
 
@@ -78,7 +80,7 @@ export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: stri
       return JSON.parse(JSON.stringify(data)) as ComponentInstance['data']
     }
     if (key === 'guoling.input') return rebindInput(instance)
-    const data = rebindDeclaredTargets(instance.data, value => ids.get(value) ?? value, value => value === surfaceId ? copiedSurfaceId : value)
+    const data = structuredClone(instance.data)
     if (key !== 'guoling.navigation' || !data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.buttons)) return data
     return { ...data, buttons: data.buttons.map(button => {
       if (!button || typeof button !== 'object' || Array.isArray(button)) return button
@@ -88,10 +90,12 @@ export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: stri
         ...(typeof action.targetStateId === 'string' ? { targetStateId: stateId(action.targetStateId) } : {}) } }
     }) }
   }
+  const professionalCopy = createProfessionalDocumentIdentityCopy(ids)
+  for (const id of ids.keys()) { const instance = project.instances[id]; professionalCopy(structuredClone(instance.data), professionalKey(instance), id, true) }
   const frameIds = frames
   const instances: ComponentInstance[] = [...ids].map(([id, copiedId]) => {
     const copy = structuredClone(project.instances[id]!)
-    return { ...copy, id: copiedId, data: rebindData(copy),
+    return { ...copy, id: copiedId, data: professionalCopy(rebindData(copy), professionalKey(copy), copy.id),
       ...(copy.visibility ? { visibility: { ...copy.visibility,
         surfaceIds: copy.visibility.surfaceIds.map(id => id === surfaceId ? copiedSurfaceId : id) } } : {}),
       ...(copy.flowPlacement?.paragraphAnchor ? { flowPlacement: { ...copy.flowPlacement, paragraphAnchor: { ...copy.flowPlacement.paragraphAnchor,
@@ -99,7 +103,7 @@ export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: stri
       ...(copy.childIds ? { childIds: copy.childIds.map(child => ids.get(child)!) } : {}),
       ...(copy.attachments ? { attachments: copy.attachments.map(attachment => ({ ...attachment,
         instanceId: ids.get(attachment.instanceId) ?? attachment.instanceId,
-        target: attachment.target.kind === 'instance' ? { kind: 'instance' as const, instanceId: ids.get(attachment.target.instanceId) ?? attachment.target.instanceId }
+        target: attachment.target.kind === 'text-range' ? { ...attachment.target, instanceId: ids.get(attachment.target.instanceId) ?? attachment.target.instanceId, rangeId: professionalCopy.identity(attachment.target.rangeId), dataPath: professionalCopy.path(attachment.target.dataPath) } : attachment.target.kind === 'instance' ? { kind: 'instance' as const, instanceId: ids.get(attachment.target.instanceId) ?? attachment.target.instanceId }
           : attachment.target.kind === 'surface' ? { kind: 'surface' as const, surfaceId: attachment.target.surfaceId === surfaceId ? copiedSurfaceId : attachment.target.surfaceId } : attachment.target,
       })) } : {}),
     }
@@ -110,14 +114,16 @@ export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: stri
     ...(surface.presentation.thumbnailStateId ? { thumbnailStateId: stateId(surface.presentation.thumbnailStateId) } : {}),
     states: surface.presentation.states.map(state => ({ ...state, id: states.get(state.id)!,
       overrides: Object.fromEntries(Object.entries(state.overrides).map(([id, override]) => [ids.get(id) ?? id, { ...override,
-        ...(override.data !== undefined ? { data: rebindData({ ...project.instances[id], data: override.data }) } : {}) }])),
+        ...(override.data !== undefined ? { data: professionalCopy(rebindData({ ...project.instances[id], data: override.data }), professionalKey(project.instances[id]), id) } : {}) }])),
       ...(state.order ? { order: state.order.map(id => ids.get(id) ?? id) } : {}),
     })) }
   if (surface.spatial) {
     const instanceId = (id: string) => ids.get(id) ?? id
     surface.spatial.frames = surface.spatial.frames.map(frame => ({ ...frame, id: frameIds.get(frame.id)!,
       ...(frame.targetInstanceId ? { targetInstanceId: instanceId(frame.targetInstanceId) } : {}) }))
-    surface.spatial.paths = surface.spatial.paths?.map(path => ({ ...path, id: createId(), frameIds: path.frameIds.map(id => frameIds.get(id) ?? id),
+    const pathIds = new Map((surface.spatial.paths ?? []).map(path => [path.id, createId()]))
+    if (surface.spatial.defaultPathId) surface.spatial.defaultPathId = pathIds.get(surface.spatial.defaultPathId)!
+    surface.spatial.paths = surface.spatial.paths?.map(path => ({ ...path, id: pathIds.get(path.id)!, frameIds: path.frameIds.map(id => frameIds.get(id) ?? id),
       ...(path.instanceIds ? { instanceIds: path.instanceIds.map(instanceId) } : {}) }))
     surface.spatial.relations = surface.spatial.relations?.map(relation => ({ ...relation, id: createId(), sourceInstanceId: instanceId(relation.sourceInstanceId), targetInstanceId: instanceId(relation.targetInstanceId) }))
     surface.spatial.semanticZoom = surface.spatial.semanticZoom?.map(rule => ({ ...rule, id: createId(), instanceIds: rule.instanceIds.map(instanceId) }))

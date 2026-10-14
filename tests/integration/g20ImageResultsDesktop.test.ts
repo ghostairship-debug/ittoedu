@@ -38,7 +38,7 @@ async function fixture() {
     if (request.jobId === 'late') { entered?.(); await new Promise<void>(resolve => { release = resolve }) }
     return { status: 'completed', images: [{ bytes: request.operation === 'edit' ? edited : original, mimeType: 'image/png', filename: 'image.png' }], provenance: imageProvenance(request, refs) }
   } } })
-  const options = { directory: path.join(root, 'actions'), images, documents, execution: { conversations, runs, appendExternalEvent: async (input: Parameters<typeof events.append>[0]) => { await events.append(input) } }, selection: async () => ({ ...selection, imageModel: 'current-edit-model' }) }
+  const options = { directory: path.join(root, 'actions'), images, documents, execution: { conversations, runs, events, appendExternalEvent: async (input: Parameters<typeof events.append>[0]) => { await events.append(input) } }, selection: async () => ({ ...selection, imageModel: 'current-edit-model' }) }
   const service = new ImageResultsDesktopService(options); services.push(service)
   const owner = { workspaceId: 'workspace', conversationId: 'conversation', runId: 'external-run', jobId: 'original' }
   const request = (jobId: string): ImageGenerationRequest => ({ jobId, runId: owner.runId, documentId: snapshot.documentId, operation: 'generate', prompt: 'fixture', selection })

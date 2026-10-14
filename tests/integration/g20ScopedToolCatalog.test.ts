@@ -80,8 +80,8 @@ it('sends a narrow Markdown catalog on every real HTTP turn and commits one cano
   expect(bodies).toHaveLength(3)
   const wireNames = bodies[0].data.tools.map((tool: any) => tool.function.name)
   // Services and engine controls are independent of the scoped document editing catalog.
-  const serviceAndControlNames = new Set([...workbenchServiceToolCatalog.map(tool => modelToolWireName(tool.name)), 'context_read', 'task_note', 'ask_user', 'tools_load'])
-  expect(wireNames.filter((name: string) => !serviceAndControlNames.has(name)).sort()).toEqual(['read', 'inspect', 'listChildren', 'text_replace', 'text_format', 'batch'].sort())
+  const serviceAndControlNames = new Set([...workbenchServiceToolCatalog.map(tool => modelToolWireName(tool.name)), modelToolWireName('context.read'), modelToolWireName('task.note'), modelToolWireName('ask_user'), modelToolWireName('tools.load')])
+  expect(wireNames.filter((name: string) => !serviceAndControlNames.has(name)).sort()).toEqual(['read', 'inspect', 'listChildren', modelToolWireName('text.replace'), modelToolWireName('text.format'), 'batch'].sort())
   expect(bodies.map(body => body.data.tools.map((tool: any) => tool.function.name))).toEqual(Array(3).fill(wireNames))
   const batch = bodies[0].data.tools.find((tool: any) => tool.function.name === 'batch')
   expect(JSON.stringify(batch.function.parameters)).toContain('text.replace')

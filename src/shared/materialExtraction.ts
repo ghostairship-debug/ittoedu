@@ -41,3 +41,7 @@ export interface LessonMaterialRead {
   fragments: MaterialFragment[]
   assets: MaterialExtraction['assets']
 }
+export interface LessonMaterialList {
+  records: LessonMaterialRecord[]
+  diagnostics: { id: string; code: string; message: string }[]
+}

@@ -10,8 +10,6 @@ import { REVEAL_IN_EXPLORER_EVENT, takePendingReveal, type RevealInExplorerDetai
 import { SLIDE_CANVAS_PRESETS } from '../../../shared/slideCanvas'
 import { snapshotWorkspaceDrop } from './workspaceDropFiles'
 import { parseWorkspaceEntryDrag, WORKSPACE_ENTRIES_DRAG_TYPE, writeWorkspaceEntryDrag } from '../workspaceMediaDrag'
-import { confirmPptxLosses } from '../../project/confirmPptxLosses'
-import { createCourseFromPptx, pptxCourseArchive, pptxCourseStem } from '../../project/pptxCourseCreation'
 import { CommandMenuItems, ContextMenu, moveMenuFocus } from '../../editing/commands/CommandMenu'
 import { explorerContextCommands, explorerNewCommands, type ExplorerCommandPorts } from './explorerCommands'
 
@@ -20,12 +18,13 @@ type Dialog = 'create-markdown' | 'create-course' | 'create-text' | 'create-html
 type Row = { entry: Entry; parentId: string }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 function icon(name: string) { return /\.(md|markdown)$/i.test(name) ? <FileText size={16} /> : isNativeProjectFilename(name) ? <Presentation size={16} /> : /\.html?$/i.test(name) ? <FileCode2 size={16} /> : <File size={16} /> }
-export function WorkspaceFilesTree({ directory, files, operation, refreshVersion = 0, onFile, onDirectory, onScope, onSaveDirectoryChange, onImportHtml }: {
+export function WorkspaceFilesTree({ directory, files, operation, refreshVersion = 0, onFile, onDirectory, onScope, onSaveDirectoryChange, onImportHtml, onImportFlow }: {
   directory: string; files: WorkspaceFilesAPI; operation?(request: LessonDesktopRequest): Promise<LessonDesktopResult>; refreshVersion?: number
   onFile(entry: LessonDirectoryEntry): void; onDirectory(path: string): void
   onScope?(path: string, kind: 'folder' | 'file', workspaceId?: string): void
   onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void
   onImportHtml?(directory: SaveDirectoryContext, sourceEntryId?: string): void
+  onImportFlow?(directory: SaveDirectoryContext, sourceEntryId?: string): void
 }) {
   const [root, setRoot] = useState<RegisteredWorkspaceRoot>()
   const [pages, setPages] = useState<Record<string, WorkspaceListItem[]>>({})
@@ -47,11 +46,10 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
   const pagesRef = useRef(pages); pagesRef.current = pages
   const buttons = useRef(new Map<string, HTMLButtonElement>())
   const createMenu = useRef<HTMLDetailsElement>(null)
-  // "从 PPT 新建 果铃工程" picks a file here and writes the new presentation into the folder chosen when it was asked for.
-  const pptxInput = useRef<HTMLInputElement>(null), pptxTarget = useRef<string | undefined>(undefined)
   // The pane clips its content, so the create options open at a fixed window position.
   const [createAt, setCreateAt] = useState<{ left: number; top: number }>()
   const dialogRef = useRef<HTMLElement>(null), dialogReturnFocus = useRef<HTMLElement | null>(null)
+  const dialogTarget = useRef<{ workspaceId: string; generation: number; sourceEntryIds: string[]; directoryEntryId?: string } | null>(null)
   const rows: Row[] = []
   const flatten = (id: string) => { for (const entry of pages[id] ?? []) if (entry.status === 'accessible') { rows.push({ entry, parentId: id }); if (entry.kind === 'directory' && expanded.has(entry.entryId)) flatten(entry.entryId) } }
   if (root) flatten(root.rootEntryId)
@@ -115,9 +113,11 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
   }, [dialog, anchor])
   const open = async (entry: Entry) => {
     if (!root) return
+    const generation = epoch.current, currentRoot = root
     const resolved = await files({ type: 'resolve', workspaceId: root.workspaceId, entryId: entry.entryId })
+    if (generation !== epoch.current || active.current?.workspaceId !== currentRoot.workspaceId) return
     if (entry.kind === 'file') onFile({ name: entry.name, kind: 'file', path: resolved.resolvedPath })
-    else { onDirectory(resolved.resolvedPath); setExpanded(value => new Set([...value, entry.entryId])); await load(entry.entryId, root) }
+    else { onDirectory(resolved.resolvedPath); setExpanded(value => new Set([...value, entry.entryId])); await load(entry.entryId, currentRoot, generation) }
   }
   const choose = (row: Row, event?: Pick<MouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>) => {
     const directoryEntryId = row.entry.kind === 'directory' ? row.entry.entryId : row.parentId
@@ -233,6 +233,8 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
   const begin = async (type: Dialog) => {
     if (type === 'trash') { if (root && selected.length) await run({ type: 'trash', operationId: crypto.randomUUID(), workspaceId: root.workspaceId, entryIds: selected.map(row => row.entry.entryId) }); return }
     dialogReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    dialogTarget.current = root ? { workspaceId: root.workspaceId, generation: epoch.current,
+      sourceEntryIds: selected.map(row => row.entry.entryId), directoryEntryId: targetDirectory } : null
     setMenu(undefined); setError(''); setResults(undefined); setRetry(undefined)
     if (type === 'rename') {
       setName(single?.name ?? '')
@@ -295,38 +297,20 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
     finally { lock.current = false; if (generation === epoch.current) setBusy(false) }
   }
   const common = () => ({ operationId: crypto.randomUUID(), workspaceId: root!.workspaceId })
-  // A new H5 presentation made from a PPT, written into the folder like any new file and then opened (M21).
-  const fromPptx = async (source: () => Promise<{ name: string; bytes: Uint8Array }>, directoryId: string) => {
-    if (!root || lock.current) return
-    const current = root, generation = epoch.current
-    lock.current = true; setBusy(true); setError(''); setMenu(undefined); setResults(undefined)
-    let made: { name: string; archive: Uint8Array<ArrayBuffer>; issues: number } | undefined
-    try {
-      const file = await source()
-      const stem = pptxCourseStem(file.name)
-      const course = await createCourseFromPptx(file.bytes, stem)
-      if (!await confirmPptxLosses(file.name, course.issues) || generation !== epoch.current) return
-      const entries = pagesRef.current[directoryId] ?? await load(directoryId, current)
-      made = { name: uniqueFilename(stem, '.glx', entries), archive: pptxCourseArchive(course), issues: course.issues.length }
-    } catch (reason) { if (generation === epoch.current) setError(message(reason)) }
-    finally { lock.current = false; if (generation === epoch.current) setBusy(false) }
-    if (!made || generation !== epoch.current) return
-    const result = await run({ type: 'create-course', ...common(), targetDirectoryId: directoryId, name: made.name, archive: made.archive })
-    if (result?.status === 'success' && made.issues) setNotice(`已从 PPT 新建 果铃工程；${made.issues} 项内容未保留或已简化`)
-  }
-  const readChosenPptx = (file: File) => async () => {
-    return { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) }
-  }
   const submit = () => {
     if (!root || !dialog) return
+    const captured = dialogTarget.current
+    if (!captured || captured.workspaceId !== root.workspaceId || captured.generation !== epoch.current) {
+      setError('原文件操作目标已失效，请重新打开操作。'); return
+    }
     if (dialog === 'mkdir' || dialog.startsWith('create-')) {
       const filename = dialog === 'create-html' ? (/\.html?$/i.test(name.trim()) ? name.trim() : `${name.trim()}.html`) : normalizeNewFilename(dialog as CreateFileType, name)
       const preset = SLIDE_CANVAS_PRESETS.find(item => item.id === canvasPreset) ?? SLIDE_CANVAS_PRESETS[0]!
-      if (dialog === 'create-course') void run({ type: 'create-course', ...common(), targetDirectoryId: targetDirectory!, name: filename, canvas: { width: preset.width, height: preset.height } })
-      else void run({ type: dialog === 'create-html' ? 'create-text' : dialog as 'mkdir' | 'create-markdown' | 'create-text', ...common(), targetDirectoryId: targetDirectory!, name: filename })
-    } else if (dialog === 'rename' && single) void run({ type: 'rename', ...common(), sourceEntryId: single.entryId, name: name.trim() })
-    else if (dialog === 'copy' || dialog === 'move') void run({ type: dialog, ...common(), sourceEntryIds: selected.map(row => row.entry.entryId), targetDirectoryId: destination ?? root.rootEntryId, ...(dialog === 'copy' ? { sourceVersion: copyVersion } : {}) })
-    else if (dialog === 'trash') void run({ type: 'trash', ...common(), entryIds: selected.map(row => row.entry.entryId) })
+      if (dialog === 'create-course') void run({ type: 'create-course', ...common(), targetDirectoryId: captured.directoryEntryId!, name: filename, canvas: { width: preset.width, height: preset.height } })
+      else void run({ type: dialog === 'create-html' ? 'create-text' : dialog as 'mkdir' | 'create-markdown' | 'create-text', ...common(), targetDirectoryId: captured.directoryEntryId!, name: filename })
+    } else if (dialog === 'rename' && captured.sourceEntryIds.length === 1) void run({ type: 'rename', ...common(), sourceEntryId: captured.sourceEntryIds[0]!, name: name.trim() })
+    else if (dialog === 'copy' || dialog === 'move') void run({ type: dialog, ...common(), sourceEntryIds: captured.sourceEntryIds, targetDirectoryId: destination ?? root.rootEntryId, ...(dialog === 'copy' ? { sourceVersion: copyVersion } : {}) })
+    else if (dialog === 'trash') void run({ type: 'trash', ...common(), entryIds: captured.sourceEntryIds })
   }
   const copy = (type: 'copy' | 'move') => { if (!root || !selected.length) return; setClipboard({ workspaceId: root.workspaceId, ids: selected.map(row => row.entry.entryId), type }); setMenu(undefined); setNotice(type === 'copy' ? `已复制 ${selected.length} 项，请选择目标文件夹后粘贴` : `已剪切 ${selected.length} 项，粘贴成功前原件保持不变`) }
   const paste = () => { if (root && clipboard?.ids.length && clipboard.workspaceId === root.workspaceId && targetDirectory) void run({ type: clipboard.type, ...common(), sourceEntryIds: clipboard.ids, targetDirectoryId: targetDirectory }) }
@@ -370,13 +354,11 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
     return () => document.removeEventListener('pointerdown', outside, true)
   }, [createAt])
   const action = (type: Dialog) => { closeCreateMenu(); void begin(type).catch(reason => setError(message(reason))) }
-  const choosePptx = () => { closeCreateMenu(); setMenu(undefined); pptxTarget.current = targetDirectory; pptxInput.current?.click() }
-  const pptxRow = selected.length === 1 && selected[0]!.entry.kind === 'file' && /\.pptx$/i.test(selected[0]!.entry.name) ? selected[0] : undefined
-  const importPptx = (row: Row) => { if (root) void fromPptx(() => files({ type: 'read-pptx', workspaceId: root.workspaceId, entryId: row.entry.entryId }), row.parentId) }
   // One definition per operation (M21): the right-click menu and the 新建 menu show the same items.
   const blocked = !root ? '工作空间未就绪' : busy ? '正在处理文件…' : null
   const commandPorts: ExplorerCommandPorts = {
-    create: type => action(type), newFromPptx: choosePptx, importPptx: () => { if (pptxRow) importPptx(pptxRow) },
+    importFlow: () => { if (single && root && onImportFlow) onImportFlow({ workspaceId: root.workspaceId, directoryEntryId: parentId ?? root.rootEntryId }, single.entryId); setMenu(undefined) },
+    create: type => action(type),
     importHtml: () => { if (root && menu && onImportHtml) { onImportHtml({ workspaceId: root.workspaceId, directoryEntryId: menu.directoryEntryId }, menu.sourceEntryId); setMenu(undefined) } },
     openHtmlExternal: () => { if (root && menu?.sourceEntryId) { if (!operation) { setError('当前界面不能用浏览器打开文件'); return } void files({ type: 'resolve', workspaceId: root.workspaceId, entryId: menu.sourceEntryId }).then(value => operation({ operation: 'open-external', path: value.resolvedPath })).then(result => { if (result.opened === false) throw new Error(result.openError ?? '没有可用的关联程序') }).catch(reason => setError(message(reason))); setMenu(undefined) } },
     rename: () => action('rename'), copy: () => copy('copy'), cut: () => copy('move'), paste,
@@ -395,7 +377,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
   return <div className="workspace-files-tree" aria-busy={busy}>
     <div role="toolbar" aria-label="文件管理" className="workspace-files-primary-actions">
       <details ref={createMenu} className="workspace-files-create-menu">
-        <summary aria-label="新建文件或文件夹" title="新建文件或文件夹" onClick={event => {
+        <summary aria-label="新建文件或文件夹" onClick={event => {
           if (createMenu.current?.open) { setCreateAt(undefined); return }
           const rect = event.currentTarget.getBoundingClientRect()
           setCreateAt({ left: Math.max(0, Math.min(rect.left, window.innerWidth - 200)), top: rect.bottom + 4 })
@@ -406,11 +388,6 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
       </details>
       <button type="button" title="刷新文件列表" disabled={busy || !root} onClick={() => { void refresh().catch(reason => setError(message(reason))) }}><RotateCw size={14} aria-hidden="true" /><span>刷新</span></button>
     </div>
-    <input ref={pptxInput} type="file" accept=".pptx" hidden aria-label="选择要在此文件夹新建为 果铃工程的 PPT" onChange={event => {
-      const file = event.target.files?.[0], target = pptxTarget.current
-      event.target.value = ''
-      if (file && target) void fromPptx(readChosenPptx(file), target)
-    }} />
     {notice && <p role="status">{busy ? '正在处理文件…' : notice}</p>}{busy && !notice && <p role="status">正在处理文件…</p>}
     {error && <p role="alert">{error}</p>}
     {results && results.status !== 'success' && <ul className="workspace-file-results" aria-label="文件操作结果">{results.items.map((item, index) => <li key={index} data-status={item.status}>{item.sourcePath?.split(/[\\/]/).pop() ?? item.targetPath?.split(/[\\/]/).pop() ?? '文件'}：{item.status === 'success' ? '已完成' : item.error?.message ?? (item.status === 'cancelled' ? '已取消' : '未完成')}</li>)}</ul>}
@@ -418,7 +395,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
       {root && <><button type="button" className="workspace-tree-root" aria-label="工作空间根目录" aria-pressed={selection.size === 0 && targetDirectory === root.rootEntryId} title={root.resolvedPath} data-drop={dropTarget === root.rootEntryId} {...droppable(root.rootEntryId)} onClick={() => { ++scopeTicket.current; onScope?.(root.resolvedPath, 'folder', root.workspaceId); setSelection(new Set()); setParentId(root.rootEntryId); onSaveDirectoryChange?.({ workspaceId: root.workspaceId, directoryEntryId: root.rootEntryId }); setMenu(undefined) }} onContextMenu={event => { event.preventDefault(); setSelection(new Set()); setParentId(root.rootEntryId); setMenu({ x: event.clientX, y: event.clientY, directoryEntryId: root.rootEntryId, htmlImport: 'pick' }) }}><Folder size={16} aria-hidden="true" /><span>{root.resolvedPath.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || root.resolvedPath}</span></button>{renderEntries(root.rootEntryId)}</>}
     </div>
     {menu && <ContextMenu at={menu} label="文件菜单" onClose={() => setMenu(undefined)}
-      items={explorerContextCommands({ blocked, selected: selected.length, pptx: Boolean(pptxRow), htmlImport: onImportHtml ? menu.htmlImport : null, htmlFile: menu.htmlImport === 'selected', clipboard: clipboard?.ids.length ?? 0 }, commandPorts)} />}
+      items={explorerContextCommands({ blocked, selected: selected.length, pptx: false, flowImport: Boolean(onImportFlow && single?.kind === 'file' && /\.(docx|md|markdown|txt)$/i.test(single.name)), htmlImport: onImportHtml ? menu.htmlImport : null, htmlFile: menu.htmlImport === 'selected', clipboard: clipboard?.ids.length ?? 0 }, commandPorts)} />}
     {dialog && <section ref={dialogRef} className="workspace-file-dialog" role="dialog" aria-modal="true" aria-label="文件操作" onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape' && !busy) { event.preventDefault(); close() } else if (event.key === 'Tab') { const controls = [...(dialogRef.current?.querySelectorAll<HTMLElement>('input:not(:disabled), select:not(:disabled), button:not(:disabled)') ?? [])]; const first = controls[0], last = controls.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() } } else if (event.key === 'Enter' && event.target instanceof HTMLInputElement && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !busy && !retry && (dialog === 'rename' || dialog === 'mkdir' || dialog.startsWith('create-')) && name.trim()) { event.preventDefault(); submit() } }}>
       {dialog === 'create-course' && <label>画布尺寸<select aria-label="画布尺寸" value={canvasPreset} onChange={event => setCanvasPreset(event.target.value)}>
         {SLIDE_CANVAS_PRESETS.map(preset => <option key={preset.id} value={preset.id}>{preset.label}（{preset.width}×{preset.height}）</option>)}

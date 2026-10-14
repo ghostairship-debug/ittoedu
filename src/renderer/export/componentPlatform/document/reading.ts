@@ -17,6 +17,7 @@ import type { DocumentBlock } from '../../../../shared/document/content'
 import { componentOutputPresentation } from '../presentation'
 import { audioDataSchema, videoDataSchema, type MediaData } from '../../../../components/media'
 import type { FlowDocxPageSize, FlowDocxOrientation } from '../../flowPageBox'
+import { componentDefinitionBuiltinKey } from '../../../../shared/contracts/component-platform/project'
 
 /** Format consumers receive a captured formal document, never editor or session state. */
 export type ComponentExportDocument = CourseProjectV10 | PublishedCourseV3
@@ -58,7 +59,7 @@ type ProfessionalBlock =
   | { kind: 'image'; data: ImageData }
   | { kind: 'shape'; data: ShapeData }
   | { kind: 'static'; label: string; lines: string[]; captureRequired: boolean }
-export type ComponentReadingBlock = ProfessionalBlock & { instance: ComponentInstance; globalPlane?: 'underlay' | 'overlay'; floatingPlacement?: ComponentFlowPlacement; outputFrame?: ComponentFrame; floatingAnchorFrame?: ComponentFrame }
+export type ComponentReadingBlock = ProfessionalBlock & { instance: ComponentInstance; outputOpacity: number; outputInheritedOpacity: number; globalPlane?: 'underlay' | 'overlay'; floatingPlacement?: ComponentFlowPlacement; outputFrame?: ComponentFrame; floatingAnchorFrame?: ComponentFrame }
 export interface ComponentReadingProjection {
   title: string
   surface: ComponentSurface
@@ -76,17 +77,19 @@ export function buildComponentReadingProjection(document: ComponentExportDocumen
   const projection: ComponentReadingProjection = { title: surface.title || document.title, surface, blocks: [], diagnostics: [] }
   const diagnostic = (instance: ComponentInstance, code: string, message: string, implementation?: ComponentImplementation) =>
     projection.diagnostics.push({ surfaceId, instanceId: instance.id, code, message, ...(implementation ? { implementation } : {}) })
-  const walk = (id: string, globalPlane?: 'underlay' | 'overlay', parent: AffineMatrix = [1, 0, 0, 1, 0, 0], inheritedPlacement?: ComponentFlowPlacement, inheritedAnchorFrame?: ComponentFrame) => {
+  const walk = (id: string, globalPlane?: 'underlay' | 'overlay', parent: AffineMatrix = [1, 0, 0, 1, 0, 0], inheritedPlacement?: ComponentFlowPlacement, inheritedAnchorFrame?: ComponentFrame, inheritedOpacity = 1) => {
     const instance = document.instances[id]
     if (!instance) throw new Error(`导出引用的组件不存在：${id}`)
     if (!isComponentVisibleAtSurface(instance, surfaceId)) return
+    const ownOpacity = Number(instance.style?.opacity ?? 1)
+    const outputOpacity = inheritedOpacity * (Number.isFinite(ownOpacity) ? Math.max(0, Math.min(1, ownOpacity)) : 1)
     const matrix = instance.frame ? multiplyMatrices(parent, instance.frame.transform) : parent
     const floatingPlacement = globalPlane ? { space: 'viewport' as const, plane: globalPlane } : instance.flowPlacement ?? inheritedPlacement
     const floatingAnchorFrame: ComponentFrame | undefined = instance.flowPlacement ? (instance.frame ? { ...instance.frame, transform: [...matrix] } : undefined) : inheritedAnchorFrame
     const definition = document.definitions[instance.definitionId]
     if (!definition) throw new Error(`导出引用的定义不存在：${instance.definitionId}`)
     const implementation = instance.implementationOverride ?? definition.implementation
-    const key = definition.implementation.kind === 'builtin' ? definition.implementation.key : definition.id
+    const key = componentDefinitionBuiltinKey(definition) ?? definition.id
     if (['guoling.navigation', 'guoling.teacher-controller'].includes(key) && !(instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && instance.data.includeInStaticExports === true)) return
     if (definition.role === 'behavior') {
       diagnostic(instance, 'static-behavior', '行为在静态文件中不执行。', implementation)
@@ -131,11 +134,11 @@ export function buildComponentReadingProjection(document: ComponentExportDocumen
     }
     if (block) {
       const outputFrame: ComponentFrame | undefined = floatingPlacement && instance.frame ? { ...instance.frame, transform: [...matrix] } : undefined
-      projection.blocks.push({ ...block, instance, ...(globalPlane ? { globalPlane } : {}),
+      projection.blocks.push({ ...block, instance, outputOpacity, outputInheritedOpacity: inheritedOpacity, ...(globalPlane ? { globalPlane } : {}),
         ...(floatingPlacement ? { floatingPlacement, ...(floatingAnchorFrame ? { floatingAnchorFrame } : {}), ...(outputFrame ? { outputFrame } : {}) } : {}) })
       if (block.kind === 'static' && !block.captureRequired) diagnostic(instance, 'static-interaction', '打印保留题面／说明和作者初值，不带学生临时答案或互动。')
     }
-    instance.childIds?.forEach(child => walk(child, globalPlane, matrix, floatingPlacement, floatingAnchorFrame))
+    instance.childIds?.forEach(child => walk(child, globalPlane, matrix, floatingPlacement, floatingAnchorFrame, outputOpacity))
   }
   const global = (plane: 'underlay' | 'overlay') => {
     for (const id of document.global[plane]) {

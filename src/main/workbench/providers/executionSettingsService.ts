@@ -1,4 +1,8 @@
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { createSearchRouter } from '../network/searchService'
+import { freezeSearchSelection } from '../network/SearchRouter'
+import { WebResearchService } from '../network/WebResearchService'
 import { executionSettingsRequestSchema, type DiscoveredModel, type DiscoveredModels,
   type DiscoveredReasoningEffort } from '../../../shared/workbench/executionSettingsDesktop'
 import { ExecutionSettingsError, ExecutionSettingsStore } from './ExecutionSettingsStore'
@@ -73,6 +77,25 @@ export class ExecutionSettingsDesktopService {
       const input = parsed.data
       switch (input.type) {
         case 'read': return await this.store.read()
+        case 'test-search': {
+          const credentialResolver = (connection: Readonly<ModelConnectionSnapshot>) => this.store.resolveCredential(connection)
+          const provider = routeModelProviders({
+            'openai-chat': new OpenAIChatProvider({ credentialResolver, fetch: this.transport }),
+            'openai-responses': new OpenAIResponsesProvider({ credentialResolver, fetch: this.transport }),
+            'anthropic-messages': new AnthropicMessagesProvider({ credentialResolver, fetch: this.transport }),
+            'chatgpt-responses': new ChatGPTResponsesProvider({ fetch: this.transport, credentialResolver: connection => this.oauth ? this.oauth.resolveCredential(connection) : Promise.reject(new Error('OAuth 未接通')) }),
+          })
+          const search = createSearchRouter({ provider, credential: credentialResolver, fetch: this.transport, observeCapability: (selection, status, actualModel) => this.store.recordNativeSearchCapability(selection, status, actualModel) })
+          const web = new WebResearchService({ searchProvider: search }), runId = randomUUID()
+          const view = await this.store.read()
+          const mainRole = view.profile.roles.conversation
+          const mainConnection = view.connections.find(entry => entry.connection.id === mainRole?.connectionId && entry.hasCredential && !entry.revoked)?.connection
+          const mainSelection = mainRole && mainConnection ? { connection: mainConnection, model: mainRole.model, ...(mainRole.parameters ? { parameters: mainRole.parameters } : {}) } : undefined
+          search.beginRun(runId, freezeSearchSelection(view, mainSelection))
+          web.beginRun(runId)
+          try { return await web.search({ runId, query: input.query, limit: 3 }) }
+          finally { search.endRun(runId); await web.stopRun(runId) }
+        }
         case 'save-connection': return await this.store.saveConnection({ ...input.input, connection: { ...input.input.connection,
           capabilities: { tools: 'unknown', vision: 'unknown', stream: 'unknown', reasoning: 'unknown' } } })
         case 'save-profile': return await this.store.saveProfile(input.input)
@@ -82,7 +105,18 @@ export class ExecutionSettingsDesktopService {
         case 'known-models': return await this.store.modelKnowledge.knownModels()
         case 'probe-capabilities': return await this.probeCapabilities(input)
         case 'oauth-login-start': return await this.requireOAuth().start(input.id, input.revision)
-        case 'oauth-login-status': return this.requireOAuth().status(input.loginId)
+        case 'oauth-login-status': {
+          const status = this.requireOAuth().status(input.loginId)
+          if (status.status !== 'connected') return status
+          try {
+            const catalog = await this.discoverModels(status.connection.connection.id, status.connection.connection.revision)
+            await this.store.applyOAuthModelDefaults(catalog.connectionId, catalog.connectionRevision, catalog.models)
+            return status
+          } catch (error) {
+            return { ...status, modelDirectoryError: error instanceof ExecutionSettingsError ? error.message
+              : '模型目录暂不可读取，请检查网络连接后重试目录。账号登录已保留。' }
+          }
+        }
         case 'oauth-login-cancel': return await this.requireOAuth().cancel(input.loginId)
       }
     } catch (error) {
@@ -204,6 +238,8 @@ export class ExecutionSettingsDesktopService {
         }
         models = [...found.values()].sort((left, right) => left.id.localeCompare(right.id))
       } catch { throw new ExecutionSettingsError('model-discovery-invalid', '模型目录格式无效；连接能力仍未验证。') }
+      if (models.length === 0) throw new ExecutionSettingsError('model-discovery-empty',
+        '服务返回了空模型目录。请重试目录；若仍为空，请检查该账号的订阅权限与网络连接。已有模型选择已保留。')
       const latest = (await this.store.read()).connections.find(entry => entry.connection.id === id)
       if (!latest || latest.connection.revision !== revision || !latest.hasCredential) throw new ExecutionSettingsError('stale-discovery', '读取期间连接已改变或撤销，请重新读取。')
       const result: DiscoveredModels = { connectionId: id, connectionRevision: revision, models,
@@ -213,10 +249,14 @@ export class ExecutionSettingsDesktopService {
     } catch (error) {
       if (!(error instanceof ExecutionSettingsError) || error.code === 'model-discovery-http' && response && (response.status === 429 || response.status >= 500)) {
         const cached = await this.store.cachedModelCatalog(id, revision)
-        if (cached) return { ...cached, models: await this.store.modelKnowledge.enrich(current.connection, cached.models) }
+        if (cached?.models.length) return { ...cached, models: await this.store.modelKnowledge.enrich(current.connection, cached.models) }
       }
       if (error instanceof ExecutionSettingsError) throw error
-      throw new ExecutionSettingsError('model-discovery-failed', '模型目录暂不可读取；未切换连接或发起生成。')
+      const cause = error instanceof Error ? error.cause as { code?: unknown } | undefined : undefined
+      const code = typeof cause?.code === 'string' && /^[A-Z0-9_]{1,64}$/.test(cause.code) ? `（${cause.code}）` : ''
+      throw new ExecutionSettingsError('model-discovery-failed', abort.signal.aborted
+        ? '模型目录请求超时（15 秒），请检查网络或代理后重试。账号和已有选择已保留。'
+        : `模型目录网络连接失败${code}，请检查网络或代理后重试。账号和已有选择已保留。`)
     } finally {
       clearTimeout(timer); abort.abort()
       if (response?.body && !response.body.locked) await response.body.cancel().catch(() => undefined)
@@ -236,8 +276,8 @@ export function executionSettingsStore(): Promise<ExecutionSettingsStore> {
   })().catch(error => { singleton = undefined; throw error })
 }
 export async function operateExecutionSettings(raw: unknown) {
-  const { app } = await import('electron')
-  return new ExecutionSettingsDesktopService(await executionSettingsStore(), fetch, await executionOAuthService(), app.getVersion()).operate(raw)
+  // Model-directory protocol compatibility is independent of the workbench's package version.
+  return new ExecutionSettingsDesktopService(await executionSettingsStore(), fetch, await executionOAuthService()).operate(raw)
 }
 export function executionOAuthService(): Promise<OAuthDesktopService> {
   return oauthSingleton ??= (async () => {

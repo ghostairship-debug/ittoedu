@@ -434,13 +434,13 @@ export class AgentFileService implements AgentFilePort {
       const parent = await this.entryId(root, path.dirname(target))
       context.assertActive?.()
       return { data: { operation: await this.host.files.mkdir({ operationId, workspaceId: root.workspaceId,
-        targetDirectoryId: parent, name: input.name }) } }
+        targetDirectoryId: parent, name: input.name }, context.assertActive) } }
     }
     if (name === 'file.rename') {
       const input = agentFileSchemas[name].parse(raw), source = await this.entryId(root, scoped[0]!)
       context.assertActive?.()
       return { data: { operation: await this.host.files.rename({ operationId, workspaceId: root.workspaceId,
-        sourceEntryId: source, name: input.name }) } }
+        sourceEntryId: source, name: input.name }, context.assertActive) } }
     }
     const sources = name === 'file.trash' ? scoped : scoped.slice(0, agentFileSchemas[name].parse(raw).sources.length)
     const destination = name === 'file.trash' ? undefined : await this.entryId(root, path.dirname(scoped[sources.length]!))
@@ -448,24 +448,26 @@ export class AgentFileService implements AgentFilePort {
       ? agentFileSchemas['file.copy'].parse(raw).sourceVersion ?? ((raw as { flushFirst?: unknown }).flushFirst === true ? 'current' : 'disk') : undefined
     const items: Array<{ status: 'success' | 'partial' | 'failed' | 'cancelled'; sourcePath?: string; targetPath?: string;
       affectedPaths: string[]; copied?: 'disk-version' | 'current-draft'; error?: { code: string; message: string } }> = []
-    for (const [index, source] of sources.entries()) {
+    const entries: string[] = []
+    const resourcePolicy = name === 'file.copy' || name === 'file.move' ? agentFileSchemas[name].parse(raw).resourcePolicy : undefined
+    for (const source of sources) {
       try {
-        const dirty = name === 'file.copy' && this.host.registry.list().some(snapshot => snapshot.binding.kind === 'file'
-          && snapshot.binding.path.toLowerCase() === source.toLowerCase() && snapshot.dirty)
-        const entry = await this.entryId(root, source)
-        const id = `${operationId}:${index}`
-        context.assertActive?.()
-        const receipt = name === 'file.trash'
-          ? await this.host.files.trash({ operationId: id, workspaceId: root.workspaceId, entryIds: [entry] })
-          : name === 'file.copy'
-            ? await this.host.files.copy({ operationId: id, workspaceId: root.workspaceId, sourceEntryIds: [entry], targetDirectoryId: destination!, sourceVersion })
-            : await this.host.files.move({ operationId: id, workspaceId: root.workspaceId, sourceEntryIds: [entry], targetDirectoryId: destination! })
-        items.push(...receipt.items.map(item => ({ ...item, sourcePath: item.sourcePath ?? source,
-          ...(dirty && sourceVersion === 'disk' && item.status === 'success' ? { copied: 'disk-version' as const } : {}) })))
+        entries.push(await this.entryId(root, source))
       } catch (error) {
         items.push({ status: 'failed', sourcePath: source, affectedPaths: [source],
           error: { code: 'file-operation-failed', message: error instanceof Error ? error.message : String(error) } })
       }
+    }
+    if (entries.length) {
+      context.assertActive?.()
+      const receipt = name === 'file.trash'
+        ? await this.host.files.trash({ operationId, workspaceId: root.workspaceId, entryIds: entries }, context.assertActive)
+        : name === 'file.copy'
+          ? await this.host.files.copy({ operationId, workspaceId: root.workspaceId, sourceEntryIds: entries, targetDirectoryId: destination!, sourceVersion, resourcePolicy }, context.assertActive)
+          : await this.host.files.move({ operationId, workspaceId: root.workspaceId, sourceEntryIds: entries, targetDirectoryId: destination!, resourcePolicy }, context.assertActive)
+      items.push(...receipt.items.map(item => ({ ...item,
+        ...(name === 'file.copy' && sourceVersion === 'disk' && item.status === 'success' && this.host.registry.list().some(snapshot => snapshot.binding.kind === 'file'
+          && snapshot.binding.path.toLowerCase() === item.sourcePath?.toLowerCase() && snapshot.dirty) ? { copied: 'disk-version' as const } : {}) })))
     }
     const status = items.every(item => item.status === 'success') ? 'success'
       : items.some(item => item.status === 'success' || item.status === 'partial') ? 'partial' : 'failed'

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { usePropertyDraftBindingKey } from './properties/PropertyControls'
+import { propertyDraftSuspended, usePropertyDraftBindingKey, usePropertyDraftFlush } from './properties/PropertyControls'
 
 export interface ColorPreset {
   readonly name: string
@@ -49,7 +49,7 @@ export interface ColorInputProps {
   readonly id: string
   readonly label: string
   readonly value: string
-  readonly onChange: (value: string) => void
+  readonly onChange: (value: string) => void | Promise<void>
   readonly onPreviewChange?: (value: string | null) => void
   readonly 'data-testid'?: string
 }
@@ -63,7 +63,10 @@ export function ColorInput({
   'data-testid': testId,
 }: ColorInputProps) {
   const projectColors = useContext(ProjectColorPaletteContext)
-  const bindingKey = `${usePropertyDraftBindingKey()}:${id}`
+  const parentBinding = usePropertyDraftBindingKey()
+  let parts: unknown[] = [parentBinding]
+  try { const parsed: unknown = JSON.parse(parentBinding); if (Array.isArray(parsed)) parts = parsed } catch { /* unbound standalone control */ }
+  const bindingKey = JSON.stringify([...parts, ['color', id]])
   const normalizedValue = normalizeOpaqueColor(value || '') ?? (value || '').toLowerCase()
   const [draft, setDraft] = useState(normalizedValue)
   const [pickerDraft, setPickerDraft] = useState(normalizedValue)
@@ -78,6 +81,14 @@ export function ColorInput({
   const previousBindingRef = useRef(bindingKey)
   const rejectRetiredPickerRef = useRef(false)
   const pointerGestureRef = useRef(false)
+  const ownerBinding = useRef(bindingKey)
+  const commitRef = useRef(onChange)
+  const latest = useRef({ bindingKey, value: normalizedValue, onChange })
+  latest.current = { bindingKey, value: normalizedValue, onChange }
+  const pending = useRef<Promise<boolean> | undefined>(undefined)
+  const composing = useRef(false), resumeRequired = useRef(false)
+  const [, setInputEpoch] = useState(0)
+  const dirty = () => resumeRequired.current || composing.current || Boolean(pending.current) || draftRef.current !== lastCommittedRef.current
 
   useLayoutEffect(() => {
     if (previousBindingRef.current === bindingKey) return
@@ -87,6 +98,9 @@ export function ColorInput({
     rejectRetiredPickerRef.current = true
     pointerGestureRef.current = false
     isCancelledRef.current = true
+    if (dirty()) { setInputError('编辑目标已改变；颜色输入已保留，请按 Esc 放弃后重试。'); return }
+    ownerBinding.current = bindingKey
+    commitRef.current = onChange
     draftRef.current = normalizedValue
     lastCommittedRef.current = normalizedValue
     setDraft(normalizedValue)
@@ -100,13 +114,15 @@ export function ColorInput({
   }, [onPreviewChange])
 
   useEffect(() => {
+    if (ownerBinding.current === bindingKey) commitRef.current = onChange
+    if (dirty()) return
     isCancelledRef.current = false
     draftRef.current = normalizedValue
     setDraft(normalizedValue)
     setPickerDraft(normalizedValue)
     lastCommittedRef.current = normalizedValue
     setInputError('')
-  }, [normalizedValue])
+  }, [normalizedValue, bindingKey, onChange])
 
   useEffect(() => {
     return () => {
@@ -135,16 +151,11 @@ export function ColorInput({
     const handleNativeChange = (e: Event) => {
       if (rejectRetiredPickerRef.current) return
       isCancelledRef.current = false
-      isPreviewDirtyRef.current = false
       const targetVal = (e.target as HTMLInputElement).value.toLowerCase()
       setPickerDraft(targetVal)
       draftRef.current = targetVal
       setDraft(targetVal)
-      onPreviewChange?.(null)
-      if (targetVal !== normalizedValue && targetVal !== lastCommittedRef.current) {
-        lastCommittedRef.current = targetVal
-        onChange(targetVal)
-      }
+      commit(targetVal)
     }
 
     el.addEventListener('input', handleNativeInput)
@@ -155,7 +166,14 @@ export function ColorInput({
     }
   }, [normalizedValue, onChange, onPreviewChange])
 
-  const commit = () => {
+  const commit = (candidate = draftRef.current): boolean | Promise<boolean> => {
+    if (propertyDraftSuspended(ownerBinding.current)) return false
+    if (pending.current) return pending.current
+    if (composing.current || resumeRequired.current) return false
+    if (ownerBinding.current !== latest.current.bindingKey
+      || latest.current.value !== lastCommittedRef.current && latest.current.value !== normalizeOpaqueColor(candidate)) {
+      setInputError('原颜色或编辑目标已改变；输入已保留，请按 Esc 放弃后重试。'); return false
+    }
     if (isCancelledRef.current) {
       isCancelledRef.current = false
       isPreviewDirtyRef.current = false
@@ -163,26 +181,34 @@ export function ColorInput({
       setDraft(normalizedValue)
       setPickerDraft(normalizedValue)
       onPreviewChange?.(null)
-      return
+      return true
     }
     isPreviewDirtyRef.current = false
     onPreviewChange?.(null)
-    const trimmed = normalizeOpaqueColor(draftRef.current)
+    const trimmed = normalizeOpaqueColor(candidate)
     if (trimmed) {
       setInputError('')
-      if (trimmed !== normalizedValue && trimmed !== lastCommittedRef.current) {
-        lastCommittedRef.current = trimmed
+      if (trimmed !== lastCommittedRef.current) {
         draftRef.current = trimmed
         setDraft(trimmed)
         setPickerDraft(trimmed)
-        onChange(trimmed)
+        const finish = () => { lastCommittedRef.current = trimmed; setInputError(''); setInputEpoch(epoch => epoch + 1); return draftRef.current === trimmed }
+        const fail = (error: unknown) => { setInputError(error instanceof Error ? error.message : String(error)); return false }
+        try {
+          const result = commitRef.current(trimmed)
+          if (!result) return finish()
+          const ack = Promise.resolve(result).then(() => { pending.current = undefined; return finish() }, error => { pending.current = undefined; return fail(error) })
+          pending.current = ack; return ack
+        } catch (error) { return fail(error) }
       } else {
         draftRef.current = normalizedValue
         setDraft(normalizedValue)
         setPickerDraft(normalizedValue)
       }
+      return true
     } else {
       setInputError('当前专业颜色支持 #RGB、#RRGGBB 或不透明 rgb()；输入已保留，请修正后应用。')
+      return false
     }
   }
 
@@ -193,13 +219,21 @@ export function ColorInput({
     const next = presetColor.toLowerCase()
     setInputError('')
     if (next !== normalizedValue && next !== lastCommittedRef.current) {
-      lastCommittedRef.current = next
       draftRef.current = next
       setDraft(next)
       setPickerDraft(next)
-      onChange(next)
+      commit(next)
     }
   }
+
+  usePropertyDraftFlush(() => dirty() ? commit() : true, {
+    hasDirty: dirty,
+    readDraft: () => ({ bindingKey: ownerBinding.current, label, kind: 'text', raw: draftRef.current,
+      baseline: lastCommittedRef.current, composing: resumeRequired.current || composing.current }),
+    restoreDraft: record => { ownerBinding.current = record.bindingKey; lastCommittedRef.current = record.baseline ?? normalizedValue
+      draftRef.current = record.raw; resumeRequired.current = record.composing; setDraft(record.raw)
+      const normalized = normalizeOpaqueColor(record.raw); if (normalized) setPickerDraft(normalized) },
+  })
 
   return (
     <div className="form-field" {...(testId ? { 'data-testid': testId } : {})}>
@@ -258,6 +292,7 @@ export function ColorInput({
           }}
           onChange={(event) => {
             isCancelledRef.current = false
+            resumeRequired.current = false
             const nextVal = event.target.value
             setInputError('')
             draftRef.current = nextVal
@@ -269,14 +304,19 @@ export function ColorInput({
               onPreviewChange?.(trimmed)
             }
           }}
-          onBlur={commit}
+          onCompositionStart={() => { composing.current = true; resumeRequired.current = false; setInputEpoch(epoch => epoch + 1) }}
+          onCompositionEnd={() => { composing.current = false; setInputEpoch(epoch => epoch + 1) }}
+          onBlur={() => commit()}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
+              if (event.nativeEvent.isComposing || composing.current) return
               commit()
               event.currentTarget.blur()
             }
             if (event.key === 'Escape') {
               isCancelledRef.current = true
+              ownerBinding.current = bindingKey; commitRef.current = onChange; lastCommittedRef.current = normalizedValue
+              resumeRequired.current = false; composing.current = false
               isPreviewDirtyRef.current = false
               draftRef.current = normalizedValue
               setDraft(normalizedValue)

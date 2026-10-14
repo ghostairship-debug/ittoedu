@@ -247,8 +247,8 @@ export function withModelThinkingBudget(parameters: ModelJsonObject, setting: Mo
 /** Change only the managed reasoning controls; keep all unrelated advanced parameters. */
 export function withModelReasoning(parameters: ModelJsonObject, effort: DiscoveredReasoningEffort | undefined,
   resolved: ResolvedModelReasoning): ModelJsonObject {
-  if (resolved.format === 'unknown' && effort === undefined) return { ...parameters }
-  const next = { ...parameters }
+  const next = withoutManagedModelReasoning(parameters)
+  if (resolved.format === 'unknown' && effort === undefined) return next
   if (effort !== undefined && !resolved.choices.some(choice => choice.effort === effort)) {
     throw new Error('invalid-reasoning-effort')
   }

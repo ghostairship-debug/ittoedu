@@ -3,8 +3,7 @@ import { outputTableHtml } from '../../../../components/table/output'
 import { chartOutputAdapter } from '../../../../components/chart/output'
 import { resolveNativeShapePath } from '../../../../shared/nativeShapePath'
 import { nativePathData } from '../../../../shared/nativePathRendering'
-import { cropGeometry } from '../../../../shared/imageCrop'
-import { flowImageDimensions } from '../../imageDimensions'
+import { cropGeometry, clampCrop } from '../../../../shared/imageCrop'
 import { buildPdfPrintHtml, pdfPrintPageName, type PdfPrintImage } from '../../course/pdfPrintHtml'
 import { bytesToDataUrl } from '../../base64'
 import { resolveFlowDocxPageBox, resolvePrintPageSize } from '../../flowPageBox'
@@ -15,6 +14,7 @@ import { resolveComponentBackground, type ComponentFlowPlacement } from '../../.
 import { flowParagraphAnchoredFrame, type FlowParagraphBlockRect } from '../../../../shared/flowParagraphAnchors'
 import { renderDocumentText } from '../../../../shared/document/render'
 import { collectComponentAssetCredits, withCourseCreditsPage } from '../../course/courseCredits'
+import { outputImageDimensions } from '../../outputImage'
 
 export interface ComponentPrintOutputOptions extends ComponentDocumentOutputOptions {
   pageId?: string
@@ -100,13 +100,20 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
       const image = await options.captureInstance?.({ document, surfaceId: surface.id, instanceId: block.instance.id, state: 'author-initial' })
       if (!image) return undefined
       diagnostics.push({ surfaceId: surface.id, instanceId: block.instance.id, code: 'actual-static-capture', message: '程序区域按实际初态图面打印；源码与数据保留在工程。' })
-      return `<img src="${x(bytesToDataUrl(image.bytes, image.mimeType))}" width="${image.width}" height="${image.height}" alt="${x(block.instance.id)}"/>`
+      return `<img data-output-capture="true" src="${x(bytesToDataUrl(image.bytes, image.mimeType))}" width="${image.width}" height="${image.height}" alt="${x(block.instance.id)}"/>`
     } catch (error) { return note(block, 'capture-failed', `实际图面捕获失败：${error instanceof Error ? error.message : String(error)}`) }
   }
   for (const block of projection.blocks) {
     let html = ''
     switch (block.kind) {
-      case 'document-block': html = documentBlockOutputAdapter.html(globalThis.document, block.instance.data, block.instance.id); break
+      case 'document-block': {
+        const source = documentBlockOutputAdapter.html(globalThis.document, block.instance.data, block.instance.id)
+        if (block.data.type === 'code' && block.data.language === 'mermaid') {
+          const diagram = await capture(block)
+          html = diagram?.startsWith('<img ') ? diagram : source + (diagram ?? note(block, 'mermaid-capture-missing', 'Mermaid 未获得实际图示；保留原代码，其他正文继续输出。'))
+        } else html = source
+        break
+      }
       case 'media':
         html = `<p>${x(block.data.title || `${block.mediaKind === 'audio' ? '音频' : '视频'} ${block.data.assetId}`)}</p>`
           + note(block, 'print-media-playback', 'PDF 不执行媒体播放、音量、速率或混合；单 HTML 与网页包保留正式播放。', block.data.assetId)
@@ -136,15 +143,18 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
         const url = asset ? bytesToDataUrl(asset.bytes, asset.mimeType) : options.resolveAssetUrl?.(data.assetId)
           ?? ('url' in (document.assets[data.assetId] ?? {}) ? (document.assets[data.assetId] as { url?: string }).url : undefined)
         if (!url) { html += note(block, 'asset-missing', `图片资源 ${data.assetId} 缺少字节或运行 URL。`, data.assetId); break }
-        const source = asset ? flowImageDimensions(asset.bytes, asset.mimeType) : undefined
+        let source
+        try { source = asset ? await outputImageDimensions(asset.bytes, asset.mimeType) : undefined }
+        catch (error) { html += note(block, 'asset-decode-failed', String(error), data.assetId); break }
         const w = Math.min(width, block.instance.frame?.width ?? source?.width ?? width)
         const h = block.instance.frame ? w * block.instance.frame.height / block.instance.frame.width : source ? w * source.height / source.width : 320
         if (!source && [data.crop.left, data.crop.top, data.crop.right, data.crop.bottom].some(value => value !== 0)) {
           html += await capture(block) ?? note(block, 'image-crop-dimensions-missing', '裁切图片缺少原图尺寸或实际图面，原引用与裁切保留。', data.assetId); break
         }
         const geometry = source ? cropGeometry({ ...data, frame: { width: w, height: h }, source }).whole : { x: 0, y: 0, width: w, height: h }
+        const clip = clampCrop(data.crop)
         const f = data.filters
-        html += `<figure style="width:${w}px;height:${h}px;overflow:hidden;position:relative;border-radius:${data.cornerRadius}px;filter:brightness(${f.brightness}) contrast(${f.contrast}) saturate(${f.saturation}) grayscale(${f.grayscale}) blur(${f.blur}px)"><img src="${x(url)}" alt="${x(data.alt)}" style="position:absolute;max-width:none;left:${geometry.x}px;top:${geometry.y}px;width:${geometry.width}px;height:${geometry.height}px;object-fit:${data.fit === 'stretch' ? 'fill' : data.fit};transform-origin:0 0;transform:translate(${data.flipX ? '100%' : '0'},${data.flipY ? '100%' : '0'}) scale(${data.flipX ? -1 : 1},${data.flipY ? -1 : 1})"/></figure>`; break
+        html += `<figure style="width:${w}px;height:${h}px;overflow:hidden;position:relative;border-radius:${data.cornerRadius}px;filter:brightness(${f.brightness}) contrast(${f.contrast}) saturate(${f.saturation}) grayscale(${f.grayscale}) blur(${f.blur}px)"><img src="${x(url)}" alt="${x(data.alt)}" style="position:absolute;max-width:none;left:${geometry.x}px;top:${geometry.y}px;width:${geometry.width}px;height:${geometry.height}px;object-fit:${data.fit === 'stretch' ? 'fill' : data.fit};clip-path:inset(${clip.top * 100}% ${clip.right * 100}% ${clip.bottom * 100}% ${clip.left * 100}%);transform-origin:0 0;transform:translate(${data.flipX ? '100%' : '0'},${data.flipY ? '100%' : '0'}) scale(${data.flipX ? -1 : 1},${data.flipY ? -1 : 1})"/></figure>`; break
       }
       case 'shape': {
         const w = Math.min(width, block.instance.frame?.width ?? 320), h = block.instance.frame?.height ?? 160
@@ -155,7 +165,8 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
         : `<p>${x([block.label, ...block.lines].join('\n'))}</p>`; break
     }
     const implementation = block.instance.implementationOverride ?? document.definitions[block.instance.definitionId]!.implementation
-    if (implementation.kind === 'source' && block.kind !== 'static') html += await capture(block)
+    if (implementation.kind === 'source' && block.kind !== 'static'
+      && !(block.kind === 'document-block' && block.data.type === 'code' && block.data.language === 'mermaid')) html += await capture(block)
       ?? note(block, 'custom-visual-missing', '定制源码图面尚未捕获；默认专业输出无法代表定制视觉与互动。')
     const element = globalThis.document.createElement('section')
     element.dataset.componentOutput = block.instance.id
@@ -163,6 +174,12 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
     element.innerHTML = html
     if (block.instance.flowLayout?.caption) {
       const caption = globalThis.document.createElement('figcaption'); caption.innerHTML = renderDocumentText(block.instance.flowLayout.caption); element.append(caption)
+    }
+    // Local capture pixels have already consumed the instance opacity, while
+    // native content and captions consume the full authored ancestor chain.
+    for (const child of Array.from(element.children)) {
+      const opacity = block.outputOpacity === 0 ? 0 : child.hasAttribute('data-output-capture') ? block.outputInheritedOpacity : block.outputOpacity
+      if (opacity < 1) (child as HTMLElement).style.opacity = String(opacity)
     }
     const layout = block.instance.flowLayout
     if (layout?.wrap && layout.wrap !== 'none') element.style.float = layout.wrap
@@ -224,5 +241,5 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
   body.style.setProperty('--component-reading-width', `${projection.surface.flow?.layout.readingWidth ?? width}px`)
   body.style.setProperty('--component-wide-width', `${projection.surface.flow?.layout.wideContentWidth ?? width}px`)
   return { html: withCourseCreditsPage(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${x(projection.title)}</title><style>${css}</style></head><body>${body.outerHTML}</body></html>`, collectComponentAssetCredits(document.assets)), diagnostics,
-    fidelity: diagnostics.some(value => ['asset-missing', 'asset-read-failed', 'capture-missing', 'capture-failed', 'custom-visual-missing', 'professional-data-invalid', 'shape-capture-missing', 'image-feather-capture-missing', 'image-crop-dimensions-missing', 'floating-frame-missing', 'floating-anchor-unresolved', 'viewport-print-placement', 'print-media-playback', 'video-frame-missing'].includes(value.code)) ? 'partial' as const : 'complete' as const }
+    fidelity: diagnostics.some(value => ['asset-missing', 'asset-read-failed', 'asset-decode-failed', 'capture-missing', 'capture-failed', 'mermaid-capture-missing', 'custom-visual-missing', 'professional-data-invalid', 'shape-capture-missing', 'image-feather-capture-missing', 'image-crop-dimensions-missing', 'floating-frame-missing', 'floating-anchor-unresolved', 'viewport-print-placement', 'print-media-playback', 'video-frame-missing'].includes(value.code)) ? 'partial' as const : 'complete' as const }
 }

@@ -3,7 +3,7 @@ import type { ObservationServicePort } from '../../shared/workbench/toolPorts'
 import type { ToolResult } from '../../shared/workbench/tools'
 
 export const viewObserveTool = { name: 'view.observe' as const,
-  description: '观察课件页面的真实画面。工程文件使用 project.list 返回的页面或对象 path；多个课件时用 project 指明文件名或路径。也可用已授权 target，组件目标保留捕获的页面和展示状态。可观察非当前页，不更改文档、选区或播放状态。purpose 默认 required；用户要求的检查保持 required，自行添加的可选诊断可用 diagnostic。诊断不可用会保留未验证说明，不表示检查通过。',
+  description: '观察课件页面的实际呈现，按回执 source、identity、coverage 判断载体和覆盖范围。当前课件路径在隔离 Published 环境重建画面，不证明现场编辑输入、草稿提交、程序私有运行状态或另一导出路径性能。工程文件使用 project.list 返回的页面或对象 path；多个课件时用 project 指明文件名或路径。也可用已授权 target，组件目标保留捕获的页面和展示状态。可观察非当前页，不更改文档、选区或播放状态。purpose 默认 required；用户要求的检查保持 required，自行添加的可选诊断可用 diagnostic。诊断不可用会保留未验证说明，不表示检查通过。',
   inputSchema: viewObserveInputSchema,
   manual: { label: '查看页面', group: 'read' as const, targetKinds: ['course-surface', 'course-instance', 'course-location', 'course-owner', 'course-state', 'course-object', 'document'] as const },
 }

@@ -37,7 +37,7 @@ export async function snapshotSelectedLessonMaterials(input: { target: LessonMat
     await workspace.read({ schemaVersion: 1, lessonId: value.lessonId,
       normalizedDirectory: createWorkspaceIdentity(value.lessonId, value.rootPath).normalizedPath })
   })
-  const records = await owner.list(target), messages: ModelChatMessage[] = []
+  const { records } = await owner.list(target), messages: ModelChatMessage[] = []
   for (const raw of frozen.selections) {
     context.signal?.throwIfAborted()
     const selection = lessonAuthoringMaterialSelectionSchema.parse(raw)
@@ -291,7 +291,7 @@ function decodePreparedCursor(input: string): PreparedCursor {
 }
 const representationReference = (snapshotId: string, representationId: string) => `prepared:${snapshotId}:${encodeURIComponent(representationId)}`
 async function preparedSnapshot(service: AttachmentService, ids: ReadonlySet<string>, sourceId: string,
-  options: { pages?: { from: number; to: number }; fromPage?: number; images?: 'auto' | 'all'; snapshotId?: string }, signal?: AbortSignal) {
+  options: { pages?: { from: number; to: number }; fromPage?: number; images?: 'auto' | 'all'; requireImages?: boolean; snapshotId?: string }, signal?: AbortSignal) {
   allowed(ids, sourceId)
   signal?.throwIfAborted()
   const source = await service.readSnapshot(sourceId)
@@ -308,7 +308,9 @@ async function preparedSnapshot(service: AttachmentService, ids: ReadonlySet<str
   const covered = source.coverage?.selectedPages
   const matchesPages = !options.pages || covered?.from === options.pages.from
     && covered?.to === Math.min(options.pages.to, source.coverage?.totalPages ?? options.pages.to)
-  if (source.representations.some(item => item.kind !== 'file') && !options.fromPage && matchesPages) return { source, snapshot: source }
+  const matchesRepresentation = !options.requireImages || source.representations.some(item => item.kind === 'image')
+    && source.coverage?.imageMode !== 'auto'
+  if (source.representations.some(item => item.kind !== 'file') && !options.fromPage && matchesPages && matchesRepresentation) return { source, snapshot: source }
   const snapshot = await service.extract(source.derivedFrom ?? source.id, {
     pages: options.pages && { from: options.fromPage ?? options.pages.from, to: options.pages.to }, fromPage: options.fromPage,
     maxPages: MATERIAL_EXTRACTION_LIMITS.pages, images: options.images ?? 'auto', signal })
@@ -319,6 +321,7 @@ function unreadPages(snapshot: AttachmentSnapshot) {
   const covered = snapshot.coverage?.selectedPages, total = snapshot.coverage?.totalPages
   if (!covered || !total) return []
   const ranges: { from: number; to: number }[] = []
+  if (covered.from > 1) ranges.push({ from: 1, to: covered.from - 1 })
   if (covered.to < total) ranges.push({ from: covered.to + 1, to: total })
   return ranges
 }
@@ -359,7 +362,7 @@ async function readPreparedMaterial(service: AttachmentService, ids: ReadonlySet
   if (input.cursor && !cursor) throw new Error('普通材料续读请使用回执 nextCursor')
   if (cursor && cursor.representation !== input.representation) throw new Error('材料续读表示偏好已改变，请重新读取')
   const { source, snapshot } = await preparedSnapshot(service, ids, input.attachmentId,
-    { pages: input.pages, images: input.representation === 'image' ? 'all' : 'auto',
+    { pages: input.pages, images: input.representation === 'image' ? 'all' : 'auto', requireImages: input.representation === 'image',
       ...(cursor?.nextPage ? { fromPage: cursor.nextPage } : cursor ? { snapshotId: cursor.snapshotId } : {}) }, signal)
   if (cursor && cursor.originalDigest !== source.digest) throw new Error('材料原件版本已改变，请重新读取')
   const sections: Record<string, unknown>[] = []
@@ -395,7 +398,7 @@ async function readPreparedMaterial(service: AttachmentService, ids: ReadonlySet
     ...(nextPage ? { nextPage } : { index, offset }) }) : undefined
   signal?.throwIfAborted()
   return { data: { attachmentId: source.id, name: source.name, originalDigest: source.digest, source: source.source,
-    sections, coverage: snapshot.coverage, gaps: snapshot.gaps, unreadPages: unreadPages(snapshot),
+    sections, coverage: snapshot.coverage, gaps: preparedGaps(snapshot), unreadPages: unreadPages(snapshot),
     truncated, ...(nextCursor ? { nextCursor } : {}), wholeSourceRead: false,
     observation: imagePrepared ? 'text-ranges-and-images-prepared-for-next-request' : 'returned-material-ranges' },
     admittedSourceIds: [snapshot.id] }
@@ -413,7 +416,9 @@ async function findPreparedMaterial(service: AttachmentService, ids: ReadonlySet
     ...input, attachmentId: snapshot.id, cursor: cursor?.nextPage ? undefined : cursor?.inner })
   const nextPage = data.truncated ? undefined : nextPreparedPage(snapshot, input.pages)
   const truncated = data.truncated || nextPage !== undefined
-  const completeSoFar = (cursor?.completeSoFar ?? true) && !data.failures.length && !data.unreadable.length
+  const searchFrom = input.pages?.from ?? source.coverage?.selectedPages?.from ?? 1
+  const completeSoFar = searchFrom === 1 && (cursor?.completeSoFar ?? (!snapshot.coverage?.selectedPages || snapshot.coverage.selectedPages.from === 1))
+    && !data.failures.length && !data.unreadable.length
     && !snapshot.gaps.length && snapshot.representations.every(item => item.kind === 'text')
   const nextCursor = truncated ? encodePreparedCursor({ sourceId: source.id, originalDigest: source.digest,
     snapshotId: snapshot.id, action: 'find', query: input.query, pages: input.pages, completeSoFar,
@@ -421,8 +426,13 @@ async function findPreparedMaterial(service: AttachmentService, ids: ReadonlySet
   signal?.throwIfAborted()
   return { data: { ...data, attachmentId: source.id,
     hits: data.hits.map(hit => ({ ...hit, representationId: representationReference(snapshot.id, hit.representationId) })),
-    truncated, nextCursor, unreadPages: unreadPages(snapshot), searchComplete: completeSoFar && !truncated
-      && (!snapshot.coverage?.selectedPages || (input.pages?.from ?? 1) === 1
-        && snapshot.coverage.selectedPages.to === snapshot.coverage.totalPages) },
+    gaps: preparedGaps(snapshot), unreadable: data.unreadable.map(item => ({ ...item, representationId: representationReference(snapshot.id, item.representationId) })),
+    truncated, nextCursor, unreadPages: unreadPages(snapshot).filter(range => !completeSoFar || range.from > (snapshot.coverage?.selectedPages?.to ?? 0)),
+    searchComplete: completeSoFar && !truncated
+      && (!snapshot.coverage?.selectedPages || snapshot.coverage.selectedPages.to === snapshot.coverage.totalPages) },
     admittedSourceIds: [snapshot.id] }
+}
+function preparedGaps(snapshot: AttachmentSnapshot) {
+  return snapshot.gaps.map(gap => ({ ...gap, ...(gap.resolutionRepresentationId
+    ? { resolutionRepresentationId: representationReference(snapshot.id, gap.resolutionRepresentationId) } : {}) }))
 }

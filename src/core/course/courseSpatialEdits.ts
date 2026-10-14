@@ -35,6 +35,12 @@ export function deleteSpatialCameraFrameEdit(project: CourseProjectV10, surfaceI
     for (const path of spatial.paths ?? []) path.frameIds = path.frameIds.filter(id => id !== frameId)
   })
 }
+export function setSpatialDefaultPathEdit(project: CourseProjectV10, surfaceId: string, pathId: string | null): ComponentEdit {
+  return spatialAuthoringEdit(project, surfaceId, spatial => {
+    if (pathId && !spatial.paths?.some(path => path.id === pathId)) throw new Error('默认播放路径已不存在')
+    spatial.defaultPathId = pathId
+  })
+}
 export function setSpatialCameraHomeEdit(project: CourseProjectV10, surfaceId: string, pose: ComponentSpatialPose): ComponentEdit {
   return spatialAuthoringEdit(project, surfaceId, spatial => { spatial.home = { ...pose } })
 }
@@ -46,14 +52,15 @@ export function updateSpatialCameraFrameEdit(project: CourseProjectV10, surfaceI
     delete frame.targetInstanceId
   })
 }
-function worldInstance(project: CourseProjectV10, surfaceId: string, instanceId: string): boolean {
-  if (!project.instances[instanceId]?.frame) return false
+export function spatialWorldInstance(project: CourseProjectV10, surfaceId: string, instanceId: string): boolean {
+  const instance = project.instances[instanceId]
+  if (!instance?.frame || project.definitions[instance.definitionId]?.role === 'behavior') return false
   let owner = owningContainer(project, instanceId)
   while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
   return owner?.kind === 'surface' && owner.surfaceId === surfaceId
 }
 export function updateSpatialCameraFrameTargetEdit(project: CourseProjectV10, surfaceId: string, frameId: string, instanceId: string | null): ComponentEdit {
-  if (instanceId && !worldInstance(project, surfaceId, instanceId)) throw new Error('镜头跟随对象已不在当前世界中')
+  if (instanceId && !spatialWorldInstance(project, surfaceId, instanceId)) throw new Error('镜头跟随对象已不在当前世界中')
   return spatialAuthoringEdit(project, surfaceId, spatial => {
     const frame = spatial.frames.find(value => value.id === frameId)
     if (!frame) throw new Error('镜头已不存在')
@@ -66,20 +73,34 @@ type GraphKind = 'paths' | 'relations' | 'semanticZoom'
 type GraphItem<K extends GraphKind> = NonNullable<ComponentSpatialAuthoring[K]>[number]
 const missing = { paths: '路径已不存在', relations: '关系已不存在', semanticZoom: '规则已不存在' }
 export function addSpatialGraphItemEdit<K extends GraphKind>(project: CourseProjectV10, surfaceId: string, kind: K, input: Omit<GraphItem<K>, 'id'>): ComponentEdit {
+  checkGraphInstances(project, surfaceId, kind, input)
   return spatialAuthoringEdit(project, surfaceId, value => {
     const items = (value[kind] ?? []) as GraphItem<K>[]
     Object.assign(value, { [kind]: [...items, { ...input, id: crypto.randomUUID() }] })
   })
 }
 export function updateSpatialGraphItemEdit<K extends GraphKind>(project: CourseProjectV10, surfaceId: string, kind: K, id: string, patch: Partial<Omit<GraphItem<K>, 'id'>>): ComponentEdit {
+  checkGraphInstances(project, surfaceId, kind, patch)
   return spatialAuthoringEdit(project, surfaceId, value => {
     const item = value[kind]?.find(item => item.id === id)
     if (!item) throw new Error(missing[kind])
     Object.assign(item, patch)
+    // Omitted object members distinguish an empty frame route from an empty object route.
+    // Keep canonical commands JSON-safe when the UI switches the whole route type.
+    if (kind === 'paths' && Object.hasOwn(patch, 'instanceIds') && (patch as Partial<GraphItem<'paths'>>).instanceIds === undefined)
+      delete (item as GraphItem<'paths'>).instanceIds
   })
 }
+function checkGraphInstances(project: CourseProjectV10, surfaceId: string, kind: GraphKind, input: unknown) {
+  const item = input as { instanceIds?: string[]; sourceInstanceId?: string; targetInstanceId?: string }
+  const ids = kind === 'relations' ? [item.sourceInstanceId, item.targetInstanceId].filter((id): id is string => id !== undefined) : item.instanceIds ?? []
+  if (ids.some(id => !spatialWorldInstance(project, surfaceId, id))) throw new Error('路径或关系端点已不在当前世界中；输入已保留，请选择当前可见对象')
+}
 export function deleteSpatialGraphItemEdit(project: CourseProjectV10, surfaceId: string, kind: GraphKind, id: string): ComponentEdit {
-  return spatialAuthoringEdit(project, surfaceId, value => { Object.assign(value, { [kind]: value[kind]?.filter(item => item.id !== id) }) })
+  return spatialAuthoringEdit(project, surfaceId, value => {
+    Object.assign(value, { [kind]: value[kind]?.filter(item => item.id !== id) })
+    if (kind === 'paths' && value.defaultPathId === id) value.defaultPathId = null
+  })
 }
 
 /** Local references belong to one observed source, and never become persistent author IDs. */
@@ -113,12 +134,14 @@ export function observeSpatialSource(project: CourseProjectV10, surfaceId: strin
       from: objectPaths[relation.sourceInstanceId], to: objectPaths[relation.targetInstanceId], label: relation.label, kind: relation.kind })) } : {}),
     ...(spatial.semanticZoom ? { semanticZoom: spatial.semanticZoom.map((rule, index) => ({ ref: observe('semanticZoom', rule.id, index),
       objects: rule.instanceIds.map(id => objectPaths[id]), minZoom: rule.minZoom, maxZoom: rule.maxZoom, visible: rule.visible })) } : {}) }
-  return { source, refs }
+  const defaultRoute = spatial.defaultPathId === null ? 'frames'
+    : spatial.defaultPathId ? Object.entries(refs.paths).find(([, id]) => id === spatial.defaultPathId)?.[0] : undefined
+  return { source: { ...source, ...(defaultRoute !== undefined ? { defaultRoute } : {}) }, refs }
 }
 
 const ref = z.string().min(1).optional(), objectPath = z.string().min(1)
 const sourcePose = z.union([componentSpatialPoseSchema, z.literal('currentViewport')])
-const sourceSchema = z.object({ home: sourcePose, stops: z.array(z.object({ ref, title: z.string().optional(), pose: sourcePose, target: objectPath.optional() })),
+const sourceSchema = z.object({ defaultRoute: z.union([z.string().min(1), z.number().int().positive()]).optional(), home: sourcePose, stops: z.array(z.object({ ref, title: z.string().optional(), pose: sourcePose, target: objectPath.optional() })),
   paths: z.array(z.object({ ref, title: z.string().optional(), stops: z.array(z.union([z.string().min(1), z.number().int().positive()])), objects: z.array(objectPath).optional(),
     style: z.object({ color: z.string().optional(), width: z.number().finite().positive().optional(), dash: z.enum(['solid', 'dashed', 'dotted']).optional() }).optional() })).optional(),
   relations: z.array(z.object({ ref, from: objectPath, to: objectPath, label: z.string().optional(), kind: z.enum(['line', 'arrow', 'bidirectional']) })).optional(),
@@ -139,7 +162,7 @@ export function prepareSpatialSourceEdit(project: CourseProjectV10, surfaceId: s
   }
   const instanceId = (path: string) => {
     const id = Object.entries(objectPaths).find(([, value]) => value === path)?.[0]
-    if (!id || !worldInstance(project, surfaceId, id)) throw new Error(`空间引用的对象路径尚未读取或已不在当前世界中：${path}`)
+    if (!id || !spatialWorldInstance(project, surfaceId, id)) throw new Error(`空间引用的对象路径尚未读取或已不在当前世界中：${path}`)
     return id
   }
   const pose = (value: z.infer<typeof sourcePose>): ComponentSpatialPose => {
@@ -171,7 +194,20 @@ export function prepareSpatialSourceEdit(project: CourseProjectV10, surfaceId: s
     ...(value.semanticZoom ? { semanticZoom: value.semanticZoom.map(rule => ({ id: identity('semanticZoom', rule.ref), instanceIds: rule.objects.map(instanceId),
       minZoom: rule.minZoom, maxZoom: rule.maxZoom, visible: rule.visible })) } : {}),
   })
+  let defaultPathId = prior?.defaultPathId
+  if (value.defaultRoute !== undefined) {
+    if (value.defaultRoute === 'frames') defaultPathId = null
+    else {
+      defaultPathId = typeof value.defaultRoute === 'number' ? spatial.paths?.[value.defaultRoute - 1]?.id : observed.paths[value.defaultRoute]
+      if (!defaultPathId) throw new Error('默认路线引用的路径不存在；请选择本次路径引用、路径序号或 frames')
+      if (!spatial.paths?.some(path => path.id === defaultPathId)) {
+        if (defaultPathId === prior?.defaultPathId) defaultPathId = null
+        else throw new Error('默认路线引用的路径已删除；请选择当前路径或 frames')
+      }
+    }
+  } else if (defaultPathId && !spatial.paths?.some(path => path.id === defaultPathId)) defaultPathId = null
   return spatialAuthoringEdit(project, surfaceId, draft => {
+    if (defaultPathId !== undefined) draft.defaultPathId = defaultPathId
     draft.home = spatial.home
     draft.frames = spatial.frames
     for (const kind of ['paths', 'relations', 'semanticZoom'] as const) {

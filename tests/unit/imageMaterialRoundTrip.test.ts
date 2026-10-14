@@ -17,7 +17,7 @@ it('imports, reopens and reads a standalone image with original pixels and sourc
     const extraction = await extractMaterial(original, '电路图.png')
     const record = await new LessonMaterials(async () => {}).import(target, { title: '电路图', original, extraction })
     const reopened = new LessonMaterials(async () => {})
-    expect((await reopened.list(target))[0]).toMatchObject({ id: record.id, format: 'image', sourcePath: expect.stringMatching(/original\.png$/) })
+    expect((await reopened.list(target)).records[0]).toMatchObject({ id: record.id, format: 'image', sourcePath: expect.stringMatching(/original\.png$/) })
     const read = await reopened.read(target, { id: record.id, extractionVersion: record.extractionVersion, fragmentIds: [record.fragments[0]!.id] })
     expect(read.fragments[0]).toMatchObject({ kind: 'image', locator: { part: '电路图.png', page: 1 } })
     expect(read.fragments[0]!.text).toBeUndefined()

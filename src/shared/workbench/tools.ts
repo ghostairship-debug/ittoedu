@@ -3,7 +3,8 @@ import type { DocumentSlot } from '../document/ports'
 import type { DisclosedExecutionSettings } from './executionDesktop'
 import type { ExecutionPermissionMode } from './executionPermission'
 import type { ConversationHome } from './conversations'
-import type { ComponentAuthorRecord } from '../contracts/component-platform/runtime'
+import type { ComponentAuthorRecord, ComponentAuthorField } from '../contracts/component-platform/runtime'
+import type { ModelSelection } from './modelProvider'
 
 /** Host-only addresses. A model sees opaque handles, never these coordinates. */
 export type ToolTarget =
@@ -14,7 +15,7 @@ export type ToolTarget =
   | { kind: 'html-author-field'; authorKey: string; field: 'text' | 'src'; record: ComponentAuthorRecord;
     source?: { from: number; to: number; quote?: '"' | "'" | '' } }
   /** V10 instance/subtree or a data field. Text offsets count code points; math is one atom. */
-  | { kind: 'course-instance'; surfaceId: string; instanceId: string; stateId?: string | null; fieldScope?: 'data' | 'flowLayout'; dataPath?: string[]; from?: number; to?: number }
+  | { kind: 'course-instance'; surfaceId: string; instanceId: string; stateId?: string | null; fieldScope?: 'data' | 'flowLayout' | 'authoring'; dataPath?: string[]; authorField?: Omit<ComponentAuthorField, 'initialValue'> & { initialValue: string }; from?: number; to?: number }
   | { kind: 'course-audio' }
   | { kind: 'course-sound'; soundId: string }
   | { kind: 'course-asset'; assetId: string }
@@ -38,6 +39,8 @@ export interface ToolRunGrant {
   actor: DocumentOperation['actor']
   documents: readonly { documentId: string; writable: readonly ToolTarget[]; selection?: readonly ToolTarget[] }[]
   disclosedSettings?: DisclosedExecutionSettings
+  /** Host-frozen selection for native search; external MCP can omit it. */
+  searchSelection?: ModelSelection
   /** Main-frozen file scope for built-in task delivery tools; external MCP grants use their bound documents. */
   fileAccess?: { permission: ExecutionPermissionMode; workspaceRoot?: string; conversationHomeRoot?: string; conversationHome?: ConversationHome; boundPaths?: Record<string, string> }
   /** Explicit user result authorization, frozen by Main; methods and observations cannot extend it. */

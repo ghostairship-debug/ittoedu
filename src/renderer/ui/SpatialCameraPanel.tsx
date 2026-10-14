@@ -19,6 +19,7 @@ export interface SpatialCameraPanelProps {
   readonly worldInstances: readonly ComponentInstance[]
   readonly paths?: readonly SpatialPathDocument[]
   readonly playbackPathId?: string | null
+  readonly defaultPathId?: string | null
   readonly semanticZoomRules: readonly SpatialSemanticZoomRule[]
   readonly disabled?: boolean
   readonly sessionCameraLabel?: string
@@ -38,12 +39,13 @@ export interface SpatialCameraPanelProps {
   readonly onActivateFrame: (frameId: string) => void
   readonly onFitWorldContent?: (scope?: 'visible' | 'all') => void
   readonly onPlaybackPathIdChange?: (pathId: string | null) => void
+  readonly onDefaultPathIdChange?: (pathId: string | null) => void
   readonly onAddSemanticZoomRule: (rule: {
     instanceIds: string[]
     minZoom: number
     maxZoom: number
     visible: boolean
-  }) => void
+  }) => unknown | Promise<unknown>
   readonly onUpdateSemanticZoomRule: (
     ruleId: string,
     patch: Partial<Omit<SpatialSemanticZoomRule, 'id'>>,
@@ -66,6 +68,7 @@ export function SpatialCameraPanel({
   worldInstances,
   paths = [],
   playbackPathId = null,
+  defaultPathId = null,
   semanticZoomRules,
   disabled = false,
   sessionCameraLabel,
@@ -85,6 +88,7 @@ export function SpatialCameraPanel({
   onActivateFrame,
   onFitWorldContent,
   onPlaybackPathIdChange,
+  onDefaultPathIdChange,
   onAddSemanticZoomRule,
   onUpdateSemanticZoomRule,
   onDeleteSemanticZoomRule,
@@ -94,6 +98,8 @@ export function SpatialCameraPanel({
   const [ruleMinZoom, setRuleMinZoom] = useState('0')
   const [ruleMaxZoom, setRuleMaxZoom] = useState('1')
   const [ruleVisible, setRuleVisible] = useState(true)
+  const [ruleError, setRuleError] = useState('')
+  const [addingRule, setAddingRule] = useState(false)
 
   useEffect(() => {
     setRuleLayerItemIds([])
@@ -144,20 +150,30 @@ export function SpatialCameraPanel({
       <label className="property-hint">
         <input
           type="checkbox"
-          aria-label="显示镜头框"
+          aria-label="显示已保存镜头框"
           disabled={disabled}
           checked={showCameraFrames}
           onChange={(event) => onShowCameraFramesChange(event.currentTarget.checked)}
         />
-        显示镜头框（仅本次编辑，不写入课程）
+        显示已保存镜头框（当前示意框始终显示）
       </label>
 
       <div className="form-field">
-        <label htmlFor="spatial-playback-path">播放路径</label>
+        <label htmlFor="spatial-default-path">默认播放路线</label>
+        <select id="spatial-default-path" className="form-input" aria-label="默认播放路线"
+          disabled={disabled || !onDefaultPathIdChange} value={defaultPathId ?? ''}
+          onChange={event => onDefaultPathIdChange?.(event.currentTarget.value || null)}>
+          <option value="">按镜头顺序</option>
+          {paths.map(path => <option value={path.id} key={path.id}>{path.title ?? path.id}</option>)}
+        </select>
+        <p className="property-hint">保存到工程，试运行、预览和导出都从这条路线进入。</p>
+      </div>
+      <div className="form-field">
+        <label htmlFor="spatial-playback-path">临时查看路径（仅编辑）</label>
         <select
           id="spatial-playback-path"
           className="form-input"
-          aria-label="播放路径"
+          aria-label="临时查看路径"
           disabled={disabled || !onPlaybackPathIdChange}
           value={playbackPathId ?? ''}
           onChange={(event) => onPlaybackPathIdChange?.(event.currentTarget.value || null)}
@@ -206,6 +222,7 @@ export function SpatialCameraPanel({
         </button>
       </>}
 
+      <p className="property-hint">全部镜头顺序；命名路径的成员顺序在路径属性中单独调整。</p>
       {frames.map((frame) => (
         <div className="form-field" key={frame.id} data-frame-id={frame.id}>
           {editingFrameId === frame.id ? (
@@ -279,7 +296,7 @@ export function SpatialCameraPanel({
             disabled={disabled || !sessionCamera}
             onClick={onSetHome}
           >
-            设为首页镜头
+            设为初始视图
           </button>
           <button
             type="button"
@@ -294,7 +311,7 @@ export function SpatialCameraPanel({
       ))}
 
       <p className="property-hint">
-        首页镜头：x {Math.round(home.x)} y {Math.round(home.y)} · {Math.round(home.zoom * 100)}%{home.rotation ? ` · 旋转 ${Math.round(home.rotation)}°` : ''}。
+        初始自由视图：x {Math.round(home.x)} y {Math.round(home.y)} · {Math.round(home.zoom * 100)}%{home.rotation ? ` · 旋转 ${Math.round(home.rotation)}°` : ''}。
       </p>
 
       <details className="simple-advanced-properties">
@@ -355,19 +372,24 @@ export function SpatialCameraPanel({
         <button
           type="button"
           className="secondary-button"
-          disabled={disabled || !canAddRule}
-          onClick={() => {
-            onAddSemanticZoomRule({
+          disabled={disabled || !canAddRule || addingRule}
+          onClick={async () => {
+            const submittedIds = ruleLayerItemIds
+            setAddingRule(true); setRuleError('')
+            try { await onAddSemanticZoomRule({
               instanceIds: ruleLayerItemIds,
               minZoom: parsedRuleMinZoom,
               maxZoom: parsedRuleMaxZoom,
               visible: ruleVisible,
             })
-            setRuleLayerItemIds([])
+            setRuleLayerItemIds(previous => previous === submittedIds ? [] : previous)
+            } catch (error) { setRuleError(error instanceof Error ? error.message : String(error)) }
+            finally { setAddingRule(false) }
           }}
         >
           <Plus size={14} />添加语义缩放规则
         </button>
+        {ruleError && <p role="alert">{ruleError}</p>}
         {semanticZoomRules.map((rule) => (
           <div className="form-field" key={rule.id} data-semantic-zoom-rule-id={rule.id}>
             <p className="property-hint">

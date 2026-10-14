@@ -28,7 +28,7 @@ export async function readComponentSourceClosure(input: {
         sourceHtml: `<style>${css.replace(/<\/style/gi, '<\\/style')}</style>`, currentSource: input.currentSource })
       for (const [relative, content] of closure.siblingFiles) {
         const logical = path.posix.normalize(path.posix.join(path.posix.dirname(name), relative))
-        if (!files.has(logical)) files.set(logical, content)
+        if (!files.has(logical)) { files.set(logical, content); pending.push(logical) }
       }
       continue
     }

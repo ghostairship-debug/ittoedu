@@ -17,12 +17,18 @@ import { usePropertiesContext } from '../ui/properties/PropertiesContextAdapter'
 import type { PropertiesContext } from '../ui/properties/PropertiesContext'
 import type { FlowPropertiesContext } from '../ui/properties/FlowPropertiesPanel'
 import type { PropertiesItemView, PropertiesPatch } from '../ui/properties/SlideNativePropertiesPanel'
-import { captureCourseInstanceSelection, usePinnedSelection, workbenchSelection } from './SelectionContextController'
+import { captureCourseInstanceSelection, captureCourseAuthorField, usePinnedSelection, workbenchSelection } from './SelectionContextController'
+import type { ComponentAuthorSpot } from '../../shared/contracts/component-platform/runtime'
+import { courseAuthorFieldTarget } from '../../core/tools/ToolTargets'
+import { useRuntimeLightEditView } from '../composition/runtime/runtimeLightEditCommands'
 import { RuntimePageTextList } from './RuntimePageText'
 import './selectionContext.css'
 import { useCourseEditorChrome } from '../documents/CourseEditorChromeContext'
 import { useEditorStore } from '../store/editorStore'
 import { proEditorRailController } from '../ui/proEditorRailController'
+import { frameCorners, multiplyMatrices, type AffineMatrix } from '../../core/components/geometry'
+import { componentParentMatrix } from '../composition/crossSurfaceCommands'
+import { owningContainer } from '../../shared/contracts/component-platform/project'
 
 type ObjectProperties = Extract<PropertiesContext, { kind: 'slide-native' | 'multi-selection' }>
 type GlobalProperties = Extract<PropertiesContext, { kind: 'course-global' }>
@@ -47,13 +53,11 @@ function matchesFlowOverlay(context: PropertiesContext, itemIds: readonly string
   return (context.kind === 'flow-page' || context.kind === 'flow-block' || context.kind === 'flow-component') && itemIds.length === 1 && context.native?.view.id === itemIds[0]
 }
 
+import { stepFontSize } from '../../shared/fontSizeStep'
+export { stepFontSize } from '../../shared/fontSizeStep'
 const FONT_SIZE_MIN = 8, FONT_SIZE_MAX = 400
 /** Canvas selections draw a rotation handle about 25px above the frame; the bar stays clear of it. */
 const ROTATION_HANDLE_CLEARANCE = 34
-export function stepFontSize(size: number, direction: 1 | -1): number {
-  const step = size < 24 ? 2 : size < 72 ? 4 : 8
-  return Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(size) + direction * step))
-}
 const ALIGN_ORDER = ['left', 'center', 'right'] as const
 const ALIGN_ICON = { left: <AlignLeft size={14} />, center: <AlignCenter size={14} />, right: <AlignRight size={14} /> }
 const ALIGN_LABEL = { left: '左对齐', center: '居中', right: '右对齐' }
@@ -72,6 +76,7 @@ function elementLabel(view: PropertiesItemView): string {
 /** Type-specific common actions of one selected object; everything else stays in the editor. */
 function ObjectActions({ view, patch, replaceImage, editText, extra = {} }: { view: PropertiesItemView; patch(patch: PropertiesPatch): void; replaceImage?: () => void; editText?: () => void; extra?: Pick<SingleObjectState, 'editFormula' | 'crop' | 'fit' | 'replaceVideo'> }) {
   if (view.type === 'text') {
+    const sizes = [...new Set(Array.from(view.text).map((_char, index) => view.runs.find(run => run.start <= index && run.end > index)?.style.fontSize ?? view.style.fontSize))]
     const align = ALIGN_ORDER.includes(view.style.align) ? view.style.align : 'left'
     const next = ALIGN_ORDER[(ALIGN_ORDER.indexOf(align) + 1) % ALIGN_ORDER.length]!
     return <>
@@ -79,9 +84,9 @@ function ObjectActions({ view, patch, replaceImage, editText, extra = {} }: { vi
       <QuickBarButton label="加粗" icon={<Bold size={14} />} pressed={view.style.bold} onClick={() => patch({ style: { bold: !view.style.bold } })} />
       <QuickBarButton label="斜体" icon={<Italic size={14} />} pressed={view.style.italic} onClick={() => patch({ style: { italic: !view.style.italic } })} />
       <QuickBarButton label="下划线" icon={<Underline size={14} />} pressed={view.style.underline} onClick={() => patch({ style: { underline: !view.style.underline } })} />
-      <QuickBarButton label="减小字号" icon={<AArrowDown size={15} />} disabled={view.style.fontSize <= FONT_SIZE_MIN} onClick={() => patch({ style: { fontSize: stepFontSize(view.style.fontSize, -1) } })} />
-      <QuickBarLabel>{Math.round(view.style.fontSize)}</QuickBarLabel>
-      <QuickBarButton label="增大字号" icon={<AArrowUp size={15} />} disabled={view.style.fontSize >= FONT_SIZE_MAX} onClick={() => patch({ style: { fontSize: stepFontSize(view.style.fontSize, 1) } })} />
+      <QuickBarButton label="减小字号" icon={<AArrowDown size={15} />} disabled={sizes.length > 0 && sizes.every(size => size <= FONT_SIZE_MIN)} onClick={() => patch({ fontSizeStep: -1 })} />
+      <QuickBarLabel>{sizes.length > 1 ? '混合' : Math.round(sizes[0] ?? view.style.fontSize)}</QuickBarLabel>
+      <QuickBarButton label="增大字号" icon={<AArrowUp size={15} />} disabled={sizes.length > 0 && sizes.every(size => size >= FONT_SIZE_MAX)} onClick={() => patch({ fontSizeStep: 1 })} />
       <QuickBarColorButton label="文字颜色" icon={<Baseline size={14} />} value={view.style.color} onPick={color => { if (color) patch({ style: { color } }) }} />
       <QuickBarColorButton label="高亮" icon={<Highlighter size={14} />} variant="highlight" value={view.style.highlightColor} onPick={highlightColor => patch({ style: { highlightColor } })} />
       <QuickBarButton label={`${ALIGN_LABEL[align]}（点按切换为${ALIGN_LABEL[next]}）`} icon={ALIGN_ICON[align]} onClick={() => patch({ style: { align: next } })} />
@@ -111,7 +116,7 @@ function ObjectActions({ view, patch, replaceImage, editText, extra = {} }: { vi
     <QuickBarButton label="静音" icon={<VolumeX size={14} />} pressed={view.muted} onClick={() => patch({ muted: !view.muted })} />
   </>
   if (view.type === 'shape') return <>
-    {!isStrokeOnlyShapeType(view.shapeType) && <QuickBarColorButton label="填充颜色" icon={<PaintBucket size={14} />} value={view.style.fillColor} onPick={fillColor => { if (fillColor) patch({ style: { fillColor } }) }} />}
+    {!isStrokeOnlyShapeType(view.shapeType) && <QuickBarColorButton label="填充颜色" icon={<PaintBucket size={14} />} value={view.style.fillColor} onPick={fillColor => { if (fillColor) patch({ solidFillColor: fillColor }) }} />}
     <QuickBarColorButton label={isStrokeOnlyShapeType(view.shapeType) ? '线条颜色' : '边框颜色'} icon={<Square size={14} />} value={view.style.borderColor} onPick={borderColor => { if (borderColor) patch({ style: { borderColor } }) }} />
   </>
   return null
@@ -120,20 +125,33 @@ function ObjectActions({ view, patch, replaceImage, editText, extra = {} }: { vi
 const MULTI_ALIGN = [['left', '左对齐'], ['center', '水平居中'], ['right', '右对齐'], ['top', '顶对齐'], ['middle', '垂直居中'], ['bottom', '底对齐']] as const
 const sortedIds = (ids: readonly string[]) => JSON.stringify([...ids].sort())
 
-export function NativeSelectionContext({ documentId, revision, surfaceId, locationId: legacyLocationId, itemIds, stateId, sceneItemIds = [], enabled, bounds, textEditing = false, ownsDocumentSelection = true }: {
+export function NativeSelectionContext({ documentId, revision, surfaceId, locationId: legacyLocationId, itemIds, stateId, sceneItemIds = [], enabled, bounds, textEditing = false, ownsDocumentSelection = true, authorSpot }: {
   documentId?: string | null; revision: number; surfaceId?: string | null; locationId?: string | null; itemIds: readonly string[]; stateId?: string | null; sceneItemIds?: readonly string[]; enabled: boolean
   bounds?(itemId: string): Box | null
+  authorSpot?: ComponentAuthorSpot
   /** The text editing toolbar owns the selection while its text is edited. */
   textEditing?: boolean
   /** Whether this control reports the document's current selection; Flow's text selection reports its own. */
   ownsDocumentSelection?: boolean
 }) {
   const locationId = surfaceId ?? legacyLocationId
+  const pageText = useRuntimeLightEditView(itemIds.length === 1 ? itemIds[0]! : '')
+  const selectedAuthor = itemIds.length === 1 && authorSpot?.instanceId === itemIds[0] ? authorSpot : undefined
+  const authorIdentity = JSON.stringify(selectedAuthor)
   const chrome = useCourseEditorChrome()
   const marker = useRef<HTMLSpanElement>(null)
   const [root, setRoot] = useState<HTMLElement | null>(null)
   const actions = useCourseEditorActions()
   const context = usePropertiesContext({ onReplaceImage: () => actions?.replaceImage() })
+  const project = useEditorStore(state => state.courseView.project)
+  const globalCount = project ? itemIds.filter(id => {
+    let owner = owningContainer(project, id)
+    while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
+    return owner?.kind === 'global'
+  }).length : 0
+  const globalNotice = globalCount ? globalCount === itemIds.length
+    ? '全局元素，修改会影响所有场景'
+    : `含全局元素（${globalCount} 项），修改全局元素会影响所有场景` : null
   useSyncExternalStore(workbenchSelection.subscribe, workbenchSelection.readVersion)
   const pinned = usePinnedSelection(documentId)
   const gesture = usePointerGesture(root)
@@ -160,7 +178,12 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
     root.addEventListener(OBJECT_CONTEXT_MENU_EVENT, request)
     return () => root.removeEventListener(OBJECT_CONTEXT_MENU_EVENT, request)
   }, [root, contextMenu.open])
-  useEffect(() => { setNotice(''); setCropping(null) }, [documentId, locationId, ids, stateId])
+  useLayoutEffect(() => {
+    // Menu commands belong to the selection that opened them. A keyboard
+    // selection change or tab/state switch ends that menu before it can run.
+    contextMenu.close()
+    setNotice(''); setCropping(null)
+  }, [documentId, locationId, ids, stateId, enabled, contextMenu.close])
   useEffect(() => {
     if (!documentId || !ownsDocumentSelection || !enabled) return
     return workbenchSelection.registerSelectionClearer(documentId, targets => { const owner = useEditorStore.getState(); const removed = targets?.flatMap(target => target.kind === 'course-instance' ? [target.instanceId] : target.kind === 'course-object' ? [target.itemId] : []) ?? []; owner.selectNodes(targets ? owner.courseView.selectedInstanceIds.filter(id => !removed.includes(id)) : []) })
@@ -169,9 +192,9 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
     if (!documentId || !ownsDocumentSelection) return
     let active = true
     void workbenchSelection.observe(documentId, revision, snapshot => enabled && locationId && itemIds.length
-      ? captureCourseInstanceSelection(snapshot, locationId, itemIds, undefined, stateId) : null, () => active)
+      ? selectedAuthor ? captureCourseAuthorField(snapshot, locationId, selectedAuthor, stateId) : captureCourseInstanceSelection(snapshot, locationId, itemIds, undefined, stateId) : null, () => active)
     return () => { active = false }
-  }, [documentId, revision, locationId, ids, stateId, enabled, ownsDocumentSelection])
+  }, [documentId, revision, locationId, ids, stateId, enabled, ownsDocumentSelection, authorIdentity])
   useLayoutEffect(() => {
     if (!root) return
     const selectedPinned = pinned?.targets.flatMap(t => t.kind === 'course-instance' && t.surfaceId === locationId && (t.stateId ?? null) === (stateId ?? null) ? [t.instanceId] : []) ?? []
@@ -193,11 +216,11 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
       const nextAnchor = unionBoxes(itemIds.flatMap(id => { const box = locate(id); return box ? [rotatedBoundingBox(box)] : [] }))
       setAnchor(previous => JSON.stringify(previous) === JSON.stringify(nextAnchor) ? previous : nextAnchor)
     }
-    paint(); window.addEventListener('resize', paint); window.addEventListener('scroll', paint, true)
+    paint(); window.addEventListener('resize', paint); window.addEventListener('scroll', paint, true); root.addEventListener('playback-view-change', paint)
     const observer = new MutationObserver(paint); observer.observe(root, { childList: true, subtree: true })
     const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(paint)
     resized?.observe(root)
-    return () => { observer.disconnect(); resized?.disconnect(); window.removeEventListener('resize', paint); window.removeEventListener('scroll', paint, true) }
+    return () => { observer.disconnect(); resized?.disconnect(); window.removeEventListener('resize', paint); window.removeEventListener('scroll', paint, true); root.removeEventListener('playback-view-change', paint) }
   }, [root, pinned, locationId, stateId, sceneIds, ids, bounds])
   const selection = enabled && itemIds.length && matchesObjectProperties(context, itemIds) ? context : null
   const overlay = enabled && matchesFlowOverlay(context, itemIds) ? context : null
@@ -228,11 +251,15 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
   const captureSelected = async () => {
     if (!documentId || !locationId) throw new Error('文档尚未就绪，请重新选择。')
     const selectedIds = [...itemIds]
-    return captureCourseInstanceSelection(await workbenchSelection.prepare(documentId), locationId, selectedIds, undefined, stateId)
+    const snapshot = await workbenchSelection.prepare(documentId)
+    return selectedAuthor ? captureCourseAuthorField(snapshot, locationId, selectedAuthor, stateId)
+      : captureCourseInstanceSelection(snapshot, locationId, selectedIds, undefined, stateId)
   }
   // One object has its own AI card (M15); several objects still go to the assistant as one request.
-  const ai = single && documentId && locationId && itemIds.length === 1
-    ? <ElementAiButton documentId={documentId} target={{ kind: 'course-instance', surfaceId: locationId, instanceId: itemIds[0]!, stateId: stateId ?? null }} label={elementLabel(single.view)} capture={captureSelected} />
+  let authorTarget: ReturnType<typeof courseAuthorFieldTarget> | undefined
+  try { if (selectedAuthor && locationId) authorTarget = courseAuthorFieldTarget(locationId, selectedAuthor, stateId) } catch { /* Report the unavailable local address without widening to the object. */ }
+  const ai = selectedAuthor && !authorTarget ? <QuickBarButton label="此处没有可编辑的精确作者地址" text="AI" disabled onClick={() => {}} /> : single && documentId && locationId && itemIds.length === 1
+    ? <ElementAiButton documentId={documentId} target={authorTarget ?? { kind: 'course-instance', surfaceId: locationId, instanceId: itemIds[0]!, stateId: stateId ?? null }} label={selectedAuthor ? selectedAuthor.kind === 'text' ? '所选内部文字' : '所选内部图片' : elementLabel(single.view)} capture={captureSelected} />
     : <QuickBarAiButton targetLabel={itemIds.length > 1 ? `所选 ${itemIds.length} 个对象` : '所选对象'}
       onSubmit={async instruction => { await workbenchSelection.request(await captureSelected(), instruction) }} />
   let content: ReactNode = null
@@ -257,7 +284,7 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
       return slideLight!.runObject(lightTarget, command)
     }
     const lightMenu = slideLightMenuItems(lightCommands, runLight)
-    const objectState: SingleObjectState = { locked: node.locked, visible: node.visible, disabledReason: single.disabledReason,
+    const objectState: SingleObjectState = { locked: node.locked, ownLocked: node.ownLocked, visible: node.visible, disabledReason: single.disabledReason,
       setLocked: (locked: boolean) => patch({ locked }), setVisible: (visible: boolean) => patch({ visible }),
       // The main action matches the quick bar's button for the type: 编辑文字 for text, 编辑公式 for formulas, 替换图片 and
       // 裁剪 for images, 替换视频 for videos.
@@ -266,7 +293,7 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
       editFormula: node.type === 'formula' && single.editText ? () => { if (!root || !requestObjectEdit(root, node.id)) report('公式编辑器现在打不开，请双击公式再试。') } : undefined,
       replaceImage: node.type === 'image' ? single.replaceImage : undefined,
       crop: node.type === 'image' && bounds && slidePage
-        ? { run: () => setCropping(node.id), disabledReason: node.rotation ? '旋转的图片请先把旋转归零再裁剪' : null } : undefined,
+        ? { run: () => setCropping(node.id), disabledReason: Math.abs(((node.rotation % 360) + 540) % 360 - 180) > 0.000001 ? '旋转的图片请先把旋转归零再裁剪' : null } : undefined,
       fit: node.type === 'image' ? { value: node.fit, set: fit => patch({ fit }) } : undefined,
       replaceVideo: node.type === 'video' && slidePage && actions?.replaceVideo ? () => actions.replaceVideo?.() : undefined,
     }
@@ -279,14 +306,14 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
         disabledReason: single.disabledReason ?? (node.locked ? '对象已锁定，请先解锁' : null) },
       node.visible ? { id: 'object.hide', label: '隐藏', group: 'state', run: () => patch({ visible: false }), disabledReason: single.disabledReason }
         : { id: 'object.show', label: '显示', group: 'state', run: () => patch({ visible: true }), disabledReason: single.disabledReason },
-      node.locked ? { id: 'object.unlock', label: '解锁', group: 'state', run: () => patch({ locked: false }), disabledReason: single.disabledReason }
+      (node.ownLocked ?? node.locked) ? { id: 'object.unlock', label: '解锁', group: 'state', run: () => patch({ locked: false }), disabledReason: single.disabledReason }
         : { id: 'object.lock', label: '锁定', group: 'state', run: () => patch({ locked: true }), disabledReason: single.disabledReason },
     ] : singleObjectCommands(objectState, ports, { primary: true }))
     if (lightMenu.length) contextItems = [...contextItems, ...guarded(lightMenu)]
     if (single.disabledReason) content = <><span title={single.disabledReason}><QuickBarLabel>此处不可编辑</QuickBarLabel></span><QuickBarSeparator />{ai}</>
     // A hidden object stays selected until the selection moves on, so it can be shown again in place.
     else if (!node.visible) content = <><QuickBarLabel>已隐藏</QuickBarLabel><QuickBarButton label="显示" text="显示" icon={<Eye size={14} />} onClick={() => patch({ visible: true })} /><QuickBarSeparator />{ai}</>
-    else if (node.locked) content = <><QuickBarLabel>已锁定</QuickBarLabel><QuickBarButton label="解锁" text="解锁" icon={<Unlock size={14} />} onClick={() => patch({ locked: false })} /><QuickBarSeparator />{ai}</>
+    else if (node.locked) content = <><QuickBarLabel>{node.ownLocked ? '已锁定' : '父组已锁定'}</QuickBarLabel>{node.ownLocked && <QuickBarButton label="解锁" text="解锁" icon={<Unlock size={14} />} onClick={() => patch({ locked: false })} />}<QuickBarSeparator />{ai}</>
     else if (single.controller && node.type === 'external-component') {
       content = <>
         <QuickBarLabel>教师控制台</QuickBarLabel>
@@ -304,7 +331,7 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
         {lightView && <SlideLightActions commands={lightCommands} fontFamily={lightView.fontFamily}
           lineSpacing={lightView.lineSpacing} backgroundColor={pageView?.backgroundColor ?? null}
           onRun={runLight} onError={report} />}
-        {node.type === 'runtime' && <QuickBarPopoverButton label="页面文字" text="页面文字" icon={<Type size={14} />} popoverLabel="页面文字">
+        {pageText && (pageText.entries.length > 0 || pageText.pageCopy.length > 0) && <QuickBarPopoverButton label="页面文字" text="页面文字" icon={<Type size={14} />} popoverLabel="页面文字">
           {() => <RuntimePageTextList itemId={node.id} onError={report} />}
         </QuickBarPopoverButton>}
         {node.type !== 'table' && node.type !== 'chart' && node.type !== 'input' && node.type !== 'external-component' && <QuickBarSeparator />}
@@ -344,19 +371,29 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
   const cropScreen = cropView ? bounds?.(cropView.id) ?? null : null
   const cropSource = cropView ? selectionObjectCommands.imageSource(cropView.assetId) : null
   const cropPatch = single?.patch
+  const cropProject = useEditorStore.getState().courseView.editingProject, cropFrame = cropView && cropProject?.instances[cropView.id]?.frame
+  let cropMatrix: AffineMatrix | undefined
+  if (cropView && cropScreen && cropProject && cropFrame) {
+    const parent = componentParentMatrix(cropProject, cropView.id), corners = frameCorners(cropFrame, parent)
+    const left = Math.min(...corners.map(point => point.x)), top = Math.min(...corners.map(point => point.y))
+    const scaleX = cropScreen.width / (Math.max(...corners.map(point => point.x)) - left), scaleY = cropScreen.height / (Math.max(...corners.map(point => point.y)) - top)
+    cropMatrix = multiplyMatrices([scaleX, 0, 0, scaleY, cropScreen.left - left * scaleX, cropScreen.top - top * scaleY], multiplyMatrices(parent, cropFrame.transform))
+  }
   const cropElement = cropView && cropScreen && cropSource && cropPatch ? <ImageCropOverlay screen={cropScreen}
-    image={{ frame: { x: cropView.x, y: cropView.y, width: cropView.width, height: cropView.height }, crop: cropView.crop, fit: cropView.fit,
+    sourceToClient={cropMatrix}
+    image={{ frame: { x: cropView.x, y: cropView.y, width: cropView.width, height: cropView.height,
+      transform: cropFrame?.transform }, crop: cropView.crop, fit: cropView.fit,
       cropX: cropView.cropX, cropY: cropView.cropY, flipX: cropView.flipX, flipY: cropView.flipY, source: { width: cropSource.width, height: cropSource.height } }}
     source={{ bytes: cropSource.bytes, mimeType: cropSource.mimeType }}
-    onCommit={result => { setCropping(null); cropPatch({ x: result.frame.x, y: result.frame.y, width: result.frame.width, height: result.frame.height, crop: result.crop }) }}
+    onCommit={result => { setCropping(null); cropPatch({ x: result.frame.x, y: result.frame.y, width: result.frame.width, height: result.frame.height, crop: result.crop, fit: 'stretch', cropX: .5, cropY: .5 }) }}
     onCancel={() => setCropping(null)} /> : null
   return <span ref={marker} className="native-selection-context" aria-hidden="true">
     {pinnedBoxes.map((box, index) => <span key={index} aria-hidden="true" data-pinned-object="true" className="native-selection-context__pinned"
       style={{ left: box.left, top: box.top, width: box.width, height: box.height, transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined }} />)}
     {content && <SelectionQuickBar label="选中对象快捷工具" anchor={anchor} bounds={view} suspended={gesture || textEditing || cropping !== null} selectionKey={`${documentId}:${locationId}:${stateId}:${ids}`} aboveOffset={ROTATION_HANDLE_CLEARANCE}>
+      {globalNotice && <><QuickBarLabel>{globalNotice}</QuickBarLabel><QuickBarSeparator /></>}
       {content}
       <QuickBarButton label="属性" icon={<SlidersHorizontal size={14} />} onClick={() => {
-        chrome.setMode('deep')
         useEditorStore.getState().setActiveTab('properties')
         proEditorRailController.open('properties')
       }} />

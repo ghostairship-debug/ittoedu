@@ -9,7 +9,7 @@ import { BufferedInput, PropertyDraftBoundary } from './PropertyControls'
 import { RuntimePropertiesPanel, type RuntimePropertiesContext } from './RuntimePropertiesPanel'
 import {
   SharedBackgroundProperties,
-  type SharedBackgroundImportFile,
+  type SharedBackgroundImportHandler,
 } from './SharedBackgroundProperties'
 
 export type EmptySceneBackgroundOwnerTab = 'slide-surface' | 'scene' | 'state'
@@ -67,10 +67,10 @@ export interface EmptyScenePropertiesContext {
     readonly resizeCanvas?: (canvas: SlideCanvasSize | null, options?: SlideCanvasResizeOptions) => void
     readonly updateSlideSurfaceBackground: (patch: EmptySceneBackgroundPatch) => void
     readonly previewSlideSurfaceBackground?: (patch: EmptySceneBackgroundPreviewPatch) => void
-    readonly importSlideSurfaceBackgroundAsset: (file: SharedBackgroundImportFile) => void
+    readonly importSlideSurfaceBackgroundAsset: SharedBackgroundImportHandler
     readonly updateSceneBackground: (patch: EmptySceneBackgroundPatch) => void
     readonly previewSceneBackground?: (patch: EmptySceneBackgroundPreviewPatch) => void
-    readonly importSceneBackgroundAsset: (file: SharedBackgroundImportFile) => void
+    readonly importSceneBackgroundAsset: SharedBackgroundImportHandler
     readonly updateStateBackground: (patch: { backgroundColor?: string; backgroundAssetId?: string | null }) => void
     readonly previewStateBackground?: (patch: EmptySceneBackgroundPreviewPatch) => void
     readonly inheritStateColor: () => void

@@ -14,7 +14,7 @@ const instance: ComponentInstance = {
 }
 
 it('keeps a rebound builtin Web fragment under one frame and one CSS paint owner', () => {
-  expect(componentLayoutInput(instance, { kind: 'flow', inlineSize: 640, definition }))
+  expect(componentLayoutInput(instance, { project: { instances: { [instance.id]: instance }, definitions: { [definition.id]: definition } }, kind: 'flow', inlineSize: 640, definition }))
     .toEqual({ mode: 'flow-content', inlineSize: 640 })
   expect(isMeasuredWebFragmentBox(instance, 'fragment', undefined, definition)).toBe(true)
   expect(componentPaintStyle(instance, definition)).toEqual({})
@@ -34,4 +34,20 @@ it('keeps explicit documents and customized source outside builtin fragment norm
   expect(componentPaintStyle(custom, definition)).toMatchObject({ padding: '12px', backgroundColor: 'blue' })
   const changedDefinition: ComponentDefinition = { ...definition, implementation: { kind: 'builtin', key: 'guoling.shape' } }
   expect(isMeasuredWebFragmentBox({ ...instance, definitionId: 'guoling.web' }, 'fragment', undefined, changedDefinition)).toBe(false)
+})
+
+
+it('keeps inline and behavior children in natural Flow while preserving real free child geometry', () => {
+  const text: ComponentDefinition = { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } }
+  const input: ComponentDefinition = { id: 'input', role: 'content', implementation: { kind: 'builtin', key: 'guoling.input' } }
+  const behavior: ComponentDefinition = { id: 'annotation', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.popover' } }
+  const answer: ComponentInstance = { id: 'answer', definitionId: 'input', data: {}, frame: { width: 120, height: 40, transform: [1, 0, 0, 1, 10, 10] } }
+  const annotation: ComponentInstance = { id: 'annotation', definitionId: 'annotation', data: {} }
+  const body: ComponentInstance = { id: 'body', definitionId: 'text', childIds: ['answer', 'annotation'], data: { content: { inlines: [{ type: 'component', instanceId: 'answer', accessibleText: 'Answer' }] } } }
+  const project = { definitions: { text, input, annotation: behavior }, instances: { body, answer, annotation } }
+  expect(componentLayoutInput(body, { project, kind: 'flow', inlineSize: 788, definition: text })).toEqual({ mode: 'flow-content', inlineSize: 788 })
+  const ordinary = { ...body, data: { content: { inlines: [{ type: 'text', text: 'Ordinary child placement' }] } } }
+  expect(componentLayoutInput(ordinary, { project, kind: 'flow', inlineSize: 788, viewport: { width: 140, height: 60 }, definition: text })).toEqual({ mode: 'flow-viewport', inlineSize: 140, blockSize: 60 })
+  const webOwner = { ...ordinary, definitionId: definition.id, data: { html: '<p>Natural Web source with a free child</p>' } }
+  expect(componentLayoutInput(webOwner, { project: { ...project, definitions: { ...project.definitions, [definition.id]: definition } }, kind: 'flow', inlineSize: 788, viewport: { width: 140, height: 60 }, definition }, false)).toEqual({ mode: 'flow-viewport', inlineSize: 140, blockSize: 60 })
 })

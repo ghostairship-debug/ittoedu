@@ -140,7 +140,7 @@ export class FlowRuntimeTocChrome {
     const dom = root.ownerDocument
 
     this.#drawer = dom.createElement('nav')
-    this.#drawer.id = 'flow-runtime-toc-drawer'
+    this.#drawer.id = `flow-runtime-toc-${crypto.randomUUID()}`
     this.#drawer.className = 'flow-runtime-toc-drawer'
     this.#drawer.dataset.testid = 'flow-runtime-toc-drawer'
     this.#drawer.setAttribute('aria-label', '目录')
@@ -149,6 +149,7 @@ export class FlowRuntimeTocChrome {
     this.#drawer.style.left = '0'
     this.#drawer.style.bottom = '0'
     this.#drawer.style.width = `${FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX}px`
+    this.#drawer.style.maxWidth = 'calc(100% - 16px)'
     this.#drawer.style.zIndex = '29'
     this.#drawer.style.boxSizing = 'border-box'
     this.#drawer.style.padding = '16px 12px'
@@ -202,6 +203,16 @@ export class FlowRuntimeTocChrome {
 
   get open(): boolean {
     return this.#open
+  }
+
+  setVisible(visible: boolean): void { this.#drawer.hidden = !visible; this.#toggle.hidden = !visible; this.#toggle.style.display = visible ? 'grid' : 'none' }
+
+  setActive(anchorId?: string): void {
+    for (const button of this.#list.querySelectorAll<HTMLElement>('[data-flow-toc-anchor]')) {
+      const active = button.dataset.flowTocAnchor === anchorId
+      if (active) button.setAttribute('aria-current', 'location'); else button.removeAttribute('aria-current')
+      button.style.background = active ? '#334155' : 'transparent'
+    }
   }
 
   setOpen(open: boolean): void {
@@ -262,7 +273,8 @@ export class FlowRuntimeTocChrome {
     this.#toggle.setAttribute('aria-controls', this.#drawer.id)
     this.#drawer.style.transform = this.#open ? 'translateX(0)' : 'translateX(-100%)'
     this.#drawer.style.pointerEvents = this.#open ? 'auto' : 'none'
-    this.#toggle.style.left = this.#open ? `${FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX}px` : '0'
+    this.#drawer.inert = !this.#open
+    this.#toggle.style.left = this.#open ? `min(${FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX}px, calc(100% - 16px))` : '0'
     this.#root.style.setProperty(
       '--flow-toc-inset',
       this.#open ? `${FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX}px` : '0px',
