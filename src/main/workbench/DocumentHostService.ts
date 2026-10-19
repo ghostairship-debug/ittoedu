@@ -14,8 +14,9 @@ import { createCourseV10Driver } from '../../core/drivers/CourseV10Driver'
 import { checkComponentExpectations, ComponentOperationConflict } from '../../core/drivers/courseV10Operations'
 import { isSourceDocumentModel, type DocumentDriver, type DocumentEvent, type DocumentKind, type DocumentModel, type DocumentSnapshot, type DocumentOperation, type DocumentOperationResult } from '../../shared/workbench/document'
 import { DesktopOperationError } from '../errors'
-import { authoringDraftRecoverySchema, documentHostRequestSchema, type AuthoringDraftRecovery, type DocumentHostRequest, type DocumentHostAPI, type DocumentFileObservation, type ReconcileDocumentFile } from '../../shared/workbench/desktop'
-import { captureDocumentSaveModel, createDocumentJournal, readDocumentFileVersion, readDocumentMarkdownResources } from './documentJournal'
+import { authoringDraftRecoverySchema, documentHostRequestSchema, type AuthoringDraftRecovery, type AuthoringDraftWrite, type AuthoringRecoveryClaim, type DocumentHostRequest, type DocumentHostAPI, type DocumentFileObservation, type ReconcileDocumentFile } from '../../shared/workbench/desktop'
+import { createDocumentJournal, readDocumentFileVersion } from './documentJournal'
+import { captureDocumentSaveModel } from './documentSourceResources'
 import { DocumentToolGateway } from '../../core/tools/DocumentToolGateway'
 import { WorkspaceFiles, type WorkspaceFilesDependencies } from './WorkspaceFiles'
 import { DocumentFileCoordinator } from './DocumentFileCoordinator'
@@ -30,7 +31,8 @@ import { readComponentProjectFileInput, prepareComponentProjectFileSource } from
 import { AgentFileService } from './execution/AgentFileService'
 import { HostArtifactDeliveryService } from './execution/HostArtifactDeliveryService'
 import { verifyContentResourceDiagnostic } from './contentApply/resources/verifyContentResourceDiagnostic'
-import { discardFlowDocumentRecovery, type FlowRecoveryDocumentIdentity } from '../flowDocumentRecovery'
+import { app } from 'electron'
+import { DocumentInputRecovery } from './DocumentInputRecovery'
 import type { MediaFileDraftInput } from '../../shared/workbench/mediaFiles'
 import { matchesSavedDocument } from './execution/savedDocumentBinding'
 import { spatialViewportCaptureSchema, type SpatialViewportCapture, type SpatialViewportRequest } from '../../shared/workbench/spatialViewport'
@@ -72,18 +74,16 @@ export class DocumentHostService {
   private spatialViewportPreparer?: (input: SpatialViewportRequest) => Promise<SpatialViewportCapture>
   private mediaCopyPreparer?: (source: string, kind: 'file' | 'directory') => Promise<readonly MediaFileDraftInput[]>
   private bootstrapping?: Promise<DocumentSnapshot>
-  private readonly authoringDraftDirectory: string
-  private authoringDraftTail: Promise<unknown> = Promise.resolve()
-  private readonly authoringDraftClaims = new Map<string, { epoch: string; records: Set<string> }>()
-  private readonly discardFlowDrafts: (target: FlowRecoveryDocumentIdentity) => Promise<void>
+  private readonly inputs: DocumentInputRecovery
 
   constructor(directory: string, fileDependencies: Pick<WorkspaceFilesDependencies, 'trashItem' | 'showItemInFolder' | 'fileOperations'> = {},
-    options: { artifactDeliveryDirectory?: string; discardFlowRecovery?: (target: FlowRecoveryDocumentIdentity) => Promise<void> } = {}) {
-    this.authoringDraftDirectory = path.join(directory, 'authoring-drafts')
-    this.discardFlowDrafts = options.discardFlowRecovery ?? discardFlowDocumentRecovery
+    options: { artifactDeliveryDirectory?: string; legacyFlowRecoveryDirectory?: string } = {}) {
+    this.inputs = new DocumentInputRecovery(path.join(directory, 'authoring-drafts'), options.legacyFlowRecoveryDirectory
+      ?? (typeof app?.getPath === 'function' ? path.join(app.getPath('userData'), 'flow-document-recovery', 'v1') : undefined))
     this.drivers = [createMarkdownDriver(), createTextDriver(), createCourseV10Driver()]
     this.journal = createDocumentJournal({ directory, isLive: documentId => this.registry?.has(documentId) ?? false,
-      onBindingRecovered: (state, before) => this.moveAuthoringDrafts({ ...state, binding: before }, state) })
+      currentSource: filename => this.currentSource(filename),
+      onBindingRecovered: state => this.inputs.refresh(state) })
     this.registry = new DocumentRegistry({ persistence: this.journal, drivers: this.drivers, createId: randomUUID, bindingKey: binding => canonicalKey(binding.path),
       onClosed: () => { if (this.registry.size === 0) this.compilation.clear() } })
     this.compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
@@ -100,6 +100,12 @@ export class DocumentHostService {
           },
         }),
         prepareSource: prepareComponentProjectFileSource,
+        plan: input => new ContentApplyService({
+          session: { project: () => input.baseline.model.project, resources: () => input.baseline.model.resources,
+            async dispatch() { throw new Error('工程内容规划不能提交正式状态') } },
+          measure: async request => (await import('./contentApply/measurement/ElectronHtmlDesignMeasurement.js')).measureHtmlAtDesignViewport(request),
+          compilation: this.compilation,
+        }).plan(input.request),
         apply: input => new ContentApplyService({
           session: { project: () => input.baseline.model.project,
             resources: () => input.baseline.model.resources,
@@ -118,17 +124,7 @@ export class DocumentHostService {
       },
     })
     this.fileCoordinator = new DocumentFileCoordinator(this.registry, this.journal, path.join(directory, 'binding-intents'))
-    this.fileCoordinator.subscribeRelocations(async action => {
-      if (!action.target || !action.sources[0]) return
-      const source = action.sources[0].resolvedPath, target = action.target.resolvedPath
-      for (const entry of await this.journal.listBindings()) {
-        if (entry.binding.kind !== 'file') continue
-        const relative = path.relative(target, entry.binding.path)
-        if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue
-        const state = await this.journal.recover(entry.documentId)
-        if (state) await this.moveAuthoringDrafts({ ...state, binding: { ...entry.binding, path: path.join(source, relative) } }, state)
-      }
-    })
+    this.fileCoordinator.subscribeRelocations(action => this.inputs.relocate(action))
     this.files = new WorkspaceFiles({ ...fileDependencies, aroundMutation: this.fileCoordinator.aroundMutation,
       creationReceiptDirectory: path.join(directory, 'creation-receipts'),
       aroundOperation: perform => this.fileCoordinator.withFileOperation(perform),
@@ -144,9 +140,9 @@ export class DocumentHostService {
           if (snapshot.binding.kind !== 'file' || canonicalKey(snapshot.binding.path) !== canonicalKey(observed.binding.path)) throw new Error('复制期间当前稿文件位置已变化')
           const driver = this.drivers.find(driver => driver.kind === snapshot.model.kind)
           if (!driver) throw new Error('当前稿格式没有可用的保存编码器')
-          const copyModel = await captureDocumentSaveModel(snapshot.model, snapshot.binding)
+          const copyModel = await captureDocumentSaveModel(snapshot.model, snapshot.binding, { currentSource: filename => this.currentSource(filename) })
           captured.push({ sourcePath: snapshot.binding.path, relativePath: kind === 'file' ? '' : relative,
-            bytes: await driver.serialize(snapshot.model), ...(snapshot.model.kind === 'markdown'
+            bytes: await driver.serialize(copyModel), ...(snapshot.model.kind === 'markdown'
               ? { markdown: { source: snapshot.model.source, resources: copyModel.resources } } : {}) })
         }
         const media = await this.mediaCopyPreparer?.(source, kind) ?? []
@@ -203,113 +199,39 @@ export class DocumentHostService {
     return this.bootstrapping
   }
 
-  private authoringDraftPath(snapshot: Pick<DocumentSnapshot, 'documentId' | 'model' | 'binding'>): string {
-    if (snapshot.model.kind !== 'course-v10') return path.join(this.authoringDraftDirectory, documentDigest({ documentId: snapshot.documentId }) + '.json')
-    // The filename is an auxiliary storage key, never a target supplied by an author or model.
-    return path.join(this.authoringDraftDirectory, documentDigest({ projectId: snapshot.model.project.id,
-      file: snapshot.binding.kind === 'file' ? canonicalKey(snapshot.binding.path) : null }) + '.json')
-  }
-  private async readDraftFile(snapshot: Pick<DocumentSnapshot, 'documentId' | 'model' | 'binding'>): Promise<AuthoringDraftRecovery | null> {
-    try {
-      const value = JSON.parse(await fs.readFile(this.authoringDraftPath(snapshot), 'utf8'))
-      return authoringDraftRecoverySchema.parse(value)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-      throw error
-    }
-  }
   async readAuthoringDrafts(documentId: string): Promise<AuthoringDraftRecovery | null> {
-    await this.authoringDraftTail
-    const snapshot = await this.registry.get(documentId).drain(), drafts = await this.readDraftFile(snapshot)
-    if (drafts) this.authoringDraftClaims.set(documentId, { epoch: snapshot.epoch,
-      records: new Set([...drafts.advanced.filter(record => snapshot.model.kind === 'course-v10' && record.projectId === snapshot.model.project.id),
-        ...drafts.properties.filter(record => { try { return Array.isArray(JSON.parse(record.bindingKey)) } catch { return false } })]
-        .map(record => this.authoringRecordKey(record)).concat(drafts.sourceConflict ? [JSON.stringify(['source-conflict', drafts.sourceConflict.documentId, drafts.sourceConflict.epoch])] : [])) })
-    return drafts
+    return this.inputs.read(await this.registry.get(documentId).drain())
   }
-  private authoringRecordKey(record: AuthoringDraftRecovery['advanced'][number] | AuthoringDraftRecovery['properties'][number]): string {
-    return 'bindingKey' in record ? JSON.stringify([record.bindingKey, record.kind, record.label])
-      : JSON.stringify([record.documentId, record.epoch, record.kind, record.key])
-  }
-  private unclaimedAuthoringDrafts(snapshot: DocumentSnapshot, drafts: AuthoringDraftRecovery): AuthoringDraftRecovery {
-    const claim = this.authoringDraftClaims.get(snapshot.documentId)
-    const claimed = (record: AuthoringDraftRecovery['advanced'][number] | AuthoringDraftRecovery['properties'][number]) =>
-      claim?.epoch === snapshot.epoch && claim.records.has(this.authoringRecordKey(record))
-    return {
-      ...(drafts.sourceConflict && !(claim?.epoch === snapshot.epoch && claim.records.has(JSON.stringify(['source-conflict', drafts.sourceConflict.documentId, drafts.sourceConflict.epoch])))
-        && !(drafts.sourceConflict.documentId === snapshot.documentId && drafts.sourceConflict.epoch === snapshot.epoch) ? { sourceConflict: drafts.sourceConflict } : {}),
-      advanced: drafts.advanced.filter(record => !claimed(record) && !(record.documentId === snapshot.documentId && record.epoch === snapshot.epoch)),
-      properties: drafts.properties.filter(record => {
-        if (claimed(record)) return false
-        try { const binding: unknown = JSON.parse(record.bindingKey)
-          return !(Array.isArray(binding) && binding[0] === snapshot.documentId && binding[1] === snapshot.epoch)
-        } catch { return true }
-      }),
+  async writeAuthoringDrafts(documentId: string, drafts: AuthoringDraftWrite, expectedEpoch?: string): Promise<void> {
+    const epoch = expectedEpoch ?? this.registry.get(documentId).read().epoch
+    const snapshot = await this.registry.get(documentId).drain()
+    if (snapshot.epoch !== epoch) throw new Error('输入所属文档已关闭或重开，原恢复记录未覆盖')
+    const model = snapshot.model
+    if ((drafts.advanced ?? []).some(record => model.kind !== 'course-v10' || record.projectId !== model.project.id || record.documentId !== documentId || record.epoch !== epoch)
+      || [...(drafts.sourceConflicts ?? []), ...(drafts.sourceConflict ? [drafts.sourceConflict] : [])].some(record => model.kind === 'course-v10' || record.documentId !== documentId || record.epoch !== epoch)
+      || (drafts.flow ?? []).some(record => model.kind !== 'course-v10' || record.projectId !== model.project.id || record.documentId && record.documentId !== documentId || record.documentEpoch !== epoch))
+      throw new Error('原始输入不属于当前文档，原恢复记录未覆盖')
+    for (const record of drafts.properties ?? []) {
+      const binding: unknown = JSON.parse(record.bindingKey)
+      if (!Array.isArray(binding) || binding[0] !== documentId || binding[1] !== epoch) throw new Error('属性草稿不属于当前课件会话，未覆盖恢复记录')
     }
-  }
-  private async writeDraftFile(snapshot: Pick<DocumentSnapshot, 'documentId' | 'epoch' | 'model' | 'binding'>, drafts: AuthoringDraftRecovery, requireLive = true): Promise<void> {
-    const filename = this.authoringDraftPath(snapshot), temporary = `${filename}.${randomUUID()}.tmp`
-    await fs.mkdir(this.authoringDraftDirectory, { recursive: true })
-    try {
-      const handle = await fs.open(temporary, 'wx')
-      try { await handle.writeFile(JSON.stringify(drafts), 'utf8'); await handle.sync() } finally { await handle.close() }
-      if (requireLive && this.registry.get(snapshot.documentId).read().epoch !== snapshot.epoch) throw new Error('草稿所属会话已改变，原恢复记录未覆盖')
-      await fs.rename(temporary, filename)
-    } finally { await fs.rm(temporary, { force: true }).catch(() => {}) }
-  }
-  private moveAuthoringDrafts(before: Pick<DocumentSnapshot, 'documentId' | 'epoch' | 'model' | 'binding'>,
-    after: Pick<DocumentSnapshot, 'documentId' | 'epoch' | 'model' | 'binding'>): Promise<void> {
-    if (this.authoringDraftPath(before) === this.authoringDraftPath(after)) return Promise.resolve()
-    const move = this.authoringDraftTail.then(async () => {
-      const drafts = await this.readDraftFile(before)
-      if (!drafts) return
-      if (!await this.readDraftFile(after)) await this.writeDraftFile(after, drafts, false)
-      await fs.rm(this.authoringDraftPath(before), { force: true })
+    await this.inputs.write(snapshot, drafts, () => {
+      if (this.registry.get(documentId).read().epoch !== epoch) throw new Error('输入所属文档已关闭或重开，原记录已保留')
     })
-    this.authoringDraftTail = move.catch(() => undefined)
-    return move
   }
-  writeAuthoringDrafts(documentId: string, input: AuthoringDraftRecovery): Promise<void> {
-    const drafts = authoringDraftRecoverySchema.parse(input)
-    const epoch = this.registry.get(documentId).read().epoch
-    const write = this.authoringDraftTail.then(async () => {
-      const snapshot = await this.registry.get(documentId).drain()
-      const model = snapshot.model
-      if (snapshot.epoch !== epoch
-        || drafts.advanced.some(record => model.kind !== 'course-v10' || record.projectId !== model.project.id || record.documentId !== documentId || record.epoch !== epoch)
-        || drafts.sourceConflict && (model.kind === 'course-v10' || drafts.sourceConflict.documentId !== documentId || drafts.sourceConflict.epoch !== epoch))
-        throw new Error('原始草稿不属于当前课件，未覆盖恢复记录')
-      for (const record of drafts.properties) {
-        const binding: unknown = JSON.parse(record.bindingKey)
-        if (!Array.isArray(binding) || binding[0] !== documentId || binding[1] !== epoch) throw new Error('属性草稿不属于当前课件会话，未覆盖恢复记录')
-      }
-      const previous = await this.readDraftFile(snapshot)
-      const retained = previous ? this.unclaimedAuthoringDrafts(snapshot, previous) : { advanced: [], properties: [] }
-      await this.writeDraftFile(snapshot, { ...retained, ...drafts, advanced: [...retained.advanced, ...drafts.advanced], properties: [...retained.properties, ...drafts.properties] })
+  async claimAuthoringDrafts(documentId: string, epoch: string, records: AuthoringRecoveryClaim[]): Promise<void> {
+    const snapshot = await this.registry.get(documentId).drain()
+    if (snapshot.epoch !== epoch) throw new Error('输入所属文档已关闭或重开，未认领恢复记录')
+    await this.inputs.claim(snapshot, records, () => {
+      if (this.registry.get(documentId).read().epoch !== epoch) throw new Error('输入所属文档已关闭或重开，原记录已保留')
     })
-    this.authoringDraftTail = write.catch(() => undefined)
-    return write
   }
-  clearAuthoringDrafts(documentId: string): Promise<void> {
-    const epoch = this.registry.get(documentId).read().epoch
-    const clear = this.authoringDraftTail.then(async () => {
-      const snapshot = await this.registry.get(documentId).drain()
-      if (snapshot.epoch !== epoch) throw new Error('草稿所属会话已改变，未清除恢复记录')
-      await this.removeOwnedAuthoringDrafts(snapshot)
-    })
-    this.authoringDraftTail = clear.catch(() => undefined)
-    return clear
-  }
-  private async removeOwnedAuthoringDrafts(snapshot: DocumentSnapshot): Promise<void> {
-    const previous = await this.readDraftFile(snapshot)
-    if (!previous) return
-    const retained = this.unclaimedAuthoringDrafts(snapshot, previous)
-    if (retained.advanced.length || retained.properties.length || retained.sourceConflict) await this.writeDraftFile(snapshot, retained, false)
-    else await fs.rm(this.authoringDraftPath(snapshot), { force: true })
+  async clearAuthoringDrafts(documentId: string): Promise<void> {
+    await this.inputs.clear(await this.registry.get(documentId).drain())
   }
 
   /** Trusted main consumers use the same sessions; UI envelopes remain human-only. */
-  readonly internalAPI: Pick<DocumentHostAPI, 'list' | 'create' | 'recoverable' | 'restore' | 'open' | 'read' | 'dispatch' | 'lookup' | 'save' | 'observeFile' | 'reconcileFile' | 'readAuthoringDrafts' | 'writeAuthoringDrafts' | 'clearAuthoringDrafts'> & { stopRun(documentId: string, runId: string): Promise<unknown> } = {
+  readonly internalAPI: Pick<DocumentHostAPI, 'list' | 'create' | 'recoverable' | 'restore' | 'open' | 'read' | 'dispatch' | 'lookup' | 'save' | 'observeFile' | 'reconcileFile' | 'readAuthoringDrafts' | 'writeAuthoringDrafts' | 'clearAuthoringDrafts' | 'claimAuthoringDrafts'> & { stopRun(documentId: string, runId: string): Promise<unknown> } = {
     list: async () => this.registry.list(),
     create: async (model, suggestedName) => this.attach(await this.registry.create(model, suggestedName)),
     recoverable: () => this.operate({ type: 'recoverable' }) as Promise<DocumentSnapshot[]>,
@@ -322,7 +244,8 @@ export class DocumentHostService {
     observeFile: documentId => this.observeFile(documentId),
     reconcileFile: input => this.reconcileFile(input),
     readAuthoringDrafts: documentId => this.readAuthoringDrafts(documentId),
-    writeAuthoringDrafts: (documentId, drafts) => this.writeAuthoringDrafts(documentId, drafts),
+    writeAuthoringDrafts: (documentId, drafts, epoch) => this.writeAuthoringDrafts(documentId, drafts, epoch),
+    claimAuthoringDrafts: (documentId, epoch, records) => this.claimAuthoringDrafts(documentId, epoch, records),
     clearAuthoringDrafts: documentId => this.clearAuthoringDrafts(documentId),
     stopRun: (documentId, runId) => this.registry.get(documentId).stopRun(runId),
   }
@@ -331,6 +254,7 @@ export class DocumentHostService {
     if (!this.subscribed.has(session.documentId)) {
       this.subscribed.add(session.documentId)
       session.subscribe(event => {
+        if (event.type === 'changed') void this.inputs.refresh(event.snapshot).catch(() => undefined)
         if (event.type === 'closed') {
           this.subscribed.delete(event.documentId)
           for (const listener of this.closeListeners) { try { listener(event.documentId) } catch { /* Closing never waits for its listeners. */ } }
@@ -371,12 +295,25 @@ export class DocumentHostService {
 
   /** The original input owner confirms its draft before Main captures an already-open source. */
   async readOpenedSource(filename: string): Promise<DocumentSnapshot | undefined> {
+    const snapshot = await this.readOpenedTaskInput(filename)
+    return snapshot && isSourceDocumentModel(snapshot.model) ? snapshot : undefined
+  }
+
+  /** Authorization precedes this lookup; the current document remains usable when its disk path is absent. */
+  async readOpenedTaskInput(filename: string): Promise<DocumentSnapshot | undefined> {
     const observed = this.registry.list().find(snapshot => snapshot.binding.kind === 'file'
       && canonicalKey(snapshot.binding.path) === canonicalKey(filename))
-    if (!observed || !isSourceDocumentModel(observed.model)) return undefined
+    if (!observed) return undefined
     await this.prepareDocumentInput(observed.documentId)
     const snapshot = await this.registry.get(observed.documentId).drain()
-    return isSourceDocumentModel(snapshot.model) ? snapshot : undefined
+    if (snapshot.epoch !== observed.epoch || snapshot.binding.kind !== 'file'
+      || canonicalKey(snapshot.binding.path) !== canonicalKey(filename)) throw new Error('读取期间打开源文件的绑定已改变，请重新观察')
+    return snapshot
+  }
+
+  private async currentSource(filename: string): Promise<string | undefined> {
+    const snapshot = await this.readOpenedSource(filename)
+    return snapshot && isSourceDocumentModel(snapshot.model) ? snapshot.model.source : undefined
   }
 
   /** Replan only known local reads; Session still performs the final CAS and durable commit. */
@@ -412,7 +349,7 @@ export class DocumentHostService {
     const session = await this.registry.open({ kind: 'file', path: canonical, version, bindingVersion: 1 }, async () => {
       const driver = this.drivers.find(value => value.kind === kind)!
       const model = await loadDocumentModel(driver, new Uint8Array(await fs.readFile(canonical)))
-      if (model.kind === 'markdown') model.resources = await readDocumentMarkdownResources(canonical)
+      model.resources = (await captureDocumentSaveModel(model, { kind: 'file', path: canonical, version, bindingVersion: 1 })).resources
       if (await readDocumentFileVersion(canonical, kind) !== version) throw new Error('读取期间文档已改变，请重新打开')
       driver.validate(model)
       return model
@@ -425,7 +362,7 @@ export class DocumentHostService {
     if (version === null) return { version, model: null }
     const driver = this.drivers.find(value => value.kind === kind)!
     const model = await loadDocumentModel(driver, new Uint8Array(await fs.readFile(filename)))
-    if (model.kind === 'markdown') model.resources = await readDocumentMarkdownResources(filename)
+    model.resources = (await captureDocumentSaveModel(model, { kind: 'file', path: filename, version, bindingVersion: 1 })).resources
     if (await readDocumentFileVersion(filename, kind) !== version) throw new Error('读取期间文件已改变，请重新比较')
     driver.validate(model)
     return { version, model }
@@ -498,17 +435,18 @@ export class DocumentHostService {
     if (revision === undefined) return null
     return { status: 'saved', documentId, epoch: proof.epoch, path: proof.binding.path,
       savedRevision: proof.savedRevision, currentRevision: revision, fileVersion: proof.binding.version,
-      dirty: revision !== proof.savedRevision, warnings: revision === proof.savedRevision ? [] : ['原操作已保存；之后的修改未由该操作保存'] }
+      dirty: revision !== proof.savedRevision, warnings: [...(proof.warnings ?? []), ...(revision === proof.savedRevision ? [] : ['原操作已保存；之后的修改未由该操作保存'])] }
   }
 
   /** overwriteConfirmed is supplied only after the native dialog, never from renderer arguments. */
-  async saveWithFact(documentId: string, filename?: string, saveIdentity?: DocumentSaveIdentity): Promise<{ snapshot: DocumentSnapshot; savedRevision: number }> {
+  async saveWithFact(documentId: string, filename?: string, saveIdentity?: DocumentSaveIdentity): Promise<{ snapshot: DocumentSnapshot; savedRevision: number; warnings: string[] }> {
     let savedRevision: number | undefined
+    let warnings: string[] = []
     const snapshot = await this.saveToPath(documentId, filename, false, progress => {
-      if (progress.status === 'saved') savedRevision = progress.savedRevision
+      if (progress.status === 'saved') { savedRevision = progress.savedRevision; warnings = progress.warnings }
     }, saveIdentity)
     if (savedRevision === undefined) throw new Error('保存已完成但缺少保存版本回执')
-    return { snapshot, savedRevision }
+    return { snapshot, savedRevision, warnings }
   }
 
   async saveToPath(documentId: string, filename?: string, overwriteConfirmed = false, onProgress?: DocumentSaveObserver, saveIdentity?: DocumentSaveIdentity): Promise<DocumentSnapshot> {
@@ -532,14 +470,14 @@ export class DocumentHostService {
           ? { kind: 'course-v10', path: progress.binding.path, projectId: savingProjectId, epoch: initial.epoch,
             savedRevision: progress.savedRevision, fileVersion: progress.binding.version } : undefined
         this.publishSave({ ...base, documentName, time: Date.now(), status: 'saved', savedRevision: progress.savedRevision,
-          currentRevision: progress.currentRevision, ...(savedBinding ? { savedBinding } : {}) })
+          currentRevision: progress.currentRevision, warnings: progress.warnings, ...(savedBinding ? { savedBinding } : {}) })
       }
       else { terminal = true; this.publishSave({ ...base, documentName, time: Date.now(), status: 'failed', revision: progress.revision, error: progress.error instanceof Error ? progress.error.message : String(progress.error) }) }
     }
     return this.fileCoordinator.withFileAccess(async () => {
       const saved = await this.saveFile(documentId, filename, overwriteConfirmed, observer, saveIdentity)
       if (saved.binding.kind === 'file') await this.files.acknowledgeDocumentSave(saved.binding.path, saved.model.kind, saved.binding.version)
-      await this.moveAuthoringDrafts(initial, saved)
+      await this.inputs.refresh(saved)
       return saved
     }).catch(error => {
       error = error instanceof DocumentSaveFailure ? error : new DocumentSaveFailure(enteredSession ? 'unknown' : 'not-published', error)
@@ -608,7 +546,8 @@ export class DocumentHostService {
       case 'open': return this.open(input.path)
       case 'read': return this.registry.get(input.documentId).drain()
       case 'read-authoring-drafts': return this.readAuthoringDrafts(input.documentId)
-      case 'write-authoring-drafts': return this.writeAuthoringDrafts(input.documentId, input.drafts)
+      case 'write-authoring-drafts': return this.writeAuthoringDrafts(input.documentId, input.drafts, input.epoch)
+      case 'claim-authoring-drafts': return this.claimAuthoringDrafts(input.documentId, input.epoch, input.records)
       case 'clear-authoring-drafts': return this.clearAuthoringDrafts(input.documentId)
       case 'dispatch': return this.dispatch(input.operation)
       case 'lookup': return this.registry.get(input.documentId).lookupOperation(input.operationId)
@@ -620,16 +559,10 @@ export class DocumentHostService {
       case 'close': return this.fileCoordinator.withFileAccess(async () => {
         this.fileCoordinator.assertResolved([], [input.documentId])
         const snapshot = await this.registry.get(input.documentId).drain()
-        await this.registry.close(input.documentId, { discardDirty: input.discardDirty, expected: input.expected })
-        if (input.discardDirty) {
-          const clear = this.authoringDraftTail.then(() => this.removeOwnedAuthoringDrafts(snapshot))
-          this.authoringDraftTail = clear.catch(() => undefined)
-          await clear
-          if (snapshot.model.kind === 'course-v10') await this.discardFlowDrafts({ projectId: snapshot.model.project.id,
-            projectPath: snapshot.binding.kind === 'file' ? snapshot.binding.path : null, epoch: snapshot.epoch })
-        }
+        await this.inputs.refresh(snapshot)
+        await this.registry.close(input.documentId, { discardDirty: input.discardDirty, expected: input.expected ?? { epoch: snapshot.epoch, revision: snapshot.revision } })
+        // Raw inputs survive normal close and formal discard until individually adopted or explicitly resolved.
         await this.journal.discard(input.documentId)
-        this.authoringDraftClaims.delete(input.documentId)
         return
       })
       case 'recoverable': return this.fileCoordinator.withFileAccess(async () => {
@@ -651,8 +584,21 @@ export class DocumentHostService {
           const state = await this.journal.recover(documentId)
           let bindingUnresolved = false
           try { this.fileCoordinator.assertResolved([], [documentId]) } catch { bindingUnresolved = true }
-          const drafts = state && await this.readDraftFile(state)
-          if (state && (state.savedRevision !== state.revision || bindingUnresolved || drafts && (drafts.advanced.length || drafts.properties.length || drafts.sourceConflict))) snapshots.push({ documentId, epoch: state.epoch, revision: state.revision, model: state.model, binding: state.binding, dirty: true, saving: false, recoverable: true, undoDepth: state.past.length, redoDepth: state.future.length })
+          const drafts = state && await this.inputs.read(state)
+          if (state && (state.savedRevision !== state.revision || bindingUnresolved || drafts && (drafts.advanced.length || drafts.properties.length || drafts.sourceConflict || drafts.flow?.length))) snapshots.push({ documentId, epoch: state.epoch, revision: state.revision, model: state.model, binding: state.binding, dirty: true, saving: false, recoverable: true, undoDepth: state.past.length, redoDepth: state.future.length })
+        }
+        for (const envelope of await this.inputs.list()) {
+          if (!envelope.records.length || this.registry.has(envelope.documentId) || snapshots.some(item => item.documentId === envelope.documentId)) continue
+          let model: DocumentModel = this.inputs.material(envelope), binding = envelope.binding, fromDisk = false
+          try {
+            if (envelope.binding.kind === 'file') {
+              const disk = await this.readDisk(envelope.binding.path, envelope.kind as DocumentKind)
+              if (disk.model) { model = disk.model; fromDisk = true }
+            }
+          } catch { /* A missing disk baseline is presented as independent original text. */ }
+          if (!fromDisk) binding = { kind: 'untitled', suggestedName: '原始输入材料.txt' }
+          snapshots.push({ documentId: envelope.documentId, epoch: envelope.epoch, revision: 0, model,
+            binding, dirty: false, saving: false, recoverable: false, rawInputOnly: true, undoDepth: 0, redoDepth: 0 })
         }
         return snapshots
       })
@@ -670,7 +616,14 @@ export class DocumentHostService {
         }
         if (input.mode !== 'unbound') this.fileCoordinator.assertResolved([], [input.documentId])
         const state = await this.journal.recover(input.documentId)
-        if (!state) throw new Error('恢复稿不存在')
+        if (!state) {
+          const raw = (await this.inputs.list()).find(envelope => envelope.documentId === input.documentId && envelope.records.length)
+          if (raw?.binding.kind === 'file' && input.mode !== 'unbound') {
+            try { return await this.openFile(raw.binding.path) } catch { /* Original text remains openable when the file is missing. */ }
+          }
+          if (raw) return this.attach(await this.registry.create(this.inputs.material(raw), '原始输入材料.txt'))
+          throw new Error('正式恢复稿不存在；保留的原始输入可在原文件打开后认领')
+        }
         if (input.mode === 'unbound') {
           if (this.registry.has(input.documentId))
             throw new Error('该恢复稿已经打开，请从文档另存为；未改变当前绑定')
@@ -680,12 +633,15 @@ export class DocumentHostService {
             ? path.basename(state.binding.path) : state.binding.suggestedName }
           state.savedRevision = null
         }
-        return this.attach(await this.registry.restore(state))
+        const restored = this.attach(await this.registry.restore(state))
+        await this.inputs.refresh(restored)
+        return restored
       })
       case 'discard-recovery': return this.fileCoordinator.withFileAccess(async () => {
         this.fileCoordinator.assertResolved([], [input.documentId])
         if (this.registry.has(input.documentId)) throw new Error('文档已打开，请从文档关闭入口处理未保存更改')
         await this.journal.discard(input.documentId)
+        await this.inputs.discard(input.documentId)
         return
       })
     }

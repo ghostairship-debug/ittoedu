@@ -5,6 +5,7 @@ import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { isInsideRoot, type ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
+import type { ModelUsage } from '../../../shared/workbench/modelProvider'
 
 /** One external loop over an approved copy. The parent job owns persistence and any document commit. */
 export interface CodexDelegationRequest {
@@ -44,7 +45,13 @@ export interface DelegationExecutionResult {
   account?: string
   actualModel?: string
   connectionId?: string
-  usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number }
+  usage?: ModelUsage
+  /** Identity of a provider request, when the adapter can report it. */
+  requestId?: string
+  /** A readable candidate may be useful even when the provider ended before completing it. */
+  candidateComplete?: boolean
+  /** Native agents keep their authoritative history in the existing execution run store. */
+  childRunId?: string
   threadId?: string
   exitCode?: number | null
   artifacts: DelegationArtifact[]
@@ -74,9 +81,9 @@ export interface CodexDelegationRunOptions {
 
 /** The selected backend must sandbox model-generated tools within the checked copy. */
 export interface CodexDelegationBoundaryPort {
-  assertReady(copyRoot: string, permission: 'read-only' | 'workspace', executable: string): Promise<boolean>
+  assertReady(copyRoot: string, permission: 'read-only' | 'workspace', executable: string, options?: { signal?: AbortSignal }): Promise<boolean>
   launchRestricted(input: { copyRoot: string; permission: 'read-only' | 'workspace'; executable: string;
-    args: readonly string[]; options: SpawnOptionsWithoutStdio }): ChildProcessWithoutNullStreams
+    args: readonly string[]; options: SpawnOptionsWithoutStdio; signal?: AbortSignal }): ChildProcessWithoutNullStreams
   /** True only after this launch and its descendants were terminated, or had already exited. */
   stopRestricted(child: ChildProcessWithoutNullStreams): Promise<boolean>
 }
@@ -84,7 +91,7 @@ export interface CodexDelegationBoundaryPort {
 export interface CodexDelegationRunnerOptions {
   boundary?: CodexDelegationBoundaryPort
   /** Defaults to local, non-generating CLI inspection. Injectable for process fixtures. */
-  inspectCli?: (executable: string) => Promise<CodexCliInspection>
+  inspectCli?: (executable: string, options?: { signal?: AbortSignal }) => Promise<CodexCliInspection>
 }
 
 export interface CodexCliInspection {
@@ -140,9 +147,12 @@ export async function discoverNativeCodexExecutable(): Promise<string | null> {
 }
 
 /** No model call: inspect CLI options, existing login and the local model capability catalog. */
-export async function inspectCodexCli(executable: string): Promise<CodexCliInspection> {
+export async function inspectCodexCli(executable: string, options: { signal?: AbortSignal } = {}): Promise<CodexCliInspection> {
   try {
-    const command = (args: string[]) => execFileAsync(executable, args, { env: childEnvironment(), windowsHide: true, timeout: 5000, maxBuffer: Infinity })
+    const command = (args: string[]) => {
+      options.signal?.throwIfAborted()
+      return execFileAsync(executable, args, { env: childEnvironment(), windowsHide: true, timeout: 5000, maxBuffer: Infinity, signal: options.signal })
+    }
     const versionOutput = await command(['--version'])
     const version = (versionOutput.stdout || versionOutput.stderr).trim()
     const helpOutput = await command(['exec', '--help'])
@@ -153,7 +163,7 @@ export async function inspectCodexCli(executable: string): Promise<CodexCliInspe
     const loginOutput = await command(['login', 'status'])
     const login = loginOutput.stdout + loginOutput.stderr
     if (!login.includes('Logged in using ChatGPT')) return { ready: false, reason: 'Codex CLI 当前不是已授权的 ChatGPT 登录路由', version }
-    const catalog = JSON.parse(await fs.readFile(path.join(process.env.CODEX_HOME || path.join(homedir(), '.codex'), 'models_cache.json'), 'utf8')) as {
+    const catalog = JSON.parse(await fs.readFile(path.join(process.env.CODEX_HOME || path.join(homedir(), '.codex'), 'models_cache.json'), { encoding: 'utf8', signal: options.signal })) as {
       models?: { slug?: string; service_tiers?: { id?: string }[] }[]
     }
     const model = catalog.models?.find(item => item.slug === MODEL)
@@ -233,17 +243,19 @@ export class CodexDelegationRunner {
       for (const name of request.expectedArtifacts) validRelative(root, name)
     } catch (cause) { result.reason = cause instanceof Error ? cause.message : '委派输入无效'; return result }
     const scope = request.permission === 'read-only' ? 'read-only' : 'workspace'
+    if (options.signal?.aborted) { result.status = 'cancelled'; result.reason = '委派在准备期间已停止'; return result }
     let boundaryReady = false
-    try { boundaryReady = !!this.options.boundary && await this.options.boundary.assertReady(root, scope, executable) }
+    try { boundaryReady = !!this.options.boundary && await this.options.boundary.assertReady(root, scope, executable, { signal: options.signal }) }
     catch { /* A failed boundary preflight cannot authorize a launch. */ }
+    if (options.signal?.aborted) { result.status = 'cancelled'; result.reason = '委派在边界预检期间已停止'; return result }
     if (!boundaryReady) {
       result.reason = '工作副本的受限执行边界尚未验证'; return result
     }
-    const inspection = await (this.options.inspectCli ?? inspectCodexCli)(executable)
+    const inspection = await (this.options.inspectCli ?? inspectCodexCli)(executable, { signal: options.signal })
     result.cliVersion = inspection.version
     result.account = inspection.account
-    if (!inspection.ready) { result.reason = inspection.reason; return result }
     if (options.signal?.aborted) { result.status = 'cancelled'; result.reason = '委派在启动前已停止'; return result }
+    if (!inspection.ready) { result.reason = inspection.reason; return result }
 
     const args = ['exec', '--json', '--ephemeral', '--ignore-user-config', '--skip-git-repo-check', '-m', MODEL, '-s',
       scope === 'read-only' ? 'read-only' : 'workspace-write', '-c', 'approval_policy="never"',
@@ -257,13 +269,28 @@ export class CodexDelegationRunner {
     let logDirectory: string
     try { logDirectory = await fs.mkdtemp(path.join(tmpdir(), 'guoling-delegation-log-')) }
     catch (cause) { result.reason = `无法准备执行日志目录：${cause instanceof Error ? cause.message : String(cause)}`; return result }
+    if (options.signal?.aborted) {
+      result.status = 'cancelled'; result.reason = '委派在准备日志期间已停止，未启动执行器'
+      await fs.rmdir(logDirectory).catch(() => undefined)
+      return result
+    }
     const logPath = path.join(logDirectory, 'events.jsonl')
     let child: ChildProcessWithoutNullStreams
     try {
       child = this.options.boundary!.launchRestricted({ copyRoot: root, permission: scope, executable,
-        args, options: { cwd: root, env: childEnvironment(), windowsHide: true, shell: false } })
-    } catch (cause) { result.reason = `执行器启动失败：${cause instanceof Error ? cause.message : String(cause)}`; return result }
+        args, options: { cwd: root, env: childEnvironment(), windowsHide: true, shell: false }, signal: options.signal })
+    } catch (cause) {
+      if (options.signal?.aborted) { result.status = 'cancelled'; result.reason = '委派在启动交接前已停止' }
+      else result.reason = `执行器启动失败：${cause instanceof Error ? cause.message : String(cause)}`
+      return result
+    }
     result.externalChangesPossible = true
+    // Observe exit before handing cancellation to the process tree. The signal may
+    // already be aborted when a synchronous launch adapter hands the child back.
+    const exit = new Promise<{ code: number | null; signal: NodeJS.Signals | null; error?: Error }>(resolve => {
+      child.once('error', error => resolve({ code: null, signal: null, error }))
+      child.once('close', (code, signal) => resolve({ code, signal }))
+    })
     let terminal: 'success' | 'failed' | undefined, summary = '', threadId: string | undefined
     let protocolError = false, buffer = '', diagnostic = ''
     const decoder = new StringDecoder('utf8')
@@ -273,14 +300,17 @@ export class CodexDelegationRunner {
     log.on('drain', () => child.stdout.resume())
     const notify = (event: DelegationEvent) => { try { options.onEvent?.(event) } catch { /* UI failure cannot alter the process result. */ } }
     let stopping = false, stopBarrier: Promise<void> | undefined, stopConfirmed = false
+    let stopTimer: ReturnType<typeof setTimeout> | undefined
     let releaseStopWait!: () => void
     const stopWait = new Promise<null>(resolve => { releaseStopWait = () => resolve(null) })
     const stop = () => {
       if (stopping) return
       stopping = true
-      setTimeout(releaseStopWait, STOP_WAIT_MS).unref()
+      stopTimer = setTimeout(releaseStopWait, STOP_WAIT_MS); stopTimer.unref()
       stopBarrier = this.options.boundary!.stopRestricted(child).then(confirmed => { stopConfirmed = confirmed }, () => undefined)
     }
+    options.signal?.addEventListener('abort', stop, { once: true })
+    if (options.signal?.aborted) stop()
     const receive = (chunk: Buffer) => {
       buffer += decoder.write(chunk)
       for (;;) {
@@ -303,12 +333,8 @@ export class CodexDelegationRunner {
       // stderr is a diagnostic tail, not a reason to cancel useful work.
       diagnostic = (diagnostic + chunk.toString('utf8')).slice(-4000)
     })
-    const exit = new Promise<{ code: number | null; signal: NodeJS.Signals | null; error?: Error }>(resolve => {
-      child.once('error', error => resolve({ code: null, signal: null, error }))
-      child.once('close', (code, signal) => resolve({ code, signal }))
-    })
-    options.signal?.addEventListener('abort', stop, { once: true })
-    try { child.stdin.end(prompt) } catch { stop() }
+    child.stdin.on('error', stop)
+    if (!stopping && !options.signal?.aborted) try { child.stdin.end(prompt) } catch { stop() }
     const exited = await Promise.race([exit, stopWait])
     buffer += decoder.end()
     if (buffer.trim()) {
@@ -320,6 +346,7 @@ export class CodexDelegationRunner {
     if (logError) diagnostic += `\n事件日志落盘失败：${logError.message}`
     options.signal?.removeEventListener('abort', stop)
     if (stopBarrier) await observe(stopBarrier, undefined, STOP_BARRIER_WAIT_MS)
+    if (stopTimer) clearTimeout(stopTimer)
     result.threadId = threadId
     result.exitCode = exited?.code
     result.summary = summary || undefined

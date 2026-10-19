@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { readNavigationGuardSources } from '../../shared/courseNavigationGuards'
 import type {
   CourseStateCondition,
   CourseStateDeclaration,
@@ -197,7 +198,7 @@ function guardDraftFrom(
   }
   return {
     id: guard.id,
-    allSources: guard.fromSurfaceIds === undefined,
+    allSources: readNavigationGuardSources(guard.fromSurfaceIds).kind === 'all',
     fromSurfaceIds: [...(guard.fromSurfaceIds ?? [])],
     toSurfaceIds: [...guard.toSurfaceIds],
     match: guard.match,

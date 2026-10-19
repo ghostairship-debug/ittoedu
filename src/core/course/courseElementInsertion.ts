@@ -11,7 +11,8 @@ import { createTextComponentData, createFormulaComponentData } from '../../compo
 import { SHAPE_DEFINITION, defaultShapeData } from '../../components/shape/authoring'
 import { shapeDataSchema, type ShapeData } from '../../components/shape/data'
 import { TABLE_DEFINITION } from '../../components/table/adapters'
-import { createTableData } from '../../components/table/data'
+import { createTableData, type TableContentInput } from '../../components/table/data'
+import { createTableContentData } from '../../components/table/content'
 import { CHART_DEFINITION } from '../../components/chart'
 import { createChartData, type ChartData } from '../../components/chart/data'
 import { changeChartType } from '../../components/chart/contentOperations'
@@ -24,6 +25,7 @@ export interface CourseInsertionOptions {
   center?: { x: number; y: number }
   container?: ComponentContainer; afterInstanceId?: string | null; index?: number
   shapeType?: ShapeData['shapeType']; chartType?: ChartData['chartType']; text?: string
+  table?: TableContentInput
   lineGeometry?: NativeLineGeometry
   destination?: 'document' | 'paper'
   /** Existing UI default profile, prepared by the host rather than supplied by public intent. */
@@ -88,7 +90,7 @@ export function prepareCourseElementEdits(project: CourseProjectV10, surfaceId: 
   } else if (kind === 'shape') {
     definition = SHAPE_DEFINITION; data = shapeDataSchema.parse({ ...defaultShapeData(options.shapeType), ...(options.lineGeometry ? { lineGeometry: options.lineGeometry } : {}) })
     width = slide ? 200 : 220; height = 140
-  } else if (kind === 'table') { definition = TABLE_DEFINITION; data = createTableData(); width = 600; height = slide ? 120 : 220 }
+  } else if (kind === 'table') { definition = TABLE_DEFINITION; data = options.table ? createTableContentData(options.table) : createTableData(); width = 600; height = slide ? 120 : 220 }
   else if (kind === 'input') { definition = INPUT_DEFINITION; data = createInputData(); height = 120 }
   else { definition = CHART_DEFINITION; const chart = createChartData(); data = changeChartType(chart, options.chartType ?? chart.chartType); width = slide ? 560 : 520; height = slide ? 360 : 320 }
   const instance: ComponentInstance = { id: `instance_${nanoid()}`, definitionId: definition.id,

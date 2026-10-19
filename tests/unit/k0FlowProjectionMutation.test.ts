@@ -6,7 +6,6 @@ import { TextEncoder as NodeTextEncoder } from 'node:util'
 import { createLayoutEditor } from '@/renderer/document/editorSession'
 import { fromEditorDocument } from '@/renderer/document/documentAdapter'
 import { DocumentHostService } from '@/main/workbench/DocumentHostService'
-import { createFlowDocumentRecoveryStore } from '@/main/flowDocumentRecovery'
 import { captureComponentOperation } from '@/core/drivers/courseV10Operations'
 import { flowDocumentEdits, projectFlowDocument } from '@/core/components/document/flowDocumentProjection'
 import { TEXT_DEFINITION, textDataEdit } from '@/components/text/adapters'
@@ -41,8 +40,7 @@ it('keeps Flow hosts through projection paint while pending DOM input reaches fo
     surfaces: [{ id: 'flow', kind: 'flow', title: 'Flow', childIds: ['first', 'table', 'source', 'last', 'tail'] }],
     global: { underlay: [], overlay: [] }, assets: {} }
   const directory = await mkdtemp(path.join(tmpdir(), 'guoling-k0-flow-paint-'))
-  const recovery = createFlowDocumentRecoveryStore(path.join(directory, 'flow-recovery'))
-  const host = new DocumentHostService(path.join(directory, 'recovery'), {}, { discardFlowRecovery: recovery.discardDocument })
+  const host = new DocumentHostService(path.join(directory, 'recovery'))
   let snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'flow.h5lesson')
   const current = () => { if (snapshot.model.kind !== 'course-v10') throw new Error('V10 required'); return snapshot.model.project }
   let release!: () => void

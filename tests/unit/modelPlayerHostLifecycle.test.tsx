@@ -16,7 +16,8 @@ import { componentFragmentStateKey } from '../../src/player/componentPlatform/fr
 import { FlowWorkspace } from '../../src/renderer/ui/FlowWorkspace'
 import { createComponentSpatialCameraPort } from '../../src/player/surfaces/spatial/componentSpatialAdapter'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
-import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
+import { applyComponentOperation, captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
+import { prepareCourseTeacherControllerEdits } from '../../src/core/course/courseElementInsertion'
 import { buildCourseGlobalPropertiesOwner } from '../../src/renderer/ui/properties/CourseGlobalPropertiesContextBuilder'
 import { buildPublishedCourseV3 } from '../../src/core/publish/componentPlatform/buildPublishedCourseV3'
 import { mountPublishedCourseV3 } from '../../src/player/componentPlatform/publishedPlayer'
@@ -35,6 +36,10 @@ const project = (): CourseProjectV10 => ({ schemaVersion: 10, id: 'commit', revi
   surfaces: [{ id: 'page', kind: 'slide', title: '本页', childIds: ['text'], designSize: { width: 800, height: 600 } }],
   global: { underlay: [], overlay: [] }, assets: {} })
 const resources = { assets: {}, components: {} }
+const courseWithTeacherController = (title: string) => {
+  const blank = createBlankCourseProjectV10(title)
+  return applyComponentOperation(blank, captureComponentOperation(blank, prepareCourseTeacherControllerEdits(blank, blank.surfaces[0].id, 'slide-authoring').edits))
+}
 
 it('keeps host font faces in Published realm snapshots and later theme events without scoping them into the outer course style', async () => {
   const root = document.createElement('div'); document.body.append(root)
@@ -162,14 +167,14 @@ it('retains the actual React runtime through StrictMode, ancestor replacement an
 })
 
 it('moves the default collapsed controller by the requested screen distance in the same HUD geometry used to paint it', () => {
-  const course = createBlankCourseProjectV10('控制台拖动'), before = structuredClone(course)
+  const course = courseWithTeacherController('控制台拖动'), before = structuredClone(course)
   const id = [...course.global.underlay, ...course.global.overlay].find(id => isGlobalTeacherController(course, id))!
   const navigation = new ComponentNavigationOwner({ project: () => course, surfaceId: () => course.surfaces[0].id,
     select() {}, viewportBounds: () => ({ left: 0, top: 0, right: 640, bottom: 360 }) })
   const geometry = createTeacherControllerHudGeometry({ referenceSize: teacherControllerReferenceSize(course), viewportRect: { x: 0, y: 0, width: 640, height: 360 } })
   const draw = () => projectTeacherControllerInstances(course, geometry, navigation).instances[id].frame!.transform.slice(4)
   const start = draw()
-  navigation.moveBy(-10, -10)
+  navigation.forInstance(id).moveBy(-10, -10)
   expect(draw()).toEqual([start[0] - 10, start[1] - 10])
   expect(course).toEqual(before)
   navigation.dispose()
@@ -227,21 +232,25 @@ it('resets the current page fragment progress without changing another page', as
   const state = new Map([[componentFragmentStateKey('current'), 0], [componentFragmentStateKey('other'), 1]])
   const navigation = new ComponentNavigationOwner({ project: () => course, surfaceId: () => 'current', select() {},
     courseState: { get: <T,>(key: string) => state.get(key) as T | undefined, set: (key, value) => { state.set(key, value) } } })
+  navigation.connectRuntime({ read: id => ({ status: 'ready', generation: 1, document: 'web', html: (course.instances[id].data as { html: string }).html }), prepare: async () => true })
   expect(await navigation.replayCurrentSurface()).toBe(true)
   expect(state.get(componentFragmentStateKey('current'))).toBe(2)
   expect(state.get(componentFragmentStateKey('other'))).toBe(1)
   course.surfaces[0] = { ...course.surfaces[0], kind: 'spatial', spatial: { home: { x: 0, y: 0, zoom: 1 },
     frames: [{ id: 'follow', title: '当前正文', targetInstanceId: 'current', pose: { x: 0, y: 0, zoom: 1 } }] } }
-  expect(await navigation.replayCurrentSurface()).toBe(true)
-  expect(state.get(componentFragmentStateKey('current'))).toBe(0); expect(state.get(componentFragmentStateKey('other'))).toBe(1)
   const camera = createComponentSpatialCameraPort({ x: 50, y: 60, zoom: 2 })
   let frameId: string | null = 'follow', stepIndex: number | null = 1
   const off = navigation.registerCamera('current', camera, { frameId: () => frameId, selectFrame: value => { frameId = value },
     stepIndex: () => stepIndex, selectStep: value => { stepIndex = value } })
+  expect(await navigation.replayCurrentSurface()).toBe(true)
+  expect(state.get(componentFragmentStateKey('current'))).toBe(0); expect(state.get(componentFragmentStateKey('other'))).toBe(1)
+  expect(await navigation.execute({ type: 'step.next' })).toBe(true)
+  expect(state.get(componentFragmentStateKey('current'))).toBe(1)
+  camera.set({ x: 50, y: 60, zoom: 2 })
   course.surfaces[0].presentation = { initialStateId: 'initial', states: [{ id: 'initial', title: '初始', overrides: {} }] }
   expect(await navigation.replayCurrentSurface()).toBe(true)
   expect(camera.read()).toEqual({ x: 0, y: 0, zoom: 1 })
-  expect(frameId).toBeNull(); expect(stepIndex).toBeNull()
+  expect(frameId).toBe('follow'); expect(stepIndex).toBe(0); expect(navigation.currentStateId()).toBe('initial')
   expect(state.get(componentFragmentStateKey('current'))).toBe(0); expect(state.get(componentFragmentStateKey('other'))).toBe(1)
   off(); camera.dispose()
   navigation.dispose()
@@ -363,7 +372,7 @@ it('awaits real cross-surface camera commits for teacher and previous-key naviga
 })
 
 it('consumes the real no-controls setting in author try-run and Published visibility while preserving the editing entry and other global content', async () => {
-  const course = createBlankCourseProjectV10('不显示控制器'), id = course.global.overlay[0]
+  const course = courseWithTeacherController('不显示控制器'), id = course.global.overlay[0]
   course.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   course.instances.decoration = { id: 'decoration', definitionId: TEXT_DEFINITION.id,
     data: JSON.parse(JSON.stringify(createTextComponentData('保留的全局内容'))), frame: { width: 200, height: 50, transform: [1, 0, 0, 1, 20, 20] } }
@@ -422,7 +431,7 @@ it('consumes the real no-controls setting in author try-run and Published visibi
     const player = await mountPublishedCourseV3(published.payload, root, { capture, keyboardNavigation: false })
     try {
       await player.ready
-      expect(root.querySelector('nav[aria-label="教师控制台"]')).not.toBeVisible()
+      expect(root.querySelector('nav[aria-label="教师控制台"]'), `Published capture=${capture}`).not.toBeVisible()
       expect(player.runtime.targetElement('decoration')).toBeVisible()
       player.runtime.setPlaying(false); player.navigation.changed()
       expect(player.runtime.targetElement(id)).not.toBeVisible()

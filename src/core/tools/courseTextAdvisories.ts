@@ -46,7 +46,7 @@ export function courseTextAdvisories(source: CourseProjectV10, target: Extract<T
     || content.inlines.some(inline => inline.type === 'math' || inline.style?.color !== undefined || inline.style?.fontSize !== undefined
       || inline.style?.bold !== undefined)) return advisories
   const background = resolveComponentBackground(project, surface)
-  if (background.assetId !== null) return advisories
+  if (background.assetId !== null || background.paint) return advisories
   const bounds = (id: string) => {
     const item = project.instances[id]
     if (!item?.frame) return null

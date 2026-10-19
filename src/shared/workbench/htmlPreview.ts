@@ -62,6 +62,7 @@ export const htmlPreviewTargetReportSchema = z.object({
   authoring: z.object({ authorKey: id, record: componentAuthorRecordSchema }).strict().optional(),
   bindingStatus: z.enum(['bound', 'unmounted', 'unresolved', 'source-required']).optional(),
   geometry: componentAuthorGeometryObservationSchema.optional(),
+  textStyle: z.record(z.string(), z.string()).optional(),
 }).strict()
 
 export const htmlPreviewRequestSchema = z.discriminatedUnion('type', [

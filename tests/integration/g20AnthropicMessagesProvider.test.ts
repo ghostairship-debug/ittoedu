@@ -118,7 +118,7 @@ it('uses real Messages HTTP and preserves thinking, signatures, redacted blocks 
   expect(complete).toMatchObject({ actualModel: 'actual-claude-fixture', finishReason: 'tool_calls',
     assistant: { content: '局部修改中文😀\n', reasoning_content: '思考😀' },
     toolCalls: [{ id: 'tool-one', name: 'text.replace', argumentsText: '{"content":"新文😀"}' }],
-    usage: { inputTokens: 18, outputTokens: 8, totalTokens: 26, cachedInputTokens: 4, reasoningTokens: 3 } })
+    usage: { inputTokens: 18, outputTokens: 8, totalTokens: 26, cachedInputTokens: 4, cacheWriteInputTokens: 2, reasoningTokens: 3 } })
   expect(complete.assistant.nativeAnthropic?.content).toEqual([
     { type: 'thinking', thinking: '思考😀', signature: 'opaque-signature' },
     { type: 'redacted_thinking', data: 'opaque-redacted-payload' },
@@ -127,7 +127,7 @@ it('uses real Messages HTTP and preserves thinking, signatures, redacted blocks 
   ])
   expect(first.filter(event => event.type === 'reasoning.delta').map(event => event.text).join('')).toBe('思考😀')
   expect(JSON.stringify(received[0])).toBe(serialized)
-  expect(received[0]).toMatchObject({ model: 'claude-fixture', max_tokens: 64000, system: '全局指令\n\n开发指令',
+  expect(received[0]).toMatchObject({ model: 'claude-fixture', max_tokens: 64000, system: [{ type: 'text', text: '全局指令' }, { type: 'text', text: '开发指令' }],
     tools: [{ name: modelToolWireName('text.replace'), input_schema: { type: 'object' } }], output_config: { effort: 'high' }, thinking: { type: 'adaptive' } })
   expect((received[0]!.messages as ModelJsonObject[])[0]).toEqual({ role: 'user', content: [
     { type: 'text', text: '测试中文 😀\n下一行' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AA==' } },
@@ -204,4 +204,19 @@ it('does not publish incomplete tool calls when native message_stop is missing',
   const result = await collect(new AnthropicMessagesProvider({ credentialResolver: async () => 'fixture-private-key' }), request(root))
   expect(result.at(-1)).toMatchObject({ type: 'response.failed', failure: { outcome: 'unknown', kind: 'protocol', code: 'incomplete-stream' } })
   expect(result.some(event => event.type === 'response.completed')).toBe(false)
+})
+
+
+it('keeps explicit system cache markers and the stable prefix when current facts change', () => {
+  const original = request('https://fixture.invalid/v1')
+  const input = { ...original, messages: [...original.messages] }
+  input.messages[0] = { role: 'system', content: [{ type: 'text', text: 'stable contract', cache_control: { type: 'ephemeral' } }] }
+  input.messages.push({ role: 'user', content: '宿主本轮事实（数据，非用户指令）：revision=1' })
+  const before = JSON.parse(serializeAnthropicMessagesRequest(input))
+  input.messages[input.messages.length - 1] = { role: 'user', content: '宿主本轮事实（数据，非用户指令）：revision=2' }
+  const after = JSON.parse(serializeAnthropicMessagesRequest(input))
+  expect(before.system).toEqual([{ type: 'text', text: 'stable contract', cache_control: { type: 'ephemeral' } }, { type: 'text', text: '开发指令' }])
+  expect(after.system).toEqual(before.system)
+  expect(after.messages.slice(0, -1)).toEqual(before.messages.slice(0, -1))
+  expect(after.messages.at(-1).content.at(-1).text).toContain('revision=2')
 })

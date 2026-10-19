@@ -5,6 +5,7 @@ import { mountComponentFlowToc } from './flowToc'
 import type { ComponentInstance, ComponentSurface, CourseProjectV10 } from '../../shared/contracts/component-platform'
 import { resolveComponentBackground, isComponentVisibleAtSurface, componentDefinitionBuiltinKey, owningContainer } from '../../shared/contracts/component-platform'
 import { resolveComponentOuterPresentation } from '../../shared/componentPresentation'
+import { applyComponentBackgroundPaint } from '../../shared/componentBackgroundPaint'
 import { transformPoint } from '../../core/components/geometry'
 import { createTeacherControllerHudGeometry, teacherControllerReferenceSize, isViewportComponent, projectTeacherControllerInstances, type TeacherControllerDisplayPort } from '../../shared/teacherControllerViewportGeometry'
 import { flowParagraphAnchoredFrame, type FlowParagraphBlockRect } from '../../shared/flowParagraphAnchors'
@@ -114,11 +115,6 @@ export function createComponentModelProjection(context: {
       const node = nodes.get(id), frame = display.instances[id]?.frame
       if (node && frame) {
         Object.assign(node.outer.style, componentFrameStyle(frame))
-        const data = project.instances[id]?.data, styles = data && typeof data === 'object' && !Array.isArray(data) ? data.sceneStyles : undefined
-        const variant = styles && typeof styles === 'object' && !Array.isArray(styles) ? styles[activeSurface ?? ''] : undefined
-        const enabled = variant && typeof variant === 'object' && !Array.isArray(variant) && typeof variant.enabled === 'boolean'
-          ? variant.enabled : data && typeof data === 'object' && !Array.isArray(data) ? data.enabled : undefined
-        node.outer.hidden = !isComponentVisibleAtSurface(project.instances[id]!, activeSurface ?? '') || enabled === false
       }
     }
     paintFlowScrollClearance()
@@ -210,8 +206,7 @@ export function createComponentModelProjection(context: {
     active?.playback?.resize()
     const activeModel = project?.surfaces.find(surface => surface.id === activeSurface)
     if (project) {
-      const background = resolveComponentBackground(project, activeModel), url = background.assetId ? runtime.assetUrl(background.assetId) : undefined
-      Object.assign(shell.style, { backgroundColor: background.color, backgroundImage: url ? `url(${JSON.stringify(url)})` : 'none', backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit, backgroundPosition: 'center', backgroundRepeat: 'no-repeat' })
+      applyComponentBackgroundPaint(shell, resolveComponentBackground(project, activeModel), id => runtime.assetUrl(id))
       for (const id of [...project.global.underlay, ...project.global.overlay]) {
         const instance = project.instances[id], node = nodes.get(id)
         if (!node || !instance?.frame) continue
@@ -359,10 +354,8 @@ export function createComponentModelProjection(context: {
             view.toc.sync()
           }
           const layout = surface.flow?.layout ?? { readingWidth: 860, wideContentWidth: 1100, paperBackgroundColor: '#ffffff' }
-          const background = resolveFlowPaperBackground(project, surface), url = background.assetId ? runtime.assetUrl(background.assetId) : undefined
-          Object.assign(view.flow.paper.style, { width: flowPaperMaxWidth(layout), maxWidth: flowPaperMaxWidth(layout), containerType: 'inline-size', backgroundColor: background.color,
-            backgroundImage: url ? `url(${JSON.stringify(url)})` : 'none', backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit,
-            backgroundPosition: 'center', backgroundRepeat: 'no-repeat' })
+          Object.assign(view.flow.paper.style, { width: flowPaperMaxWidth(layout), maxWidth: flowPaperMaxWidth(layout), containerType: 'inline-size' })
+          applyComponentBackgroundPaint(view.flow.paper, resolveFlowPaperBackground(project, surface), id => runtime.assetUrl(id))
         }
         view.designSize = surface.designSize
          const host = view.content?.parentElement

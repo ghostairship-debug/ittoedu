@@ -15,6 +15,11 @@
  */
 import type { DocumentOperationResult, DocumentSnapshot } from './document'
 import type { ModelChatMessage, ModelFailure, ModelUsage } from './modelProvider'
+import type { ComponentFrame } from '../contracts/component-platform'
+
+/** Task-frozen image configuration only; configured does not prove provider execution succeeds. */
+export type ImageRoleAvailability = { status: 'configured' } | { status: 'unavailable'; reason: string }
+export type ImageRoleAvailabilitySnapshot = Record<'generate' | 'edit', ImageRoleAvailability>
 
 /** Author intent only; Main resolves and freezes source bytes through the existing file/resource owners. */
 export interface LocalToolRunIntent {
@@ -23,6 +28,7 @@ export interface LocalToolRunIntent {
   cwd?: string
   stdin?: string
   sources?: string[]
+  sourceVersion?: 'current' | 'disk'
   outputs?: string[]
   timeoutMs?: number
 }
@@ -37,8 +43,28 @@ export interface LocalToolRunPreview {
 export interface ReadonlyDelegationIntent {
   goal: string
   sources: string[]
-  budget: { maxOutputTokens: number; maxDurationMs: number }
+  sourceVersion?: 'current' | 'disk'
 }
+export interface DelegationTarget {
+  project?: string
+  path: string
+  /** One preparation's region, not another persisted layout. */
+  region?: ComponentFrame
+}
+/** One autonomous task. The host supplies its workspace, model and source versions. */
+export interface NativeDelegationIntent {
+  goal: string
+  sources?: string[]
+  sourceVersion?: 'current' | 'disk'
+  target?: DelegationTarget
+  sharedBrief?: string
+  /** A context preference, never a separate permission or permanent tool restriction. */
+  role?: string
+  outputs: string[]
+}
+/** Explicit continuation uses the child's own history; the job owner is resolved by the host. */
+export interface NativeDelegationResumeIntent extends NativeDelegationIntent { job: string }
+export interface NativeDelegationMessageIntent { job: string; text: string }
 /** Host-produced snapshot. A source reference or version is never a writer grant. */
 export interface PreparedTaskSource {
   source: string
@@ -46,6 +72,8 @@ export interface PreparedTaskSource {
   mimeType: string
   bytes: Uint8Array
   version?: string
+  /** Model-window view only. bytes always retains the complete source. */
+  modelRepresentation?: { text: string; mimeType: string; read?: { source: string; version?: string; offset?: number } }
 }
 
 /** Capabilities that may read bundled authoring Skills. */
@@ -109,6 +137,7 @@ export interface ObservationImageResource {
   height: number
   byteLength: number
 }
+export interface ObservationClip { x: number; y: number; width: number; height: number }
 
 export interface ObservationServicePort {
   /**
@@ -126,8 +155,14 @@ export interface ObservationServicePort {
     locationId: string
     stateId?: string | null
     viewGeneration?: string
+    /** Rectangle in the original preview viewport's CSS pixels. */
+    clip?: ObservationClip
     signal?: AbortSignal
   }): Promise<ObservationResult>
+  /** Runtime-only input in the same isolated observation session, never an author edit. */
+  actionIdentity?(runId: string): ObservationResult['identity'] | null
+  click?(input: { runId: string; operationId: string; handle: string; signal?: AbortSignal }): Promise<ObservationResult>
+  input?(input: { runId: string; operationId: string; handle: string; value: string; signal?: AbortSignal }): Promise<ObservationResult>
   stopRun?(runId: string): Promise<void> | void
   /** Load real bytes for a previously captured observation resource. */
   readResource(input: { runId: string; resourceId: string }): Promise<{ mimeType: string; bytes: Uint8Array }>
@@ -136,15 +171,23 @@ export interface ObservationServicePort {
 export type ObservationResult = {
   source: 'live' | 'isolated-published'
   identity: { documentId: string; epoch: string; revision: number; locationId: string; stateId?: string | null; viewGeneration?: string }
-  coverage: { width: number; height: number }
+  coverage: { width: number; height: number; viewport?: { width: number; height: number };
+    clip?: ObservationClip; scale?: { x: number; y: number }; coordinateSpace?: 'preview-viewport-css-pixels' }
   structure: readonly string[]
   diagnostics: readonly string[]
   image: ObservationImageResource
+  /** The unmodified captured PNG stays in the same resource owner when image is cropped. */
+  originalImage?: ObservationImageResource
+  /** Only a persistent interactive observation supplies handles. */
+  generation?: number
+  elements?: readonly { handle: string; tag: string; role: string; label: string; text: string; editable: boolean; value?: string;
+    rect: { x: number; y: number; width: number; height: number } }[]
   reason?: string
 }
 
 /** Provider facts from a separate visual request; the Engine journals them with the run. */
 export type VisualAnalysisRequestEvent =
+  | { type: 'usage'; requestId: string; usage: ModelUsage }
   | { type: 'sending'; requestId: string }
   | { type: 'started'; requestId: string; responseId: string; actualModel?: string }
   | { type: 'completed'; requestId: string; responseId: string; actualModel?: string; usage?: ModelUsage }

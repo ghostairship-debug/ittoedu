@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { applyComponentBackgroundPaint } from '../../shared/componentBackgroundPaint'
 import { isComponentVisibleAtSurface, resolveComponentBackground, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
 import type { ComponentInstance } from '../../shared/contracts/component-platform/project'
 import { applyComponentPaintStyle } from '../../player/components/componentPlacementStyle'
@@ -52,11 +53,8 @@ export function SceneThumbnail({ locationId }: { locationId?: string; scene?: ob
     const background = resolveComponentBackground(project, surface)
     const page = dom.createElement('div')
     Object.assign(page.style, { position: 'absolute', left: '0', top: '0', width: size.width + 'px', height: size.height + 'px',
-      transformOrigin: '0 0', pointerEvents: 'none', overflow: 'hidden', backgroundColor: background.color })
-    if (background.assetId) {
-      const url = assetUrl(background.assetId)
-      if (url) Object.assign(page.style, { backgroundImage: 'url("' + url + '")', backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit, backgroundRepeat: 'no-repeat', backgroundPosition: 'center' })
-    }
+      transformOrigin: '0 0', pointerEvents: 'none', overflow: 'hidden' })
+    applyComponentBackgroundPaint(page, background, id => assetUrl(id) ?? undefined)
     const diagnostics: string[] = []
     const label = (target: HTMLElement, instance: ComponentInstance, reason: string) => {
       target.dataset.thumbnailDiagnostic = reason
@@ -70,7 +68,7 @@ export function SceneThumbnail({ locationId }: { locationId?: string; scene?: ob
       const instance = project.instances[id], definition = instance && project.definitions[instance.definitionId]
       if (!instance || !definition || !isComponentVisibleAtSurface(instance, surface.id) || definition.role === 'behavior') return
       const wrapper = dom.createElement('div'), content = dom.createElement('div')
-      applyComponentPaintStyle(wrapper, instance)
+      applyComponentPaintStyle(wrapper, instance, definition)
       Object.assign(wrapper.style, componentFrameStyle(instance.frame))
       Object.assign(content.style, { width: '100%', height: '100%' })
       wrapper.append(content); parent.append(wrapper)

@@ -6,6 +6,7 @@ import type {
   RuntimeEvidenceActionKind,
   RuntimeScope,
 } from '../shared/runtimeTypes'
+import { createBrowserUuid } from '../shared/browser/createBrowserUuid'
 
 export const HOST_EVIDENCE_SCHEMA_VERSION = 1 as const
 export const HOST_EVIDENCE_CONSOLE_PREFIX =
@@ -83,27 +84,6 @@ const capturedConsoleInfo = console.info.bind(console)
 const capturedJsonStringify = JSON.stringify.bind(JSON)
 const defaultSink: HostEvidenceSink = capturedConsoleInfo
 
-function createSessionId(): string {
-  if (typeof globalThis.crypto?.randomUUID === 'function') {
-    return globalThis.crypto.randomUUID()
-  }
-  if (typeof globalThis.crypto?.getRandomValues !== 'function') {
-    throw new Error('宿主证据会话需要安全随机数源')
-  }
-  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
-  // RFC 4122 version 4 / variant 1 layout for environments without randomUUID.
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80
-  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0'))
-  return [
-    hex.slice(0, 4).join(''),
-    hex.slice(4, 6).join(''),
-    hex.slice(6, 8).join(''),
-    hex.slice(8, 10).join(''),
-    hex.slice(10).join(''),
-  ].join('-')
-}
-
 /**
  * Write-only host evidence channel. PlayerApp keeps the recorder in a native
  * private field; Runtime code receives only the normal assessment API.
@@ -118,7 +98,7 @@ export class HostEvidenceRecorder {
     /** Deterministic tests only. PlayerApp always uses a random session id. */
     sessionId?: string
   } = {}) {
-    this.#sessionId = options.sessionId ?? createSessionId()
+    this.#sessionId = options.sessionId ?? createBrowserUuid()
     this.#sink = options.sink ?? defaultSink
     this.#write({
       schemaVersion: HOST_EVIDENCE_SCHEMA_VERSION,

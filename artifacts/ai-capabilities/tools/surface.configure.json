@@ -7,6 +7,63 @@
         "type": "string"
       },
       "__schema1": {
+        "additionalProperties": false,
+        "properties": {
+          "resourceBindings": {
+            "additionalProperties": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "propertyNames": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "style": {
+            "additionalProperties": false,
+            "properties": {
+              "background-attachment": {
+                "type": "string"
+              },
+              "background-blend-mode": {
+                "type": "string"
+              },
+              "background-clip": {
+                "type": "string"
+              },
+              "background-color": {
+                "type": "string"
+              },
+              "background-image": {
+                "type": "string"
+              },
+              "background-origin": {
+                "type": "string"
+              },
+              "background-position": {
+                "type": "string"
+              },
+              "background-repeat": {
+                "type": "string"
+              },
+              "background-size": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "style",
+          "resourceBindings"
+        ],
+        "type": "object"
+      },
+      "__schema2": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema3": {
         "type": "number"
       }
     },
@@ -24,8 +81,7 @@
                   "assetId": {
                     "anyOf": [
                       {
-                        "minLength": 1,
-                        "type": "string"
+                        "$ref": "#/$defs/__schema0"
                       },
                       {
                         "type": "null"
@@ -50,8 +106,31 @@
                     ],
                     "type": "string"
                   },
+                  "paint": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "layers": {
+                            "items": {
+                              "$ref": "#/$defs/__schema1"
+                            },
+                            "minItems": 1,
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "layers"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "source": {
-                    "$ref": "#/$defs/__schema0",
+                    "$ref": "#/$defs/__schema2",
                     "description": "来源返回的 source 或已授权图片路径；软件登记资源，不需要拼接 assetId。"
                   }
                 },
@@ -69,7 +148,7 @@
                 "type": "string"
               },
               "readingWidth": {
-                "$ref": "#/$defs/__schema1",
+                "$ref": "#/$defs/__schema3",
                 "exclusiveMinimum": 0
               },
               "toc": {
@@ -80,7 +159,7 @@
                 "type": "string"
               },
               "wideContentWidth": {
-                "$ref": "#/$defs/__schema1",
+                "$ref": "#/$defs/__schema3",
                 "exclusiveMinimum": 0
               },
               "widthMode": {

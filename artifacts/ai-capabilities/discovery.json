@@ -23,7 +23,7 @@
   ],
   "query": "query.mjs",
   "scope": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
-  "semanticVersion": "3a79316095c712b5bd2b9002957352b58d786e60e3e34b3d6fab218546ea24e2",
+  "semanticVersion": "84a96da89eba5d7424d579180e1f89a804418cacf22994c11b82e9db118db451",
   "tools": [
     {
       "id": "artifact.save",
@@ -86,12 +86,24 @@
       "path": "tools/course.recipes.json"
     },
     {
+      "id": "delegate.agent",
+      "path": "tools/delegate.agent.json"
+    },
+    {
+      "id": "delegate.message",
+      "path": "tools/delegate.message.json"
+    },
+    {
       "id": "delegate.read",
       "path": "tools/delegate.read.json"
     },
     {
       "id": "delegate.readonly",
       "path": "tools/delegate.readonly.json"
+    },
+    {
+      "id": "delegate.resume",
+      "path": "tools/delegate.resume.json"
     },
     {
       "id": "delegate.start",
@@ -330,6 +342,14 @@
       "path": "tools/presentation.update.json"
     },
     {
+      "id": "programmatic.execute",
+      "path": "tools/programmatic.execute.json"
+    },
+    {
+      "id": "programmatic.read",
+      "path": "tools/programmatic.read.json"
+    },
+    {
       "id": "project.apply",
       "path": "tools/project.apply.json"
     },
@@ -384,6 +404,14 @@
     {
       "id": "text.replace",
       "path": "tools/text.replace.json"
+    },
+    {
+      "id": "view.click",
+      "path": "tools/view.click.json"
+    },
+    {
+      "id": "view.input",
+      "path": "tools/view.input.json"
     },
     {
       "id": "view.observe",

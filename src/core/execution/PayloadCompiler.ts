@@ -23,7 +23,9 @@ export class PayloadCompiler {
   }) {}
 
   /** Complete the first request after the host has read current facts and selected actual tools. */
-  finalize(input: PayloadSerializerInput & { manifest: PayloadManifest; sourceMessages?: readonly ModelChatMessage[]; sourceUserMessageIndex?: number }): CompiledPayload {
+  finalize(input: PayloadSerializerInput & { manifest: PayloadManifest; sourceMessages?: readonly ModelChatMessage[]; sourceUserMessageIndex?: number;
+    /** Exact wire payload already prepared from these messages and tools by the current request owner. */
+    serialized?: string }): CompiledPayload {
     const { selection, messages, tools, manifest } = structuredClone(input)
     if (manifest.delivery.status !== 'prepared') throw new PayloadCompileError('already-sent', '已发送请求不能重新装配')
     const originalIndex = manifest.userMessageIndex ?? manifest.userText?.messageIndex ?? manifest.explicitAttachments[0]?.messageIndex
@@ -61,7 +63,7 @@ export class PayloadCompiler {
       automaticContext.push({ messageIndex, provenance: known.get(digest(serializedMessage))?.provenance
         ?? { kind: 'runtime', id: `final-context-${messageIndex}` }, digest: digest(serializedMessage), serializedBytes: size(serializedMessage) })
     })
-    const serialized = this.options.serializePayload({ selection, messages, tools })
+    const serialized = input.serialized ?? this.options.serializePayload({ selection, messages, tools })
     const connection = selection.connection
     return { messages: [...messages], tools: [...tools], serialized, manifest: { ...manifest,
       provider: { connectionId: connection.id, revision: connection.revision, provider: connection.provider,

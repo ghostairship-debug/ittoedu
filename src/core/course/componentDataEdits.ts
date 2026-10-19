@@ -10,7 +10,8 @@ import { chartDataSchema, chartTableDataSchema } from '../../components/chart/da
 import { changeChartType, replaceChartTableData } from '../../components/chart/contentOperations'
 import { editChartData, type ChartEdit } from '../../components/chart/edit'
 import { editTableData, type TableEdit } from '../../components/table/edit'
-import { parseTableData } from '../../components/table/data'
+import { parseTableData, tableContentInputSchema } from '../../components/table/data'
+import { replaceTableContentData } from '../../components/table/content'
 import { shapeDataSchema } from '../../components/shape/data'
 import { switchShapeType } from '../../components/shape/authoring'
 
@@ -88,6 +89,16 @@ export function componentDataEdits(project: CourseProjectV10, target: ComponentD
   let fields = change.kind === 'fields' ? [...change.fields] : change.kind === 'patch'
     ? componentDataPropertyFields(instance.data, change.data, builtinKey) : [{ path: [], value: change.data }]
   let next = changedData(instance.data, fields)
+  if (builtinKey === 'guoling.table' && record(next) && Array.isArray(next.rows) && next.rows.some(Array.isArray)) {
+    const headerSupplied = change.kind === 'fields'
+      ? change.fields.some(field => !field.path.length && record(field.value) && Object.hasOwn(field.value, 'headerRowCount') || field.path.length === 1 && field.path[0] === 'headerRowCount')
+      : record(change.data) && Object.hasOwn(change.data, 'headerRowCount')
+    const content = tableContentInputSchema.parse({ rows: next.rows, ...(headerSupplied ? { headerRowCount: next.headerRowCount } : {}) })
+    const prepared = replaceTableContentData(parseTableData(instance.data), content)
+    next = json(parseTableData(changedData(json(prepared), componentDataPropertyFields(instance.data, next, builtinKey)
+      .filter(field => field.path[0] !== 'rows' && field.path[0] !== 'headerRowCount'))))
+    fields = [{ path: [], value: next }]
+  }
   const mapped = json(remapDocumentData(instance.data, next, change))
   if (!equalComponentValue(mapped, next)) { next = mapped; fields = [{ path: [], value: next }] }
   if (equalComponentValue(instance.data, next)) return []

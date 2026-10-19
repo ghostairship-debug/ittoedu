@@ -11,6 +11,11 @@ export interface ComponentCameraMotion {
 }
 /** Generate these keyframes in ordinary code; delays/offsets coordinate both snapshots. */
 export interface ComponentNavigationTransition {
+  /** Small presets share the snapshot owner with authored advanced keyframes. */
+  effect?: 'none' | 'fade' | 'slide' | 'zoom'
+  durationMs?: number
+  easing?: string
+  direction?: 'left' | 'right' | 'up' | 'down'
   outgoing?: { keyframes: readonly MotionKeyframe[]; timing?: { duration?: number; delay?: number; easing?: string } }
   incoming?: { keyframes: readonly MotionKeyframe[]; timing?: { duration?: number; delay?: number; easing?: string } }
 }
@@ -31,5 +36,8 @@ const snapshotMotionSchema = z.object({
   timing: z.object({ duration: z.number().finite().nonnegative().optional(), delay: z.number().finite().nonnegative().optional(), easing: z.string().min(1).optional() }).strict().optional(),
 }).strict()
 export const componentNavigationTransitionSchema: z.ZodType<ComponentNavigationTransition> = z.object({
+  effect: z.enum(['none', 'fade', 'slide', 'zoom']).optional(),
+  durationMs: z.number().finite().nonnegative().optional(), easing: z.string().min(1).optional(),
+  direction: z.enum(['left', 'right', 'up', 'down']).optional(),
   outgoing: snapshotMotionSchema.optional(), incoming: snapshotMotionSchema.optional(),
 }).strict()

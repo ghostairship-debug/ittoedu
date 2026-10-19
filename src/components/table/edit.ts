@@ -15,15 +15,16 @@ export function editTableCellText(content: FlowTextContent, text: string): FlowT
   if(from===end && from===nextEnd)return content
   let offset=0, atomOffset=0, startAtom=0, endAtom=0
   for(const inline of content.inlines) {
-    const width=Array.from(plainDocumentText({inlines:[inline]})).length, size=inline.type==='math' ? 1 : width
-    if(offset<=from)startAtom=atomOffset+(inline.type==='text' ? Math.min(size,from-offset):0)
+    const width=Array.from(plainDocumentText({inlines:[inline]})).length, size=inline.type!=='text' ? 1 : width
+    if(offset<=from)startAtom=atomOffset+(inline.type==='text' ? Math.min(size,from-offset):from>=offset+width ? size:0)
     if(offset<end)endAtom=atomOffset+(inline.type==='text' ? Math.min(size,end-offset):size)
-    if(inline.type==='math') {
+    if(inline.type!=='text') {
       if(from>offset && from<offset+width)from=offset
       if(end>offset && end<offset+width){nextEnd+=offset+width-end;end=offset+width}
     }
     offset+=width;atomOffset+=size
   }
+  endAtom=Math.max(startAtom,endAtom)
   return normalizeDocumentText({inlines:[...sliceDocumentText(content,0,startAtom).inlines,
     ...after.slice(from,nextEnd).length ? [{type:'text' as const,text:after.slice(from,nextEnd).join('')}]:[],
     ...sliceDocumentText(content,endAtom,atomOffset).inlines]})

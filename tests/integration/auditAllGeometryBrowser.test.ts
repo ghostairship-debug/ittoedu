@@ -4,6 +4,10 @@ import fs from 'node:fs/promises'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { chromium, type Browser, type Page } from '@playwright/test'
 import { createServer, type ViteDevServer } from 'vite'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
+import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
+import { buildPublishedCourseV3 } from '../../src/core/publish/componentPlatform/buildPublishedCourseV3'
+import type { ComponentEdit, CourseProjectV10 } from '../../src/shared/contracts/component-platform'
 
 let server: ViteDevServer, browser: Browser, url: string
 beforeAll(async () => {
@@ -24,7 +28,7 @@ beforeAll(async () => {
       import { createBlankCourseProjectV10 } from '/src/core/course/createCourseProjectV10.ts';
       import { createImageData } from '/src/components/image/data.ts';
       import { createTeacherControllerRuntimeImplementation } from '/src/components/teacher-controller/index.ts';
-      window.api={createDomAuthoring,LocalAuthorTransformGesture,shapeRuntimeImplementation,defaultShapeData,createTextComponentData,renderTextComponent,measureTextComponent,applyTextComponentLayout};
+      window.api={createDomAuthoring,LocalAuthorTransformGesture,shapeRuntimeImplementation,defaultShapeData,createTextComponentData,renderTextComponent,measureTextComponent,applyTextComponentLayout,mountPublishedCourseV3};
       const frame=(width,height,x=0,y=0)=>({width,height,transform:[1,0,0,1,x,y]});
       window.mountFixture=async(mode,size)=>{
         await window.player?.dispose();const root=document.querySelector('#fixture');root.replaceChildren();
@@ -49,6 +53,7 @@ beforeAll(async () => {
         const project=createBlankCourseProjectV10('Author'),teacher=structuredClone(project.instances[project.global.overlay[0]]);project.instances={};project.definitions={};project.global={underlay:[],overlay:[]};project.surfaces[0]={id:'S',kind:'slide',title:'Author',childIds:['text','shape'],designSize:{width:600,height:400}};
         const add=(id,key,data,placement)=>{project.definitions[key]={id:key,role:'content',implementation:{kind:'builtin',key}};project.instances[id]={id,definitionId:key,data,frame:placement};};
         add('text','guoling.text',createTextComponentData('BACK TEXT'),frame(200,80,50,50));add('shape','guoling.shape',defaultShapeData(),mode==='overlap'?frame(200,80,50,50):frame(100,80,380,180));
+        if(mode==='reflow'){const data=createTextComponentData('文字框变窄后根据宽度重新换行，字形比例保持原样。');data.sizing={mode:'fixed',minHeight:0,overflow:'clip'};project.instances.text.data=data;}
         if(mode==='line'){project.surfaces[0].childIds=['shape'];project.instances.shape.data=defaultShapeData('line');project.instances.shape.frame=frame(200,100,100,100);}
         if(mode==='guides'){const data=createImageData('image');data.safeAreas=[{id:'important',label:'正文',x:.1,y:.2,width:.5,height:.4}];add('image','guoling.image',data,frame(200,100,100,180));project.surfaces[0].childIds.push('image');}
         if(mode==='clip'){project.surfaces[0].designSize={width:600,height:120};project.instances.shape.frame=frame(100,80,380,100);project.global.overlay=['teacher','logo'];add('teacher','guoling.navigation',{...teacher.data,defaultCollapsed:false},teacher.frame);add('logo','guoling.shape',{...defaultShapeData(),style:{...defaultShapeData().style,fillColor:'#ff0000'}},frame(100,80,20,100));}
@@ -227,6 +232,70 @@ it('CA073/332 actual author workspace preserves Shift selection and foreground b
     await screenshot(page,'CA332-author-front-shape')
   }finally{await page.close()}
 },30_000)
+
+it('native text frame resize reflows real editor glyphs and retains the same layout after archive and Published playback', async () => {
+  const page = await current(), directory = path.resolve('output/authoring-followup-20261017/text-reflow')
+  const readText = (selector: string) => page.locator(selector).evaluate(element => {
+    const content = element.querySelector<HTMLElement>('[data-text-component-content]')!, box = content.parentElement!
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT), text = walker.nextNode()!
+    const range = document.createRange(), tops = new Set<number>()
+    for (let index = 0; index < (text.textContent?.length ?? 0); index++) {
+      range.setStart(text, index); range.setEnd(text, index + 1); tops.add(Math.round(range.getBoundingClientRect().top))
+    }
+    range.setStart(text, 0); range.setEnd(text, 1)
+    const glyph = range.getBoundingClientRect(), bounds = box.getBoundingClientRect()
+    return { lines: tops.size, glyph: { width: glyph.width, height: glyph.height }, fontSize: getComputedStyle(content).fontSize,
+      overflow: getComputedStyle(box).overflow, width: bounds.width, height: bounds.height, contentHeight: content.getBoundingClientRect().height }
+  })
+  try {
+    await fs.mkdir(directory, { recursive: true })
+    await page.evaluate(() => Reflect.get(window, 'mountAuthor')('reflow'))
+    const text = page.locator('[data-component-instance="text"]'), bounds = await text.boundingBox()
+    if (!bounds) throw new Error('Missing author text')
+    await page.mouse.click(bounds.x + 20, bounds.y + 20)
+    expect(await page.evaluate(() => Reflect.get(window, 'authorSelection'))).toEqual(['text'])
+    const before = await readText('[data-component-instance="text"]')
+    await page.screenshot({ path: path.resolve('output/authoring-followup-20261017/before/text-reflow/original.png') })
+    const handle = await page.locator('[data-handle="e"]').boundingBox()
+    if (!handle) throw new Error('Missing text resize handle')
+    const x = handle.x + handle.width / 2, y = handle.y + handle.height / 2
+    await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x - bounds.width * .4, y, { steps: 3 })
+    const during = await readText('[data-component-instance="text"]')
+    expect(during.width).toBeCloseTo(before.width * .6, 1)
+    expect(during.height).toBeCloseTo(before.height, 1)
+    expect(during.lines).toBeGreaterThan(before.lines)
+    expect(during.glyph.width).toBeCloseTo(before.glyph.width, 1)
+    expect(during.glyph.height).toBeCloseTo(before.glyph.height, 1)
+    expect(during.fontSize).toBe(before.fontSize)
+    expect(during.overflow).toBe('hidden')
+    expect(during.contentHeight).toBeGreaterThan(during.height)
+    await page.screenshot({ path: path.join(directory, 'editor-resized.png') }); await page.mouse.up()
+    const observed = await page.evaluate(() => ({ project: Reflect.get(window, 'authorProject'), calls: Reflect.get(window, 'authorCalls') })) as { project: CourseProjectV10; calls: ComponentEdit[][] }
+    expect(observed.calls).toHaveLength(1)
+    const driver = new CourseV10Driver(), model = driver.apply({ kind: 'course-v10', project: observed.project, resources: { assets: {}, components: {} } }, captureComponentOperation(observed.project, observed.calls[0]))
+    const archive = driver.serialize(model), cold = driver.load(archive)
+    if (cold.kind !== 'course-v10') throw new Error('Expected course')
+    expect(cold.project.instances.text.frame!.width).toBeCloseTo(120)
+    expect(cold.project.instances.text.frame!.transform).toEqual(observed.project.instances.text.frame!.transform)
+    expect(cold.project.instances.text.data).toEqual(observed.project.instances.text.data)
+    expect(cold.project.instances.shape).toEqual(observed.project.instances.shape)
+    await fs.writeFile(path.join(directory, 'resized.glx'), archive)
+    const published = await buildPublishedCourseV3({ project: cold.project, assetBytes: {}, componentFiles: {} })
+    await page.evaluate(async (payload: unknown) => {
+      document.querySelector<HTMLElement>('#fixture')!.style.display = 'none'
+      const root = document.createElement('div'); root.id = 'text-playback'; root.style.cssText = 'position:relative;width:600px;height:400px'; document.body.append(root)
+      Reflect.set(window, 'player', await Reflect.get(window, 'api').mountPublishedCourseV3(payload, root, { capture: true, keyboardNavigation: false }))
+    }, published.payload as unknown)
+    await page.waitForSelector('#text-playback [data-text-component-content]')
+    const playback = await readText('#text-playback [data-component-object="text"]')
+    expect(playback.lines).toBe(during.lines)
+    expect(playback.fontSize).toBe(before.fontSize)
+    expect(playback.glyph.width / playback.glyph.height).toBeCloseTo(before.glyph.width / before.glyph.height, 2)
+    expect(playback.overflow).toBe('hidden')
+    await page.screenshot({ path: path.join(directory, 'published-reopened.png') })
+    await fs.writeFile(path.join(directory, 'geometry.json'), JSON.stringify({ before, during, playback, frame: cold.project.instances.text.frame }, null, 2))
+  } finally { await page.close() }
+}, 30_000)
 
 it('CA160/222 actual author default line has endpoint handles and previews on its live shape canvas before one commit',async()=>{
   const page=await current()

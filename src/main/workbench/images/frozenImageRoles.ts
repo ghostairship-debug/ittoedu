@@ -1,6 +1,7 @@
 import type { ExecutionRole, ExecutionSelectionSnapshot } from '../../../shared/workbench/executionSettings'
 import { matchesDisclosedSelection, type DisclosedExecutionSettings } from '../../../shared/workbench/executionDesktop'
 import type { ImageModelSelection } from '../../../shared/workbench/images'
+import type { ImageRoleAvailability, ImageRoleAvailabilitySnapshot } from '../../../shared/workbench/toolPorts'
 import { imageRoute } from './imageRoute'
 
 type FrozenImageRole = { selection: ImageModelSelection } | { error: string }
@@ -31,6 +32,16 @@ export function frozenImageRoles(snapshot: (role: ExecutionRole) => Promise<Exec
         roles.set(operation, { selection: structuredClone({ connection: role.connection, imageModel: role.model }) })
       }))
       runs.set(runId, roles)
+    },
+    describe(runId: string): ImageRoleAvailabilitySnapshot | undefined {
+      const roles = runs.get(runId)
+      if (!roles) return undefined
+      const describeRole = (operation: 'generate' | 'edit'): ImageRoleAvailability => {
+        const role = roles.get(operation)
+        return role && 'selection' in role ? { status: 'configured' }
+          : { status: 'unavailable', reason: role && 'error' in role ? role.error : '图片任务没有冻结的模型配置。' }
+      }
+      return { generate: describeRole('generate'), edit: describeRole('edit') }
     },
     selection(runId: string, operation: 'generate' | 'edit'): ImageModelSelection {
       const role = runs.get(runId)?.get(operation)

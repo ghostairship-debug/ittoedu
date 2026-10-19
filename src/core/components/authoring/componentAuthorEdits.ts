@@ -1,9 +1,11 @@
-import type { ComponentAsset, ComponentAuthorGeometry, ComponentAuthorSpot, ComponentAuthorField, ComponentEdit, CourseProjectV10, JsonValue } from '../../../shared/contracts/component-platform'
+import type { ComponentAsset, ComponentAuthorGeometry, ComponentAuthorSpot, ComponentAuthorField, ComponentAuthorRecord, ComponentEdit, CourseProjectV10, JsonValue } from '../../../shared/contracts/component-platform'
 import type { DocumentResources } from '../../../shared/workbench/document'
 import { decodeHtmlEntities, indexHtmlElements, scanHtmlSource } from '../../../shared/html/htmlSourceScanner'
 import { componentSourceOwnerIsShared } from '../source/sourceAuthoringEdits'
 import { assertAuthorRecordBinding, prepareWebAuthoringRecordEdits } from '../../../components/web/authoringRecords'
 import { encodeAuthorSourceText, readAuthorSourceText } from './sourceAuthorText'
+import { equalComponentValue } from '../../drivers/courseV10Operations'
+import { locateHtmlAuthorRecordSource } from '../../../shared/html/htmlSourceLocator'
 
 function usesRecordOwner(project: CourseProjectV10, spot: ComponentAuthorField & { instanceId: string }): boolean {
   if (!spot.authorKey || !spot.binding) return false
@@ -26,6 +28,11 @@ export function authorSpotGeometryEdits(project: CourseProjectV10, spot: Compone
         throw new Error('此处作者几何已变化，本次手势已保留原结果，请重新操作')
     }
   }
+  return authorSpotPresentationEdits(project, spot, { geometry }, originalProject)
+}
+
+function authorSpotPresentationEdits(project: CourseProjectV10, spot: ComponentAuthorSpot,
+  patch: ComponentAuthorRecord['overrides'], originalProject: CourseProjectV10 = project): ComponentEdit[] {
   // A static precise source address can receive software identity in the same transaction as its first geometry.
   // Dynamic same-looking items still need their real semantic binding; a DOM index is not persistent identity.
   if ((spot.bindingStatus === 'unresolved' || spot.bindingStatus === 'source-required') && spot.sourceRegion?.kind === 'data'
@@ -52,9 +59,72 @@ export function authorSpotGeometryEdits(project: CourseProjectV10, spot: Compone
     const anchored = { ...project, instances: { ...project.instances, [spot.instanceId]: { ...instance,
       data: { ...data as Record<string, JsonValue>, html } } } }
     return [{ type: 'data.set', instanceId: spot.instanceId, path: ['html'], value: html },
-      ...prepareWebAuthoringRecordEdits(anchored, { ...spot, binding, bindingStatus: 'bound' }, { geometry })]
+      ...prepareWebAuthoringRecordEdits(anchored, { ...spot, binding, bindingStatus: 'bound' }, patch)]
   }
-  return Object.keys(geometry).length ? prepareWebAuthoringRecordEdits(project, spot, { geometry }) : []
+  return prepareWebAuthoringRecordEdits(project, spot, patch)
+}
+
+/** Local formatting uses the same author records and canonical transaction as local geometry. */
+export function authorSpotStyleSourceRegion(project: CourseProjectV10, spot: ComponentAuthorSpot): ComponentAuthorSpot['sourceRegion'] | undefined {
+  if (spot.sourceRegion?.kind === 'data' && spot.sourceRegion.path?.length === 1 && spot.sourceRegion.path[0] === 'html'
+    && spot.sourceRegion.encoding === 'html-text') return spot.sourceRegion
+  const instance = project.instances[spot.instanceId], record = spot.authorKey && instance?.authoring?.records?.[spot.authorKey]
+  const source = authorSpotValue(instance?.data, ['html'])
+  if (!record || typeof source !== 'string' || Object.keys(record.scope ?? {}).some(key => key.startsWith('react:'))) return undefined
+  const located = locateHtmlAuthorRecordSource(source, record, spot.authorKey!)
+  return located?.valueSpan ? { kind: 'data', path: ['html'], ...located.valueSpan, encoding: 'html-text' } : undefined
+}
+
+export function authorSpotIsSvgText(spot: Pick<ComponentAuthorSpot, 'binding'>): boolean {
+  const boundary = [...spot.binding?.path ?? []].reverse().find(step => /^(?:svg|foreignobject)$/i.test(step.tag))
+  return boundary?.tag.toLowerCase() === 'svg'
+}
+
+export function authorSpotStyleEdits(project: CourseProjectV10, spot: ComponentAuthorSpot, style: Record<string, string>): ComponentEdit[] {
+  if (!Object.keys(style).length) return []
+  if (spot.kind !== 'text') throw new Error('此处不是可格式化文字')
+  if (spot.geometry) return authorSpotPresentationEdits(project, spot, { style })
+  const region = authorSpotStyleSourceRegion(project, spot)
+  // A text node sharing its DOM parent must not format neighboring text or elements.
+  // Wrap its exact static HTML source, then let the original runtime parse that source.
+  if (region?.kind !== 'data' || region.path?.length !== 1 || region.path[0] !== 'html' || region.encoding !== 'html-text'
+    || !spot.binding || !spot.authorKey) throw new Error('此片段由程序共享排版，请在组件源码中修改格式')
+  const instance = project.instances[spot.instanceId], source = authorSpotValue(instance?.data, ['html'])
+  if (typeof source !== 'string') throw new Error('原HTML源码已不存在')
+  const previous = instance.authoring?.records?.[spot.authorKey]
+  authorSpotEdit(project, { ...spot, sourceRegion: region, initialValue: spot.sourceRegion ? spot.initialValue : previous!.binding.baseline },
+    spot.sourceRegion ? spot.initialValue : previous!.binding.baseline)
+  const scan = scanHtmlSource(source), index = indexHtmlElements(source, scan.tokens)
+  const owner = index.elements.filter(element => element.content.start <= region.start && element.content.end >= region.end)
+    .sort((a, b) => a.full.end - a.full.start - (b.full.end - b.full.start))[0]
+  if (!owner || owner.name !== spot.binding.path.at(-1)?.tag) throw new Error('精确HTML父元素已变化，请重新选择')
+  const key = spot.authorKey.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+  const wrapperTag = authorSpotIsSvgText(spot) ? 'tspan' : 'span'
+  const html = source.slice(0, region.start) + `<${wrapperTag} data-cw-author-key="${key}">` + source.slice(region.start, region.end) + `</${wrapperTag}>` + source.slice(region.end)
+  const binding = structuredClone(spot.binding)
+  binding.path.push({ tag: wrapperTag, index: index.elements.filter(element => element.parent === index.elements.indexOf(owner) && element.full.start < region.start).length,
+    attributes: { 'data-cw-author-key': spot.authorKey } })
+  delete binding.textIndex
+  const scope = spot.scope && Object.fromEntries(Object.entries(spot.scope).map(([name, value]) => {
+    const dom = /^dom:(\d+):(.+)$/.exec(name)
+    return [dom ? `dom:${Number(dom[1]) + 1}:${dom[2]}` : name, value]
+  }))
+  const records = instance.authoring?.records
+  assertAuthorRecordBinding(previous, spot)
+  const nextRecords = records ? { ...records } : undefined
+  if (nextRecords) delete nextRecords[spot.authorKey]
+  const anchored = { ...project, instances: { ...project.instances, [instance.id]: { ...instance,
+    data: { ...instance.data as Record<string, JsonValue>, html },
+    ...(nextRecords ? { authoring: { ...instance.authoring, records: nextRecords } } : {}) } } }
+  const siblingBindings: ComponentEdit[] = Object.entries(records ?? {}).flatMap(([key, record]) => key !== spot.authorKey && record.kind === 'text'
+    && equalComponentValue(record.scope ?? {}, spot.scope ?? {}) && equalComponentValue(record.binding.path, spot.binding!.path)
+    && (record.binding.textIndex ?? 0) > (spot.binding!.textIndex ?? 0)
+    ? [{ type: 'authoring.set', instanceId: instance.id, path: ['records', key, 'binding', 'textIndex'], value: (record.binding.textIndex ?? 0) - 1 }]
+    : [])
+  return [{ type: 'data.set', instanceId: instance.id, path: ['html'], value: html },
+    ...siblingBindings,
+    ...prepareWebAuthoringRecordEdits(anchored, { ...spot, binding, ...(scope ? { scope } : {}), bindingStatus: 'bound' },
+      { ...previous?.overrides, style: { ...previous?.overrides.style, ...style } })]
 }
 
 export function authorSpotValue(data: JsonValue | undefined, path: readonly string[]): JsonValue | undefined {

@@ -74,7 +74,7 @@ it.skipIf(process.platform !== 'win32')('executes exact approved commands in the
     else if (turn === 6) { outputJob = result().data.job; tools = [{ name: 'job.wait', input: { job: outputJob, milliseconds: 10000 } }] }
     else if (turn === 7) { const artifact = result().data.snapshot.artifacts[0]; localSource = artifact.source; localVersion = artifact.digest; tools = [{ name: 'delegate.read', input: { job: outputJob, name: artifact.name, version: localVersion } }] }
     else if (turn === 8) { expect(JSON.parse(result().data.text)).toEqual({ total: 30 }); tools = [{ name: 'artifact.save', input: { source: localSource, destination: 'local-result.json' } }] }
-    else if (turn === 9) { expect(result().data).toMatchObject({ status: 'written', sourceKind: 'delegation' }); tools = [{ name: 'delegate.readonly', input: { goal: '根据当前numbers.txt给出引用来源的简短结论', sources: ['numbers.txt'], budget: { maxOutputTokens: 128, maxDurationMs: 10000 } } }] }
+    else if (turn === 9) { expect(result().data).toMatchObject({ status: 'written', sourceKind: 'delegation' }); tools = [{ name: 'delegate.readonly', input: { goal: '根据当前numbers.txt给出引用来源的简短结论', sources: ['numbers.txt'] } }] }
     else if (turn === 10) { readonlyJob = result().data.job; tools = [{ name: 'job.wait', input: { job: readonlyJob, milliseconds: 10000 } }] }
     else if (turn === 11) { const artifact = result().data.snapshot.artifacts[0]; readonlySource = artifact.source; readonlyVersion = artifact.digest; tools = [{ name: 'task.finish', input: {} }] }
     else if (turn === 12) { expect(result().code).toBe('task-unfinished'); tools = [{ name: 'delegate.read', input: { job: readonlyJob, name: 'report.md', version: readonlyVersion } }] }

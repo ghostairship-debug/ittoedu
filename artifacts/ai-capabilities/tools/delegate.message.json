@@ -1,0 +1,30 @@
+{
+  "description": "向同一协作树中一个已知 job 定向传递必要约定、问题或阻断。父任务用子 job 发送给该子运行，子任务用parentJob回复父运行；兄弟或其他同树协作者可用已知目标job直达其子运行。宿主从真实job/run关系解析身份，不广播、不接受任意runId，不复制完整历史或授予另一文档writer。发送只加入目标现消息队列，等待仍用job.wait；不会自动续接终态任务，不代表用户追加授权、回答或批准。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "job": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "text": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "job",
+      "text"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "delegate.message",
+    "targetKinds": []
+  },
+  "name": "delegate.message",
+  "version": 1
+}

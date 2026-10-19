@@ -7,20 +7,21 @@ import {
   X,
 } from 'lucide-react'
 import { useMemo } from 'react'
+import { collectComponentProjectHealth } from '../../core/components/componentProjectHealth'
 import {
-  collectComponentProjectHealth,
   summarizeCourseProjectHealth,
   type ComponentProjectHealthFinding,
 } from '../../shared/componentProjectHealth'
 import { resolveCourseProjectHealthRoute } from '../diagnostics/projectHealthNavigation'
 import {
   selectActiveCourseProjectDocument,
-  selectMediaAssetFiles,
+  selectActiveCourseResources,
   useEditorStore,
 } from '../store/editorStore'
 
 export interface ProjectHealthPanelProps {
   open: boolean
+  diagnostics?: readonly ComponentProjectHealthFinding[]
   onClose(): void
   onExportDiagnostics?(): void
 }
@@ -41,6 +42,7 @@ function SeverityIcon({ severity }: { severity: 'error' | 'warning' | 'info' }) 
 
 export function ProjectHealthPanel({
   open,
+  diagnostics,
   onClose,
   onExportDiagnostics,
 }: ProjectHealthPanelProps) {
@@ -48,6 +50,7 @@ export function ProjectHealthPanel({
 
   return (
     <OpenProjectHealthPanel
+      diagnostics={diagnostics}
       onClose={onClose}
       onExportDiagnostics={onExportDiagnostics}
     />
@@ -55,18 +58,17 @@ export function ProjectHealthPanel({
 }
 
 function OpenProjectHealthPanel({
+  diagnostics: capturedDiagnostics,
   onClose,
   onExportDiagnostics,
 }: Omit<ProjectHealthPanelProps, 'open'>) {
   const courseProject = useEditorStore(selectActiveCourseProjectDocument)
-  const assetFiles = useEditorStore(selectMediaAssetFiles)
+  const resources = useEditorStore(selectActiveCourseResources)
   const diagnostics = useMemo(
-    () => courseProject
-      ? collectComponentProjectHealth(courseProject, {
-          assetFiles,
-        })
-      : [],
-    [assetFiles, courseProject],
+    () => capturedDiagnostics ?? (courseProject
+      ? collectComponentProjectHealth(courseProject, resources)
+      : []),
+    [capturedDiagnostics, resources, courseProject],
   )
   const summary = useMemo(
     () => summarizeCourseProjectHealth(diagnostics),

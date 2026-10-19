@@ -2,7 +2,7 @@ import { createProfessionalDocumentIdentityCopy } from '../components/library/pr
 import type { ComponentInstance, ComponentSurface, CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform/project'
-import { componentInteractionDataSchema, createComponentInteractionCopyIdentities, remapComponentInteractionData } from '../../shared/componentInteractionData'
+import { associatedComponentInteractionRules, interactionRules, componentInteractionDataSchema, createComponentInteractionCopyIdentities, remapComponentInteractionData } from '../../shared/componentInteractionData'
 import { remapComponentInputData } from '../../components/input/authoring'
 
 export const LAST_COURSE_PAGE_REASON = '这是最后一个页面，不能删除'
@@ -29,7 +29,7 @@ export function assertCourseSurfaceRemoval(project: CourseProjectV10): void {
 }
 
 /** Copies the owned graph once. Definitions/assets remain shared; internal targets follow the copy. */
-export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: string, createId: () => string = () => crypto.randomUUID()): { edits: ComponentEdit[]; surfaceId: string; ids: ReadonlyMap<string, string> } {
+export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: string, createId: () => string = () => crypto.randomUUID()): { edits: ComponentEdit[]; surfaceId: string; ids: ReadonlyMap<string, string>; readPaths: string[][] } {
   const source = project.surfaces.find(surface => surface.id === surfaceId)
   if (!source) throw new Error('页面已经不存在')
   const ids = new Map<string, string>()
@@ -41,6 +41,15 @@ export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: stri
     instance.childIds?.forEach(visit)
   }
   source.childIds.forEach(visit)
+  const selected = new Set(ids.keys())
+  const snapshots = [associatedComponentInteractionRules(project, selected), ...(source.presentation?.states ?? []).map(state =>
+    associatedComponentInteractionRules(project, selected, new Set(), Object.fromEntries(Object.entries(state.overrides)
+      .flatMap(([id, override]) => override.data === undefined ? [] : [[id, override.data]]))))]
+  const external = new Map(snapshots.flat().filter(family => !selected.has(family.instance.id)).map(family => [family.instance.id, family]))
+  // Project programs keep their real owner; local programs outside the tree join the copied page.
+  const localExternalIds = [...external].filter(([, family]) => family.target.kind !== 'project').map(([id]) => id)
+  for (const id of localExternalIds) ids.set(id, createId())
+  const familyRules = (id: string, stateIndex = -1) => snapshots[stateIndex + 1].find(family => family.instance.id === id)?.rules ?? []
   const copiedSurfaceId = createId()
   const states = new Map((source.presentation?.states ?? []).map(state => [state.id, createId()]))
   const frames = new Map((source.spatial?.frames ?? []).map(frame => [frame.id, createId()]))
@@ -53,8 +62,12 @@ export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: stri
     for (const [from, to] of copy.actions) if (!actions.has(from)) actions.set(from, to)
   }
   for (const id of ids.keys()) if (professionalKey(project.instances[id]!) === 'guoling.interactions') {
-    ruleIdentities(project.instances[id]!.data)
-    for (const state of source.presentation?.states ?? []) if (state.overrides[id]?.data !== undefined) ruleIdentities(state.overrides[id]!.data!)
+    ruleIdentities(external.has(id) ? { rules: familyRules(id) } as unknown as ComponentInstance['data'] : project.instances[id]!.data)
+    for (const [index, state] of (source.presentation?.states ?? []).entries()) if (external.has(id) || state.overrides[id]?.data !== undefined)
+      ruleIdentities(external.has(id) ? { rules: familyRules(id, index) } as unknown as ComponentInstance['data'] : state.overrides[id]!.data!)
+  }
+  for (const [id, family] of external) if (family.target.kind === 'project') {
+    for (let index = -1; index < (source.presentation?.states.length ?? 0); index++) ruleIdentities({ rules: familyRules(id, index) } as unknown as ComponentInstance['data'])
   }
   const rebindInput = (instance: ComponentInstance) => remapComponentInputData(instance.data, {
     fromInstanceId: instance.id, toInstanceId: ids.get(instance.id) ?? instance.id, rules, stateKeys,
@@ -95,7 +108,9 @@ export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: stri
   const frameIds = frames
   const instances: ComponentInstance[] = [...ids].map(([id, copiedId]) => {
     const copy = structuredClone(project.instances[id]!)
+    if (external.has(id)) copy.data = { rules: familyRules(id) } as unknown as ComponentInstance['data']
     return { ...copy, id: copiedId, data: professionalCopy(rebindData(copy), professionalKey(copy), copy.id),
+      ...(copy.stateBindings ? { stateBindings: Object.fromEntries(Object.entries(copy.stateBindings).map(([alias, key]) => [alias, stateKeys.get(key) ?? key])) } : {}),
       ...(copy.visibility ? { visibility: { ...copy.visibility,
         surfaceIds: copy.visibility.surfaceIds.map(id => id === surfaceId ? copiedSurfaceId : id) } } : {}),
       ...(copy.flowPlacement?.paragraphAnchor ? { flowPlacement: { ...copy.flowPlacement, paragraphAnchor: { ...copy.flowPlacement.paragraphAnchor,
@@ -112,11 +127,23 @@ export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: stri
   if (surface.presentation) surface.presentation = { ...surface.presentation,
     ...(surface.presentation.initialStateId ? { initialStateId: stateId(surface.presentation.initialStateId) } : {}),
     ...(surface.presentation.thumbnailStateId ? { thumbnailStateId: stateId(surface.presentation.thumbnailStateId) } : {}),
-    states: surface.presentation.states.map(state => ({ ...state, id: states.get(state.id)!,
+    states: surface.presentation.states.map((state, stateIndex) => ({ ...state, id: states.get(state.id)!,
       overrides: Object.fromEntries(Object.entries(state.overrides).map(([id, override]) => [ids.get(id) ?? id, { ...override,
-        ...(override.data !== undefined ? { data: professionalCopy(rebindData({ ...project.instances[id], data: override.data }), professionalKey(project.instances[id]), id) } : {}) }])),
+        ...(override.data !== undefined ? { data: external.has(id)
+          ? external.get(id)!.target.kind === 'project'
+            ? JSON.parse(JSON.stringify({ rules: [...interactionRules({ ...project.instances[id], data: override.data }), ...interactionRules({ ...project.instances[id], data: rebindData({ ...project.instances[id], data: { rules: familyRules(id, stateIndex) } as unknown as ComponentInstance['data'] }) })] })) as ComponentInstance['data']
+            : rebindData({ ...project.instances[id], data: { rules: familyRules(id, stateIndex) } as unknown as ComponentInstance['data'] })
+          : professionalCopy(rebindData({ ...project.instances[id], data: override.data }), professionalKey(project.instances[id]), id) } : {}) }])),
       ...(state.order ? { order: state.order.map(id => ids.get(id) ?? id) } : {}),
     })) }
+  for (const [stateIndex, state] of (source.presentation?.states ?? []).entries()) for (const [id, family] of external) {
+    if (state.overrides[id]?.data !== undefined || JSON.stringify(familyRules(id, stateIndex)) === JSON.stringify(familyRules(id))) continue
+    const rebound = interactionRules({ ...family.instance, data: rebindData({ ...family.instance,
+      data: { rules: familyRules(id, stateIndex) } as unknown as ComponentInstance['data'] }) })
+    const copiedState = surface.presentation!.states[stateIndex], targetId = ids.get(id) ?? id
+    copiedState.overrides[targetId] = { ...copiedState.overrides[targetId], data: JSON.parse(JSON.stringify({ rules: family.target.kind === 'project'
+      ? [...interactionRules(family.instance), ...rebound] : rebound })) as ComponentInstance['data'] }
+  }
   if (surface.spatial) {
     const instanceId = (id: string) => ids.get(id) ?? id
     surface.spatial.frames = surface.spatial.frames.map(frame => ({ ...frame, id: frameIds.get(frame.id)!,
@@ -130,7 +157,11 @@ export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: stri
   }
   const edits: ComponentEdit[] = [{ type: 'surface.insert', surface, index: project.surfaces.indexOf(source) + 1 }]
   if (instances.length) edits.push({ type: 'instance.insert', container: { kind: 'surface', surfaceId: copiedSurfaceId }, index: 0,
-    instances, rootIds: source.childIds.map(id => ids.get(id)!) })
+    instances, rootIds: [...source.childIds, ...localExternalIds].map(id => ids.get(id)!) })
+  for (const [id, family] of external) if (family.target.kind === 'project') {
+    const rebound = interactionRules({ ...family.instance, data: rebindData({ ...family.instance, data: { rules: familyRules(id) } as unknown as ComponentInstance['data'] }) })
+    edits.push({ type: 'data.set', instanceId: id, path: ['rules'], value: JSON.parse(JSON.stringify([...interactionRules(family.instance), ...rebound])) })
+  }
   // Global decorations stay shared; the copied page inherits the source page's scope membership.
   const visitedGlobals = new Set<string>()
   const inheritGlobalScope = (id: string) => {
@@ -154,5 +185,6 @@ export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: stri
     }
     edits.push({ type: 'project.logic.set', logic })
   }
-  return { edits, surfaceId: copiedSurfaceId, ids }
+  return { edits, surfaceId: copiedSurfaceId, ids, readPaths: [['@surface', surfaceId],
+    ...[...selected].map(id => ['instances', id]), ...[...external.keys()].flatMap(id => [['instances', id, 'data'], ['instances', id, 'attachments'], ['@owner', id]])] }
 }

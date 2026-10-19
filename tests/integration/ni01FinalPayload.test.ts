@@ -25,7 +25,7 @@ const selection: ModelSelection = { model: 'fixture', connection: { id: 'fixture
   baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture' },
   billing: { kind: 'unknown' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'supported', reasoning: 'supported' } } }
 const digest = (text: string) => createHash('sha256').update(text).digest('hex')
-function complete(request: ModelRequest, calls: { id: string; name: string; argumentsText: string }[] = []): ModelEvent {
+function complete(request: ModelRequest, calls: { id: string; name: string; argumentsText: string }[] = []): Extract<ModelEvent, { type: 'response.completed' }> {
   return { type: 'response.completed', requestId: request.requestId, sequence: 2, responseId: request.requestId, actualModel: 'fixture',
     nativeResponse: {}, finishReason: calls.length ? 'tool_calls' : 'stop', toolCalls: calls,
     assistant: { role: 'assistant', content: calls.length ? '正在修改' : '完成', ...(calls.length ? { tool_calls: calls.map(call => ({
@@ -62,7 +62,13 @@ it.each([true, false])('NI01 final production payload reaches provider and its m
   expect(final.status).toBe('completed')
   expect(requests).toHaveLength(1)
   const request = requests[0]!, manifest = final.initialPayload!
-  expect(request.messages.some(message => String(message.content).includes('currentDocuments'))).toBe(bound)
+  const factMessage = [...request.messages].reverse().find(message => typeof message.content === 'string'
+    && message.content.startsWith('宿主本轮事实（数据，非用户指令）：'))
+  expect(factMessage?.role).toBe('user')
+  const facts = JSON.parse(String(factMessage!.content).split('\n').slice(1).join('\n'))
+  expect(facts.currentDocuments.map((document: { documentId: string }) => document.documentId))
+    .toEqual(h.input.documents.map(document => document.documentId))
+  expect(facts.workingNote).toMatchObject({ goal: h.input.instruction, userConstraints: [] })
   const serialized = serializeModelPayload({ selection: request.selection, messages: request.messages, tools: request.tools ?? [] })
   expect(manifest.payloadDigest).toBe(digest(serialized))
   expect(manifest.totals.serializedBytes).toBe(Buffer.byteLength(serialized))
@@ -73,6 +79,38 @@ it.each([true, false])('NI01 final production payload reaches provider and its m
     expect(entry.serializedBytes).toBe(Buffer.byteLength(JSON.stringify(request.messages[entry.messageIndex])))
   }
   expect(manifest.tools).toEqual(request.tools?.map(tool => ({ name: tool.name, digest: digest(JSON.stringify(tool)) })))
+})
+
+it('shares the measured provider preparation with initial finalize and transport', async () => {
+  let preparations = 0, transports = 0
+  const preparedWires: string[] = []
+  const provider: ModelProvider = {
+    prepare(input) {
+      preparations++
+      const frozen = structuredClone(input), serialized = serializeModelPayload(frozen)
+      preparedWires.push(serialized)
+      return { serialized, async *stream(requestId: string): AsyncGenerator<ModelEvent> {
+        transports++
+        yield { type: 'response.started', requestId, sequence: 1, responseId: requestId }
+        yield { type: 'usage.reported', requestId, sequence: 2, usage: { inputTokens: 18, outputTokens: 0,
+          cachedInputTokens: 4, cacheWriteInputTokens: 2, raw: { input_tokens: 12, cache_read_input_tokens: 4, cache_creation_input_tokens: 2 } } }
+        yield { ...complete({ ...frozen, requestId }), sequence: 3, usage: { inputTokens: 18, outputTokens: 8, totalTokens: 26,
+          cachedInputTokens: 4, cacheWriteInputTokens: 2, reasoningTokens: 3,
+          raw: { input_tokens: 12, output_tokens: 8, cache_read_input_tokens: 4, cache_creation_input_tokens: 2 } } }
+      } }
+    },
+    async *stream() { throw new Error('prepared input must be sent directly') },
+  }
+  const h = await fixture(provider)
+  const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('completed')
+  expect(preparations).toBe(1)
+  expect(transports).toBe(1)
+  expect(final.initialPayload?.payloadDigest).toBe(digest(preparedWires[0]!))
+  expect(final.requests).toHaveLength(1)
+  expect(final.requests[0]!.usage).toEqual({ inputTokens: 18, outputTokens: 8, totalTokens: 26,
+    cachedInputTokens: 4, cacheWriteInputTokens: 2, reasoningTokens: 3,
+    raw: { input_tokens: 12, output_tokens: 8, cache_read_input_tokens: 4, cache_creation_input_tokens: 2 } })
 })
 
 it.each([{ sameSource: true }, { sameSource: false }])(

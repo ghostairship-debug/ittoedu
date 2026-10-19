@@ -7,10 +7,10 @@ import { File, Folder, Plus, MoreHorizontal, Sparkles, Pin, PinOff, X, Send, Squ
 import { ConversationInput } from './ConversationInput'
 import { dispatchRevealInExplorer } from './revealInExplorer'
 import { useDismissableDetails } from '../ui/useDismissableDetails'
-import { type ConversationRecord, type ExecutionAdvancementMode } from '../../shared/workbench/conversations'
-import { executionAdvancementMode, type ExecutionRunRecord, type ExecutionContentOutput } from '../../shared/workbench/execution'
+import { type ConversationRecord } from '../../shared/workbench/conversations'
+import { type ExecutionRunRecord, type ExecutionContentOutput } from '../../shared/workbench/execution'
 import { captureRendererTiming, disclosedExecutionSettings, executionSelectionTargetSchema, type ExecutionDesktopAPI, type ExecutionDocumentReference, type ExecutionSendInput, type ExecutionSubmissionMode, type ExecutionSubmissionRecord } from '../../shared/workbench/executionDesktop'
-import { emptyExecutionProjection, foldExecutionEvents, type ExecutionProjection } from '../../shared/workbench/executionEvents'
+import { emptyExecutionProjection, foldExecutionEvents, type ExecutionEvent, type ExecutionProjection } from '../../shared/workbench/executionEvents'
 import type { InputAttachmentReference } from '../../shared/workbench/attachments'
 import type { ExecutionRoleSelection, ExecutionSettingsView } from '../../shared/workbench/executionSettings'
 import type { DiscoveredModel, DiscoveredModels, DiscoveredReasoningEffort, ExecutionSettingsAPI } from '../../shared/workbench/executionSettingsDesktop'
@@ -25,18 +25,18 @@ import { ExecutionSettingsPanel } from './ExecutionSettingsPanel'
 import { ExternalMcpPanel } from './ExternalMcpPanel'
 import { useExternalUiStateProvider } from './useExternalUiState'
 import { ExecutionTimeline, type ExecutionTimelineProps } from './ExecutionTimeline'
+import { ExecutionDelegationChildren, createExecutionDelegationInteraction, type ExecutionDelegationInteraction } from './ExecutionDelegationChildren'
 import { ExecutionChangeReview, type ExecutionChangeReviewProps } from './ExecutionChangeReview'
 import type { UserCheckpointIndex } from '../../shared/workbench/executionReview'
 import { ExecutionQuestionCard } from './ExecutionQuestionCard'
 import { ExecutionApprovalCard } from './ExecutionApprovalCard'
 import { pendingApproval, pendingQuestion } from './executionTimelineModel'
-import { DEFAULT_PERMISSION_MODE, executionPermissionModes, permissionDescriptions, permissionLabels, permissionShortLabels, type ExecutionPermissionMode } from '../../shared/workbench/executionPermission'
+import { DEFAULT_PERMISSION_MODE, recordedPermissionMode, executionPermissionModes, permissionDescriptions, permissionLabels, permissionShortLabels, type ExecutionPermissionMode } from '../../shared/workbench/executionPermission'
 import { AttachmentComposer } from './attachments/AttachmentComposer'
 import { attachmentDraftChange } from './attachments/attachmentDraftChange'
 import { userMessageWindow } from './userMessageWindow'
 import { isExecutionInputError } from '../../shared/workbench/executionInputMessages'
 import './executionAssistant.css'
-import './executionAdvancementMode.css'
 import { bodyStreamingLabel, bodyStreamingRecord, configuredBodyStreamingAlternatives } from '../../shared/workbench/bodyStreaming'
 import { useWorkbenchSessionDock } from './WorkbenchSessionPortal'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
@@ -66,7 +66,6 @@ const checkpointStatusLabels: Record<ExecutionRunRecord['status'], string> = {
   completed: '本轮已结束', failed: '失败', interrupted: '已中断',
 }
 const effortLabels: Record<DiscoveredReasoningEffort, string> = { none: '关闭', minimal: '极低', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最高' }
-const advancementLabels: Record<ExecutionAdvancementMode, string> = { automatic: '自动推进', stepwise: '逐步推进' }
 const knowledgeKey = (entry: ModelKnowledgeEntry) => entry.provider ? `${entry.provider}/${entry.id}` : entry.id
 const knownModelGuidance: Record<string, string> = {
   'gpt-6-sol': '日常创作与开发',
@@ -115,6 +114,15 @@ const connectionFailure = (run: ExecutionRunRecord | null): string | null => {
   if (failure.kind === 'protocol') return `模型服务返回了无法继续处理的响应${status}。已有成果保留，请检查连接配置后继续此任务。`
   return null
 }
+function openedCourseDocumentId(toolName: string, output: string): string | null {
+  const result = JSON.parse(output)
+  const data = result?.kind === 'read' ? result.data : null
+  // file.create reports the new course summary; file.open reports the document kind.
+  // The writable target is issued only after Main has selected the opened document.
+  return data && data.writable === true && typeof data.target === 'string' && typeof data.documentId === 'string'
+    && (toolName === 'file.open' ? data.kind === 'course-v10' : toolName === 'file.create' && data.course && typeof data.course === 'object')
+    ? data.documentId : null
+}
 const permissionKey = (workspaceId: string) => `guoling.execution.permission.v1:${workspaceId}`
 function readPermission(workspaceId: string): ExecutionPermissionMode {
   try {
@@ -147,13 +155,14 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   useExternalUiStateProvider(externalAPI, workspaceId, captureDocuments)
   const [conversations, setConversations] = useState<ConversationRecord[]>([])
   const [active, setActive] = useState<ConversationRecord | null>(null)
+  const [delegationInteractions, setDelegationInteractions] = useState<Record<string, ExecutionDelegationInteraction>>({})
+  const emptyDelegationInteraction = useMemo(createExecutionDelegationInteraction, [active?.workspaceId, active?.conversationId])
   const [draft, setDraft] = useState('')
   const [documents, setDocuments] = useState<ExecutionDocumentReference[]>([])
   const [attachments, setAttachments] = useState<InputAttachmentReference[]>([])
   const [permission, setPermissionState] = useState<ExecutionPermissionMode>(DEFAULT_PERMISSION_MODE)
   const [permissionOpen, setPermissionOpen] = useState(false), [plusOpen, setPlusOpen] = useState(false)
   const [contextFrozen, setContextFrozen] = useState(false)
-  const [advancementBusy, setAdvancementBusy] = useState(false)
   const [projection, setProjection] = useState<ExecutionProjection>(() => emptyExecutionProjection(''))
   const [run, setRun] = useState<ExecutionRunRecord | null>(null)
   const [settings, setSettings] = useState<ExecutionSettingsView | null>(null)
@@ -200,6 +209,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const [busy, setBusy] = useState(false), [attachmentBusy, setAttachmentBusy] = useState(false), [error, setError] = useState('')
   const generation = useRef(0), capturePromise = useRef<Promise<ExecutionDocumentReference[]> | null>(null)
   const fileOpenTicket = useRef(0)
+  const locateDocumentRef = useRef(onLocateDocument); locateDocumentRef.current = onLocateDocument
+  const observedCourseOpens = useRef(new Set<string>())
   const documentsByConversation = useRef(new Map<string, ExecutionDocumentReference[]>())
   const frozenByConversation = useRef(new Map<string, boolean>())
   const activeRef = useRef<ConversationRecord | null>(null), draftRef = useRef('')
@@ -211,8 +222,6 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const [attachmentBusyOwners, setAttachmentBusyOwners] = useState<ReadonlySet<string>>(new Set())
   const contextFrozenRef = useRef(false)
   const persistQueue = useRef<Promise<unknown>>(Promise.resolve())
-  const advancementWrite = useRef<Promise<unknown>>(Promise.resolve())
-  const advancementRead = useRef(0)
   const submittingRef = useRef(false), composingRef = useRef(false)
   const referenceCapture = useRef(0), removedAutomatic = useRef(new Set<string>()), automaticFocus = useRef('')
 
@@ -315,42 +324,13 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     const next = { ...current, home: latest.home, advancementMode: latest.advancementMode, updatedAt: latest.updatedAt }
     activeRef.current = next; setActive(next)
   }
-  const refreshAdvancementPreference = async (owner: Pick<ConversationRecord, 'workspaceId' | 'conversationId'>) => {
-    const ticket = ++advancementRead.current
-    const latest = await api?.conversation(owner.workspaceId, owner.conversationId)
-    if (latest && ticket === advancementRead.current) applyConversationMetadata(latest)
-  }
-  const chooseAdvancementMode = async (advancementMode: ExecutionAdvancementMode) => {
-    const selected = activeRef.current
-    if (!api?.setAdvancementMode || !selected || advancementBusy || selected.advancementMode === advancementMode) return
-    setAdvancementBusy(true); setError(''); ++advancementRead.current
-    const ticket = generation.current
-    const task = persistQueue.current.then(async () => {
-      const saved = await api.setAdvancementMode!({ workspaceId: selected.workspaceId, conversationId: selected.conversationId, advancementMode })
-      if (ticket !== generation.current) return
-      applyConversationMetadata(saved)
-      // The accepted run keeps its original freeze; Main publishes ordered steering for the changed preference.
-      const currentRun = runRef.current
-      if (currentRun?.input.conversationId === selected.conversationId) {
-        const latestRun = await api.run(currentRun.runId).catch(() => null)
-        if (latestRun && activeRef.current?.conversationId === selected.conversationId && runRef.current?.runId === currentRun.runId && latestRun.version >= runRef.current.version) {
-          setRun(latestRun); runRef.current = latestRun
-        }
-      }
-    })
-    advancementWrite.current = task.catch(() => undefined)
-    persistQueue.current = task.catch(() => undefined)
-    try { await task }
-    catch (failure) { if (ticket === generation.current) setError(failure instanceof Error ? failure.message : '推进方式未保存，请重试。') }
-    finally { if (ticket === generation.current) setAdvancementBusy(false) }
-  }
 
   useEffect(() => {
     const ticket = ++generation.current
     documentsByConversation.current.clear(); frozenByConversation.current.clear()
     activeRef.current = null; draftRef.current = ''; documentsRef.current = []; attachmentsRef.current = []; contextFrozenRef.current = false
     setWorkspaceId(''); setConversations([]); setActive(null); setDraft(''); setDocuments([]); setAttachments([]); setSubmissions([]); setUserHistoryOffsets({})
-    setLatestRequest(undefined); setAdvancementBusy(false); ++advancementRead.current
+    setLatestRequest(undefined)
     setContextFrozen(false); setRun(null); setError('')
     if (!api) { setError('当前环境没有统一执行服务。'); return }
     setBusy(true)
@@ -581,6 +561,24 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         .finally(() => { catchingUp = false; if (catchUpPending && !disposed) catchUp() })
     }
     const runReads = new Map<string, boolean>()
+    let openedCourseSequence = 0
+    const focusOpenedCourse = async (event: ExecutionEvent) => {
+      if (event.source !== 'builtin' || event.type !== 'tool' || !['completed', 'written'].includes(event.data.status ?? '')
+        || !['file.create', 'file.open'].includes(event.data.toolName ?? '') || !locateDocumentRef.current) return
+      const key = JSON.stringify([event.runId, event.itemId])
+      if (observedCourseOpens.current.has(key)) return
+      observedCourseOpens.current.add(key)
+      try {
+        const output = event.data.output ?? (event.data.outputRef ? await api.blob(conversationId, event.data.outputRef) : undefined)
+        if (disposed || activeRef.current?.conversationId !== conversationId || event.sequence <= openedCourseSequence || output === undefined) return
+        const documentId = openedCourseDocumentId(event.data.toolName!, output)
+        if (!documentId) return
+        openedCourseSequence = event.sequence
+        await locateDocumentRef.current?.(documentId)
+      } catch {
+        if (!disposed && activeRef.current?.conversationId === conversationId) setError('工程已打开，但暂时无法显示。请在项目文件中打开。')
+      }
+    }
     let submissionsTicket = 0
     const refreshRun = (runId: string, changed = false) => {
       if (runReads.has(runId)) { if (changed) runReads.set(runId, true); return }
@@ -592,10 +590,6 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           || !['queued', 'running', 'stopping'].includes(previous.status) && ['queued', 'running', 'stopping'].includes(value.status)
           : previous.createdAt > value.createdAt)) return
         setRun(value); runRef.current = value
-        if (executionAdvancementMode(value) !== (previous ? executionAdvancementMode(previous) : undefined)) {
-          const owner = activeRef.current
-          if (owner?.conversationId === conversationId) void refreshAdvancementPreference(owner).catch(() => undefined)
-        }
       }).catch(() => { if (!disposed) setError('当前任务状态暂不可读取，已保留任务内容。') })
         .finally(() => { const pending = runReads.get(runId); runReads.delete(runId); if (pending && !disposed) refreshRun(runId) })
     }
@@ -607,6 +601,9 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     }
     const unsubscribe = api.subscribe(event => {
       if (event.conversationId !== conversationId) return
+      // Only new results received by the selected built-in conversation navigate.
+      // Loading a timeline or catching up history must never reopen an old course.
+      void focusOpenedCourse(event)
       catchUp()
       if (event.type === 'run.end' || event.type === 'run.state' || runRef.current?.runId !== event.runId) {
         if (event.type === 'run.end') void settingsAPI?.read().then(setSettings).catch(() => undefined)
@@ -659,10 +656,6 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   // Element AI cards (M15) belong to this space and use the permission level shown here.
   useEffect(() => { elementCards.setWorkspace(workspaceId || null); return () => elementCards.setWorkspace(null) }, [workspaceId])
   useEffect(() => { elementCards.setPermission(permission) }, [permission])
-  useEffect(() => {
-    elementCards.setAdvancementPreferenceOwner(active ? { workspaceId: active.workspaceId, conversationId: active.conversationId } : null)
-    return () => elementCards.setAdvancementPreferenceOwner(null)
-  }, [active?.workspaceId, active?.conversationId])
   const choosePermission = (value: ExecutionPermissionMode) => {
     setPermissionState(value); setPermissionOpen(false)
     permissionRef.current?.querySelector<HTMLButtonElement>('button')?.focus()
@@ -979,7 +972,6 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     submittingRef.current = true; setBusy(true); setError('')
     let request: ExecutionSendInput | undefined, sendInvoked = false
     try {
-      await advancementWrite.current
       if (retry) request = { workspaceId: retry.workspaceId, conversationId: retry.conversationId, submissionId: retry.submissionId,
         expectedRevision: selected.revision, text: retry.text, documents: structuredClone(retry.documents), attachments: structuredClone(retry.attachments),
         mode: retry.mode, ...(retry.retryOfRunId ? { retryOfRunId: retry.retryOfRunId } : {}), ...(retry.permission ? { permission: retry.permission } : {}), ...(retry.contentOutput ? { contentOutput: retry.contentOutput } : {}),
@@ -1003,22 +995,20 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         request = { workspaceId: source.workspaceId, conversationId: source.conversationId, submissionId: crypto.randomUUID(),
           expectedRevision: persisted.revision, text: source.text, documents: structuredClone(source.documents),
           attachments: structuredClone(source.attachments), mode: 'queue', retryOfRunId: continueRun.runId,
-          ...((persisted.advancementMode ?? executionAdvancementMode(continueRun)) ? { advancementMode: persisted.advancementMode ?? executionAdvancementMode(continueRun) } : {}),
-          ...(source.permission ? { permission: source.permission } : {}), ...(source.contentOutput ? { contentOutput: source.contentOutput } : {}),
+          permission: recordedPermissionMode(source.permission), ...(source.contentOutput ? { contentOutput: source.contentOutput } : {}),
           ...(source.materials ? { materials: structuredClone(source.materials) } : {}) }
       }
       else if (mode === 'adjust') {
         const original = runRef.current
         if (!original || !['queued', 'running'].includes(original.status)) throw new Error('当前任务已结束，补充输入已保留，请作为新任务发送')
-        if (attachmentsRef.current.length || permission !== (original.input.permission ?? DEFAULT_PERMISSION_MODE))
+        if (attachmentsRef.current.length || permission !== recordedPermissionMode(original.input.permission))
           throw new Error('新增材料或权限请加入队列作为新任务。')
         const persisted = await persist()
         const current = activeRef.current
         if (!current || !persisted || current.conversationId !== selected.conversationId || persisted.conversationId !== selected.conversationId) throw new Error('会话已切换，消息没有发送。')
         // Main owns the original run's documents, provider and authority. A text adjustment captures none anew.
         request = { workspaceId: current.workspaceId, conversationId: current.conversationId, submissionId: crypto.randomUUID(),
-          expectedRevision: current.revision, text: draftRef.current, documents: [], attachments: [], mode: 'adjust', permission,
-          ...((persisted.advancementMode ?? executionAdvancementMode(original)) ? { advancementMode: persisted.advancementMode ?? executionAdvancementMode(original) } : {}) }
+          expectedRevision: current.revision, text: draftRef.current, documents: [], attachments: [], mode: 'adjust', permission }
       }
       else {
         const materials = await captureMaterials?.()
@@ -1035,7 +1025,6 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         const level = permissionOverride ?? permission
         request = { workspaceId: current.workspaceId, conversationId: current.conversationId, submissionId: crypto.randomUUID(),
           expectedRevision: current.revision, text: draftRef.current, documents: documentsForPermission(captured, level), attachments: structuredClone(attachmentsRef.current), mode, permission: level, ...(contentOutput ? { contentOutput } : {}),
-          ...(persisted.advancementMode ? { advancementMode: persisted.advancementMode } : {}),
           ...(materials ? { materials: structuredClone(materials) } : {}) }
       }
       // Owner 2026-09-24: no service notice. The route shown in the model menu is frozen with the task.
@@ -1357,7 +1346,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
             </div>
           </details>
         </div>
-        {run && ['queued', 'running', 'stopping'].includes(run.status) && <small className="execution-assistant__run-route" title="本次任务保持发送时的模型；推进方式采用最新接受的选择。">当前任务：{run.input.selection.model} · <span aria-label="当前任务推进方式">{executionAdvancementMode(run) ? advancementLabels[executionAdvancementMode(run)!] : '推进方式尚未选择'}</span></small>}
+        {run && ['queued', 'running', 'stopping'].includes(run.status) && <small className="execution-assistant__run-route" title="本次任务保持发送时的模型。">当前任务：{run.input.selection.model}</small>}
       </header>
       {forkAdvisory && forkAdvisory.conversationId === active?.conversationId && <section aria-label="新会话继续提示" className="execution-assistant__submission-note">
         <p>已从检查点创建新会话。先检查并修改下方目标草稿；发送时会重新读取当前文件，原任务操作不会自动重做。</p>
@@ -1393,6 +1382,9 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
             timedSubmissions.current.delete(taskId)
             void api.timing!({ ...owner, submissionId: taskId, stage: 'renderer.first-visible', stamp, itemId }).catch(() => undefined)
           } : undefined} />
+        {api && active && <ExecutionDelegationChildren key={`${active.workspaceId}:${active.conversationId}`} api={api} workspaceId={active.workspaceId} conversationId={active.conversationId}
+          interaction={delegationInteractions[`${active.workspaceId}:${active.conversationId}`] ?? emptyDelegationInteraction}
+          onInteraction={update => { const key = `${active.workspaceId}:${active.conversationId}`; setDelegationInteractions(values => ({ ...values, [key]: update(values[key] ?? emptyDelegationInteraction) })) }} />}
         </>}
         {reviewRunId && active?.runIndex.builtinRunIds.includes(reviewRunId) && reviewLoader && reviewRollback && <section aria-label="会话变更审阅">
           <header><strong>审阅任务变更</strong>
@@ -1416,7 +1408,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
 
         {submissions.filter(item => item.state !== 'accepted' && item.state !== 'cancelled').map(item => <article className={`execution-assistant__submission execution-assistant__submission--${item.state}`} key={item.submissionId} aria-label="待处理消息">
           <header><strong>{item.state === 'queued' ? `排队中${item.position ? ` · 第 ${item.position} 条` : ''}` : item.state === 'starting' ? '正在确认' : '未发送'}</strong>
-            <small>{item.model.provider} · {item.model.model}{item.advancementMode ? ` · ${advancementLabels[item.advancementMode]}` : ''}</small></header>
+            <small>{item.model.provider} · {item.model.model}</small></header>
           <p>{item.text || `附件 ${item.attachments.length} 个`}</p>
           {item.queuePausedReason === 'user' && <p className="execution-assistant__submission-note">后续任务已暂停，消息和草稿仍保留。
             <button type="button" disabled={busy} onClick={() => { void api?.resumeQueue({ workspaceId: item.workspaceId, conversationId: item.conversationId }).catch(cause => setError(String(cause))) }}>继续排队任务</button></p>}
@@ -1434,9 +1426,6 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           const currentDraft = openQuestion.question.currentDraft ? await workbenchSelection.prepareQuestion(openQuestion.question) : undefined
           const record = await api.answer!({ runId: openQuestion.runId, callId: openQuestion.callId, answer, ...(currentDraft ? { currentDraft } : {}) })
           if (runRef.current?.runId === record.runId) { setRun(record); runRef.current = record }
-          const owner = activeRef.current
-          if (openQuestion.question.purpose === 'advancement-mode' && owner?.conversationId === record.input.conversationId)
-            await refreshAdvancementPreference(owner).catch(() => undefined)
         } : undefined} />}
       {openApproval && <ExecutionApprovalCard key={`${openApproval.runId}:${openApproval.callId}`} pending={openApproval}
         onDecide={api?.approve ? async decision => {
@@ -1498,16 +1487,6 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           </div>}
         </AttachmentComposer></div>)}
         <div className="execution-assistant__toolbar">
-          <label className="execution-assistant__advancement">
-            <span className="execution-assistant__advancement-label">推进</span>
-            <select aria-label="推进方式" value={active?.advancementMode ?? ''} disabled={!active || busy || advancementBusy || !api?.setAdvancementMode}
-              title="自动推进持续完成授权目标；逐步推进在有选择价值的产物节点确认。可随时更改，当前任务按最新接受的选择继续。"
-              onChange={event => { const value = event.currentTarget.value; if (value === 'automatic' || value === 'stepwise') void chooseAdvancementMode(value) }}>
-              <option value="" disabled>尚未选择</option>
-              <option value="automatic">自动推进</option>
-              <option value="stepwise">逐步推进</option>
-            </select>
-          </label>
           <div className="execution-assistant__permission" ref={permissionRef}>
             <button type="button" className="execution-assistant__permission-button" aria-label={`权限：${permissionLabels[permission]}`} aria-haspopup="menu" aria-expanded={permissionOpen}
               title={`${permissionLabels[permission]}：${permissionDescriptions[permission]}`} onClick={event => togglePopup('permission', event.currentTarget)}>
@@ -1595,7 +1574,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
             {run && ['queued', 'running', 'stopping'].includes(run.status) && <button type="button" aria-label={run.status === 'stopping' ? '正在停止…' : '停止当前'} title="停止当前" onClick={() => void stop()} disabled={busy || run.status === 'stopping'}><Square size={15} /></button>}
             {run?.status === 'running' && submissions.some(item => item.state === 'queued') && <button type="button" aria-label="停止并暂停后续" title="停止并暂停后续" disabled={busy} onClick={() => void stop(true)}><Pause size={15} /></button>}
             {run && ['queued', 'running'].includes(run.status) && <button type="button" onClick={() => { composerRef.current?.focus(); void submit('adjust') }}
-              disabled={!active || busy || attachmentBusy || !draft.trim() || attachments.length > 0 || permission !== (run.input.permission ?? DEFAULT_PERMISSION_MODE)}
+              disabled={!active || busy || attachmentBusy || !draft.trim() || attachments.length > 0 || permission !== recordedPermissionMode(run.input.permission)}
               aria-label="调整当前任务" title="在原任务的范围内继续；新增材料或权限请加入队列。"><Pencil size={15} /></button>}
             <button type="button" className="primary-button" aria-label={run && ['queued', 'running', 'stopping'].includes(run.status) ? '加入队列' : '发送'} title={run && ['queued', 'running', 'stopping'].includes(run.status) ? '加入队列' : '发送'} onClick={() => { composerRef.current?.focus(); void submit('queue') }} disabled={!active || busy || attachmentBusy || (!draft.trim() && attachments.length === 0)}>{run && ['queued', 'running', 'stopping'].includes(run.status) ? <ListPlus size={16} /> : <Send size={16} />}</button>
           </div>

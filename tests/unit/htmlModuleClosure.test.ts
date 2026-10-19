@@ -66,7 +66,10 @@ it('retains recursive editable HTML modules through archive, same-writer edits a
   const runtime = await projectWebModuleGraph(updated.project.instances.program!, input => compilation.compile(input))
   const published = await buildPublishedCourseV3({ project: updated.project, assetBytes: {} }, { compilation })
   expect(published.diagnostics).toEqual([])
-  expect(published.payload.instances.program!.data).toEqual(runtime.data)
+  const { publishedModuleBundle, ...publishedData } = published.payload.instances.program!.data as Record<string, unknown>
+  expect(publishedData).toEqual(runtime.data)
+  expect(publishedModuleBundle).toEqual(expect.any(String))
+  expect((publishedModuleBundle as string).length).toBeGreaterThan(0)
   const graph = z.object({ moduleGraph: z.object({ modules: z.record(z.string(), z.object({
     code: z.string(), imports: z.array(z.object({ path: z.string(), start: z.number(), end: z.number() })),
   })) }) }).parse(runtime.data).moduleGraph

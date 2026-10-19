@@ -8,6 +8,7 @@ import { HtmlPreviewService, HtmlPreviewUnavailableError, type HtmlPreviewAutoma
 import { HtmlActionService, type HtmlActionPreviewPort } from './HtmlActionService'
 import { HtmlActionDesktopPort } from './HtmlActionDesktopPort'
 import { ObservationImageStore } from './ObservationImageStore'
+import { taskTargetViewport } from '../../../shared/workbench/taskTargetContext'
 
 interface OwnedPreview {
   documentId: string
@@ -30,7 +31,8 @@ export class TaskHtmlPreview implements HtmlActionPreviewPort {
   private readonly stopped = new Set<string>()
   private disposed = false
   constructor(private readonly options: { live?: HtmlPreviewService;
-    readDocument(documentId: string): Promise<DocumentSnapshot>; agentBundlePath: string }) {}
+    readDocument(documentId: string): Promise<DocumentSnapshot>; agentBundlePath: string;
+    taskTargetContext?(runId: string): Promise<unknown | null> }) {}
 
   async automationContext(leaseId: string, loadId: string, revision: number): Promise<HtmlPreviewAutomationContext> {
     if (this.disposed) throw new Error('HTML 观察已停止')
@@ -45,25 +47,31 @@ export class TaskHtmlPreview implements HtmlActionPreviewPort {
 
   async automationContextForDocument(input: DocumentRequest): Promise<HtmlPreviewAutomationContext> {
     if (this.disposed || input.runId && this.stopped.has(input.runId)) throw new Error('HTML 观察已停止')
-    const key = JSON.stringify([input.documentId, input.epoch, input.revision])
+    const viewport = input.runId && this.options.taskTargetContext
+      ? taskTargetViewport(await this.options.taskTargetContext(input.runId)) : undefined
+    if (this.disposed || input.runId && this.stopped.has(input.runId)) throw new Error('HTML 观察已停止')
+    const key = JSON.stringify([input.documentId, input.epoch, input.revision, viewport])
     const existing = input.runId ? this.owned.get(input.runId) : undefined
     // Preserve this task's interaction state even if a live tab opens in the meantime.
     if (existing?.key === key && !existing.closed) return existing.context
     try {
-      if (!this.options.live) throw new HtmlPreviewUnavailableError('missing')
+      // A live editor tab may have a different viewport. Candidate geometry is
+      // frozen by the task owner, so render that candidate at its actual size.
+      if (!this.options.live || viewport) throw new HtmlPreviewUnavailableError('missing')
       const context = await this.options.live.automationContextForDocument(input)
       if (this.disposed || input.runId && this.stopped.has(input.runId)) throw new Error('HTML 观察已停止')
       if (existing) this.close(existing)
       return context
     } catch (error) {
-      if (!(error instanceof HtmlPreviewUnavailableError) || error.reason !== 'missing' || input.tabId || !input.runId) throw error
+      if (!(error instanceof HtmlPreviewUnavailableError) || error.reason !== 'missing' || input.tabId && !viewport || !input.runId) throw error
     }
     if (this.disposed || this.stopped.has(input.runId)) throw new Error('HTML 观察已停止')
     if (existing) this.close(existing)
     const partition = sessions.fromPartition(`html-task-${randomUUID()}`, { cache: false })
     const policy = new PreviewNetworkPolicy()
     configureRestrictedSession(partition, url => policy.allowsRequest(url))
-    const window = new BrowserWindow({ show: false, skipTaskbar: true, width: 1280, height: 720,
+    const window = new BrowserWindow({ show: false, skipTaskbar: true,
+      width: Math.ceil(viewport?.width ?? 1280), height: Math.ceil(viewport?.height ?? 720),
       useContentSize: true, webPreferences: { session: partition, sandbox: true, contextIsolation: true,
         nodeIntegration: false, backgroundThrottling: false } })
     const shell = 'data:text/html;charset=utf-8,' + encodeURIComponent('<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;overflow:hidden"></body></html>')
@@ -101,7 +109,7 @@ export class TaskHtmlPreview implements HtmlActionPreviewPort {
       await window.webContents.mainFrame.executeJavaScript(`new Promise((resolve,reject)=>{
         const frame=document.createElement('iframe');frame.title='Task HTML preview';
         frame.setAttribute('sandbox','allow-scripts allow-same-origin');frame.referrerPolicy='no-referrer';
-        frame.style.cssText='display:block;border:0;width:100vw;height:100vh';
+        frame.style.cssText=${JSON.stringify(`display:block;border:0;width:${viewport ? `${viewport.width}px` : '100vw'};height:${viewport ? `${viewport.height}px` : '100vh'}`)};
         const faultWait=setTimeout(()=>{frame.remove();reject(new Error('HTML 任务预览无响应'))},15000);
         frame.onload=()=>{clearTimeout(faultWait);resolve(true)};frame.onerror=()=>{clearTimeout(faultWait);reject(new Error('HTML 任务预览加载失败'))};
         frame.src=${JSON.stringify(lease.url)};document.body.append(frame);
@@ -129,8 +137,10 @@ export class TaskHtmlPreview implements HtmlActionPreviewPort {
 
 /** GUI and headless composition consume the same actions and canonical source
  * reader. The existing isolated preview is prepared only when a run needs it. */
-export function createHtmlActionServices(options: ConstructorParameters<typeof TaskHtmlPreview>[0]) {
+export function createHtmlActionServices(options: ConstructorParameters<typeof TaskHtmlPreview>[0],
+  automation: Partial<Pick<ConstructorParameters<typeof HtmlActionService>[0], 'images' | 'published'>> = {}) {
   const preview = new TaskHtmlPreview(options)
-  const actions = new HtmlActionService({ preview, frames: new HtmlActionDesktopPort(), images: new ObservationImageStore() })
+  const actions = new HtmlActionService({ preview, frames: new HtmlActionDesktopPort(),
+    images: automation.images ?? new ObservationImageStore(), ...(automation.published ? { published: automation.published } : {}) })
   return { actions, preview, dispose: () => { actions.dispose(); preview.dispose() } }
 }

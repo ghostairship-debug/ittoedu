@@ -59,7 +59,7 @@ describe('image status settlement from the same job owner', () => {
     const record = run(tool('image.generate', { job: 'image-one', status: 'preparing' }, 0),
       tool('image.status', { job: 'image-one', status: 'running' }, 1), failed)
     expect(runningExecutionJobs(record)).toEqual([])
-    expect(executionExitDecision(record)).toMatchObject({ status: 'partial', continuable: [],
+    expect(executionExitDecision(record)).toMatchObject({ status: 'continue', continuable: [expect.objectContaining({ name: '交付', status: 'unverified' })],
       remaining: [expect.objectContaining({ name: '交付', status: 'unverified' })] })
     expect(executionAuditWarnings(record)).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'image.status', status: 'failed' }),

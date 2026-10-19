@@ -1,0 +1,306 @@
+{
+  "source": {
+    "snapshot": "output/real-authoring-20261014/staged-layout-v1/actual-run-latest.json",
+    "priorRun": "faaea2e1-d555-4f41-af53-d7340ceb2e82",
+    "currentRun": "bcae7b58-ea81-431b-a84e-ba6de5c94845",
+    "currentVersion": 467
+  },
+  "prior": {
+    "runId": "faaea2e1-d555-4f41-af53-d7340ceb2e82",
+    "status": "partial",
+    "documentBindings": {
+      "b272ec19-b8dd-4346-bd83-fbecdff2acaf": {
+        "kind": "course-v10",
+        "path": "D:\\果铃工作台\\output\\real-authoring-20261014\\staged-layout-v1\\workspace\\天下拼图：春秋到秦汉的国家实验.glx",
+        "projectId": "8a6843f4-7f37-44dd-b8f1-eddbb260262f",
+        "epoch": "50717423-48b1-4a1a-8a1e-806a9f856167",
+        "savedRevision": 6,
+        "fileVersion": "10c2d5a25cb533d43275bcc1594efc51e6afb03c9696c1c218498ae5117efc3c"
+      }
+    },
+    "tools": [
+      {
+        "callId": "d2e5ebe2-dc5b-43da-8a87-ac63bdf489e4.attempt-1:0",
+        "providerCallId": "call_6a6491efdf6e41068c620e2181411f75",
+        "requestId": "d2e5ebe2-dc5b-43da-8a87-ac63bdf489e4.attempt-1",
+        "call": {
+          "name": "file.create",
+          "input": {}
+        },
+        "state": "returned",
+        "result": {
+          "kind": "read",
+          "data": {
+            "operation": {
+              "operationId": "tool:f5356c83eb995cc526f9fb6b8821c3e6b9ab83a604b81722eb928af0e33e10e2",
+              "status": "success",
+              "items": [
+                {
+                  "status": "success",
+                  "entryId": "b2ea6e80-7d7e-4eaa-80a0-eb92cb31b3ed",
+                  "targetPath": "D:\\果铃工作台\\output\\real-authoring-20261014\\staged-layout-v1\\workspace\\天下拼图：春秋到秦汉的国家实验.glx",
+                  "affectedPaths": [
+                    "D:\\果铃工作台\\output\\real-authoring-20261014\\staged-layout-v1\\workspace\\天下拼图：春秋到秦汉的国家实验.glx"
+                  ]
+                }
+              ],
+              "affectedPaths": [
+                "D:\\果铃工作台\\output\\real-authoring-20261014\\staged-layout-v1\\workspace\\天下拼图：春秋到秦汉的国家实验.glx"
+              ]
+            },
+            "path": "D:\\果铃工作台\\output\\real-authoring-20261014\\staged-layout-v1\\workspace\\天下拼图：春秋到秦汉的国家实验.glx",
+            "documentId": "b272ec19-b8dd-4346-bd83-fbecdff2acaf"
+          }
+        }
+      },
+      {
+        "callId": "c87a641c-3d36-4e75-86ae-614eac4cf426.attempt-1:2",
+        "providerCallId": "call_60d535dac9554ef791f63b0d147df356",
+        "requestId": "c87a641c-3d36-4e75-86ae-614eac4cf426.attempt-1",
+        "call": {
+          "name": "project.apply",
+          "input": {}
+        },
+        "state": "returned",
+        "result": {
+          "kind": "read",
+          "data": {
+            "path": "pages/07-百家争鸣：同一个问题，四种回应/01-Web 内容.content.html",
+            "commit": "committed",
+            "usability": "partial",
+            "delivery": "not_requested",
+            "insertedIds": [
+              "9944a55f-be74-49c8-8453-d296485ba295",
+              "47a5cbcd-c0e9-4128-9e6c-bfae8f278369",
+              "0a819699-6908-4600-b22d-afcd67f75293",
+              "a75e906b-5bea-49e4-8ba3-0264111d7f1f",
+              "b52de598-3dcb-4169-8f76-6c73a70cadcd",
+              "dd2afab3-8d2e-4722-9c74-eb07b89033e0",
+              "f78a5b52-01fa-4dcb-bb57-471d08eee4a3",
+              "92a77834-a16b-4a69-b1f2-785893655e7f",
+              "de9c9018-61e8-49cb-a967-fd8d1b48c9ee",
+              "4392879f-f09e-4eab-a7c5-6f3116084100",
+              "c371e8ed-bc55-49d5-a626-2fc144b35215",
+              "24b8296c-7248-42c7-9a7c-f1d7f79d5ff3",
+              "9d8982c5-be63-4406-9a40-a364ac55e2b8",
+              "3f63e088-76db-48b9-8491-a392d323517d",
+              "08d8884b-5721-4055-9cee-a806fb73e9f6",
+              "9eba90f3-45ac-4895-a922-31ab780d3dee",
+              "570212fc-c0cf-4ec5-b2e4-2508ac068cc4",
+              "eb546eae-ccd9-41c5-9462-f8d8690faad6",
+              "e052cb02-056a-4baa-89af-c20025864514",
+              "ec69e581-4b31-439b-a76c-34b9a1a5fbac",
+              "1f4ad1dc-388f-46a7-8ad2-f0ab4fb420b1",
+              "345a0044-d37b-4766-9213-0383a834ccad",
+              "6cec7384-0487-47e9-b045-a41bfa25c4ad",
+              "514a93d0-5c0d-46e1-9947-d74ebd5cc9ad"
+            ],
+            "receipt": {
+              "status": "applied",
+              "documentId": "b272ec19-b8dd-4346-bd83-fbecdff2acaf",
+              "operationId": "tool:2d768c0c57e6610562d26cae1f6d2860b8c1080957e45c85f311c7ee584d5f77",
+              "beforeRevision": 5,
+              "revision": 6,
+              "persistence": "recoverable"
+            },
+            "diagnostics": [
+              {
+                "level": "warning",
+                "code": "insertion-overlap",
+                "message": "当前容器没有可用空位；新对象保留输入位置，原对象未移动。",
+                "repairable": true
+              }
+            ],
+            "currentRevision": 6
+          }
+        },
+        "effectTargets": [
+          {
+            "documentId": "b272ec19-b8dd-4346-bd83-fbecdff2acaf",
+            "epoch": "50717423-48b1-4a1a-8a1e-806a9f856167",
+            "target": {
+              "kind": "course-surface",
+              "surfaceId": "a3e07dee-4d53-4e54-b6cc-267e5e153e7a"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "current": {
+    "runId": "bcae7b58-ea81-431b-a84e-ba6de5c94845",
+    "status": "partial",
+    "documentBindings": {
+      "cbc5e24e-775b-4a77-82b7-1d83592015df": {
+        "kind": "course-v10",
+        "path": "D:\\果铃工作台\\output\\real-authoring-20261014\\staged-layout-v1\\workspace\\天下拼图：春秋到秦汉的国家实验.glx",
+        "projectId": "8a6843f4-7f37-44dd-b8f1-eddbb260262f",
+        "epoch": "eed4c5e6-936f-461d-b2c5-c89a25a658cd",
+        "savedRevision": 41,
+        "fileVersion": "1df3c80fdc6dee6a94c03a28c67adff62df956a8c0893f40380631e1cf4b3f7d"
+      }
+    },
+    "tools": [
+      {
+        "callId": "53e6b686-7583-4198-aea9-55478aa82ee6.attempt-2:0",
+        "providerCallId": "call_6f0d56480ece4a6a8da8b672939a1461",
+        "requestId": "53e6b686-7583-4198-aea9-55478aa82ee6.attempt-2",
+        "call": {
+          "name": "batch",
+          "input": {}
+        },
+        "state": "returned",
+        "result": {
+          "kind": "document-operation",
+          "result": {
+            "status": "applied",
+            "documentId": "cbc5e24e-775b-4a77-82b7-1d83592015df",
+            "operationId": "tool:605fb85182b670ac8e8cba90fe50499caa20637b173d5167e212e24fd07c2f3f",
+            "beforeRevision": 40,
+            "revision": 41,
+            "persistence": "recoverable"
+          },
+          "affected": [
+            "t_2UENkFTTjORxdtAWq5XKw",
+            "tFmgA7d5-SrCXomlUcF7mUg"
+          ]
+        },
+        "effectTargets": [
+          {
+            "documentId": "cbc5e24e-775b-4a77-82b7-1d83592015df",
+            "epoch": "eed4c5e6-936f-461d-b2c5-c89a25a658cd",
+            "target": {
+              "kind": "course-instance",
+              "surfaceId": "d20bcf25-9ddc-4681-a13d-e5d23d18fa59",
+              "instanceId": "dc13e4dc-812b-48e8-bbf7-28d686b63271",
+              "stateId": null
+            }
+          },
+          {
+            "documentId": "cbc5e24e-775b-4a77-82b7-1d83592015df",
+            "epoch": "eed4c5e6-936f-461d-b2c5-c89a25a658cd",
+            "target": {
+              "kind": "course-instance",
+              "surfaceId": "d20bcf25-9ddc-4681-a13d-e5d23d18fa59",
+              "instanceId": "f082d9be-0ff7-4a12-8bba-faec66f483c3",
+              "stateId": null
+            }
+          }
+        ],
+        "writeScopes": [
+          {
+            "documentId": "cbc5e24e-775b-4a77-82b7-1d83592015df",
+            "epoch": "eed4c5e6-936f-461d-b2c5-c89a25a658cd",
+            "paths": [
+              [
+                "instances",
+                "dc13e4dc-812b-48e8-bbf7-28d686b63271",
+                "frame",
+                "height"
+              ]
+            ]
+          },
+          {
+            "documentId": "cbc5e24e-775b-4a77-82b7-1d83592015df",
+            "epoch": "eed4c5e6-936f-461d-b2c5-c89a25a658cd",
+            "paths": [
+              [
+                "instances",
+                "f082d9be-0ff7-4a12-8bba-faec66f483c3",
+                "frame",
+                "transform",
+                "5"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "callId": "877669e5-3000-4b46-8c68-edc37862e86c.attempt-1:0",
+        "providerCallId": "call_decde3f5b294420d962211f219d0f8f1",
+        "requestId": "877669e5-3000-4b46-8c68-edc37862e86c.attempt-1",
+        "call": {
+          "name": "file.save",
+          "input": {}
+        },
+        "state": "returned",
+        "result": {
+          "kind": "read",
+          "data": {
+            "status": "saved",
+            "path": "D:\\果铃工作台\\output\\real-authoring-20261014\\staged-layout-v1\\workspace\\天下拼图：春秋到秦汉的国家实验.glx",
+            "documentId": "cbc5e24e-775b-4a77-82b7-1d83592015df",
+            "epoch": "eed4c5e6-936f-461d-b2c5-c89a25a658cd",
+            "savedRevision": 41,
+            "currentRevision": 41,
+            "fileVersion": "1df3c80fdc6dee6a94c03a28c67adff62df956a8c0893f40380631e1cf4b3f7d",
+            "dirty": false,
+            "warnings": []
+          }
+        },
+        "effectTargets": [
+          {
+            "documentId": "cbc5e24e-775b-4a77-82b7-1d83592015df",
+            "epoch": "eed4c5e6-936f-461d-b2c5-c89a25a658cd",
+            "target": {
+              "kind": "document"
+            }
+          }
+        ]
+      },
+      {
+        "callId": "4b15d193-51d7-43f5-9481-d6850e57ab88.attempt-1:0",
+        "providerCallId": "call_44484f86907f4b4088d101e1ab9e9fab",
+        "requestId": "4b15d193-51d7-43f5-9481-d6850e57ab88.attempt-1",
+        "call": {
+          "name": "document.export",
+          "input": {}
+        },
+        "state": "returned",
+        "result": {
+          "kind": "read",
+          "data": {
+            "status": "written",
+            "documentId": "cbc5e24e-775b-4a77-82b7-1d83592015df",
+            "epoch": "eed4c5e6-936f-461d-b2c5-c89a25a658cd",
+            "format": "html-offline",
+            "exportedRevision": 41,
+            "currentRevision": 41,
+            "warnings": [],
+            "path": "D:\\果铃工作台\\output\\real-authoring-20261014\\staged-layout-v1\\workspace\\天下拼图：春秋到秦汉的国家实验.html",
+            "fileVersion": "a81381e216e5ad28c8132250a200bf6d252c72ee63da863623545148105ea038"
+          }
+        },
+        "effectTargets": [
+          {
+            "documentId": "cbc5e24e-775b-4a77-82b7-1d83592015df",
+            "epoch": "eed4c5e6-936f-461d-b2c5-c89a25a658cd",
+            "target": {
+              "kind": "document"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "documents": [
+    {
+      "documentId": "cbc5e24e-775b-4a77-82b7-1d83592015df",
+      "epoch": "eed4c5e6-936f-461d-b2c5-c89a25a658cd",
+      "revision": 41,
+      "binding": {
+        "kind": "file",
+        "path": "D:\\果铃工作台\\output\\real-authoring-20261014\\staged-layout-v1\\workspace\\天下拼图：春秋到秦汉的国家实验.glx",
+        "version": "1df3c80fdc6dee6a94c03a28c67adff62df956a8c0893f40380631e1cf4b3f7d",
+        "bindingVersion": 1
+      },
+      "dirty": false,
+      "model": {
+        "kind": "course-v10",
+        "project": {
+          "id": "8a6843f4-7f37-44dd-b8f1-eddbb260262f"
+        }
+      }
+    }
+  ]
+}

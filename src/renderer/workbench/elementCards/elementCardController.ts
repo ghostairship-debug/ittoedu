@@ -53,6 +53,7 @@ export interface ElementCardView {
   approval: PendingApproval | null
   error: string
   draft: string
+  restrictToSelection: boolean
   closing: boolean
   unconfirmed: boolean
   undo: ElementCardStep | null
@@ -90,6 +91,7 @@ interface CardRecord {
   projection: ExecutionProjection
   error: string
   draft: string
+  restrictToSelection?: boolean
   closing: boolean
   unconfirmed?: ExecutionSendInput
   sends: Map<string, PendingSend>
@@ -143,7 +145,6 @@ export class ElementCardController {
   private version = 0
   private workspace: { workspaceId: string } | null = null
   private permission: ExecutionPermissionMode = DEFAULT_PERMISSION_MODE
-  private advancementPreferenceOwner: Pick<ConversationRecord, 'workspaceId' | 'conversationId'> | null = null
   private events: { api: ExecutionDesktopAPI; stop(): void } | null = null
   private documents: { api: Pick<DocumentHostAPI, 'subscribe'>; stop(): void } | null = null
   private views = new Map<string, ElementCardView>()
@@ -172,8 +173,10 @@ export class ElementCardController {
       && (!surfaceId || !this.focus.surfaceId || surfaceId === this.focus.surfaceId)
   }
   setPermission(mode: ExecutionPermissionMode) { this.permission = mode }
-  /** Only newly created cards inherit this conversation's current preference; existing cards retain their own owner. */
-  setAdvancementPreferenceOwner(owner: Pick<ConversationRecord, 'workspaceId' | 'conversationId'> | null) { this.advancementPreferenceOwner = owner }
+  setSelectionRestriction(key: string, restricted: boolean) {
+    const card = this.cards.get(key)
+    if (card) { card.restrictToSelection = restricted; this.notify() }
+  }
 
   view(key: string): ElementCardView | null {
     const card = this.cards.get(key)
@@ -182,7 +185,7 @@ export class ElementCardController {
     if (cached) return cached
     const view: ElementCardView = {
       key, kind: card.kind, dismissed: Boolean(card.dismissed), anchor: card.anchor, textLost: card.kind === 'text' && card.content === null ? TEXT_LOST : null, documentId: card.documentId, workspaceId: card.workspaceId, epoch: card.capture?.epoch, label: card.label, target: card.target,
-      entries: card.entries, projection: card.projection,
+      entries: card.entries, projection: card.projection, restrictToSelection: card.restrictToSelection === true,
       busy: Boolean(card.sends.size || card.closing || card.unconfirmed || card.entries.some(entry => entry.state === 'sending' || entry.state === 'queued' || entry.state === 'running')),
       question: pendingQuestion(card.projection), approval: pendingApproval(card.projection), error: card.error, draft: card.draft, closing: card.closing, unconfirmed: Boolean(card.unconfirmed), ...steps(card.entries),
     }
@@ -306,7 +309,7 @@ export class ElementCardController {
       const snapshot = card.draft && !card.capture ? await this.ports.snapshot?.(card.documentId) : undefined
       const capture = card.capture ?? (snapshot ? { documentId: card.documentId, epoch: snapshot.epoch,
         revision: snapshot.revision, targets: [structuredClone(card.target)], label: card.label } : undefined)
-      const documents = capture ? [selectionReference(capture, this.permission !== 'read-only')] : []
+      const documents = capture ? [selectionReference(capture, this.permission !== 'read-only', card.restrictToSelection === true)] : []
       for (let attempt = 0; ; attempt++) {
         const current = await api.conversation(workspaceId, card.conversation.conversationId) ?? card.conversation
         const sameContext = current.frozenContextRefs.length === documents.length && current.frozenContextRefs.every((ref, index) => {
@@ -373,7 +376,7 @@ export class ElementCardController {
     if (!api || !workspaceId) throw new Error('AI 执行服务或工作空间尚未就绪。')
     card.workspaceId = workspaceId
     if (card.kind === 'text' && this.view(key)?.busy) throw new Error('请等 AI 改完这一次再继续追问。')
-    const submissionId = crypto.randomUUID(), previous = card.sending, permission = this.permission, preferenceOwner = this.advancementPreferenceOwner
+    const submissionId = crypto.randomUUID(), previous = card.sending, permission = this.permission, restrictToSelection = card.restrictToSelection === true
     let settle!: () => void
     const done = new Promise<void>(resolve => { settle = resolve })
     const pending: PendingSend = { cancelled: false, invoked: false, done, settle }
@@ -406,24 +409,16 @@ export class ElementCardController {
         current = await api.createConversation(workspaceId, card.label, undefined, { kind: 'element', documentId: card.documentId, label: card.label })
         card.conversation = current
         card.projection = emptyExecutionProjection(current.conversationId); this.listen(api); alive()
-        const owner = preferenceOwner
-        if (owner?.workspaceId === workspaceId) {
-          const preference = await api.conversation(owner.workspaceId, owner.conversationId); alive()
-          if (preference?.advancementMode && api.setAdvancementMode) {
-            current = await api.setAdvancementMode({ workspaceId, conversationId: current.conversationId, advancementMode: preference.advancementMode })
-            card.conversation = current; alive()
-          }
-        }
       }
       const contentOutput = card.kind === 'text' ? capture.contentOutput : undefined
       const request = { workspaceId, conversationId: current.conversationId, submissionId, text,
-        documents: [selectionReference(capture, permission !== 'read-only')], attachments: [], mode: 'queue' as const,
+        documents: [selectionReference(capture, permission !== 'read-only', restrictToSelection)], attachments: [], mode: 'queue' as const,
         ...(contentOutput ? { contentOutput } : {}),
         permission, disclosedSettings: disclosedExecutionSettings(settings) }
       let result: ExecutionSendResult
       for (let attempt = 0; ; attempt++) {
         current = await api.conversation(current.workspaceId, current.conversationId) ?? current; alive()
-        try { pending.request = { ...request, expectedRevision: current.revision, ...(current.advancementMode ? { advancementMode: current.advancementMode } : {}) }; pending.invoked = true; result = await api.send(pending.request); break }
+        try { pending.request = { ...request, expectedRevision: current.revision }; pending.invoked = true; result = await api.send(pending.request); break }
         catch (error) {
           // Known draft-CAS rejection happened before a task was accepted.
           if (!isExecutionInputError(error, 'conversation-draft-changed') || attempt >= 3) throw error

@@ -3,83 +3,70 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 vi.mock('electron', () => ({ app: { getPath: () => '' } }))
-import { createFlowDocumentRecoveryStore } from '@/main/flowDocumentRecovery'
+import { DocumentInputRecovery } from '@/main/workbench/DocumentInputRecovery'
+import { readLegacyFlowDocumentInputs } from '@/main/flowDocumentRecovery'
+import type { DocumentSnapshot } from '@/shared/workbench/document'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true }))) })
 async function setup() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'flow-recovery-'))
   roots.push(root)
-  return { root, operate: createFlowDocumentRecoveryStore(root) }
+  const owner = { documentId: 'document-1', epoch: 'session-1', model: { kind: 'course-v10', project: { id: 'same-id' }, resources: { assets: {}, components: {} } }, binding: { kind: 'file', path: 'C:\\Lessons\\A.h5lesson', version: 'disk', bindingVersion: 1 } } as Pick<DocumentSnapshot, 'documentId' | 'epoch' | 'model' | 'binding'>
+  return { root, owner, store: new DocumentInputRecovery(path.join(root, 'raw'), path.join(root, 'legacy')) }
 }
 const identity = { projectId: 'same-id', surfaceId: 'flow', projectPath: 'C:\\Lessons\\A.h5lesson', epoch: 'session-1' }
 const record = { ...identity, revision: 5, source: '$unfinished', diagnostics: [], composing: false }
 
-describe('Flow recovery path identity and session fences', () => {
-  it('isolates Save As paths with the same project ID and normalizes lexical path aliases', async () => {
-    const { operate } = await setup()
-    await operate({ operation: 'read', target: identity })
-    await operate({ operation: 'write', record })
-    const savedAs = { ...identity, projectPath: 'C:\\Lessons\\B.h5lesson', epoch: 'session-2' }
-    expect(await operate({ operation: 'read', target: savedAs })).toBeNull()
-    await operate({ operation: 'write', record: { ...record, ...savedAs, source: 'B only' } })
-    expect(await operate({ operation: 'read', target: { ...identity, projectPath: 'c:/lessons/./A.h5lesson', epoch: 'session-3' } })).toMatchObject({ source: '$unfinished' })
-    expect(await operate({ operation: 'read', target: { ...identity, projectPath: null, epoch: 'unsaved' } })).toBeNull()
+describe('Flow input migration into the document owner', () => {
+  it('isolates Save As from an old path while lexical aliases locate the original candidate', async () => {
+    const { store, owner } = await setup()
+    await store.write(owner, { flow: [{ ...record, documentId: owner.documentId, documentEpoch: owner.epoch }], flowSurfaceId: 'flow' })
+    const alias = { ...owner, documentId: 'reopened', epoch: 'reopen', binding: { kind: 'file' as const, path: 'c:/lessons/./A.h5lesson', version: 'disk', bindingVersion: 1 } }
+    expect((await store.read(alias))?.flow?.[0]?.source).toBe('$unfinished')
+    const savedAs = { ...owner, binding: { kind: 'file' as const, path: 'C:/Lessons/B.h5lesson', version: 'disk', bindingVersion: 2 } }
+    await store.refresh(savedAs)
+    expect(await store.read(alias)).toBeNull()
+    expect((await store.read(savedAs))?.flow?.[0]?.source).toBe('$unfinished')
   })
-  it('rejects queued and subsequent writes or clears from a retired epoch', async () => {
-    const { operate } = await setup()
-    await operate({ operation: 'read', target: identity })
-    await operate({ operation: 'write', record })
-    const staleWrite = operate({ operation: 'write', record: { ...record, source: 'late old edit' } })
-    const current = { ...identity, epoch: 'session-2' }
-    const read = operate({ operation: 'read', target: current })
-    await expect(staleWrite).rejects.toThrow('会话已失效')
-    expect(await read).toMatchObject({ source: '$unfinished' })
-    await expect(operate({ operation: 'clear', target: identity })).rejects.toThrow('会话已失效')
-    expect(() => operate({ operation: 'read', target: identity })).toThrow('会话已失效')
-    await operate({ operation: 'write', record: { ...record, ...current, source: 'current edit' } })
-    expect(await operate({ operation: 'read', target: current })).toMatchObject({ source: 'current edit' })
+  it('retains previous process raw until exact claim, and clears only the adopted owner', async () => {
+    const { root, store, owner } = await setup()
+    await store.write(owner, { flow: [record] })
+    const restarted = new DocumentInputRecovery(path.join(root, 'raw'))
+    const current = { ...owner, documentId: 'document-2', epoch: 'session-2' }
+    const read = (await restarted.read(current))!
+    await restarted.write(current, { flow: [] })
+    expect((await restarted.read(current))?.flow).toHaveLength(1)
+    await restarted.claim(current, read.recoveryRecords!)
+    await restarted.write(current, { flow: [] })
+    expect(await restarted.read(current)).toBeNull()
+    expect(await restarted.read(owner)).toBeNull()
   })
-  it('restores a previous-process record under the newly registered epoch', async () => {
-    const { root, operate } = await setup()
-    await operate({ operation: 'read', target: identity })
-    await operate({ operation: 'write', record })
-    const restarted = createFlowDocumentRecoveryStore(root)
-    const current = { ...identity, epoch: 'new-process-session' }
-    expect(await restarted({ operation: 'read', target: current })).toMatchObject({ epoch: 'session-1', source: '$unfinished' })
-    await restarted({ operation: 'clear', target: current })
-    expect(await restarted({ operation: 'read', target: current })).toMatchObject({ source: '$unfinished' })
-    await restarted({ operation: 'claim', target: current, recordEpoch: record.epoch, revision: record.revision })
-    await restarted({ operation: 'clear', target: current })
-    expect(await restarted({ operation: 'read', target: current })).toBeNull()
+  it('does not accept a late current-slice write after document ownership retired', async () => {
+    const { store, owner } = await setup()
+    await store.write(owner, { flow: [record] })
+    await expect(store.write(owner, { flow: [] }, () => { throw new Error('retired document epoch') })).rejects.toThrow('retired')
+    expect((await store.read(owner))?.flow?.[0]?.source).toBe('$unfinished')
   })
-  it('keeps an older revision retrievable through current writes, clears and document discard', async () => {
-    const { operate } = await setup()
-    await operate({ operation: 'read', target: identity })
-    await operate({ operation: 'write', record })
-    const current = { ...identity, epoch: 'current-input', documentEpoch: 'current-document', revision: 8 }
-    expect(await operate({ operation: 'read', target: current })).toMatchObject({ source: '$unfinished' })
-    await operate({ operation: 'clear', target: current })
-    expect(await operate({ operation: 'retained', target: current })).toEqual([record])
-    await operate({ operation: 'write', record: { ...record, ...current, source: 'current raw' } })
-    await operate.discardDocument({ ...current, epoch: current.documentEpoch })
-    const reopened = { ...current, epoch: 'reopen-input', documentEpoch: 'reopen-document' }
-    expect(await operate({ operation: 'read', target: reopened })).toBeNull()
-    expect(await operate({ operation: 'retained', target: reopened })).toEqual([record])
-    await expect(operate({ operation: 'write', record: { ...record, ...current } })).rejects.toThrow('会话已失效')
+  it('discovers legacy retained orphan inputs without assigning them to an arbitrary live document', async () => {
+    const { root, store, owner } = await setup()
+    const legacy = path.join(root, 'legacy'); await fs.mkdir(path.join(legacy, 'retained'), { recursive: true })
+    await fs.writeFile(path.join(legacy, 'retained', 'orphan.json'), JSON.stringify(record))
+    expect(await readLegacyFlowDocumentInputs(legacy)).toHaveLength(1)
+    const candidates = await store.list()
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0]!.documentId).toMatch(/^unclaimed-flow:/)
+    expect(candidates[0]!.documentId).not.toBe(owner.documentId)
+    expect((await store.read(owner))?.flow?.[0]?.source).toBe('$unfinished')
   })
-  it('discards only the adopted document input, not another saved path', async () => {
-    const { operate } = await setup()
-    await operate({ operation: 'read', target: identity })
-    await operate({ operation: 'write', record })
-    const other = { ...identity, projectPath: 'C:/Lessons/B.h5lesson', epoch: 'other' }
-    await operate({ operation: 'read', target: other })
-    await operate({ operation: 'write', record: { ...record, ...other, source: 'other source' } })
-    const adopted = { ...identity, epoch: 'adopted', documentEpoch: 'main-epoch' }
-    await operate({ operation: 'read', target: adopted })
-    await operate({ operation: 'claim', target: adopted, recordEpoch: record.epoch, revision: record.revision })
-    await operate.discardDocument({ ...adopted, epoch: 'main-epoch' })
-    expect(await operate({ operation: 'read', target: { ...adopted, epoch: 'next' } })).toBeNull()
-    expect(await operate({ operation: 'read', target: other })).toMatchObject({ source: 'other source' })
+  it('current surface clearing does not remove another surface or a different file owner', async () => {
+    const { store, owner } = await setup()
+    await store.write(owner, { flow: [record] })
+    await store.write(owner, { flow: [{ ...record, surfaceId: 'other-flow', source: 'other surface' }], flowSurfaceId: 'other-flow' })
+    const other = { ...owner, documentId: 'other-document', epoch: 'other-epoch', binding: { kind: 'file' as const, path: 'C:/Lessons/B.h5lesson', version: 'disk', bindingVersion: 1 } }
+    await store.write(other, { flow: [{ ...record, projectPath: 'C:/Lessons/B.h5lesson', source: 'other file' }] })
+    await store.write(owner, { flow: [], flowSurfaceId: 'flow' })
+    expect((await store.read(owner))?.flow?.map(item => item.source)).toEqual(['other surface'])
+    expect((await store.read(other))?.flow?.[0]?.source).toBe('other file')
   })
 })

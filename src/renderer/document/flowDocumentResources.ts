@@ -15,6 +15,7 @@ import type { DocumentClipboardResourcePort } from './documentClipboard'
 export interface FlowPreparedDocumentResources {
   readonly target: CapturedCourseTarget
   readonly edits: readonly ComponentEdit[]
+  readonly readPaths?: readonly string[][]
 }
 const staged = new WeakSet<FlowPreparedDocumentResources>()
 
@@ -32,7 +33,7 @@ function preparedProject(target: CapturedCourseTarget, batches: readonly FlowPre
   let project = target.project
   for (const batch of batches) {
     if (!sameOwner(target, batch.target)) throw new Error('正文资源不属于当前捕获目标')
-    project = applyComponentOperation(project, captureComponentOperation(project, [...batch.edits]))
+    project = applyComponentOperation(project, captureComponentOperation(project, [...batch.edits], batch.readPaths))
   }
   return project
 }
@@ -86,14 +87,14 @@ export function createFlowDocumentResourcePort(input: {
         capturedTarget: destination, container: { kind: 'surface', surfaceId: target.surfaceId! },
         index: destination.editingProject.surfaces.find(surface => surface.id === target.surfaceId)!.childIds.length,
         identity: identity ?? 'copy',
-      }) : { edits: [], idMap: new Map<string, string>(), assetIds: new Map<string, string>(), rootIds: [] }
+      }) : { edits: [], idMap: new Map<string, string>(), assetIds: new Map<string, string>(), rootIds: [], readPaths: [] }
       const assetIds = Object.fromEntries(plan.assetIds)
       const mapped: DocumentResources = { assets: resources.assets.map(ref => {
         const assetId = assetIds[ref.assetId]
         if (!assetId) throw new Error(`复制素材没有正式实例闭包：${ref.assetId}`)
         return { assetId, source: { kind: 'project' } }
       }), components: [] }
-      const prepared: FlowPreparedDocumentResources = { target: previous[0]?.target ?? target, edits: plan.edits }
+      const prepared: FlowPreparedDocumentResources = { target: previous[0]?.target ?? target, edits: plan.edits, readPaths: plan.readPaths }
       staged.add(prepared); input.onPrepared?.(prepared)
       return { resources: mapped, assetIds, components: [], identities: { ...Object.fromEntries('professionalIdentities' in plan ? plan.professionalIdentities ?? [] : []), ...Object.fromEntries(plan.idMap) }, prepared }
     },
@@ -109,7 +110,7 @@ export function projectFlowPreparedResources(target: CapturedCourseTarget, value
 
 /** One formal operation contains every resource edit and the complete body projection. */
 export function prepareFlowDocumentResourceTransaction(target: CapturedCourseTarget, surfaceId: string, blocks: DocumentBlock[], values: readonly unknown[], rangeProjection?: readonly DocumentRangeProjection[]): {
-  target: CapturedCourseTarget; edits: ComponentEdit[]; prepared: readonly FlowPreparedDocumentResources[]
+  target: CapturedCourseTarget; edits: ComponentEdit[]; readPaths: string[][]; prepared: readonly FlowPreparedDocumentResources[]
 } {
   const batches = preparedBatches(values), captured = batches[0]?.target ?? target
   if (!sameOwner(captured, target) || captured.surfaceId !== surfaceId) throw new Error('正文资源目标已变化，请回到原稿后继续')
@@ -117,7 +118,7 @@ export function prepareFlowDocumentResourceTransaction(target: CapturedCourseTar
   const edits = [...batches.flatMap(batch => [...batch.edits]), ...flowDocumentEdits(project, surfaceId, blocks, captured.editingProject, rangeProjection)]
   // Resource copy batches are canonical already. Flow has no persisted named states;
   // the final capture must not reinterpret a complete clone as a presentation edit.
-  return { target: batches.length ? { ...captured, activeStateId: null, editingProject: captured.project } : captured, edits, prepared: batches }
+  return { target: batches.length ? { ...captured, activeStateId: null, editingProject: captured.project } : captured, edits, readPaths: batches.flatMap(batch => batch.readPaths ?? []), prepared: batches }
 }
 export function releaseFlowPreparedResources(values: readonly FlowPreparedDocumentResources[]): void {
   values.forEach(value => staged.delete(value))

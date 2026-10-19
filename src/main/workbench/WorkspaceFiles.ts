@@ -6,7 +6,8 @@ import path from 'node:path'
 import type { WorkspaceEntryKind, WorkspaceOperationStatus, WorkspaceMutationKind, RegisteredWorkspaceRoot, ResolvedWorkspaceEntry, WorkspaceListItem, WorkspaceListPage, WorkspaceItemResult, WorkspaceOperationResult, WorkspaceMutationAction } from '../../shared/workbench/workspaceFiles'
 import type { DocumentKind, DocumentResources } from '../../shared/workbench/document'
 export type { WorkspaceEntryKind, WorkspaceOperationStatus, WorkspaceMutationKind, RegisteredWorkspaceRoot, ResolvedWorkspaceEntry, WorkspaceListItem, WorkspaceListPage, WorkspaceItemResult, WorkspaceOperationResult, WorkspaceMutationAction } from '../../shared/workbench/workspaceFiles'
-import { markdownReferences, readDocumentFileVersion } from './documentJournal'
+import { readDocumentFileVersion } from './documentJournal'
+import { markdownReferences } from './documentSourceResources'
 import { prepareMarkdownMoveResources } from './markdownMoveResources'
 
 export type WorkspaceAroundMutation = (

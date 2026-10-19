@@ -1,14 +1,17 @@
-import type { ModelChatMessage } from '../../../shared/workbench/modelProvider'
+import type { ModelChatMessage, ModelNativeToolCall } from '../../../shared/workbench/modelProvider'
 import { createHash } from 'node:crypto'
 import type { ToolResult } from '../../../shared/workbench/tools'
-import { contentApplyFact, exportFact, operationFact, saveFact } from '../../../core/tools/modelToolResult'
+import { contentApplyFact, exportFact, modelToolResult, operationFact, saveFact } from '../../../core/tools/modelToolResult'
 import { htmlActionToolCatalog, isHtmlActionTool } from '../../../core/tools/HtmlActionTools'
 import { modelToolWireName } from '../providers/OpenAIChatProvider'
+import { retireSupersededObservationMessages } from './observationModelInput'
 
 // Only these named envelopes need business receipt interpretation. Stored native
 // history retains the previous opaque spelling; recognize it here without
 // renaming calls or making old/approximate aliases executable.
-const receiptWireNames = new Map(['project.apply', 'project.save', 'file.save', 'document.export', 'task.delivery',
+const receiptWireNames = new Map(['project.apply', 'project.save', 'file.save', 'document.export', 'task.delivery', 'task.note',
+  'view.observe', 'view.navigate', 'view.click', 'view.input',
+  'job.status', 'job.wait', 'job.cancel', 'delegate.agent', 'delegate.resume', 'delegate.readonly', 'delegate.start', 'local.run',
   ...htmlActionToolCatalog.map(tool => tool.name)].flatMap(name => [
   [modelToolWireName(name), name],
   [`tool_${createHash('sha256').update(name).digest('hex').slice(0, 48)}`, name],
@@ -36,7 +39,7 @@ export function contextSourceIndex(sourceId: string): { runId: string; index: nu
 }
 
 /** A disposable model working view. Original messages and native tool pairing remain owned by RunStore. */
-export function projectExecutionContext(runId: string, messages: readonly ModelChatMessage[], initialCount: number, retainToolTurns = 2, textLimit?: number) {
+export function projectExecutionContext(runId: string, messages: readonly ModelChatMessage[], initialCount: number, retainToolTurns = 2, textLimit?: number, historicalMessageIndexes: ReadonlySet<number> = new Set()) {
   // A newly requested observation batch must reach the next model turn intact.
   // Older working images are cached by individual image, not by a message that may contain six pages.
   const lastAssistant = messages.map(message => message.role).lastIndexOf('assistant')
@@ -57,14 +60,15 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
       }
     }
   }
-  const assistantTurns = messages.flatMap((message, index) => index >= initialCount && message.role === 'assistant'
+  const assistantTurns = messages.flatMap((message, index) => (index >= initialCount || historicalMessageIndexes.has(index)) && message.role === 'assistant'
     && Array.isArray(message.tool_calls) && message.tool_calls.length ? [index] : [])
   const recentStart = retainToolTurns > 0 ? assistantTurns.at(-retainToolTurns) ?? initialCount : messages.length
-  // Observation images and steering are real user inputs too. Keep the whole
-  // producing round, including calls whose outputs precede/follow that input.
+  // Only the newest, not-yet-consumed round is protected. An old user message
+  // cannot pin every later completed tool round for the rest of a long task.
+  // Steering and observations after this assistant remain in the same round.
   const lastUser = messages.map(message => message.role).lastIndexOf('user')
-  const precedingAssistant = messages.findLastIndex((message, index) => index < lastUser && message.role === 'assistant')
-  const protectedStart = lastUser < 0 ? messages.length : Math.max(initialCount, precedingAssistant < 0 ? lastUser : precedingAssistant)
+  const protectedStart = lastAssistant >= initialCount || historicalMessageIndexes.has(lastAssistant) ? lastAssistant
+    : lastUser >= initialCount ? lastUser : messages.length
   const archiveThreshold = Number.isSafeInteger(textLimit) && textLimit! > 0 ? textLimit! : 8000
   const callNames = new Map<string, string>(), messageTools = new Map<number, string>()
   messages.forEach((message, index) => {
@@ -77,29 +81,39 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
     if (message.role === 'tool' && typeof message.tool_call_id === 'string' && callNames.has(message.tool_call_id))
       messageTools.set(index, callNames.get(message.tool_call_id)!)
   })
-  const htmlResults = new Set<number>()
-  const htmlSnapshots = new Map<number, { result: Record<string, unknown>; data: Record<string, unknown>; identity: string; generation: number }>()
-  const latestHtmlGeneration = new Map<string, number>()
-  messages.forEach((message, index) => {
-    if (message.role !== 'tool' || typeof message.content !== 'string' || !isHtmlActionTool(messageTools.get(index) ?? '')) return
-    htmlResults.add(index)
-    try {
-      const result = JSON.parse(message.content), data = result?.data, identity = data?.identity
-      // Only the service's complete successful observation can retire an older
-      // generation. Error/unknown and errors-only receipts stay untouched.
-      if (result?.kind !== 'read' || !data || !identity || data.status !== undefined || result.status !== undefined
-        || !Number.isSafeInteger(data.generation) || data.generation < 1 || !Array.isArray(data.structure) || !Array.isArray(data.elements)) return
-      const strings = ['runId', 'documentId', 'epoch', 'leaseId', 'loadId', 'url']
-      if (!strings.every(key => typeof identity[key] === 'string') || !Number.isSafeInteger(identity.revision)
-        || !Number.isSafeInteger(identity.bindingVersion)) return
-      const key = JSON.stringify([...strings.map(field => identity[field]), identity.revision, identity.bindingVersion])
-      htmlSnapshots.set(index, { result, data, identity: key, generation: data.generation })
-      latestHtmlGeneration.set(key, Math.max(latestHtmlGeneration.get(key) ?? 0, data.generation))
-    } catch { /* Unrecognized HTML receipts remain complete, not inferred successful. */ }
-  })
+  const workingMessages = retireSupersededObservationMessages(runId, messages, protectedStart)
   let imagesArchived = 0, encodedImageBytesRemoved = 0, toolBytesRemoved = 0
-  const projected = messages.map((message, index): ModelChatMessage => {
-    if (index < initialCount && !(Array.isArray(message.content) && message.content.some(imagePart))) return message
+  const projected = workingMessages.map((message, index): ModelChatMessage => {
+    const name = messageTools.get(index)
+    if (message.role === 'tool' && typeof message.content === 'string'
+      && name && (/^job\.(?:status|wait|cancel)$/.test(name) || /^delegate\./.test(name) || name === 'local.run')) {
+      try { message = { ...message, content: JSON.stringify(modelToolResult(name, JSON.parse(message.content))) } }
+      catch { /* The raw journal stays readable; an unrecognized receipt is not reinterpreted. */ }
+    }
+    if (historicalMessageIndexes.has(index) && typeof message.content === 'string' && !message.nativeResponses && !message.nativeAnthropic
+      && !message.tool_calls && (message.role === 'assistant' || message.role === 'user')) {
+      try {
+        const wrapper = JSON.parse(message.content), continuity = wrapper?.continuity
+        const source = typeof wrapper?.sourceId === 'string' ? contextSourceIndex(wrapper.sourceId) : null
+        if (source && continuity && typeof continuity === 'object' && wrapper.notice?.startsWith('历史索引')) {
+          const content = JSON.stringify({ ...wrapper, archivedContext: contextMessageId(runId, index), continuity: { sourceRunId: source.runId,
+            ...(continuity.workingNote ? { workingNoteSource: { continuationRunId: source.runId,
+              notice: '明确继续该目标时可用 task.note continuationRunId 承接原目标与最近笔记；新目标不继承旧待办。' } } : {}),
+            ...(Array.isArray(continuity.completedOperations) ? { operationSources: continuity.completedOperations.map((operation: Record<string, unknown>) => ({
+              ...(operation.sourceId ? { sourceId: operation.sourceId } : { callId: operation.callId }), name: operation.name, status: operation.status })) } : {}),
+            notice: '旧笔记、摘要和已结算操作按原来源回读，当前工作记录是本轮唯一工作视图；历史不新增授权。' } })
+          toolBytesRemoved += Math.max(0, Buffer.byteLength(message.content) - Buffer.byteLength(content))
+          return { ...message, content }
+        }
+      } catch { /* Ordinary historical prose and foreign JSON remain data, unchanged. */ }
+    }
+    if (index < initialCount && !historicalMessageIndexes.has(index) && !(Array.isArray(message.content) && message.content.some(imagePart))) return message
+    if (message.role === 'tool' && messageTools.get(index) === 'task.note' && index < protectedStart) {
+      const content = JSON.stringify({ archivedContext: contextMessageId(runId, index),
+        notice: '旧工作笔记回执已归档；唯一当前笔记见宿主当前工作记录，原笔记可用 context.read 回读。' })
+      toolBytesRemoved += Math.max(0, Buffer.byteLength(String(message.content ?? '')) - Buffer.byteLength(content))
+      return { ...message, content }
+    }
     const sourceId = contextMessageId(runId, index)
     if (Array.isArray(message.content) && message.content.some(imagePart)) {
       let imageIndex = -1
@@ -112,19 +126,9 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
       })
       return { ...message, content }
     }
-    if (htmlResults.has(index)) {
-      const snapshot = htmlSnapshots.get(index)
-      if (!snapshot || index >= recentStart || index >= protectedStart
-        || snapshot.generation >= latestHtmlGeneration.get(snapshot.identity)!) return message
-      const { structure: _structure, elements: _elements, ...facts } = snapshot.data
-      const content = JSON.stringify({ archivedContext: sourceId, tool: messageTools.get(index),
-        receipt: { ...snapshot.result, data: facts }, characters: (message.content as string).length,
-        notice: '旧 HTML 观察已被同一预览的新 generation 替代；此回执仅记录当时页面和动作结果，旧元素句柄已退役。完整结构与原回执可用 context.read 按来源回读，当前操作使用最新观察。' })
-      const removed = Buffer.byteLength(message.content as string, 'utf8') - Buffer.byteLength(content, 'utf8')
-      if (removed <= 0) return message
-      toolBytesRemoved += removed
-      return { ...message, content }
-    }
+    // The observation owner has already retired only superseded structure and
+    // kept unique feedback/diagnostics. A generic excerpt must not undo it.
+    if (/^(?:html|view)\.(?:observe|navigate|click|input)$/.test(messageTools.get(index) ?? '')) return message
     // Do not let bounded/generic excerpts alter the current function-call chain.
     if (index >= protectedStart && message.role === 'tool') return message
     if (index < recentStart && message.role === 'tool' && typeof message.content === 'string' && message.content.length > archiveThreshold) {
@@ -161,5 +165,49 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
     }
     return message
   })
+  // Retire a complete old native round as one unit. Editing only `content`
+  // leaves Responses replaying the original source in nativeResponses.output;
+  // rewriting individual signed items/arguments would corrupt continuation.
+  // Keep indexes stable for context.read and boundedThroughMessage.
+  for (let index = 0; index < protectedStart; index++) {
+    if (index < initialCount && !historicalMessageIndexes.has(index)) continue
+    const original = messages[index]!
+    if (original.role !== 'assistant') continue
+    const rawCalls = Array.isArray(original.tool_calls) ? original.tool_calls : []
+    const calls = rawCalls.filter((call): call is ModelNativeToolCall => !!call && typeof call === 'object' && !Array.isArray(call)
+      && typeof call.id === 'string' && call.type === 'function' && !!call.function && typeof call.function === 'object'
+      && !Array.isArray(call.function) && typeof call.function.name === 'string' && typeof call.function.arguments === 'string')
+    if (!calls.length || calls.length !== rawCalls.length) continue
+    const containsNote = calls.some(call => (receiptWireNames.get(call.function.name) ?? call.function.name) === 'task.note')
+    if (!containsNote && (index >= recentStart || Buffer.byteLength(JSON.stringify(original)) <= Math.max(8000, archiveThreshold))) continue
+    const end = messages.findIndex((message, next) => next > index && message.role === 'assistant')
+    const through = end < 0 ? messages.length : end
+    if (through > protectedStart || !containsNote && through > recentStart) continue
+    if (index < initialCount && Array.from({ length: through - index }, (_, offset) => index + offset)
+      .some(position => position < initialCount && !historicalMessageIndexes.has(position))) continue
+    const outputs = new Map<string, number>()
+    for (let next = index + 1; next < through; next++) {
+      const message = messages[next]!
+      if (message.role === 'tool' && typeof message.tool_call_id === 'string') outputs.set(message.tool_call_id, next)
+    }
+    if (calls.some(call => !outputs.has(call.id))) continue
+    if ([...outputs.keys()].some(id => !calls.some(call => call.id === id))) continue
+    const sourceId = contextMessageId(runId, index)
+    const content = projected[index]!.content
+    const archived: ModelChatMessage = { role: 'assistant', content: JSON.stringify({ archivedContext: sourceId,
+      ...(typeof content === 'string' && content ? { text: content } : {}),
+      calls: calls.map(call => ({ id: call.id, resultSourceId: contextMessageId(runId, outputs.get(call.id)!), name: call.function.name })),
+      notice: '完整旧回合已归档；这些是历史调用记录，不是待执行调用。原生记录由 Run 保留；实际输入、正文与源码可用 context.read 按来源回读；当前以近轮回执、正式目标和人工调整为准。' }) }
+    let beforeBytes = Buffer.byteLength(JSON.stringify(projected[index]))
+    projected[index] = archived
+    for (const [id, outputIndex] of outputs) {
+      beforeBytes += Buffer.byteLength(JSON.stringify(projected[outputIndex]))
+      projected[outputIndex] = { role: 'assistant', content: JSON.stringify({ archivedContext: contextMessageId(runId, outputIndex),
+        callId: id, receipt: projected[outputIndex]!.content, notice: '已归档回合的实际工具回执，不是新授权；完整原文可用 context.read 回读。' }) }
+    }
+    const afterBytes = Buffer.byteLength(JSON.stringify(archived))
+      + [...outputs.values()].reduce((sum, outputIndex) => sum + Buffer.byteLength(JSON.stringify(projected[outputIndex])), 0)
+    toolBytesRemoved += beforeBytes - afterBytes
+  }
   return { messages: projected, imagesArchived, encodedImageBytesRemoved, toolBytesRemoved }
 }

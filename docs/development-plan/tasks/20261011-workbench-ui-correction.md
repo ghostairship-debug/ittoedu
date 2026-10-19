@@ -1,9 +1,8 @@
-# §14.8 界面与聊天交互纠偏及最终单EXE实际验收
+# 界面与原生交付剩余验收
 
-- Status / Owner: active / Root
-- Outcome / Evidence: Owner 2026-10-12本轮前三项源码候选完成：空启动、AI首次生成完成保存（中断继续纳入，后续编辑不自动保存）、GLX同目录导出及右上厚弯箭头。10个聚焦例、Renderer/Main类型与构建通过，接续漏保存独审finding已修复；完整窗口冷启动/真实模型本轮未另验。指定天下拼图HTML只读动态诊断定位全课导航/可见性重复开销，原文件与性能实现未改。唯一增量结果IMPLEMENTATION_RESULT.md §9.10及其证据链接。原§14.8授权与其余待验保留。Owner 2026-10-12新增两处已完成：GPT Responses遗留输出字段等值适配，20/20与独审PASS、同OAuth/gpt-6.1-sol/xhigh两次短文本200；三Surface统一页面属性、Slide浏览器与Spatial/Flow生产App原生入口通过。真实Flow同caret回对象属性根因在editorSession重发现selection，相关2匹配用例/独审/生产同点通过，工程/revision/undo保持。Root解释已完成Skill与流程；夜间09:00收束保持，不恢复心跳/新课。唯一增量结果IMPLEMENTATION_RESULT.md §9.9，§7/§9.7/§9.8历史证据保持，不以本批通过关闭旧完整验收。
-- Write scope: Owner 2026-10-12新授权SAR28已接续本轮实际相交源码；本卡释放相交写锁，仍保原其余待验及历史证据，禁止借交接宣告整批完成。当前没有其他活跃会话写本仓库，Root-01a130bf统一集成。原范围记录：本轮 Owner 2026-10-12 追加启动空工作区、AI新课GLX首次生成完成时落盘（后续编辑不自动保存）、工程同目录导出及右上弯箭头修复；Root独写CourseV10DocumentBridge/useCourseDelivery/ipcTypes/ipc/fileDialogs/pdfExport/ExportMenu及相应测试和本卡/既有结果。ai_save唯一写ExecutionEngine.ts与g20AiCreatedCoursePersistence.test.ts；html_performance只读用户HTML/源码，独写output/tianxia-performance-20261012分析证据；不实施第4项性能改造。此前写域：all_html页面入口App.tsx/CourseLightToolbar.tsx、openCoursePageProperties/componentPlatformProperties及真实Flow根因editorSession.ts/g20M21DocumentObjectClick均已停笔；仅独写本output/page-properties诊断原件与production隔离实机，合法workspace副本、无Owner profile/凭据/模型，自有App均正常关闭。all_ai单writerChatGPTResponsesProvider.ts共享prepare及g20ChatGPTProviders回归已停笔，Owner settings只读；两次已授权同OAuth短文本无cap/有canonical cap皆200，保旧限额/优先级不迁移配置。临时OS保护上下文精确清理，无明文凭据/refresh/额外请求；原复杂工具Run/长截断未验。Root独写卡/结果/当前状态/生成与构建，Reviewer独写review叶；结构独审PASS。原本批Main/Renderer类型构建通过，Flow增量仅Renderer重验。旧成果/Owner档/工程不改，单writer、不切模型/新收费路径。
+- Status / Owner: queued / Root
+- Outcome / Evidence: §14.8已完成实现和有效实机证据保留；10月12日空启动、首存/同目录导出、箭头、GPT字段适配及三Surface页面属性增量已收口。后续软件与创作修复已接续重叠源码，本卡不再表示旧执行者正在实施；尚未签过的原生操作、最终单EXE与独立Windows验收仍保留，不以本轮整理关闭。
+- Write scope: 本轮仅整理交接。后续按Owner当前目标选取尚缺证据及其直接消费者，单一writer；[原范围/写域快照](../../archive/20261017-开发状态与任务交接快照.md#ui-card-snapshot)及[§9.9—9.10增量结果](../20261010-workbench-consolidated/IMPLEMENTATION_RESULT.md)用于精确接续，不恢复原人员或旧源码锁。
 - Write locks: none
-- Acceptance: 保全现有布局、页/状态/全局层及全部能力；/的Skill＋常用操作与@真实引用有效；Flow同设计纸宽适配、Spatial开放世界/Slides同尺寸当前示意框/添加固定/默认无正式镜头；先完成生产目录实际按钮、选择/另存为/导出/Explorer/窗口、真实发送/编辑/保存冷开，全部通过再生成单EXE，不以构建代签。
-- Validation: 受影响最低有效逻辑/类型检查＋真实GUI与原生操作，必要一次集中独审。使用隔离userData/样例副本，未变登录/付费证据复用；不reset/stash/clean，不改原作品/默认档/旧EXE，不启动§15/旧任务，不提交推送发行。
-
+- Acceptance: 保留原布局、页/状态/全局层、Skill与真实引用，以及Flow纸宽/Spatial开放世界等受支持能力；原生选择/另存为/导出/Explorer/窗口及发送/编辑/保存冷开仅补当前缺失项。最终单EXE、独立Windows/故障机和未验模型/图片边界分别报告，不以构建或后续其他样本代签。
+- Validation: 复用未变有效证据；恢复时先核实际缺口，仅做相关最小检查和必要独审，使用隔离档/样例副本。当前发行暂停，不自动打包、提交、推送或付费；不改原作品、默认档和旧EXE。

@@ -124,6 +124,12 @@ export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('pause-queue'), ...identity, reason: z.literal('user').optional() }).strict(),
   z.object({ type: z.literal('resume-queue'), ...identity }).strict(),
   z.object({ type: z.literal('run'), runId: id }).strict(),
+  z.object({ type: z.literal('delegation-children'), ...identity }).strict(),
+  z.object({ type: z.literal('delegation-child'), ...identity, parentRunId: id, jobId: id }).strict(),
+  z.object({ type: z.literal('delegation-artifact'), ...identity, parentRunId: id, jobId: id, name: id }).strict(),
+  z.object({ type: z.literal('delegation-stop'), ...identity, parentRunId: id, jobId: id }).strict(),
+  z.object({ type: z.literal('delegation-message'), ...identity, parentRunId: id, jobId: id, text: z.string().trim().min(1), submissionId: z.uuid() }).strict(),
+  z.object({ type: z.literal('delegation-resume'), ...identity, parentRunId: id, jobId: id, text: z.string().trim().min(1), submissionId: z.uuid() }).strict(),
   z.object({ type: z.literal('browser-control'), ...identity, runId: id, action: z.enum(['status', 'takeover', 'resume']) }).strict(),
   z.object({ type: z.literal('browser-viewport'), ...identity, runId: id, visible: z.boolean(), bounds: z.object({ x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive() }).strict().optional() }).strict(),
   z.object({ type: z.literal('change-review'), ...identity, runId: id, offset: index.optional(), limit: z.number().int().min(1).max(100).optional() }).strict(),
@@ -239,6 +245,12 @@ export interface ExecutionDesktopAPI {
   pauseQueue(input: { workspaceId: string; conversationId: string; reason?: 'user' }): Promise<void>
   resumeQueue(input: { workspaceId: string; conversationId: string }): Promise<void>
   run(runId: string): Promise<ExecutionRunRecord | null>
+  delegationChildren?(input: { workspaceId: string; conversationId: string }): Promise<import('./delegation').ExecutionDelegationChildView[]>
+  delegationChild?(input: import('./delegation').ExecutionDelegationChildIdentity): Promise<import('./delegation').ExecutionDelegationChildDetail>
+  delegationArtifact?(input: import('./delegation').ExecutionDelegationChildIdentity & { name: string }): Promise<{ name: string; byteLength: number; text: string | null }>
+  delegationStop?(input: import('./delegation').ExecutionDelegationChildIdentity): Promise<import('./delegation').ExecutionDelegationChildView>
+  delegationMessage?(input: import('./delegation').ExecutionDelegationChildIdentity & { text: string; submissionId: string }): Promise<import('./delegation').ExecutionDelegationChildView>
+  delegationResume?(input: import('./delegation').ExecutionDelegationChildIdentity & { text: string; submissionId: string }): Promise<import('./delegation').ExecutionDelegationChildView>
   browserControl?(input: { workspaceId: string; conversationId: string; runId: string; action: 'status' | 'takeover' | 'resume' }): Promise<{ state: 'agent' | 'human' | 'transition' | 'stopped'; pageUrl?: string; snapshotId?: string }>
   browserViewport?(input: import('./embeddedBrowser').EmbeddedBrowserViewportRequest): Promise<import('./embeddedBrowser').EmbeddedBrowserViewportState>
   changeReview?(input: { workspaceId: string; conversationId: string; runId: string; offset?: number; limit?: number }): Promise<import('./executionReview').ChangeReviewPage>

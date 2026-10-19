@@ -65,8 +65,8 @@ export function createCourseStructureSlice(kernel: EditorStoreKernel, ports: Cou
     deleteCourseLocation(surfaceId: string, captured?: CapturedComponentOperation): Promise<CourseStructureResult> { return this.deleteCourseSurface(surfaceId, captured) },
     async duplicateCourseLocation(surfaceId: string): Promise<CourseStructureResult> {
       try {
-        const copy = duplicateSurfaceEdits(kernel.readDocument(), surfaceId)
-        return await commit(copy.edits, '已复制页面', copy.surfaceId)
+        const target = kernel.captureTarget(), copy = duplicateSurfaceEdits(target.project, surfaceId)
+        return await commit(copy.edits, '已复制页面', copy.surfaceId, kernel.capture(copy.edits, { ...target, activeStateId: null }, copy.readPaths))
       } catch (error) { return failure(error instanceof Error ? error.message : '页面复制失败') }
     },
     renameCourseLocation(surfaceId: string, title: string): Promise<CourseStructureResult> { return this.renameCourseSurface(surfaceId, title) },

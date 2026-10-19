@@ -81,7 +81,7 @@ it('sends a narrow Markdown catalog on every real HTTP turn and commits one cano
   const wireNames = bodies[0].data.tools.map((tool: any) => tool.function.name)
   // Services and engine controls are independent of the scoped document editing catalog.
   const serviceAndControlNames = new Set([...workbenchServiceToolCatalog.map(tool => modelToolWireName(tool.name)), modelToolWireName('context.read'), modelToolWireName('task.note'), modelToolWireName('ask_user'), modelToolWireName('tools.load')])
-  expect(wireNames.filter((name: string) => !serviceAndControlNames.has(name)).sort()).toEqual(['read', 'inspect', 'listChildren', modelToolWireName('text.replace'), modelToolWireName('text.format'), 'batch'].sort())
+  expect(wireNames.filter((name: string) => !serviceAndControlNames.has(name)).sort()).toEqual(['read', 'inspect', 'listChildren', modelToolWireName('text.replace'), modelToolWireName('text.format'), modelToolWireName('file.save'), 'batch'].sort())
   expect(bodies.map(body => body.data.tools.map((tool: any) => tool.function.name))).toEqual(Array(3).fill(wireNames))
   const batch = bodies[0].data.tools.find((tool: any) => tool.function.name === 'batch')
   expect(JSON.stringify(batch.function.parameters)).toContain('text.replace')
@@ -183,6 +183,31 @@ it('discovers a deferred tool, sends its real schema on the next turn and execut
   expect(observed.slice(1).map(value => value.bytes)).toEqual(Array(3).fill(observed[1].bytes))
   expect(result.requests.map((request, index) => request.payload?.serializedBytes === observed[index]?.payloadBytes)).toEqual([true, true, true, true])
   expect(await host.internalAPI.read(session.documentId)).toMatchObject({ revision: 1, undoDepth: 1, model: { project: { title: '已发现并调用' } } })
+})
+
+it('retains requested families through project creation and directly exposes supported delivery without another load', async () => {
+  const { directory, host } = await workspace()
+  host.tools.configureHostServices({ deliveries: {
+    async save() { throw new Error('not used by catalog inspection') },
+    async export() { throw new Error('not used by catalog inspection') },
+    async lookup() { return null },
+  } })
+  await host.tools.beginRun({ runId: 'creation', actor: 'agent', documents: [],
+    fileAccess: { workspaceRoot: directory, permission: 'workspace' } })
+  expect((await host.tools.describeRun('creation')).map(tool => tool.name)).not.toContain('document.export')
+  const available = await host.tools.loadToolFamilies('creation', ['layout', 'navigation', 'build'])
+  expect(available.some(item => item.family === 'build')).toBe(false)
+  const project = await host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('新作品'), resources: { assets: {}, components: {} } }, 'new.glx')
+  await host.tools.attachRunDocument('creation', project.documentId, true, 'initialize')
+  expect((await host.tools.describeRun('creation')).map(tool => tool.name)).toEqual(expect.arrayContaining(['file.save', 'document.export', 'course.configure', 'surface.configure']))
+
+  await host.tools.beginRun({ runId: 'unrequested', actor: 'agent', documents: [{ documentId: project.documentId, writable: [{ kind: 'document' }] }] })
+  const direct = (await host.tools.describeRun('unrequested')).map(tool => tool.name)
+  expect(direct).toContain('document.export')
+  expect(direct).not.toContain('course.configure')
+  await host.tools.beginRun({ runId: 'readonly-delivery', actor: 'agent', documents: [{ documentId: project.documentId, writable: [] }] })
+  await host.tools.loadToolFamilies('readonly-delivery', ['build', 'layout'])
+  expect((await host.tools.describeRun('readonly-delivery')).map(tool => tool.name)).not.toContain('document.export')
 })
 
 it('keeps creation available for an empty formal project while hiding unrelated long-tail schemas until discovery', async () => {

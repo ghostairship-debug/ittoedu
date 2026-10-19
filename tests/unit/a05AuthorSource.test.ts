@@ -36,7 +36,13 @@ it('reads the same short entry without mutating builtin, then persists a real sh
   expect(entry.content).toBe(prepared.implementation.source)
   expect(current).toEqual(before)
   expect(entry.content).toContain("import implementation from './implementation'")
-  expect(files.some(file => file.authorSource?.dependencyId && file.content?.includes('mountWebContent'))).toBe(true)
+  const apiReference = files.find(file => file.kind === 'reference' && file.path === entry.references?.[0]?.path)!
+  expect(apiReference).toBeDefined()
+  for (const api of ['context.root', 'scope.state', 'get(name)', 'set(name, value)', 'subscribe(name, listener)',
+    'scope.cleanup', 'return mounted', 'tc.read().scenes', 'tc.execute', 'context.scope.signal']) expect(apiReference.content).toContain(api)
+  expect(apiReference.content).toContain('subscribe 不回放当前值')
+  const dependency = files.find(file => file.authorSource?.dependencyId && file.content?.includes('mountWebContent'))!
+  expect(dependency.note).toContain('仅深改底层实现时按需读取')
   const modified = entry.content!.replace('return implementation.mount(context);', 'context.root.dataset.custom = "a";\n    return implementation.mount(context);')
   const edits = canonicalComponentFileEdits(snapshot(current), entry, modified)
   current = driver.apply(current, captureComponentOperation(current.project, edits)) as typeof current
@@ -44,6 +50,7 @@ it('reads the same short entry without mutating builtin, then persists a real sh
   expect(current.project.definitions.web).toEqual(before.project.definitions.web)
   const instanceSource = current.project.instances.a.implementationOverride
   if (instanceSource?.kind !== 'source') throw new Error('Expected short source')
+  expect(prepareComponentAuthorSource(current.project, instanceSource)?.implementation).toBe(instanceSource)
   const compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
   expect((await compilation.compile(componentCompilationInput(current.project, instanceSource, current.resources))).status).toBe('ready')
   const second = prepareComponentAuthorSource(current.project, current.project.definitions.web.implementation)!
@@ -60,6 +67,95 @@ it('reads the same short entry without mutating builtin, then persists a real sh
   expect(reopened.project.instances.a.implementationOverride).toEqual(instanceSource)
   expect(reopened.project.instances.b).toEqual(before.project.instances.b)
   expect(componentCompilationInput(reopened.project, instanceSource, reopened.resources).dependencies).toEqual(componentCompilationInput(current.project, instanceSource, current.resources).dependencies)
+})
+
+it.each([
+  ['dispose() {}', 'update()'],
+  ['update() {}', 'dispose()'],
+  ['', 'update() / dispose()'],
+])('warns about an undeclared literal lifecycle during apply and retains its source: %s', async (methods, missing) => {
+  let current = model()
+  const before = structuredClone(current)
+  const entry = componentProjectFiles(current.project, current.resources).find(file =>
+    file.binding?.kind === 'instance-source' && file.binding.instanceId === 'a' && !file.authorSource?.dependencyId)!
+  const authored = `export default {\n  mount() {\n    return { ${methods} };\n  },\n};`
+  const compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
+  const service = new ContentApplyService({ compilation, async measure() { throw new Error('source does not need measurement') },
+    session: { project: () => current.project, resources: () => current.resources, async dispatch(command) {
+      const beforeRevision = current.project.revision
+      current = driver.apply(current, command) as typeof current
+      return { status: 'applied', documentId: 'author', operationId: 'source-apply', beforeRevision,
+        revision: current.project.revision, persistence: 'recoverable' }
+    } } })
+  const applied = await service.apply({ intent: 'canonical', edits: canonicalComponentFileEdits(snapshot(current), entry, authored) })
+  expect(applied).toMatchObject({ commit: 'committed', usability: 'partial', diagnostics: [{
+    code: 'component-compile', level: 'warning', file: 'component.js', line: 3, column: 11,
+    lineText: `    return { ${methods} };`, repairable: true,
+  }] })
+  expect(applied.diagnostics[0].message).toContain(`未声明 ${missing}`)
+  const reopened = driver.load(driver.serialize(current)) as typeof current
+  expect(reopened.project.instances.a.implementationOverride).toMatchObject({ kind: 'source', source: authored })
+  expect(reopened.project.instances.a.data).toEqual(before.project.instances.a.data)
+  expect(reopened.project.instances.b).toEqual(before.project.instances.b)
+})
+
+it.each([
+  `export default {mount(context){
+    context.root.innerHTML='<button>ready</button>';
+    const button=context.root.querySelector('button');
+    const onClick=()=>{button.textContent='clicked'};
+    context.root.addEventListener('click',onClick);
+    return {dispose(){context.root.removeEventListener('click',onClick)}};
+  }}`,
+  'export default {mount(){Object.prototype.update=()=>{};return {dispose(){}}}}',
+])('keeps a direct-return advisory nonblocking after DOM or prototype preparation: %s', async authored => {
+  const current = model(), compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
+  const implementation = source(authored)
+  const compiled = await compilation.compile(componentCompilationInput(current.project, implementation, current.resources))
+  expect(compiled).toMatchObject({ status: 'ready', artifact: { code: expect.any(String), diagnostics: [{ severity: 'warning' }] } })
+  const service = new ContentApplyService({ compilation, async measure() { throw new Error('source does not need measurement') },
+    session: { project: () => current.project, resources: () => current.resources, async dispatch() { throw new Error('plan only') } } })
+  const plan = await service.plan({ intent: 'canonical', edits: [{ type: 'implementation.set', instanceId: 'a', implementation }] })
+  expect(plan).toMatchObject({ usability: 'partial', diagnostics: [{ code: 'component-compile', level: 'warning' }] })
+  expect(plan.diagnostics[0].message).toContain('如未由原型或其他实际实现提供会无法挂载')
+  const applied = driver.apply(current, plan.command) as typeof current
+  expect(applied.project.instances.a.implementationOverride).toMatchObject({ source: authored })
+  expect(applied.project.instances.b).toEqual(current.project.instances.b)
+})
+
+it('accepts a complete literal lifecycle without executing candidate Source', async () => {
+  const current = model(), implementation = source(`throw new Error('Source must not execute during compilation');
+export default { document: 'web', mount() { return { update() {}, dispose() {} }; } };`)
+  const result = await new InMemoryComponentCompilation(createEsbuildComponentCompiler())
+    .compile(componentCompilationInput(current.project, implementation, current.resources))
+  expect(result).toMatchObject({ status: 'ready', artifact: { diagnostics: [] } })
+})
+
+it.each([
+  'export default {mount(context){return implementation.mount(context)}}',
+  'export default {...implementation,mount(){return {dispose(){}}}}',
+  'export default {mount(){return {...lifecycle,dispose(){}}}}',
+  'export default {mount(context){return createLifecycle(context)}}',
+  'export default {mount(){return {[method](){}}}}',
+  'export default {mount(){return {__proto__: lifecycle,dispose(){}}}}',
+  'export default {mount(){return {get update(){return installLifecycle(this)}}}}',
+  'export default {mount(){return {then(resolve){resolve({update(){},dispose(){}})}}}}',
+  'export default {mount(context){if(context.ready)return createLifecycle(context);return {dispose(){}}}}',
+])('leaves delegated or dynamic lifecycle construction unverified: %s', async authored => {
+  const current = model(), compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
+  const service = new ContentApplyService({ compilation, async measure() { throw new Error('source does not need measurement') },
+    session: { project: () => current.project, resources: () => current.resources, async dispatch() { throw new Error('plan only') } } })
+  const plan = await service.plan({ intent: 'canonical', edits: [{ type: 'implementation.set', instanceId: 'a', implementation: source(authored) }] })
+  expect(plan).toMatchObject({ usability: 'unverified', diagnostics: [] })
+})
+
+it('keeps TypeScript outside the JavaScript-only literal lifecycle diagnostic', async () => {
+  const current = model(), implementation: Extract<ComponentImplementation, { kind: 'source' }> = {
+    kind: 'source', language: 'typescript', source: 'export default {mount(_context: unknown){return {dispose(){}}}}',
+  }
+  const result = await new InMemoryComponentCompilation(createEsbuildComponentCompiler())
+    .compile(componentCompilationInput(current.project, implementation, current.resources))
+  expect(result).toMatchObject({ status: 'ready', artifact: { diagnostics: [] } })
 })
 
 it('copies only the modified dependency and ancestor path, preserving sibling sharing, source CAS and byte CAS', async () => {

@@ -229,6 +229,34 @@ export class AgentFileService implements AgentFilePort {
       opened: this.openedFile(context, filename, reconciled) }
   }
   /** Original bytes for material import, browser upload, computation and component packages. */
+  async authorizeTaskInput(context: AgentFileContext, raw: string): Promise<string> {
+    context.assertActive?.()
+    const requested = path.resolve(context.workspaceRoot, raw)
+    let actual: string
+    try { actual = await fs.realpath(requested) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      // An opened current draft survives deletion of its former disk file.
+      // Resolve the existing ancestor for the same realpath read boundary.
+      let ancestor = path.dirname(requested)
+      for (;;) {
+        try { actual = path.resolve(await fs.realpath(ancestor), path.relative(ancestor, requested)); break }
+        catch (cause) {
+          if ((cause as NodeJS.ErrnoException).code !== 'ENOENT' || path.dirname(ancestor) === ancestor) throw cause
+          ancestor = path.dirname(ancestor)
+        }
+      }
+      const root = await fs.realpath(context.workspaceRoot)
+      const bound = (context.boundPaths ?? []).some(value => this.officeKey(path.resolve(value)) === this.officeKey(requested))
+      if (context.permission !== 'full' && !isInsideRoot(root, actual) && !bound)
+        throw new Error('当前权限不允许访问工作空间外文件')
+      context.assertActive?.()
+      return requested
+    }
+    if (!await this.mayRead(context, actual)) throw new Error('当前权限不允许访问工作空间外文件')
+    context.assertActive?.()
+    return actual
+  }
   async readAuthorizedFile(context: AgentFileContext, raw: string): Promise<{ path: string; name: string; version: string; bytes: Uint8Array }> {
     context.assertActive?.()
     const filename = await this.filenameOrDirectory(context, raw, false)
@@ -283,6 +311,8 @@ export class AgentFileService implements AgentFilePort {
     return { data: { ...saved, path: saved.binding.path, saved: true } }
   }
   async execute(context: AgentFileContext, name: AgentFileToolName, raw: unknown, operationId: string): Promise<AgentFileOutcome> {
+    context = { ...context, operationCall: { name, input: structuredClone(raw) } }
+    if (name === 'file.write' || name === 'file.patch') this.host.tools.captureHostOperation(context.runId, operationId, context.operationCall!)
     if (!context.workspaceRoot || !path.isAbsolute(context.workspaceRoot)) throw new Error('任务缺少已冻结的工作空间位置')
     if (name === 'file.list') {
       const input = agentFileSchemas[name].parse(raw), { directory, fallback } = await this.directory(context, input.path)

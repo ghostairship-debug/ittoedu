@@ -7,6 +7,10 @@ import type { LightEditTextOverride } from '../../shared/contracts/runtime/light
 import { splitInstalledBundledFontFaceCss } from '../../shared/fonts/installedBundledFontFaceCss'
 import { createPreparedJavaScriptImportOptionsValidator, preparedJavaScriptNativeImportBody } from '../../shared/browser/validatePreparedJavaScriptImportOptions'
 import { projectPublishedNativeImportOptions } from '../../core/publish/componentPlatform/compiledScript'
+import { createDomAuthoring } from './authoringDom'
+import { installOwnedDocumentAuthoring } from './ownedDocumentAuthoring'
+import { ownedDocumentKeyAttribute } from './ownedDocumentIdentity'
+import { createBrowserUuid } from '../../shared/browser/createBrowserUuid'
 
 export interface AuthoredDocumentPrograms {
   graph?: WebModuleGraph
@@ -106,10 +110,17 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
   /** Internal projection of child documents inside a fragment carrier. */
   nestedOnly?: boolean
   documentPath?: string
+  /** Author identity is independent from positional module-compilation paths. */
+  authoringPath?: string
+  authoringPendingPath?: string
+  /** One ephemeral key set per loaded generation; ordinary updates reuse it. */
+  pendingDocumentKeys?: Record<string, string>
   transportFragment?: boolean
 }): string {
   const source = data.html, parsed = parse(source, { sourceCodeLocationInfo: true })
   const documentPath = options.documentPath ?? ''
+  const authoringPath = options.authoringPath ?? ''
+  const authoringPendingPath = options.authoringPendingPath ?? ''
   const prefix = `guoling-module:${encodeURIComponent(options.instanceId)}/${options.nonce}/${documentPath ? `${documentPath}/` : ''}`
   const property = `__guoling_parser_${options.nonce.replace(/-/g, '_')}`
   const programs: AuthoredDocumentPrograms = { graph: webModuleGraphForDocument(data.moduleGraph, documentPath), prefix, property, classic: {},
@@ -125,6 +136,15 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
     programs.published = { helper, contexts: runtime?.contexts, code: `${projected}\n${runtime ? `${binding}.configureRuntimeImport(${helper});` : ''}\n${binding}.ready.catch(${helper}.report);` }
   }
   const edits: Array<{ start: number; end: number; value: string }> = []
+  const ownedKeys = new Map<string, number>()
+  const countOwnedKeys = (node: DefaultTreeAdapterTypes.Node): void => {
+    if ('tagName' in node && node.tagName === 'iframe') {
+      const key = node.attrs.find(attribute => attribute.name === ownedDocumentKeyAttribute)?.value
+      if (key) ownedKeys.set(key, (ownedKeys.get(key) ?? 0) + 1)
+    }
+    if ('childNodes' in node) node.childNodes.forEach(countOwnedKeys)
+  }
+  countOwnedKeys(parsed)
   let index = 0, iframeIndex = 0
   const quote = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
   const visit = (node: DefaultTreeAdapterTypes.Node): void => {
@@ -133,8 +153,17 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
       const location = node.sourceCodeLocation?.attrs?.srcdoc
       if (srcdoc && location) {
         const childPath = documentPath ? `${documentPath}/${current}` : String(current)
+        const key = node.attrs.find(attribute => attribute.name === ownedDocumentKeyAttribute)?.value || undefined
+        const pendingKeys = options.pendingDocumentKeys
+        const pendingKey = () => pendingKeys ? pendingKeys[childPath] ??= createBrowserUuid() : createBrowserUuid()
+        const softwareKey = key ?? pendingKey()
+        const authorSegment = key ? (ownedKeys.get(key) === 1 ? `key:${encodeURIComponent(key)}` : `ambiguous:${encodeURIComponent(key)}:${pendingKey()}`)
+          : `pending:${current}:${encodeURIComponent(softwareKey)}`
+        const childAuthoringPath = authoringPath ? `${authoringPath}/${authorSegment}` : authorSegment
+        const pendingSegment = `pending:${current}:${encodeURIComponent(softwareKey)}`
+        const childPendingPath = authoringPendingPath ? `${authoringPendingPath}/${pendingSegment}` : pendingSegment
         const child = authoredDocumentBootstrap({ ...data, html: srcdoc.value, css: undefined }, {
-          ...options, nestedOnly: false, documentPath: childPath, resourceCss: undefined,
+          ...options, nestedOnly: false, documentPath: childPath, authoringPath: childAuthoringPath, authoringPendingPath: childPendingPath, resourceCss: undefined,
           bridge: authoredDocumentProgramsSource,
         })
         edits.push({ start: location.startOffset, end: location.endOffset, value: `srcdoc="${quote(child)}"` })
@@ -189,7 +218,7 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
   const fonts = splitInstalledBundledFontFaceCss(options.themeCss ?? '')
   const style = [fonts.faces ? `<style data-component-bundled-faces>${fonts.faces.replace(/<\/style/gi, '<\\/style')}</style>` : '',
     fonts.theme ? `<style data-component-initial-theme>${fonts.theme.replace(/<\/style/gi, '<\\/style')}</style>` : '', data.css ? `<style${marker ? ` data-component-resource-bindings="${quote(marker)}"` : ''}>${data.css.replace(/<\/style/gi, '<\\/style')}</style>` : ''].join('')
-  const textBootstrap = `${domTextOverrideRealmSource()}(${installParsedPageTextOverrides.toString()})(${JSON.stringify(programs.textOverrides ?? [])},${JSON.stringify(property)},createPageTextOverrides);(${installOwnedDocumentBridge.toString()})(${JSON.stringify(property)},${Boolean(documentPath)},${refreshWebResourceReferences.toString()});`
+  const textBootstrap = `${domTextOverrideRealmSource()}(${installParsedPageTextOverrides.toString()})(${JSON.stringify(programs.textOverrides ?? [])},${JSON.stringify(property)},createPageTextOverrides);(${installOwnedDocumentBridge.toString()})(${JSON.stringify(property)},${Boolean(documentPath)},${refreshWebResourceReferences.toString()});${documentPath ? `(${installOwnedDocumentAuthoring.toString()})(${JSON.stringify(property)},${JSON.stringify(authoringPath)},${createDomAuthoring.toString()},{pendingPath:${JSON.stringify(authoringPath.includes('ambiguous:') ? undefined : authoringPendingPath)},refreshResources:${refreshWebResourceReferences.toString()}});` : ''}`
   const bootstrap = `<meta charset="utf-8"><script>${(textBootstrap + options.bridge(programs)).replace(/<\/script/gi, '<\\/script')}</script>${style}`
   if (!options.nestedOnly) edits.push({ start: insertion, end: insertion, value: bootstrap })
   let result = source
@@ -246,6 +275,7 @@ export function installParsedPageTextOverrides(rules: readonly LightEditTextOver
   factory: (roots: readonly Node[], rules: readonly LightEditTextOverride[]) => DomTextOverrideController) {
   const owner = factory([document.documentElement], rules)
   const cascade = (next: readonly LightEditTextOverride[]) => {
+    rules = next
     owner.setRules(next)
     for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]'))
       frame.contentWindow?.postMessage({ type: 'guoling.page-copy.update', token, rules: next }, '*')
@@ -254,11 +284,16 @@ export function installParsedPageTextOverrides(rules: readonly LightEditTextOver
     if (event.source === parent && event.data?.type === 'guoling.page-copy.update' && event.data.token === token
       && Array.isArray(event.data.rules)) cascade(event.data.rules)
   }
+  const loaded = (event: Event) => {
+    if (event.target instanceof HTMLIFrameElement && event.target.hasAttribute('srcdoc'))
+      event.target.contentWindow?.postMessage({ type: 'guoling.page-copy.update', token, rules }, '*')
+  }
   const consumer: DomTextOverrideController = { setRules: cascade, applyAll: () => owner.applyAll(), samples: () => owner.samples(),
     originalText: node => owner.originalText(node), setLocalText: (node, text) => owner.setLocalText(node, text),
-    destroy() { owner.destroy(); window.removeEventListener('message', receive) } }
+    destroy() { owner.destroy(); window.removeEventListener('message', receive); window.removeEventListener('load', loaded, true) } }
   Object.defineProperty(window, '__cwPageTextOverrides', { configurable: true, value: consumer })
   window.addEventListener('message', receive)
+  window.addEventListener('load', loaded, true)
   window.addEventListener('pagehide', () => consumer.destroy(), { once: true })
   owner.applyAll()
 }

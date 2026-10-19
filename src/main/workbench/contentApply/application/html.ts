@@ -8,6 +8,7 @@ import { measuredFragmentBoxStyle, measuredFragmentRootCss, measuredFragmentDocu
 import { HTML_PROGRAM_DEFINITION, WEB_DEFINITION } from '../../../../components/web/data'
 import { retainedMeasurementScopeHtml } from '../measurement/prepareMeasurementDocument'
 import { htmlDocumentKind } from '../../../../shared/html/documentKind'
+import { pageHtmlAssembly, type HtmlPageTarget } from './pageHtmlAssembly'
 
 type Element = DefaultTreeAdapterTypes.Element
 type Node = DefaultTreeAdapterTypes.ChildNode
@@ -88,7 +89,8 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
   flow?: boolean
   /** Only an explicit whole-surface redo can transfer page paint to its owner. */
   flowPage?: boolean
-}): { draft: ContentObjectDraft; drafts?: ContentObjectDraft[]; definitions: ComponentDefinition[]; diagnostics: ContentApplyDiagnostic[]; flowBackgroundColor?: string } {
+  page?: HtmlPageTarget
+}): { draft: ContentObjectDraft; drafts?: ContentObjectDraft[]; definitions: ComponentDefinition[]; diagnostics: ContentApplyDiagnostic[]; flowBackgroundColor?: string; pageBackground?: import('../../../../shared/contracts/component-platform').ComponentBackground; pageLayout?: true } {
   const definitions = new Map<string, ComponentDefinition>(), diagnostics: ContentApplyDiagnostic[] = []
   const serialization: HtmlSerialization = { nextPseudo: 0 }
   const isDefaultImplementation = (existing: ComponentDefinition, expected: ComponentDefinition) =>
@@ -110,9 +112,25 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
     return definition
   }
   const draft = (object: HtmlAssemblyObject): ContentObjectDraft => {
-    const professional = object.retainedSource ? undefined : professionalHtmlDraft(object, options.admittedResourceBindings ?? resourceBindings, options.createFormulaId, assembly.supportCss)
+    const professionalObject = object.kind === 'group' && !object.sourceRegions.length ? { ...object, decorations: [] } : object
+    const professional = object.retainedSource ? undefined : professionalHtmlDraft(professionalObject, options.admittedResourceBindings ?? resourceBindings, options.createFormulaId, assembly.supportCss)
     if (professional?.kind === 'native') {
-      return { ...professional.draft, definitionId: definitionFor(professional.definition).id }
+      const ownDefinitions = new Map([professional.definition, ...(professional.definitions ?? [])].map(value => [value.id, value]))
+      const remap = (value: ContentObjectDraft): ContentObjectDraft => ({ ...value,
+        definitionId: ownDefinitions.has(value.definitionId) ? definitionFor(ownDefinitions.get(value.definitionId)!).id : value.definitionId,
+        ...(value.children ? { children: value.children.map(remap) } : {}) })
+      const converted = remap(professional.draft)
+      if (professional.diagnostics) diagnostics.push(...professional.diagnostics)
+      if (object.kind === 'group') {
+        const background = object.decorations.filter(value => !value.interleaves).map<HtmlAssemblyObject>(value => ({
+          kind: 'web', label: '装饰', sourcePath: value.sourcePath, frame: value.frame,
+          style: value.content.kind === 'element' ? value.content.style : {}, content: value.content,
+          pseudoElements: value.content.kind === 'element' ? value.content.pseudoElements : {},
+          children: [], decorations: [], sourceRegions: [],
+        }))
+        converted.children = [...(converted.children ?? []), ...background.map(draft), ...orderedChildren(object).map(draft)]
+      }
+      return converted
     } else if (professional?.kind === 'web') diagnostics.push(professional.diagnostic)
     const definition = definitionFor(WEB_DEFINITIONS.find(value => value.id === (object.kind === 'program' ? 'guoling.html-program' : 'guoling.web'))!)
     const originalContent = object.content?.kind === 'element' && object.content.tagName === 'body'
@@ -125,10 +143,13 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
         style: measuredFragmentBoxStyle(originalContent.style) } : originalContent
     // Atomic Web source keeps its real CSS ancestor context. Detached group children
     // remain separately owned objects and cannot be copied back into this source.
-    const sourceScope = !object.retainedSource && object.kind !== 'program' && object.kind !== 'group'
+    const localProgram = object === assembly.root && object.kind === 'program' && object.sourcePath.length > 0
+    const sourceScope = localProgram
+      ? retainedMeasurementScopeHtml(assembly.source, object.sourcePath, { programOrigin: { x: object.frame.transform[4], y: object.frame.transform[5], viewport: assembly.viewport } })
+      : !object.retainedSource && object.kind !== 'group'
       && object.sourceStyle !== undefined && object.sourcePath.length && !object.children.length
       ? retainedMeasurementScopeHtml(assembly.source, object.sourcePath) : undefined
-    let html = object.retainedSource?.html ?? object.program?.html ?? sourceScope ?? (content ? contentHtml(content, serialization) : '')
+    let html = object.retainedSource?.html ?? sourceScope ?? object.program?.html ?? (content ? contentHtml(content, serialization) : '')
     const retained = backgroundDecorationHtml(object, serialization) + object.sourceRegions.map(region => region.html).join('')
     if (retained) {
       const closing = content?.kind === 'element' && !VOID.has(content.tagName) ? `</${content.tagName}>` : ''
@@ -146,7 +167,7 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
       ...(Object.keys(resourceBindings).length ? { resourceBindings } : {}) }
     return { definitionId: definition.id, data,
       frame: { width: object.frame.width, height: object.frame.height, transform: [...object.frame.transform] } as ComponentFrame,
-      style: object.kind === 'program' ? htmlObjectStyle(object.style, false) : object.retainedSource || sourceScope ? {} : measuredStyle,
+      style: object.retainedSource || sourceScope ? {} : object.kind === 'program' ? htmlObjectStyle(object.style, false) : measuredStyle,
       ...(object.kind === 'group' ? { children: orderedChildren(object).map(draft) } : {}) }
   }
   const rootStyle = assembly.root.style
@@ -173,6 +194,13 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
     const roots = assembly.root.children.map(draft)
     return { draft: roots[0]!, drafts: roots, definitions: [...definitions.values()], diagnostics,
       ...(options.flowPage && hasColor ? { flowBackgroundColor: rootColor } : {}) }
+  }
+  const page = options.page && pageHtmlAssembly(assembly, options.page, options.admittedResourceBindings ?? resourceBindings, orderedChildren)
+  if (page) {
+    diagnostics.push(...page.diagnostics)
+    const roots = orderedChildren({ ...assembly.root, children: page.roots, decorations: [] }).map(draft)
+    return { draft: roots[0] ?? draft(assembly.root), drafts: roots, definitions: [...definitions.values()], diagnostics, pageLayout: true,
+      ...(page.background ? { pageBackground: page.background } : {}) }
   }
   const root = draft(assembly.root)
   return { draft: root, definitions: [...definitions.values()], diagnostics }

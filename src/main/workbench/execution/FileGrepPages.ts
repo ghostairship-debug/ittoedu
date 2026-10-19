@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { literalTextMatches } from '../../../core/tools/literalTextSearch'
 
 type Entry = { name: string; kind: 'folder' | 'file' | 'unsupported' }
 type DirectoryPosition = { directory: string; offset: number; digest?: string }
@@ -40,7 +41,7 @@ export class FileGrepPages {
     verifyDirectory: (directory: string) => Promise<string>;
     readFile: (filename: string) => Promise<{ source: string; version: string }> }) {
     const state = this.begin(input.runId, input.root, input.query, input.kind, input.cursor)
-    const matches: Array<{ path: string; line: number; column: number; excerpt: string; version: string }> = []
+    const matches: Array<{ path: string; line: number; column: number; offset: number; matchLength: number; offsetUnit: 'utf-16-code-unit'; excerptOffset: number; excerpt: string; version: string }> = []
     const excluded: Array<{ path: string; reason: string }> = [], failed: Array<{ path: string; reason: string }> = []
     // A resumed page must not silently join a different directory snapshot.
     for (const [directory, previous] of Object.entries(state.observed)) {
@@ -67,23 +68,9 @@ export class FileGrepPages {
         }
         if (position.version && position.version !== file.version) throw new Error('搜索中的文件版本已改变，请重新搜索')
         position.version = file.version
-        while (matches.length < input.limit) {
-          const index = file.source.indexOf(input.query, position.offset)
-          if (index < 0) break
-          for (let i = position.offset; i < index; i++) if (file.source.charCodeAt(i) === 10) {
-            position.line++; position.lineStart = i + 1
-          }
-          const lineStart = position.lineStart
-          const lineEnd = file.source.indexOf('\n', index)
-          matches.push({ path: position.filename, line: position.line, column: index - lineStart + 1,
-            excerpt: file.source.slice(lineStart, lineEnd < 0 ? Math.min(file.source.length, lineStart + 240) : Math.min(lineEnd, lineStart + 240)),
-            version: file.version })
-          const next = index + Math.max(1, input.query.length)
-          for (let i = index; i < next; i++) if (file.source.charCodeAt(i) === 10) {
-            position.line++; position.lineStart = i + 1
-          }
-          position.offset = next
-        }
+        const found = literalTextMatches(file.source, input.query, { ...position, limit: input.limit - matches.length })
+        matches.push(...found.matches.map(match => ({ path: position.filename, ...match, version: file.version })))
+        position.offset = found.offset; position.line = found.line; position.lineStart = found.lineStart
         if (matches.length >= input.limit) break
         state.file = undefined; state.scannedFiles++; filesThisCall++
         continue

@@ -22,9 +22,15 @@ afterEach(async () => {
 })
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'course-input-lifecycle-')); roots.push(root)
-  const host = new DocumentHostService(path.join(root, 'recovery'), {}, { discardFlowRecovery: async () => {} })
-  const project = createBlankCourseProjectV10(), instanceId = project.global.overlay[0]!
-  project.instances[instanceId]!.data = { text: '原文' }
+  const host = new DocumentHostService(path.join(root, 'recovery'))
+  // Input ownership is independent of an automatically inserted teacher HUD.
+  // A blank V10 project deliberately has no objects; create the subject explicitly.
+  const project = createBlankCourseProjectV10(), instanceId = 'lifecycle-text'
+  project.definitions['lifecycle-text'] = { id: 'lifecycle-text', title: 'Lifecycle text', role: 'content',
+    implementation: { kind: 'source', language: 'javascript', source: 'export default { mount({root,instance}) { root.textContent=instance.data.text; return { update(next) { root.textContent=next.data.text }, dispose() {} } } }' } }
+  project.instances[instanceId] = { id: instanceId, definitionId: 'lifecycle-text', data: { text: '原文' },
+    frame: { width: 200, height: 40, transform: [1, 0, 0, 1, 20, 20] } }
+  project.surfaces[0]!.childIds.push(instanceId)
   const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'input.glx')
   const api: DocumentHostAPI = { ...documentHostAPI(host), bootstrapCourse: async () => snapshot }
   const bridge = new CourseV10DocumentBridge(); bridges.push(bridge); await bridge.connect(api)

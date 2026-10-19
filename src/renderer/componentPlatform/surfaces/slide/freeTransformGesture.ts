@@ -97,7 +97,7 @@ export class FreeTransformGesture {
         const inverse = invertMatrix(frameToSpaceMatrix(frame, target.parentToSurface))
         const factors = resizeFactors(this.start.handle!, frame.width, frame.height, transformPoint(inverse, this.initial), transformPoint(inverse, current), Boolean(modifiers.shift || target.preserveAspectRatio))
         if (this.start.allowReflection === false) { factors.x = Math.max(.001, factors.x); factors.y = Math.max(.001, factors.y) }
-        if (this.start.resizeMode === 'box') {
+        if ((this.start.resizeMode ?? target.resizeMode) === 'box') {
           const x = Math.max((this.start.minimumBoxSize?.width ?? 1) / frame.width, factors.x), y = Math.max((this.start.minimumBoxSize?.height ?? 1) / frame.height, factors.y)
           return { edits: [{ type: 'frame.set', instanceId: target.instanceId, frame: {
             width: frame.width * x, height: frame.height * y,

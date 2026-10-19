@@ -22,6 +22,8 @@ import { useSlideNativeTextEditor } from './useSlideNativeTextEditor'
 import { componentDefinitionPresentation } from '../properties/componentDefinitionPresentation'
 import type { SlideContentEdit } from '../../store/slices/slideAuthoringSlice'
 import { resolveComponentBackground } from '../../../shared/contracts/component-platform'
+import { mergeComponentBackground } from '../../../shared/componentBackgroundPaint'
+import { ComponentBackgroundPaint } from '../../components/ComponentBackgroundPaint'
 import { createTeacherControllerHudGeometry, teacherControllerReferenceSize, isViewportComponent, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, type TeacherControllerDisplayPort, type TeacherControllerHudGeometry } from '../../../shared/teacherControllerViewportGeometry'
 import { SlideLayerSelectionOverlay } from './SlideLayerSelectionOverlay'
 import { CourseNavigationControls } from './CourseNavigationControls'
@@ -38,7 +40,7 @@ export interface SpatialLocationWorkspaceProps {
   canvasMode: 'edit' | 'run'
   renderInstance(instanceId: string, displayProjection?: CourseProjectV10): ReactNode
   teacherController?: TeacherControllerDisplayPort
-  backgroundAssetUrl?: string | null
+  resolveBackgroundAsset?(id: string): string | undefined
   backgroundPreviewColor?: string | null
   onViewportChange?(size: { width: number; height: number }): void
   captureTarget(): CapturedCourseTarget
@@ -393,8 +395,7 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
       data-observation-surface-id={props.surface.id} data-observation-location-id={currentFrame?.id ?? props.surface.id} data-observation-state-id={props.activeStateId ?? ''} data-observation-ready="true"
       data-observation-spatial-camera={JSON.stringify(props.view.camera)} style={{ ...(props.canvasMode === 'run'
         ? { inset: 'auto', left: runFit.left, top: runFit.top, width: design.width * runFit.scale, height: design.height * runFit.scale }
-        : { inset: 0 }), overflow: 'hidden', touchAction: 'none', backgroundColor: props.backgroundPreviewColor ?? background.color,
-        backgroundImage: props.backgroundAssetUrl ? `url(${JSON.stringify(props.backgroundAssetUrl)})` : undefined, backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit, backgroundPosition: 'center', backgroundRepeat: 'no-repeat', boxShadow: dragOver ? 'inset 0 0 0 3px #245b46' : undefined }}
+        : { inset: 0 }), overflow: 'hidden', touchAction: 'none', isolation: 'isolate', boxShadow: dragOver ? 'inset 0 0 0 3px #245b46' : undefined }}
       onPointerDownCapture={event => { if (event.target instanceof Element && event.target.closest('[data-controller-selection]')) {
         const handle = event.target.closest('[data-handle]')?.getAttribute('data-handle') as FreeResizeHandle | 'rotate' | null
         begin(event, handle === 'rotate' ? 'rotate' : handle ? 'resize' : 'drag', handle === 'rotate' ? undefined : handle ?? undefined)
@@ -422,6 +423,8 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
           { captured: frozen, documentId: frozen.documentId, projectId: frozen.project.id, revision: frozen.project.revision, locationId: props.surface.id, surfaceId: props.surface.id, sessionGeneration: props.activation ?? 0 }, props.onDropWorkspaceMedia,
           () => mediaRef.current.directory === media.directory && mediaRef.current.files === media.files).then(result => setError(result.ok ? null : result.reason ?? '媒体未插入'))
       }}>
+      <ComponentBackgroundPaint background={props.backgroundPreviewColor == null ? background : mergeComponentBackground(background, { color: props.backgroundPreviewColor })}
+        resolveAsset={id => props.resolveBackgroundAsset?.(id)} />
       <div data-spatial-hud-plane="underlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: props.view.scope === 'global' ? 'auto' : 'none' }}>{props.project.global.underlay.map(id => props.renderInstance(id, hudDisplayProject))}</div>
       <div data-spatial-world="true" style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0, transformOrigin: '0 0', transform: `matrix(${worldMatrix.join(',')})` }}>{props.surface.childIds.map(id => props.renderInstance(id))}
       </div>
@@ -445,7 +448,8 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
           </g>
         })}
       </svg>
-      <div data-spatial-hud-plane="overlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: props.view.scope === 'global' || props.canvasMode === 'run' ? 'auto' : 'none' }}>{props.project.global.overlay.map(id => props.renderInstance(id, hudDisplayProject))}</div>
+      {/* The plane never captures empty-space input; InstanceView owns each actual HUD hit surface. */}
+      <div data-spatial-hud-plane="overlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: 'none' }}>{props.project.global.overlay.map(id => props.renderInstance(id, hudDisplayProject))}</div>
       {props.canvasMode === 'edit' && <div data-controller-selection="true"><SlideLayerSelectionOverlay targets={selectedControllers.filter(target => !locked(target))} scale={1} surfaceToPointer={controllerPointerMatrix()} /></div>}
       {props.canvasMode === 'edit' && <div style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0, transformOrigin: '0 0', transform: `matrix(${editorMatrix.join(',')})` }}>{editor.editor}</div>}
       <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'visible' }}>

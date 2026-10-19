@@ -11,7 +11,7 @@ export interface DocumentDeliveryServiceOptions {
   documents: {
     read(documentId: string): Promise<DocumentSnapshot>
     prepareDrafts?(documentId: string, epoch: string): Promise<void>
-    saveWithFact(documentId: string, filename?: string, identity?: DocumentSaveIdentity): Promise<{ snapshot: DocumentSnapshot; savedRevision: number }>
+    saveWithFact(documentId: string, filename?: string, identity?: DocumentSaveIdentity): Promise<{ snapshot: DocumentSnapshot; savedRevision: number; warnings?: string[] }>
     lookupSave?(documentId: string, identity: DocumentSaveIdentity): Promise<SaveReceipt | null>
     withFileLease<T>(documentId: string, work: (read: () => DocumentSnapshot) => Promise<T>): Promise<T>
   }
@@ -119,14 +119,14 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
       const justBefore = await this.options.documents.read(input.documentId)
       if (justBefore.epoch !== before.epoch || justBefore.revision !== before.revision
         || documentDigest(justBefore.binding) !== documentDigest(before.binding)) throw new Error('保存准备期间文档或文件绑定已变化')
-      const { snapshot, savedRevision } = await this.options.documents.saveWithFact(input.documentId, filename,
+      const { snapshot, savedRevision, warnings = [] } = await this.options.documents.saveWithFact(input.documentId, filename,
         { runId: input.runId, operationId: input.operationId, requestDigest: input.requestDigest }).catch(error => {
           throw error instanceof DocumentSaveFailure ? error : new DocumentDeliveryOutcomeUnknown(error)
         })
       if (snapshot.binding.kind !== 'file') throw new DocumentDeliveryOutcomeUnknown()
       const receipt: SaveReceipt = { status: 'saved', path: snapshot.binding.path, documentId: snapshot.documentId, epoch: snapshot.epoch,
         savedRevision, currentRevision: snapshot.revision, fileVersion: snapshot.binding.version, dirty: snapshot.dirty,
-        warnings: snapshot.dirty ? ['保存期间又有新修改；当前文档仍未全部保存'] : [] }
+        warnings: [...warnings, ...(snapshot.dirty ? ['保存期间又有新修改；当前文档仍未全部保存'] : [])] }
       try { await this.options.operations.patch(input.runId, input.operationId, { status: 'completed', receipt, path: receipt.path, fileVersion: receipt.fileVersion }) }
       catch (error) { throw new DocumentDeliveryOutcomeUnknown(error) }
       return receipt

@@ -236,6 +236,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     {!isHtml && <header><strong>{documentRefLabel(currentRef)}</strong>{documentActions}</header>}
     {(error || state.error) && <div role="alert">{error ?? state.error}<button type="button" onClick={() => { void flush() }}>重试保存</button>{onClosed && <><button type="button" onClick={() => { void preserveAndClose().then(closed => { if (closed) onClosed() }) }}>保留恢复稿后关闭</button><button type="button" onClick={() => { void session.discardAndClose().then(closed => { if (closed) onClosed() }) }}>放弃未保存更改并关闭</button></>}</div>}
     {state.recovery && <aside role="alert">已找到未保存恢复稿，请比较后继续。{state.conflictHunks.length ? <span>请逐处处理下方冲突。</span> : <button type="button" onClick={() => { void session.resolveConflict('recovery') }}>保留恢复稿并保存</button>}</aside>}
+    {state.retainedSourceConflicts.length > 0 && <aside aria-label="保留的手动合并恢复稿"><p>原冲突上下文尚未匹配，以下输入可复制到当前冲突处，原记录继续保留。</p>{state.retainedSourceConflicts.map((candidate, index) => <details key={index}><summary>手动合并候选 {index + 1}</summary><details><summary>原始源文</summary><pre>{candidate.source}</pre></details>{candidate.hunks.map((hunk, hunkIndex) => <label key={hunkIndex}>未应用输入<textarea readOnly value={hunk.text} /></label>)}</details>)}</aside>}
     {state.conflict && <aside role="alert">
       <p>{state.conflict === 'deleted' ? '磁盘文档已删除，当前稿已保留。' : '磁盘稿与当前稿在同一处有修改，请比较后选择。'}</p>
       {state.conflictHunks.map((hunk, index) => <ConflictHunk key={hunk.id} hunk={hunk} index={index} session={session} />)}

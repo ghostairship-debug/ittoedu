@@ -2,6 +2,8 @@
 export type ModelJson = null | boolean | number | string | ModelJson[] | { [key: string]: ModelJson }
 export type ModelJsonObject = { [key: string]: ModelJson }
 export type ModelCapability = 'supported' | 'unsupported' | 'unknown'
+/** Unknown uses the selected connection's real request path; only an explicit rejection disables input. */
+export const modelAcceptsImages = (capability: ModelCapability): boolean => capability !== 'unsupported'
 
 export interface ModelConnectionSnapshot {
   id: string
@@ -17,7 +19,7 @@ export interface ModelConnectionSnapshot {
   capabilities: { tools: ModelCapability; vision: ModelCapability; stream: ModelCapability; reasoning: ModelCapability }
 }
 
-/** Native fields stay with the message when Engine persists or sends the next turn. */
+/** Native fields stay with persisted originals and complete current continuation rounds. */
 export type ModelChatMessage = ModelJsonObject & { role: 'system' | 'developer' | 'user' | 'assistant' | 'tool' }
 export type ModelNativeToolCall = ModelJsonObject & {
   id: string; type: 'function'; function: ModelJsonObject & { name: string; arguments: string }
@@ -44,6 +46,8 @@ export interface ModelSelection {
 }
 export interface ModelRequest {
   requestId: string
+  /** Opaque host session affinity, independent of request/run IDs, document identity and native response lineage. */
+  sessionAffinity?: { key: string }
   selection: ModelSelection
   messages: readonly ModelChatMessage[]
   tools?: readonly ModelToolDefinition[]
@@ -56,8 +60,33 @@ export interface ModelUsage {
   totalTokens?: number
   reasoningTokens?: number
   cachedInputTokens?: number
+  cacheWriteInputTokens?: number
   /** Usage is provider-reported; it is not a balance or actual charge. Missing counters remain unknown. */
   raw: ModelJsonObject
+}
+export interface ModelFinishDetails {
+  /** Original provider stop/incomplete reason, before normalization to finishReason. */
+  reason: string
+  /** Present only when the provider distinguishes output exhaustion from context exhaustion. */
+  limit?: 'output' | 'context'
+}
+/** One frozen, credential-free wire payload, shared by budgeting and its actual transport. */
+export interface PreparedModelRequest {
+  readonly serialized: string
+  stream(requestId: string, options?: { signal?: AbortSignal }): AsyncIterable<ModelEvent>
+}
+/** Fixed transport categories only; excludes exception text, URLs and response bytes. */
+export interface ModelTransportDiagnostic {
+  phase: 'fetch-before-headers' | 'body-read'
+  errorClass: 'TypeError' | 'Error' | 'AbortError' | 'AggregateError' | 'SocketError' | 'ConnectTimeoutError' | 'HeadersTimeoutError' | 'BodyTimeoutError' | 'other'
+  errorCode?: 'ECONNRESET' | 'ECONNREFUSED' | 'ENOTFOUND' | 'ETIMEDOUT' | 'EPIPE' | 'UND_ERR_SOCKET' | 'UND_ERR_CONNECT_TIMEOUT' | 'UND_ERR_HEADERS_TIMEOUT' | 'UND_ERR_BODY_TIMEOUT'
+  httpResponseReceived: boolean
+  httpStatus?: number
+  lastEventType?: 'response.created' | 'response.in_progress' | 'response.output_item.added' | 'response.output_item.done'
+    | 'response.content_part.added' | 'response.content_part.done' | 'response.output_text.delta' | 'response.output_text.done'
+    | 'response.function_call_arguments.delta' | 'response.function_call_arguments.done' | 'response.reasoning_summary_text.delta'
+    | 'response.reasoning_summary_text.done' | 'response.refusal.delta' | 'response.refusal.done'
+    | 'response.completed' | 'response.failed' | 'response.incomplete' | 'error' | 'other'
 }
 export interface ModelFailure {
   outcome: 'not-sent' | 'rejected' | 'unknown'
@@ -69,6 +98,7 @@ export interface ModelFailure {
   providerRequestId?: string
   providerCode?: string
   providerType?: string
+  transport?: ModelTransportDiagnostic
 }
 export type ModelEvent = { requestId: string; sequence: number } & (
   | { type: 'response.started'; responseId: string; /** Only provider-reported, never inferred from selection. */ actualModel?: string; providerRequestId?: string }
@@ -80,12 +110,14 @@ export type ModelEvent = { requestId: string; sequence: number } & (
   | { type: 'tool.delta'; index: number; id?: string; name?: string; argumentsDelta: string }
   | { type: 'response.completed'; responseId: string; /** May remain unknown when the provider omits it. */ actualModel?: string; assistant: ModelAssistantMessage;
       toolCalls: readonly { id: string; name: string; argumentsText: string }[];
-      finishReason: string; usage?: ModelUsage; nativeResponse: ModelJsonObject }
+      finishReason: string; finishDetails?: ModelFinishDetails; usage?: ModelUsage; nativeResponse: ModelJsonObject }
   | { type: 'response.failed'; failure: ModelFailure }
 )
 export interface ModelProvider {
   /** Explicit adapter fact: absence does not authorize automatic replay of an unknown provider. */
   readonly retrySafety?: 'pure-generation' | 'server-side-effects'
+  /** Optional request-scoped preparation; never a cache across changing messages, tools or selections. */
+  prepare?(request: Omit<ModelRequest, 'requestId'>): PreparedModelRequest
   /** Exactly one request, no implicit retry, provider fallback, tool execution or document mutation. */
   stream(request: ModelRequest, options?: { signal?: AbortSignal }): AsyncIterable<ModelEvent>
 }

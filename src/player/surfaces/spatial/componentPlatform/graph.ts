@@ -115,7 +115,7 @@ export function spatialTourStops(spatial: ComponentSpatialAuthoring | undefined,
 }
 
 export interface SpatialTourStep extends SpatialTourStop { fragmentInstanceId?: string; fragmentStep?: number }
-/** Fragment counts come from the professional HTML consumer, never from a second author list. */
+/** Fragment counts come from the active document runtime, never from a second author list. */
 export function spatialTourSteps(spatial: ComponentSpatialAuthoring | undefined, pathId: string | null | undefined, viewport: { width: number; height: number }, targets: readonly SpatialGeometryTarget[], fragmentCounts: ReadonlyMap<string, number>): SpatialTourStep[] {
   const reached = new Set<string>()
   return spatialTourStops(spatial, pathId, viewport, targets).flatMap(stop => {

@@ -135,8 +135,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
     drain: drainActive,
     restore(documentId, epoch, records) {
       const result = advancedDrafts.restore(documentId, records.advanced)
-      restorePropertiesDrafts(documentId, records.properties, epoch)
+      const properties = restorePropertiesDrafts(documentId, records.properties, epoch)
       if (result.issues.length) get().setError(result.issues[0]!.message)
+      else if (properties.ambiguous) get().setError('属性恢复稿存在不同原文或当前输入，已保留原记录，请比较后继续。')
+      return { advanced: result.adopted, properties: properties.adopted }
     },
     suspend(ids) { courseBridge.suspendForClose(ids); suspendPropertiesDrafts(ids) },
     resume(ids) { courseBridge.resumeAfterCloseCancelled(ids); resumePropertiesDrafts(ids) },
@@ -198,6 +200,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 const EMPTY_IDS: readonly string[] = Object.freeze([])
 const EMPTY_ASSETS = Object.freeze({})
 const EMPTY_FILES: Record<string, Uint8Array> = Object.freeze({})
+const EMPTY_RESOURCES: DocumentResources = { assets: EMPTY_FILES, components: Object.freeze({}) }
 export const selectCourseView = (state: EditorState) => state.courseView
 export const selectActiveCourseProjectDocument = (state: EditorState) => state.courseView.project
 export const selectActiveCourseLocationId = (state: EditorState) => state.courseView.surfaceId
@@ -245,6 +248,10 @@ export const selectHasUnsavedCourseDocuments = (state: EditorState) => selectHas
   || Object.values(state.flowDocumentDrafts ?? {}).some(Boolean)
   || state.courseView.documents.some(document => courseDraftLifecycle(state.courseBridge).hasDirty(document.documentId)
     || hasPropertiesDrafts(document.documentId))
+export const selectActiveCourseResources = (state: EditorState): DocumentResources => {
+  const view = state.courseView
+  return view.views.find(item => item.documentId === view.activeDocumentId)?.model.resources ?? EMPTY_RESOURCES
+}
 export const selectMediaAssets = (state: EditorState) => state.courseView.project?.assets ?? EMPTY_ASSETS
 export const selectMediaAssetFiles = (state: EditorState): Record<string, Uint8Array> => {
   const view = state.courseView

@@ -86,7 +86,7 @@ export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPan
     try {
       if (!alreadyRestored) {
         const snapshot = mode ? await api.restore(documentId, mode) : await api.restore(documentId)
-        if (mode === 'saved') {
+        if (mode === 'saved' || snapshot.documentId !== documentId) {
           operationGeneration.current++
           setItems(current => current.filter(item => item.snapshot.documentId !== documentId))
           await onRestored(snapshot.documentId)
@@ -146,8 +146,8 @@ export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPan
         {item.error && <p role="alert">{item.error}</p>}
         <div className="workspace-recovery-panel__actions">
           {item.snapshot.recoveryUnavailable ? <button type="button" disabled={busy !== null} onClick={() => void restore(id, false, 'saved')}>保留损坏记录后打开已保存稿</button> : <>
-          <button type="button" disabled={busy !== null} onClick={() => void restore(id, item.restored)}>{item.restored ? '打开已恢复稿' : '恢复并打开'}</button>
-          {!item.restored && item.snapshot.binding.kind === 'file' && <button type="button" disabled={busy !== null}
+          <button type="button" disabled={busy !== null} onClick={() => void restore(id, item.restored)}>{item.restored ? '打开已恢复稿' : item.snapshot.rawInputOnly ? '打开文件并接续原始输入' : '恢复并打开'}</button>
+          {!item.restored && !item.snapshot.rawInputOnly && item.snapshot.binding.kind === 'file' && <button type="button" disabled={busy !== null}
             title="保留内容与撤销历史，重新选择保存位置；不改动原文件" onClick={() => void restore(id, false, 'unbound')}>恢复为未命名稿</button>}
           {!item.restored && <button type="button" disabled={busy !== null} title="只丢弃这份恢复稿，保留用户文件" onClick={() => void discard([id])}>丢弃恢复稿</button>}
           </>}

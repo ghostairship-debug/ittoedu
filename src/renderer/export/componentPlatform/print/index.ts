@@ -15,6 +15,7 @@ import { flowParagraphAnchoredFrame, type FlowParagraphBlockRect } from '../../.
 import { renderDocumentText } from '../../../../shared/document/render'
 import { collectComponentAssetCredits, withCourseCreditsPage } from '../../course/courseCredits'
 import { outputImageDimensions } from '../../outputImage'
+import { applyComponentBackgroundPaint, componentBackgroundAssetIds } from '../../../../shared/componentBackgroundPaint'
 
 export interface ComponentPrintOutputOptions extends ComponentDocumentOutputOptions {
   pageId?: string
@@ -231,12 +232,14 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
   }
   const background = resolveComponentBackground(document, projection.surface)
   const paperColor = projection.surface.flow?.layout.paperBackgroundColor ?? background.color
-  if (background.assetId) {
-    const asset = await options.resolveAsset?.(background.assetId)
-    const url = asset ? bytesToDataUrl(asset.bytes, asset.mimeType) : options.resolveAssetUrl?.(background.assetId)
-    if (url) { body.style.backgroundImage = `url(${JSON.stringify(url)})`; body.style.backgroundSize = background.fit === 'fill' ? '100% 100%' : background.fit; body.style.backgroundRepeat = 'no-repeat' }
-    else diagnostics.push({ surfaceId: surface.id, instanceId: '', code: 'asset-missing', message: `背景资源 ${background.assetId} 缺少实际字节。`, assetId: background.assetId })
-  }
+  const backgroundUrls = new Map<string, string>()
+  await Promise.all(componentBackgroundAssetIds(background).map(async assetId => {
+    const asset = await options.resolveAsset?.(assetId)
+    const url = asset ? bytesToDataUrl(asset.bytes, asset.mimeType) : options.resolveAssetUrl?.(assetId)
+    if (url) backgroundUrls.set(assetId, url)
+    else diagnostics.push({ surfaceId: surface.id, instanceId: '', code: 'asset-missing', message: `背景资源 ${assetId} 缺少实际字节。`, assetId })
+  }))
+  applyComponentBackgroundPaint(body, { ...background, color: paperColor }, assetId => backgroundUrls.get(assetId))
   body.style.backgroundColor = paperColor
   body.style.setProperty('--component-reading-width', `${projection.surface.flow?.layout.readingWidth ?? width}px`)
   body.style.setProperty('--component-wide-width', `${projection.surface.flow?.layout.wideContentWidth ?? width}px`)

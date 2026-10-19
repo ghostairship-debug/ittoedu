@@ -198,12 +198,13 @@ it('runs one finite readonly request with the parent selection, returns source-b
   } }
   const service = new DelegationJobService({ ...paths, readonlyRunner: new ReadonlyTaskRunner({ provider, parentSelection: () => selection }) })
   const sources = [{ source: 'numbers.txt', name: 'numbers.txt', mimeType: 'text/plain', version: 'frozen-version', bytes: new TextEncoder().encode('1,2,3') }]
-  const intent = { goal: '统计个数并引用来源', sources: ['numbers.txt'], budget: { maxOutputTokens: 128, maxDurationMs: 5000 } }
+  const intent = { goal: '统计个数并引用来源', sources: ['numbers.txt'] }
   const request = { ...identity('readonly'), intent, sources }
   await service.startReadonly(request)
   expect(await service.wait('parent', request.jobId, 5000)).toMatchObject({ status: 'ready', executionKind: 'readonly',
     configuredModel: 'deepseek-flash', actualModel: 'actual-parent-model', connectionId: 'parent-connection', usage: { totalTokens: 52 } })
-  expect(requests[0]).toMatchObject({ selection: { model: selection.model, connection: selection.connection, parameters: { max_tokens: 128 } }, tools: [] })
+  expect(requests[0]).toMatchObject({ selection, tools: [] })
+  expect(requests[0]!.selection.parameters).toEqual(selection.parameters)
   const report = Buffer.from((await service.readArtifact('parent', request.jobId, 'report.md')).bytes).toString()
   expect(report).toContain('frozen-version'); expect(report).toContain('numbers.txt')
   expect(await service.startReadonly(request)).toMatchObject({ status: 'ready' }); expect(requests).toHaveLength(1)

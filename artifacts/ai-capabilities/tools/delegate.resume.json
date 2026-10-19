@@ -1,0 +1,125 @@
+{
+  "description": "显式继续某个已结束原生子任务的自身历史。job 是原返回引用，goal/sharedBrief 说明这次修订；outputs 仍声明所需相对成果。宿主核验原 owner，复制子任务自己的候选目录并冻结新 sources，返回当前父运行拥有的新 job。原封存成果保持可读，不恢复旧目录、主文档写权或旧任务取消权；未知操作不会以新调用编号自动重放。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema1": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema2": {
+        "type": "number"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "goal": {
+        "$ref": "#/$defs/__schema0"
+      },
+      "job": {
+        "$ref": "#/$defs/__schema1"
+      },
+      "outputs": {
+        "items": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "minItems": 1,
+        "type": "array"
+      },
+      "role": {
+        "$ref": "#/$defs/__schema0"
+      },
+      "sharedBrief": {
+        "$ref": "#/$defs/__schema0"
+      },
+      "sources": {
+        "items": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "type": "array"
+      },
+      "sourceVersion": {
+        "enum": [
+          "current",
+          "disk"
+        ],
+        "type": "string"
+      },
+      "target": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "project": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "region": {
+            "additionalProperties": false,
+            "properties": {
+              "height": {
+                "$ref": "#/$defs/__schema2",
+                "exclusiveMinimum": 0
+              },
+              "transform": {
+                "prefixItems": [
+                  {
+                    "$ref": "#/$defs/__schema2"
+                  },
+                  {
+                    "$ref": "#/$defs/__schema2"
+                  },
+                  {
+                    "$ref": "#/$defs/__schema2"
+                  },
+                  {
+                    "$ref": "#/$defs/__schema2"
+                  },
+                  {
+                    "$ref": "#/$defs/__schema2"
+                  },
+                  {
+                    "$ref": "#/$defs/__schema2"
+                  }
+                ],
+                "type": "array"
+              },
+              "width": {
+                "$ref": "#/$defs/__schema2",
+                "exclusiveMinimum": 0
+              }
+            },
+            "required": [
+              "width",
+              "height",
+              "transform"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "goal",
+      "outputs",
+      "job"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "delegate.resume",
+    "targetKinds": []
+  },
+  "name": "delegate.resume",
+  "version": 1
+}

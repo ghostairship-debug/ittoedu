@@ -1,7 +1,8 @@
 import type {
   ModelAssistantMessage, ModelConnectionSnapshot, ModelEvent, ModelFailure, ModelJson,
-  ModelJsonObject, ModelNativeToolCall, ModelProvider, ModelRequest, ModelUsage,
+  ModelJsonObject, ModelNativeToolCall, ModelProvider, ModelRequest, ModelUsage, PreparedModelRequest,
 } from '../../../shared/workbench/modelProvider'
+import { modelAcceptsImages } from '../../../shared/workbench/modelProvider'
 import { effectiveModelProtocol } from '../../../shared/workbench/modelRouting'
 import { normalizeModelOutputParameters } from '../../../shared/workbench/modelOutputParameters'
 import { modelToolWireName, waitForModelOperation } from './OpenAIChatProvider'
@@ -14,7 +15,7 @@ export interface AnthropicMessagesProviderOptions {
   fetch?: typeof fetch
   now?: () => number
 }
-type Payload = Pick<ModelRequest, 'selection' | 'messages' | 'tools'>
+type Payload = Pick<ModelRequest, 'selection' | 'messages' | 'tools' | 'sessionAffinity'>
 const object = (value: unknown): value is ModelJsonObject => value !== null && typeof value === 'object' && !Array.isArray(value)
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0
 const counter = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
@@ -65,7 +66,7 @@ function prepare(request: Payload) {
       ? { type: 'object', ...tool.inputSchema } : tool.inputSchema }
   })
   const messages: { role: 'user' | 'assistant'; content: ModelJsonObject[] }[] = []
-  const system: string[] = []
+  const system: ModelJsonObject[] = []
   const append = (role: 'user' | 'assistant', content: ModelJsonObject[]) => {
     const previous = messages.at(-1)
     if (previous?.role === role) previous.content.push(...content)
@@ -76,7 +77,7 @@ function prepare(request: Payload) {
     if (message.role === 'system' || message.role === 'developer') {
       const blocks = contentBlocks(message.content)
       if (blocks.some(block => block.type !== 'text')) throw new Error('unsupported-system-content')
-      system.push(blocks.map(block => block.text).join('\n'))
+      system.push(...blocks)
     } else if (message.role === 'assistant' && message.nativeAnthropic !== undefined) {
       const native = message.nativeAnthropic
       if (!object(native) || !Array.isArray(native.content) || !native.content.every(object)) throw new Error('invalid-native-continuation')
@@ -102,11 +103,11 @@ function prepare(request: Payload) {
     }
   }
   if (!messages.length) throw new Error('missing-messages')
-  if (connection.capabilities.vision === 'unsupported' && messages.some(message => message.content.some(block => block.type === 'image'))) throw new Error('unsupported-vision')
+  if (!modelAcceptsImages(connection.capabilities.vision) && messages.some(message => message.content.some(block => block.type === 'image'))) throw new Error('unsupported-vision')
   const root = connection.baseURL.replace(/\/+$/, '')
   const endpoint = /\/v1$/.test(root) ? `${root}/messages` : `${root}/v1/messages`
   return { endpoint, names, body: { ...parameters, model, max_tokens: maxTokens,
-    ...(system.length ? { system: system.join('\n\n') } : {}), messages, ...(tools?.length ? { tools } : {}), stream: true } }
+    ...(system.length ? { system } : {}), messages, ...(tools?.length ? { tools } : {}), stream: true } }
 }
 export function serializeAnthropicMessagesRequest(request: Payload): string { return JSON.stringify(prepare(request).body) }
 
@@ -119,6 +120,7 @@ function usageOf(raw: ModelJsonObject): ModelUsage {
   if (counter(raw.output_tokens)) usage.outputTokens = raw.output_tokens
   if (usage.inputTokens !== undefined && usage.outputTokens !== undefined) usage.totalTokens = usage.inputTokens + usage.outputTokens
   if (counter(raw.cache_read_input_tokens)) usage.cachedInputTokens = raw.cache_read_input_tokens
+  if (counter(raw.cache_creation_input_tokens)) usage.cacheWriteInputTokens = raw.cache_creation_input_tokens
   if (object(raw.output_tokens_details) && counter(raw.output_tokens_details.thinking_tokens)) usage.reasoningTokens = raw.output_tokens_details.thinking_tokens
   return usage
 }
@@ -133,7 +135,24 @@ interface StreamBlock { value: ModelJsonObject; closed: boolean; argumentsText?:
 export class AnthropicMessagesProvider implements ModelProvider {
   readonly retrySafety = 'pure-generation' as const
   constructor(private readonly options: AnthropicMessagesProviderOptions) {}
+  prepare(input: Payload): PreparedModelRequest {
+    const request = structuredClone(input)
+    const prepared = prepare(request)
+    const serialized = JSON.stringify(prepared.body)
+    return { serialized, stream: (requestId, options) => this.streamPrepared({ ...request, requestId }, prepared, serialized, options) }
+  }
   async *stream(input: ModelRequest, options: { signal?: AbortSignal } = {}): AsyncGenerator<ModelEvent> {
+    let prepared: PreparedModelRequest
+    try { if (!input.requestId) throw new Error('missing-request-id'); prepared = this.prepare(input) }
+    catch {
+      yield { requestId: input.requestId, sequence: 1, type: 'response.failed', failure: {
+        outcome: 'not-sent', kind: 'configuration', code: 'invalid-model-request', message: 'Anthropic 连接、模型输出窗口或请求配置无效；请求未发送。' } }
+      return
+    }
+    yield* prepared.stream(input.requestId, options)
+  }
+  private async *streamPrepared(input: ModelRequest, prepared: ReturnType<typeof prepare>, serialized: string,
+    options: { signal?: AbortSignal } = {}): AsyncGenerator<ModelEvent> {
     let sequence = 0, attempted = false
     const event = (value: object) => ({ ...value, requestId: input.requestId, sequence: ++sequence }) as ModelEvent
     const controller = new AbortController()
@@ -142,10 +161,7 @@ export class AnthropicMessagesProvider implements ModelProvider {
     if (options.signal?.aborted) abort()
     let response: Response | undefined, httpStatus: number | undefined, providerRequestId: string | undefined
     try {
-      const request = structuredClone(input)
-      let prepared: ReturnType<typeof prepare>
-      try { if (!request.requestId) throw new Error('missing-request-id'); prepared = prepare(request) }
-      catch { yield event({ type: 'response.failed', failure: { outcome: 'not-sent', kind: 'configuration', code: 'invalid-model-request', message: 'Anthropic 连接、模型输出窗口或请求配置无效；请求未发送。' } }); return }
+      const request = input
       let credential: string
       try { credential = await waitForModelOperation(() => this.options.credentialResolver(request.selection.connection), controller.signal) }
       catch { controller.signal.throwIfAborted(); yield event({ type: 'response.failed', failure: { outcome: 'not-sent', kind: 'auth', code: 'credential-unavailable', message: '无法读取所选连接的凭据；请求未发送。' } }); return }
@@ -157,7 +173,7 @@ export class AnthropicMessagesProvider implements ModelProvider {
       response = await modelFetch(this.options.fetch)(prepared.endpoint, {
         method: 'POST', redirect: 'error', signal: controller.signal,
         headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'x-api-key': credential, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify(prepared.body),
+        body: serialized,
       })
       httpStatus = response.status
       const headerId = response.headers.get('request-id') ?? response.headers.get('x-request-id')
@@ -264,7 +280,9 @@ export class AnthropicMessagesProvider implements ModelProvider {
         function: { name: String(call.name), arguments: argumentsOf(call) } } satisfies ModelNativeToolCall))
       yield event({ type: 'response.completed', responseId, ...(actualModel ? { actualModel } : {}), assistant,
         toolCalls: calls.map(call => ({ id: String(call.id), name: prepared.names.get(String(call.name)) ?? String(call.name), argumentsText: argumentsOf(call) })),
-        finishReason, ...(usage ? { usage } : {}), nativeResponse: { ...native, content, ...(usage ? { usage: usage.raw } : {}) } })
+        finishReason, finishDetails: { reason: finish,
+          ...(finish === 'max_tokens' ? { limit: 'output' } : finish === 'model_context_window_exceeded' ? { limit: 'context' } : {}) },
+        ...(usage ? { usage } : {}), nativeResponse: { ...native, content, ...(usage ? { usage: usage.raw } : {}) } })
     } catch (error) {
       const idleCode = controller.signal.aborted ? undefined : responseIdleTimeoutCode(error)
       const kind: ModelFailure['kind'] = controller.signal.aborted ? 'aborted' : idleCode ? 'timeout' : error instanceof ProtocolError ? 'protocol' : 'transport'

@@ -1,4 +1,5 @@
 import type { ComponentDefinition, ComponentInstance } from '../../shared/contracts/component-platform/project'
+import { documentColorChannels } from '../../shared/document/color'
 import { htmlDocumentKind } from '../../shared/html/documentKind'
 import { isMeasuredWebFragmentBox } from '../../components/web/measuredFragmentBox'
 
@@ -30,10 +31,21 @@ export function componentPaintStyle(instance: ComponentInstance, definition?: Co
     return clip
   }
   const geometry = /^(?:transform(?:-.+)?|translate|rotate|scale|zoom|position|inset(?:-.+)?|left|top|right|bottom|(?:min-|max-)?(?:width|height|inline-size|block-size)|margin(?:-.+)?|z-index|float|clear|order|flex(?:-.+)?|grid(?:-.+)?|align-self|justify-self)$/
+  const implementation = instance.implementationOverride ?? definition?.implementation
+  const professionalTextPaint = implementation?.kind === 'builtin' && (implementation.key === 'guoling.text' || implementation.key === 'guoling.group')
+  const sourceColor = professionalTextPaint && typeof instance.style?.color === 'string' ? documentColorChannels(instance.style.color) : undefined
   const result: Record<string, string | number> = {}
   for (const [key, value] of Object.entries(instance.style ?? {})) {
     const cssKey = key.startsWith('--') ? key : key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)
     if (geometry.test(cssKey) || typeof value !== 'string' && typeof value !== 'number') continue
+    // Captured text and group fills equal to captured color are derived. Keeping one
+    // on a group would override every descendant's professional colors and ranges.
+    // Preserve an authored distinct fill and other content implementations.
+    if (sourceColor && cssKey === '-webkit-text-fill-color' && typeof value === 'string') {
+      const fill = documentColorChannels(value)
+      if (fill && fill.red === sourceColor.red && fill.green === sourceColor.green
+        && fill.blue === sourceColor.blue && fill.alpha === sourceColor.alpha) continue
+    }
     const reactKey = cssKey.startsWith('--') ? cssKey : cssKey === 'float' ? 'cssFloat'
       : cssKey.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase()).replace(/^Ms/, 'ms')
     result[reactKey] = value

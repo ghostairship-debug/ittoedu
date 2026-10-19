@@ -1,8 +1,9 @@
 import type { HtmlDesignCapture, HtmlAssemblyDiagnostic, MeasuredHtmlChild, MeasuredHtmlElement } from '../../../../core/contentApply/assembly/htmlAssembly'
+import { measuredHtmlKind } from '../../../../core/contentApply/assembly/htmlAssembly'
 import { cssUsesViewport } from '../../../../components/web/measuredFragmentBox'
 
 /** Host-owned browser function; author scripts are disabled by the measurement document's CSP. */
-export async function captureHtmlDesignViewport(resourceWaitMs: number, viewportCss = cssUsesViewport): Promise<HtmlDesignCapture> {
+export async function captureHtmlDesignViewport(resourceWaitMs: number, viewportCss = cssUsesViewport, classify = measuredHtmlKind): Promise<HtmlDesignCapture> {
   const diagnostics: HtmlAssemblyDiagnostic[] = []
   const styleOf = (style: CSSStyleDeclaration): Record<string, string> => Object.fromEntries(Array.from(style, name => [name, style.getPropertyValue(name)]))
   const inheritedNames=new Set(['color','cursor','direction','visibility','text-align','text-indent','text-transform','white-space','word-break','overflow-wrap','letter-spacing','word-spacing','line-height','list-style-type','list-style-position','quotes','tab-size','writing-mode','text-orientation','text-decoration-color'])
@@ -43,13 +44,31 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
   // placement. Only the copy is opened; the returned author attributes stay unchanged.
   const disclosures = [...document.querySelectorAll('details')].map(element => ({ element, open: element.open }))
   for (const { element } of disclosures) element.open = true
-  // Give font/image completion one layout/paint turn. No foreground window or editor state is read.
-  await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-
-  const elements: MeasuredHtmlElement[] = []
   const all = Array.from(document.body.querySelectorAll('*'))
   const body = document.body
   const nodes = [body, ...all]
+  // CSSOM serializes used width/height with fewer digits than the layout box.
+  // ResizeObserver supplies the actual local border box, before transforms, so
+  // tight text frames do not lose a layout subpixel and wrap on projection.
+  const borderBoxes = new Map<Element, { width: number; height: number }>()
+  const borderObserver = new ResizeObserver(entries => {
+    for (const entry of entries) {
+      if (entry.borderBoxSize.length !== 1) continue
+      const box = entry.borderBoxSize[0]!
+      if (!(box.inlineSize > 0 && box.blockSize > 0)) continue
+      const vertical = getComputedStyle(entry.target).writingMode !== 'horizontal-tb'
+      borderBoxes.set(entry.target, vertical ? { width: box.blockSize, height: box.inlineSize } : { width: box.inlineSize, height: box.blockSize })
+    }
+  })
+  // Non-replaced inline and SVG geometry retain their existing fragment/affine
+  // handling below; their observer sizes are not HTML border boxes.
+  for (const element of nodes) if (element instanceof HTMLElement) borderObserver.observe(element, { box: 'border-box' })
+  // Give font/image completion and observer delivery one layout/paint turn.
+  // No foreground window or editor state is read.
+  try { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) }
+  finally { borderObserver.disconnect() }
+
+  const elements: MeasuredHtmlElement[] = []
   const indices = new Map<Element, number>(nodes.map((element, index) => [element, index]))
   const styles = new Map<Element, CSSStyleDeclaration>(nodes.map(element => [element, getComputedStyle(element)]))
   let contentBounds: HtmlDesignCapture['contentBounds'], viewportDependent = false
@@ -109,6 +128,8 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
     return result
   }
   const borderSize = (element: Element, style: CSSStyleDeclaration, axis: 'width' | 'height'): number => {
+    const measured = borderBoxes.get(element)
+    if (measured) return measured[axis]
     const value = parseFloat(style.getPropertyValue(axis))
     if (Number.isFinite(value)) {
       if (style.boxSizing === 'border-box') return value
@@ -183,14 +204,26 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
   const sourceRules:string[]=[]
   const supportRules: string[] = []
   const selectors: string[] = []
+  const mediaQueries = new Set<string>()
   let unreadableStylesheet = false
-  const collectRules = (rules: CSSRuleList): void => {
+  const collectRules = (rules: CSSRuleList, sourceOwned = true): void => {
     for (const rule of Array.from(rules)) {
-      if (rule.type === CSSRule.FONT_FACE_RULE || rule.type === CSSRule.KEYFRAMES_RULE || rule.cssText.startsWith('@property')) supportRules.push(rule.cssText)
-      else if ('cssRules' in rule) collectRules((rule as CSSGroupingRule).cssRules)
+      if (rule.type === CSSRule.MEDIA_RULE) mediaQueries.add((rule as CSSMediaRule).conditionText)
+      if (rule.type === CSSRule.IMPORT_RULE) {
+        const imported = rule as CSSImportRule
+        if (imported.media.mediaText) mediaQueries.add(imported.media.mediaText)
+        if (imported.styleSheet) collectRules(imported.styleSheet.cssRules, sourceOwned)
+        else unreadableStylesheet = true
+      }
+      if (rule.type === CSSRule.FONT_FACE_RULE || rule.type === CSSRule.KEYFRAMES_RULE || rule.cssText.startsWith('@property')) {
+        if (sourceOwned) supportRules.push(rule.cssText)
+      } else if ('cssRules' in rule) collectRules((rule as CSSGroupingRule).cssRules, sourceOwned)
       if (rule.type === CSSRule.STYLE_RULE) {
         const styled = rule as CSSStyleRule
-        selectors.push(styled.selectorText)
+        // Cursor feedback cannot couple content or geometry. Keep its CSS in
+        // the cascade/source, while real author and theme state rules still
+        // participate in the shared document ownership check below.
+        if (Array.from(styled.style).some(property => property !== 'cursor')) selectors.push(styled.selectorText)
         try {
           if (body.matches(styled.selectorText) || body.querySelector(styled.selectorText)) inspectSpecifiedStyle(styled.style)
         } catch { /* A selector unsupported by querySelector does not invalidate its browser layout. */ }
@@ -198,7 +231,12 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
     }
   }
   for (const sheet of Array.from(document.styleSheets)) {
-    try { sourceRules.push(...Array.from(sheet.cssRules,rule=>rule.cssText));collectRules(sheet.cssRules) }
+    if (sheet.media.mediaText) mediaQueries.add(sheet.media.mediaText)
+    const sourceOwned = !(sheet.ownerNode instanceof Element && sheet.ownerNode.hasAttribute('data-guoling-measurement-course-theme'))
+    try {
+      if (sourceOwned) sourceRules.push(...Array.from(sheet.cssRules,rule=>rule.cssText))
+      collectRules(sheet.cssRules, sourceOwned)
+    }
     catch { unreadableStylesheet = true; diagnostics.push({ level: 'warning', code: 'html-stylesheet-read', message: '样式表可用于当前排版，但浏览器未开放其字体/动效规则读取。', reference: sheet.href ?? undefined }) }
   }
   for (const { element, open } of disclosures) element.open = open
@@ -231,9 +269,14 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
       || /(?:^|\s)(?:layout|paint|strict|content)(?:\s|$)/.test(style.contain)
       || /(?:^|,\s*)(?:transform|opacity|filter|perspective)(?:\s*,|$)/.test(style.willChange)
   }
-  const paintContext = (node: Element): Element => {
+  // A browser-painted viewport owns its descendants' normal paint order even
+  // without a CSS stacking context. Backdrop blending is a different relation:
+  // an inline viewport can still blend with HTML outside it until CSS isolates it.
+  const ownsDescendantPaint = (node: Element): boolean => node instanceof SVGSVGElement && !node.ownerSVGElement
+  const paintRoot = (node: Element): boolean => ownsDescendantPaint(node) || createsContext(node)
+  const paintContext = (node: Element, relation: 'paint-order' | 'backdrop' = 'paint-order'): Element => {
     let parent = node.parentElement ?? body
-    while (parent !== body && !createsContext(parent)) parent = parent.parentElement ?? body
+    while (parent !== body && !createsContext(parent) && (relation === 'backdrop' || !ownsDescendantPaint(parent))) parent = parent.parentElement ?? body
     return body.contains(parent) ? parent : body
   }
   // These are observed CSS ownership relationships, not admission rules. A
@@ -281,9 +324,11 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
     } else if (Object.keys(measured.pseudoElements).length && node.children.length) retain([node], 'generated-paint')
     if (node.children.length && (Number(style.opacity || '1') < 1
       || ['filter', 'clip-path', 'mask-image', '-webkit-mask-image'].some(name => Boolean(style.getPropertyValue(name) && style.getPropertyValue(name) !== 'none')))) retain([node], 'group-compositing')
-    if (style.backdropFilter && style.backdropFilter !== 'none' || style.mixBlendMode && style.mixBlendMode !== 'normal') retain([paintContext(node)], 'shared-compositing')
+    if (style.backdropFilter && style.backdropFilter !== 'none' || style.mixBlendMode && style.mixBlendMode !== 'normal') retain([paintContext(node, 'backdrop')], 'shared-compositing')
     const blockChildren = [...node.children].some(child => !/^(?:inline(?:-block|-flex|-grid|-table)?|contents)$/.test(styles.get(child)?.display ?? ''))
-    if (!createsContext(node) && node !== body && blockChildren && ['relative', 'absolute', 'sticky'].includes(style.position)) {
+    // Only descendants without an existing paint root can interleave with
+    // outside HTML paint. Ordinary atomic Web may still have such descendants.
+    if (!paintRoot(node) && node !== body && blockChildren && ['relative', 'absolute', 'sticky'].includes(style.position)) {
       const context = paintContext(node)
       if (crossesPositionedPaint(node, context)) retain([context], 'positioned-paint-order')
     }
@@ -292,13 +337,43 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
       // stacking phase. Keep the common context when a real intermediate
       // painted/semantic shell would otherwise become a separate frame.
       let parent = node.parentElement
-      while (parent && parent !== body && !createsContext(parent)) {
+      while (parent && parent !== body && !paintRoot(parent)) {
         const parentStyle = styles.get(parent)!
         if (semanticGroups.has(parent.localName) || painted(parentStyle) || parent.hasAttribute('aria-label') || parent.hasAttribute('title')) {
-          retain([paintContext(parent)], 'ancestor-paint-order'); break
+          const context = paintContext(parent)
+          // A viewport's own opacity/transform stays on that independently
+          // painted object. Only real outside interleaving gives its HTML
+          // ancestor a shared paint-order responsibility.
+          if (!ownsDescendantPaint(node) || crossesPositionedPaint(node, context)) retain([context], 'ancestor-paint-order')
+          break
         }
         parent = parent.parentElement
       }
+    }
+  }
+  // A paint boundary does not sever real DOM references. A filter/use/paint
+  // server outside its viewport still needs the smallest common source owner;
+  // self-contained definitions stay with their existing local SVG carrier.
+  const documentUrl = new URL(document.URL)
+  documentUrl.hash = ''
+  const fragmentTarget = (reference: string): Element | null => {
+    try {
+      const url = new URL(reference, document.baseURI), fragment = url.hash
+      url.hash = ''
+      return fragment && url.href === documentUrl.href ? document.getElementById(decodeURIComponent(fragment.slice(1))) : null
+    } catch { return null }
+  }
+  for (const node of nodes) {
+    let viewport = node.closest('svg')
+    while (viewport?.parentElement?.closest('svg')) viewport = viewport.parentElement.closest('svg')
+    if (!viewport || !ownsDescendantPaint(viewport)) continue
+    const references = [node.getAttribute('href'), node.getAttribute('xlink:href')].filter((value): value is string => Boolean(value))
+    for (const property of styles.get(node)!) {
+      for (const match of styles.get(node)!.getPropertyValue(property).matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/g)) references.push((match[1] ?? match[2] ?? match[3] ?? '').trim())
+    }
+    for (const reference of references) {
+      const target = fragmentTarget(reference)
+      if (target && !viewport.contains(target)) retain([viewport, target], 'fragment-reference')
     }
   }
   // Browser ownership, including form= controls and labels outside the form subtree.
@@ -354,21 +429,29 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
     checkedInputs.forEach((input, index) => { input.checked = checkedState[index]! })
   }
 
-  for (const [root] of [...scopes]) for (const node of [root, ...root.querySelectorAll<HTMLElement>('*')]) {
-    const style = styles.get(node)
-    if (style?.display === 'none' || style?.visibility === 'hidden' || style?.opacity === '0') continue
-    const position = style?.position
-    if (position === 'fixed') retain([body], 'viewport-layout')
-    else if (position === 'absolute' && node instanceof HTMLElement && node.offsetParent && !root.contains(node.offsetParent)) {
-      retain([root, node.offsetParent], 'positioned-layout')
+  // Only nodes the assembler would detach need an independent affine box.
+  // Fragmented formatting inside a text object already has its original owner.
+  const inspectIndependent = (index: number): void => {
+    const node = nodes[index]!, measured = elements[index]!, style = styles.get(node)!
+    if (['base', 'head', 'link', 'meta', 'script', 'style', 'template', 'title'].includes(measured.tagName)
+      || style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)) return
+    if (measured.geometryIssue) {
+      let owner = node.parentElement ?? body
+      while (owner !== body && (!elements[indices.get(owner)!]?.frame || elements[indices.get(owner)!]?.geometryIssue)) owner = owner.parentElement ?? body
+      retain([owner], 'fragmented-layout')
+      diagnostics.push({ level: 'info', code: 'html-geometry-source-scope', message: `局部 ${measured.tagName} 的 ${measured.geometryIssue} 由最近可测的 ${owner.localName} 保留原排版。`, sourcePath: measured.sourcePath })
+      return
     }
+    const kind = classify(elements, index, scopes.has(node)).kind
+    if (kind === 'program') { retain([node], 'embedded-program-context'); return }
+    if (kind === 'group' && measured.frame) for (const child of measured.children) if (child.kind === 'element') inspectIndependent(child.index)
   }
+  for (const child of elements[0]!.children) if (child.kind === 'element') inspectIndependent(child.index)
 
   // Ancestor shells preserve inherited CSS and descendant selectors. Test their
   // actual selector matches before using them; outside sibling/nth-child context
-  // is retained as the whole input when pruning would change a relevant match.
-  for (const [root, reasons] of [...scopes]) {
-    if (root === body) continue
+  // promotes only as far as the smallest measurable matching ancestor.
+  const selectorContextMatches = (root: Element): boolean => {
     const cloned = document.cloneNode(true) as Document
     const cloneAt = (path: readonly number[]) => path.reduce<Node | undefined>((node, index) => node?.childNodes[index], cloned.body)
     const path = pathOf(root), target = cloneAt(path) as Element
@@ -379,24 +462,68 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
       current = parent
     }
     const originals = [root, ...root.querySelectorAll('*')], copies = [target, ...target.querySelectorAll('*')]
-    let changed = false
     for (const selector of selectors) {
       try {
         const potential = potentialSelector(selector)
         if (!potential.trim()) continue
-        if (originals.some((value, index) => value.matches(potential) !== copies[index]!.matches(potential))) { changed = true; break }
+        if (originals.some((value, index) => value.matches(potential) !== copies[index]!.matches(potential))) return false
       } catch { /* Unsupported selectors keep their native browser behavior. */ }
     }
-    if (changed) { scopes.delete(root); retain([body], 'selector-context') }
-    else if (!elements[indices.get(root)!]?.frame || elements[indices.get(root)!]?.geometryIssue) {
+    return true
+  }
+  const containsPositionedLayout = (root: Element): boolean => [...root.querySelectorAll<HTMLElement>('*')].every(node => {
+    const style = styles.get(node)
+    if (style?.display === 'none' || style?.visibility === 'hidden' || style?.opacity === '0') return true
+    return style?.position !== 'fixed' && (style?.position !== 'absolute' || !node.offsetParent || root.contains(node.offsetParent))
+  })
+  for (const [root, reasons] of [...scopes]) {
+    let closed = root
+    while (closed !== body) {
+      const measured = elements[indices.get(closed)!]
+      if (measured?.frame && !measured.geometryIssue && containsPositionedLayout(closed) && selectorContextMatches(closed)) break
+      closed = closed.parentElement ?? body
+    }
+    if (closed !== root) {
       scopes.delete(root)
-      let measurable = root.parentElement ?? body
-      while (measurable !== body && (!elements[indices.get(measurable)!]?.frame || elements[indices.get(measurable)!]?.geometryIssue)) measurable = measurable.parentElement ?? body
-      retain([measurable], [...reasons].join(', '))
+      retain([closed], [...reasons, 'selector-layout-context'].join(', '))
     }
   }
   const sourceScopes = [...scopes].filter(([root]) => ![...scopes.keys()].some(parent => parent !== root && parent.contains(root)))
-    .map(([root, reasons]) => ({ index: indices.get(root)!, reason: [...reasons].join(', ') }))
-  return { viewport: { width: innerWidth, height: innerHeight }, contentBounds, viewportDependent,
+    .map(([root, reasons]) => {
+      const horizontal = root.scrollWidth - root.clientWidth, vertical = root.scrollHeight - root.clientHeight
+      if (horizontal > 1 || vertical > 1) diagnostics.push({ level: 'warning', code: 'html-source-scope-overflow',
+        message: `关联的 ${root.localName} 初始内容超出已测框：横向 ${Math.max(0, horizontal)}px，纵向 ${Math.max(0, vertical)}px；原内容与溢出样式保留。`, sourcePath: pathOf(root) })
+      return { index: indices.get(root)!, reason: [...reasons].join(', ') }
+    })
+  // A program may render more content after startup. Its temporary child bounds
+  // are not its stage size; an explicitly sized root is an authored region.
+  const stageRoots = [...body.children].filter(node => !['script', 'style', 'template', 'link', 'meta'].includes(node.localName)
+    && (styles.get(node) ?? getComputedStyle(node)).display !== 'none')
+  const stage = stageRoots.length === 1 ? stageRoots[0] : undefined
+  const typedStyle = (stage as Element & { computedStyleMap?(): { get(name: string): unknown } } | undefined)?.computedStyleMap?.()
+  const fixedLength = (name: string) => {
+    const value = typedStyle?.get(name)
+    return value !== null && typeof value === 'object' && Reflect.get(value, 'unit') === 'px'
+      && typeof Reflect.get(value, 'value') === 'number' && Reflect.get(value, 'value') > 0
+  }
+  const stageBox = stage?.getBoundingClientRect()
+  const stageStyle = stage && styles.get(stage)
+  const untransformed = (node: Element) => {
+    const style = styles.get(node) ?? getComputedStyle(node)
+    return ['transform', 'translate', 'rotate', 'scale'].every(name => !style.getPropertyValue(name) || style.getPropertyValue(name) === 'none')
+      && (!style.zoom || style.zoom === '1')
+  }
+  // Transfer only an absolute fixed region's external baseline. Its own style
+  // stays live: programmatic left/top/transform changes must still move it.
+  const localPlacement = stage && stageStyle?.position === 'absolute'
+    && (styles.get(body)?.position ?? 'static') === 'static'
+    && [stage, body, document.documentElement].every(untransformed)
+  const programRoot = stage && stageBox && fixedLength('width') && fixedLength('height') && !viewportDependent && !unreadableStylesheet
+    && stageBox.width > 0 && stageBox.height > 0 && stageBox.left >= 0 && stageBox.top >= 0
+    && ![...body.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())
+    ? { sourcePath: pathOf(stage), x: stageBox.x, y: stageBox.y, width: stageBox.width, height: stageBox.height,
+      ...(localPlacement ? { localPlacement: true as const } : {}),
+      ...(mediaQueries.size ? { media: [...mediaQueries].map(query => ({ query, matches: matchMedia(query).matches })) } : {}) } : undefined
+  return { viewport: { width: innerWidth, height: innerHeight }, contentBounds, viewportDependent, ...(programRoot ? { programRoot } : {}),
     body: 0, pageStyle, sourceCss:sourceRules.join('\n'), supportCss: supportRules.join('\n'), sourceScopes, elements, diagnostics }
 }

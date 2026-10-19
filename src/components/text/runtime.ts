@@ -10,24 +10,49 @@ function mounted<Data>(initial: ComponentInstance<Data>, scope: ComponentRuntime
   let instance = initial, disposed = false, element: HTMLElement | null = null
   let releaseInline: (() => void) | undefined
   let releaseLayout: (() => void) | undefined
+  let observer: ResizeObserver | undefined
+  let contentBox: { width: number; height: number; key: string } | undefined
   const active = () => !disposed && scope.isActive() && !scope.signal.aborted
+  const boxKey = (style: CSSStyleDeclaration | undefined) => [instance.frame?.width, instance.frame?.height,
+    style?.width, style?.height, style?.boxSizing, style?.padding, style?.borderWidth].join('|')
   const measure = () => {
-    if (!active() || !element?.isConnected || !instance.frame || layout?.read().mode === 'flow-content') return
+    if (!active() || !element?.isConnected || !instance.frame) return
+    const placement = layout?.read()
+    if (placement?.mode === 'flow-content') return
     // Frame geometry includes the Surface wrapper's border/padding. Measure
     // the available local content box, before its camera/observation transform.
     const style = root && root.ownerDocument.defaultView?.getComputedStyle(root)
     const contentSize = (axis: 'width' | 'height', fallback: number) => {
-      const value = style && Number.parseFloat(style.getPropertyValue(axis))
-      if (value === undefined || !Number.isFinite(value) || value <= 0) return fallback
-      // Computed CSS sizes are local and retain subpixels; clientWidth/Height
-      // round them, while viewport rectangles also include the Surface camera.
+      // CSSOM's px string can round a layout unit down. Reapplying it can wrap
+      // an otherwise unchanged line, so prefer the observer's untransformed box.
+      if (contentBox?.key === boxKey(style)) return contentBox[axis]
       const sides = axis === 'width' ? ['left', 'right'] : ['top', 'bottom']
-      const edges = style!.boxSizing === 'border-box' ? sides.reduce((sum, side) => sum
-        + (Number.parseFloat(style!.getPropertyValue(`padding-${side}`)) || 0)
-        + (Number.parseFloat(style!.getPropertyValue(`border-${side}-width`)) || 0), 0) : 0
-      return Math.max(0, value - edges)
+      const edges = (box: CSSStyleDeclaration | undefined) => box?.boxSizing === 'border-box' ? sides.reduce((sum, side) => sum
+        + (Number.parseFloat(box.getPropertyValue(`padding-${side}`)) || 0)
+        + (Number.parseFloat(box.getPropertyValue(`border-${side}-width`)) || 0), 0) : 0
+      // Hidden mounts retain percentage CSS sizes such as 100%. They are not
+      // pixels; the current host layout supplies the authored frame until resolved.
+      const cssSize = style?.getPropertyValue(axis).trim()
+      const value = cssSize?.endsWith('px') ? Number.parseFloat(cssSize) : undefined
+      if (value === undefined || !Number.isFinite(value) || value <= 0) {
+        // Free-frame input is the outer border box. Its retained wrappers still
+        // expose their insets while hidden; Flow retains its host-derived size.
+        if (placement && placement.mode !== 'free-frame') return fallback
+        const outer = scope.target({ kind: 'instance', instanceId: instance.id })?.element
+        const boundary = root && outer?.contains(root) ? outer : root
+        let inset = 0
+        for (let node = root; node; node = node.parentElement ?? undefined) {
+          inset += edges(node.ownerDocument.defaultView?.getComputedStyle(node))
+          if (node === boundary) break
+        }
+        return Math.max(0, fallback - inset)
+      }
+      // Synchronous fallback before the first observation. Hidden mounts above
+      // retain the current formal frame; client/viewport rects are not local sizes.
+      return Math.max(0, value - edges(style || undefined))
     }
-    const size = { width: contentSize('width', instance.frame.width), height: contentSize('height', instance.frame.height) }
+    const size = { width: contentSize('width', placement?.inlineSize ?? instance.frame.width),
+      height: contentSize('height', placement?.blockSize ?? instance.frame.height) }
     const result = measureTextComponent(element, size, sizing(instance.data))
     applyTextComponentLayout(element, result)
     element.dataset.textOverflow = String(result.overflows)
@@ -56,9 +81,28 @@ function mounted<Data>(initial: ComponentInstance<Data>, scope: ComponentRuntime
     scope.events.emit('__runtime.text-ranges', { instanceId: instance.id })
     place()
   }
-  const dispose = () => { if (disposed) return; disposed = true; releaseLayout?.(); releaseInline?.(); element?.remove(); element = null }
+  const dispose = () => { if (disposed) return; disposed = true; observer?.disconnect(); contentBox = undefined; releaseLayout?.(); releaseInline?.(); element?.remove(); element = null }
   scope.cleanup(dispose)
   paint()
+  const Observer = root?.ownerDocument.defaultView?.ResizeObserver
+  if (root && Observer && active()) {
+    observer = new Observer(entries => {
+      if (!active()) return
+      const entry = entries.find(value => value.target === root), box = entry?.contentBoxSize[0]
+      if (!entry || !box) return
+      const style = root.ownerDocument.defaultView?.getComputedStyle(root)
+      const vertical = style?.writingMode.startsWith('vertical') || style?.writingMode.startsWith('sideways')
+      const width = vertical ? box.blockSize : box.inlineSize, height = vertical ? box.inlineSize : box.blockSize
+      if (!(width > 0 && height > 0)) { contentBox = undefined; return }
+      const key = boxKey(style)
+      if (contentBox?.key === key && contentBox.width === width && contentBox.height === height) return
+      contentBox = { width, height, key }
+      // Restart from authored fonts; a prior shrink measurement is presentation,
+      // not the input for the next available box.
+      paint()
+    })
+    observer.observe(root)
+  }
   releaseLayout = layout?.subscribe(paint)
   void root?.ownerDocument.fonts?.ready.then(() => { if (active()) paint() })
   return {

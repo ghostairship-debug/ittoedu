@@ -7,9 +7,10 @@ import { normalizeDocumentColor } from '../../../../shared/document/color'
 import { jsonValueSchema, type ComponentDefinition, type ComponentFrame } from '../../../../shared/contracts/component-platform'
 import type { HtmlAssemblyObject, HtmlObjectContent } from '../../../../core/contentApply/assembly/htmlAssembly'
 import type { ContentApplyDiagnostic, ContentObjectDraft } from './types'
+import { professionalGraphicDraft, type ProfessionalGraphicResult } from './professionalGraphics'
 
 export type ProfessionalHtmlResult =
-  | { kind: 'native'; draft: ContentObjectDraft; definition: ComponentDefinition }
+  | Extract<ProfessionalGraphicResult, { kind: 'native' }>
   | { kind: 'web'; diagnostic: ContentApplyDiagnostic }
 
 const retained = (object: HtmlAssemblyObject, message: string): ProfessionalHtmlResult => ({ kind: 'web',
@@ -133,6 +134,8 @@ function textReason(content: Extract<HtmlObjectContent, { kind: 'element' }>): s
 /** Converts only an already measured, independent object. Identity/resource admission/history stay with the host. */
 export function professionalHtmlDraft(object: HtmlAssemblyObject, resourceBindings: Readonly<Record<string, string>>,
   createFormulaId: () => string, supportCss = ''): ProfessionalHtmlResult | undefined {
+  const graphic = professionalGraphicDraft(object, supportCss, resourceBindings)
+  if (graphic) return graphic
   if (object.kind !== 'text' && object.kind !== 'image') return undefined
   if (!object.content || object.content.kind !== 'element') return retained(object, '对象缺少可保真的完整元素内容；保留 Web。')
   if (object.children.length || object.decorations.length || object.sourceRegions.length || Object.keys(object.pseudoElements).length) {

@@ -6,6 +6,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { z } from 'zod'
 import { describeTools } from '../src/core/tools/ToolCatalog'
 import { agentFileTools } from '../src/core/tools/AgentFileTools'
+import { programmaticTools } from '../src/core/tools/ProgrammaticTools'
 import { skillReadTool } from '../src/core/tools/SkillTools'
 import { builtinComponentSourceKeys } from '../src/core/components/source/builtinSources'
 import { courseAgentBundledSkills } from '../src/shared/courseAgentSkills'
@@ -127,6 +128,7 @@ export async function generateAiCapabilityArtifacts(
       description: tool.name === currentSkillReader.name ? currentSkillReader.description : tool.description,
       inputSchema: tool.schema, manual: tool.manual })),
     ...agentFileTools,
+    ...programmaticTools,
   ]
   for (const tool of registeredTools) {
     const location = `tools/${tool.name}.json`

@@ -84,19 +84,32 @@ export function discardPropertiesDrafts(documentId: string): void {
   notifyPropertyDrafts()
 }
 /** Recovery restores input only. It never replays an authoring command. */
-export function restorePropertiesDrafts(documentId: string, records: readonly PropertyDraftRecovery[], epoch?: string): void {
+export function restorePropertiesDrafts(documentId: string, records: readonly PropertyDraftRecovery[], epoch?: string): { adopted: PropertyDraftRecovery[]; ambiguous: boolean } {
+  const groups = new Map<string, PropertyDraftRecovery[]>(), adopted: PropertyDraftRecovery[] = []
+  let ambiguous = false
+  const sameInput = (left: PropertyDraftRecovery, right: PropertyDraftRecovery) => left.raw === right.raw
+    && left.baseline === right.baseline && left.composing === right.composing
   for (const record of records) {
     const parts = bindingParts(record.bindingKey)
-    if (!parts) continue
+    if (!parts || parts.length < 2) { ambiguous = true; continue }
+    const key = JSON.stringify([record.label, record.kind, parts.slice(2)])
+    const group = groups.get(key) ?? []
+    group.push(record); groups.set(key, group)
+  }
+  for (const group of groups.values()) {
+    const record = group[0]!, parts = bindingParts(record.bindingKey)!
+    if (group.some(candidate => !sameInput(candidate, record))) { ambiguous = true; continue }
     const draft = { ...record, bindingKey: JSON.stringify([documentId, epoch ?? parts[1], ...parts.slice(2)]) }
     const existing = [...pendingPropertyDrafts].find(entry => entry.read() && sameDraftTarget(entry.read()!, draft))
     if (existing) {
       if (!existing.dirty()) existing.restore?.({ ...draft, bindingKey: existing.read()!.bindingKey })
-      continue
-    }
-    pendingPropertyDrafts.add({ flush: () => false, read: () => draft, dirty: () => true, mounted: false })
+    } else pendingPropertyDrafts.add({ flush: () => false, read: () => draft, dirty: () => true, mounted: false })
+    if (preservePropertiesDrafts(documentId).some(candidate => sameDraftTarget(candidate, draft)
+      && (epoch === undefined || bindingParts(candidate.bindingKey)?.[1] === epoch) && sameInput(candidate, record))) adopted.push(...group)
+    else ambiguous = true
   }
   notifyPropertyDrafts()
+  return { adopted, ambiguous }
 }
 
 /** Saving commits focused property drafts without moving focus. IME retains its native composition. */

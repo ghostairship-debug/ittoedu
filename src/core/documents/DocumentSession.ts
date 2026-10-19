@@ -6,7 +6,7 @@ import type {
 import { isSourceDocumentModel } from '../../shared/workbench/document'
 import { documentDigest } from './documentDigest'
 import { documentEqual } from './documentEqual'
-import { documentSourceEdits } from '../../shared/document/sourceMerge'
+import { documentSourceReplacement } from '../../shared/document/sourceMerge'
 import { DocumentSaveFailure, type DocumentSaveIdentity, type DocumentSaveProof } from '../../shared/workbench/documentSave'
 import { retainDocumentResourceBytes } from '../drivers/resources'
 
@@ -21,7 +21,7 @@ export interface CreateDocumentSession {
 /** Observes actual captured save revisions; never changes the save acknowledgement. */
 export type DocumentSaveProgress =
   | { status: 'saving'; revision: number; binding: DocumentBinding }
-  | { status: 'saved'; savedRevision: number; currentRevision: number; binding: DocumentBinding }
+  | { status: 'saved'; savedRevision: number; currentRevision: number; binding: DocumentBinding; warnings: string[] }
   | { status: 'failed'; revision: number; binding: DocumentBinding; error: unknown }
 export type DocumentSaveObserver = (progress: DocumentSaveProgress) => void
 
@@ -39,14 +39,17 @@ function operationDigest(operation: DocumentOperation): string {
 
 function sourceChange(before: DocumentModel, after: DocumentModel, command?: Extract<DocumentCommand, { type: 'markdown.splice' }>): DocumentSourceChange | undefined {
   if (before.kind !== after.kind || !isSourceDocumentModel(before) || !isSourceDocumentModel(after)) return
+  // Receipts reverse source bytes; range continuation materializes the original before/after models.
+  // An external/full replacement therefore needs no expensive fine diff at commit time.
+  const replacement = command ?? documentSourceReplacement(before.source, after.source)
   return { kind: 'edits', documentKind: before.kind,
-    edits: (command ? [command] : documentSourceEdits(before.source, after.source)).map(edit => ({ from: edit.from, removed: before.source.slice(edit.from, edit.to), text: edit.text })),
+    edits: (replacement ? [replacement] : []).map(edit => ({ from: edit.from, removed: before.source.slice(edit.from, edit.to), text: edit.text })),
     beforeResources: before.resources, afterResources: after.resources }
 }
 
 /** Models and receipts are immutable inside the Session; only the queue's next containers change. */
 function nextState(state: DurableDocumentState): DurableDocumentState {
-  return { ...state, past: [...state.past], future: [...state.future],
+  return { ...state, schemaVersion: 2, disposition: 'active', past: [...state.past], future: [...state.future],
     operations: [...state.operations], stoppedRuns: [...state.stoppedRuns] }
 }
 
@@ -95,7 +98,7 @@ export class DocumentSession {
     driver.validate(input.model)
     const revision = input.model.kind === 'course-v9' || input.model.kind === 'course-v10' ? input.model.project.revision : 0
     const state: DurableDocumentState = {
-      schemaVersion: 1, documentId: input.documentId, epoch: input.epoch, sequence: 0,
+      schemaVersion: 2, disposition: 'active', documentId: input.documentId, epoch: input.epoch, sequence: 0,
       revision, savedRevision: input.saved ? revision : null,
       binding: structuredClone(input.binding), model: structuredClone(input.model),
       past: [], future: [], operations: [], stoppedRuns: [],
@@ -106,10 +109,14 @@ export class DocumentSession {
   }
 
   static async restore(input: DurableDocumentState, epoch: string, driver: DocumentDriver, persistence: DocumentPersistence): Promise<DocumentSession> {
-    if (!epoch || input.schemaVersion !== 1 || input.model.kind !== driver.kind) throw new Error('无法恢复文档版本或 Driver')
+    if (!epoch || ![1, 2].includes(input.schemaVersion) || input.model.kind !== driver.kind
+      || input.schemaVersion === 1 && input.disposition !== undefined
+      || input.schemaVersion === 2 && input.disposition !== 'active') throw new Error('无法恢复文档版本、终态或 Driver')
     const models = new Set([input.model, ...(input.savedModel ? [input.savedModel] : []), ...[...input.past, ...input.future].flatMap(entry => [entry.before, entry.after])])
     for (const model of models) driver.validate(model)
     const state = structuredClone(input)
+    state.schemaVersion = 2
+    state.disposition = 'active'
     state.epoch = epoch
     state.sequence += 1
     await persistence.append(structuredClone(state))
@@ -372,6 +379,7 @@ export class DocumentSession {
 
   stopRun(runId: string): Promise<DocumentSnapshot> {
     return this.serial(async () => {
+      if (this.closed) return this.read()
       if (!runId) throw new Error('停止任务缺少编号')
       if (!this.state.stoppedRuns.includes(runId)) {
         const next = nextState(this.state)
@@ -450,7 +458,7 @@ export class DocumentSession {
             const next = nextState(this.state)
             next.binding = structuredClone(proof.binding); next.savedRevision = proof.savedRevision
             const original = this.modelAtRevision(proof.savedRevision)
-            const savedModel = proof.savedModel ?? (this.persistence.prepareSaveModel ? undefined : original)
+            const savedModel = proof.savedModel ?? (this.persistence.prepareSave ? undefined : original)
             if (!savedModel) throw new Error('保存查证缺少实际保存模型，已保留当前稿')
             next.savedModel = structuredClone(savedModel)
             next.model = { ...next.model, resources: next.revision === proof.savedRevision ? next.savedModel.resources
@@ -501,16 +509,20 @@ export class DocumentSession {
       })
       let persistenceCalled = false
       try {
-        if (this.persistence.prepareSaveModel) captured.model = await this.persistence.prepareSaveModel({ model: captured.model, sourceBinding: sourceBinding!, targetBinding: captured.binding })
+        const prepared = this.persistence.prepareSave
+          ? await this.persistence.prepareSave({ model: captured.model, sourceBinding: sourceBinding!, targetBinding: captured.binding })
+          : { model: captured.model }
+        captured.model = prepared.model
         const bytes = await this.driver.serialize(captured.model)
         persistenceCalled = true
-        const savedBinding = await this.persistence.save({ documentId: captured.documentId, revision: captured.revision, model: captured.model, binding: captured.binding, bytes, ...(saveIdentity ? { saveIdentity } : {}) })
+        const savedBinding = await this.persistence.save({ documentId: captured.documentId, revision: captured.revision, model: captured.model, binding: captured.binding, bytes,
+          ...(prepared.sourcePublication ? { sourcePublication: prepared.sourcePublication } : {}), ...(saveIdentity ? { saveIdentity } : {}) })
         return await this.serial(async () => {
           const next = nextState(this.state)
           next.binding = structuredClone(savedBinding)
           next.savedRevision = captured.revision
           next.savedModel = captured.model
-          if (this.persistence.prepareSaveModel) {
+          if (this.persistence.prepareSave) {
             // Only the Session publishes these captured dependencies. A later edit owns its changed resources.
             if (next.revision === captured.revision) next.model = { ...next.model, resources: captured.model.resources }
             else next.model = { ...next.model, resources: capturedResources(next.model, originalModel!, captured.model) }
@@ -522,7 +534,8 @@ export class DocumentSession {
           this.saveError = null
           if (next.savedRevision === next.revision) this.recovered = false
           this.notify()
-          observe({ status: 'saved', savedRevision: captured.revision, currentRevision: this.state.revision, binding: structuredClone(savedBinding) })
+          observe({ status: 'saved', savedRevision: captured.revision, currentRevision: this.state.revision, binding: structuredClone(savedBinding),
+            warnings: prepared.sourcePublication?.diagnostics.map(diagnostic => diagnostic.message) ?? [] })
           return this.read()
         })
       } catch (error) {
@@ -541,8 +554,14 @@ export class DocumentSession {
   async close(options: { discardDirty?: boolean; expected?: { epoch: string; revision: number } } = {}): Promise<void> {
     await this.saveTail
     await this.serial(async () => {
+      if (this.closed) return
       if (options.expected && (this.state.epoch !== options.expected.epoch || this.state.revision !== options.expected.revision)) throw new Error('确认关闭期间文档又有更改，请检查当前内容后重试')
       if (!options.discardDirty && this.state.savedRevision !== this.state.revision) throw new Error('文档有未保存更改，请保存或明确放弃')
+      const disposition = options.discardDirty ? 'discarded' : 'closed'
+      const terminal: DurableDocumentState = { ...this.state, schemaVersion: 2, disposition, sequence: this.state.sequence + 1 }
+      if (this.persistence.finalize) await this.persistence.finalize(structuredClone(this.state), disposition)
+      else await this.persistence.append(structuredClone(terminal))
+      this.state = terminal
       this.closed = true
       for (const listener of this.listeners) {
         try { listener({ type: 'closed', documentId: this.state.documentId, epoch: this.state.epoch }) } catch { /* detached view */ }

@@ -15,7 +15,8 @@ export interface PreparedMeasurementDocument {
 }
 
 /** A local semantic scope keeps author CSS/ancestor selectors; only outer placement moves to its frame. */
-export function retainedMeasurementScopeHtml(input: { html: string; themeCss?: string }, sourcePath: readonly number[]): string {
+export function retainedMeasurementScopeHtml(input: { html: string; themeCss?: string }, sourcePath: readonly number[],
+  options: { programOrigin?: { x: number; y: number; viewport: { width: number; height: number } } } = {}): string {
   if (!sourcePath.length) return input.html
   const document = parse(input.html, { sourceCodeLocationInfo: true })
   const documentKind = htmlDocumentKind(document)
@@ -31,6 +32,22 @@ export function retainedMeasurementScopeHtml(input: { html: string; themeCss?: s
     for (const node of style.childNodes) node.parentNode = head
     if (prepend) head.childNodes.unshift(...style.childNodes)
     else head.childNodes.push(...style.childNodes)
+  }
+  if (options.programOrigin) {
+    // Keep the complete program DOM, including scripts/templates outside its
+    // visible root. Move only the fragment's software document shell, so the
+    // author's original coordinates and later root movement remain executable.
+    const { x, y, viewport } = options.programOrigin
+    body.attrs.push({ name: 'data-guoling-program-viewport', value: '' })
+    if (input.themeCss) appendStyle(input.themeCss, true)
+    // The original canvas can exceed this local carrier. Clip its software
+    // viewport, keeping body/root clipping and program movement inside it intact.
+    appendStyle(`${measuredFragmentDocumentCss()}
+html{overflow:hidden!important}
+body[data-guoling-program-viewport]{position:relative!important;left:${-x}px!important;top:${-y}px!important;width:${viewport.width}px!important;height:${viewport.height}px!important}`)
+    // A fragment was measured in standards mode; making its document shell
+    // explicit must not accidentally turn the program into a quirks document.
+    return (documentKind === 'fragment' ? '<!doctype html>' : '') + serialize(document)
   }
   // Body-level styles outside the selected region remain its original CSS context.
   const outsideStyles: HtmlElement[] = []
@@ -62,7 +79,7 @@ export function retainedMeasurementScopeHtml(input: { html: string; themeCss?: s
 }
 
 /** Resource preparation remains the existing resource owner's job; only supplied URL bindings are used. */
-export function prepareMeasurementDocument(input: { html: string; themeCss?: string; resourceUrls?: Readonly<Record<string, string>> }): PreparedMeasurementDocument {
+export function prepareMeasurementDocument(input: { html: string; themeCss?: string; courseThemeCss?: string; resourceUrls?: Readonly<Record<string, string>> }): PreparedMeasurementDocument {
   const document = parse(input.html, { sourceCodeLocationInfo: true })
   const documentKind = htmlDocumentKind(document)
   const originalElements = new Map<string, { attributes: Record<string, string>; sourceHtml: string }>()
@@ -94,9 +111,13 @@ export function prepareMeasurementDocument(input: { html: string; themeCss?: str
   if (!body || !head) throw new Error('HTML parser did not produce a document body/head')
   // Reuse the content permission boundary: no program, embedded navigation or file access during measurement.
   const fragmentDefaults = documentKind === 'fragment' ? '<style>html,body{width:100%;height:100%;margin:0}</style>' : ''
-  const additions = parse(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' data: https:; img-src data: blob: https:; font-src data: https:; media-src data: https:; script-src 'none'; frame-src 'none'">${fragmentDefaults}${input.themeCss ? `<style>${resource(input.themeCss).replace(/<\/style/gi, '<\\/style')}</style>` : ''}`)
+  const courseTheme = input.courseThemeCss ? `<style data-guoling-measurement-course-theme>${resource(input.courseThemeCss).replace(/<\/style/gi, '<\\/style')}</style>` : ''
+  const additions = parse(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' data: https:; img-src data: blob: https:; font-src data: https:; media-src data: https:; script-src 'none'; frame-src 'none'">${fragmentDefaults}${courseTheme}${input.themeCss ? `<style>${resource(input.themeCss).replace(/<\/style/gi, '<\\/style')}</style>` : ''}`)
   const addedHead = additions.childNodes.find(isElement)?.childNodes.find(node => isElement(node) && node.tagName === 'head') as HtmlElement
   head.childNodes.unshift(...addedHead.childNodes)
   addedHead.childNodes.forEach(node => { node.parentNode = head! })
-  return { html: serialize(document), documentKind, documentProgramReason, originalElements }
+  // A fragment is inserted into the standard editor/player document. Its
+  // synthetic measurement wrapper must use that same inline formatting mode.
+  // Explicit author documents retain their own doctype (including quirks mode).
+  return { html: (documentKind === 'fragment' ? '<!doctype html>' : '') + serialize(document), documentKind, documentProgramReason, originalElements }
 }

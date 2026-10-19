@@ -55,6 +55,7 @@ export function resolveComponentOuterPresentation(project: CourseProjectV10, ins
     : frame ? { position: 'absolute', left: '0px', top: '0px', width: `${frame.width}px`, height: `${frame.height}px`,
       transform: `matrix(${frame.transform.join(',')})`, transformOrigin: '0 0', maxWidth: '', margin: '', float: '' }
       : { position: 'relative', left: '', top: '', width: '100%', height: 'auto', transform: '', transformOrigin: '', maxWidth: '', margin: '', float: '' }
+  outerStyle.cursor = typeof instance.style?.cursor === 'string' ? instance.style.cursor : ''
   if (flow && (media || instance.flowLayout)) {
     const presentation = resolveFlowMediaLayoutProjection(instance.flowLayout?.width ?? 'content-width', input.flowLayout ?? { readingWidth: 860, wideContentWidth: 1100 })
     const wrap = instance.flowLayout?.wrap

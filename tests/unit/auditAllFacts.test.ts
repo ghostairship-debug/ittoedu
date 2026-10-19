@@ -85,11 +85,11 @@ describe('audit complete repair: source boundaries and durable operation facts',
   it('resource capture uses the original frozen binding and leaves a newer local resource intact', async () => {
     const persistence = memory(); let enter!: () => void, release!: () => void
     const entered = new Promise<void>(resolve => { enter = resolve }), gate = new Promise<void>(resolve => { release = resolve })
-    persistence.port.prepareSaveModel = async ({ model, sourceBinding, targetBinding }) => {
+    persistence.port.prepareSave = async ({ model, sourceBinding, targetBinding }) => {
       expect(sourceBinding.kind === 'file' && sourceBinding.path).toBe('/A.md')
       expect(targetBinding.kind === 'file' && targetBinding.path).toBe('/B.md')
       enter(); await gate
-      return { ...model, resources: { assets: { 'image.png': new Uint8Array([2]) }, components: {} } }
+      return { model: { ...model, resources: { assets: { 'image.png': new Uint8Array([2]) }, components: {} } } }
     }
     const original = md('![图](image.png)'); original.resources.assets['image.png'] = new Uint8Array([1])
     const session = await DocumentSession.create({ documentId: 'resource', epoch: 'one', model: original, saved: true,
@@ -107,8 +107,8 @@ describe('audit complete repair: source boundaries and durable operation facts',
   it('a body edit during save retains each unchanged component file and adopts newly captured files', async () => {
     const persistence = memory(); let enter!: () => void, release!: () => void
     const entered = new Promise<void>(resolve => { enter = resolve }), gate = new Promise<void>(resolve => { release = resolve })
-    persistence.port.prepareSaveModel = async ({ model }) => { enter(); await gate; return { ...model, resources: { ...model.resources,
-      components: { pkg: { ...model.resources.components.pkg, 'new.txt': new Uint8Array([2]) } } } } }
+    persistence.port.prepareSave = async ({ model }) => { enter(); await gate; return { model: { ...model, resources: { ...model.resources,
+      components: { pkg: { ...model.resources.components.pkg, 'new.txt': new Uint8Array([2]) } } } } } }
     const model = md('body'); model.resources.components.pkg = { 'old.txt': new Uint8Array([1]) }
     const session = await DocumentSession.create({ documentId: 'component', epoch: 'one', model, saved: true,
       binding: { kind: 'file', path: '/A.md', version: 'original', bindingVersion: 1 } }, createMarkdownDriver(), persistence.port)
@@ -119,7 +119,7 @@ describe('audit complete repair: source boundaries and durable operation facts',
 
   it('unknown save acknowledgement adopts the actual proven disk model, including prepared resources', async () => {
     const persistence = memory(); let saved: DocumentModel | undefined, fail = true
-    persistence.port.prepareSaveModel = async ({ model }) => ({ ...model, resources: { assets: { 'image.png': new Uint8Array([2]) }, components: {} } })
+    persistence.port.prepareSave = async ({ model }) => ({ model: { ...model, resources: { assets: { 'image.png': new Uint8Array([2]) }, components: {} } } })
     const append = persistence.port.append
     persistence.port.append = async state => { if (fail && state.sequence > 0 && state.binding.kind === 'file' && state.binding.path === '/B.md') {
       fail = false; throw new Error('ACK append failed')

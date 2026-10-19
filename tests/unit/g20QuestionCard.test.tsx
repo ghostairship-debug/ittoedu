@@ -55,6 +55,20 @@ function api(timeline: ExecutionEvent[], answer?: ExecutionDesktopAPI['answer'],
 const mount = (value: ExecutionDesktopAPI) => render(<ExecutionAssistant root="C:/workspace" api={value} settingsAPI={settingsAPI()}
   captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
 
+it('answers a delegated question from the parent conversation using the original child identity', async () => {
+  const timeline = events(single)
+  timeline[0] = { ...timeline[0]!, data: { status: 'running', phase: 'tool' } }
+  timeline[1] = { ...timeline[1]!, itemId: 'delegation:child:child-question', data: { ...timeline[1]!.data,
+    delegationRef: { runId: 'child', callId: 'child-question', parentRunId: 'run', jobId: 'child-job' } } }
+  const answer = vi.fn<NonNullable<ExecutionDesktopAPI['answer']>>(async () => ({ runId: 'child' }) as Awaited<ReturnType<NonNullable<ExecutionDesktopAPI['answer']>>>)
+  mount(api(timeline, answer))
+  const card = await screen.findByRole('region', { name: 'AI 的提问' })
+  expect(card).toHaveTextContent('子任务需要你的回答')
+  expect(screen.getByRole('article', { name: '子任务提问' })).toHaveTextContent('这一段改成哪种写法？')
+  fireEvent.click(within(card).getByRole('button', { name: '简洁版' }))
+  await waitFor(() => expect(answer).toHaveBeenCalledWith({ runId: 'child', callId: 'child-question', answer: { choices: [0] } }))
+})
+
 it('pops up clickable options for the open question and answers with one click without taking focus', async () => {
   const answer = vi.fn<NonNullable<ExecutionDesktopAPI['answer']>>(async () => ({ runId: 'run' }) as Awaited<ReturnType<NonNullable<ExecutionDesktopAPI['answer']>>>)
   let release!: () => void

@@ -134,27 +134,19 @@ export class AgentFileText {
     edit?: { from: number; to: number; newText: string }): Promise<AgentFileOutcome> {
     if (current.snapshot) {
       const snapshot = current.snapshot
-      if (context.permission !== 'full' && !isInsideRoot(context.workspaceRoot, filename)) {
-        if (!(context.approvedOutsidePaths ?? []).some(approved => samePath(approved, filename))) throw new Error('工作空间外文档的本次修改需要明确批准')
-        context.assertActive?.()
-        const result = await this.host.registry.get(snapshot.documentId).execute({ documentId: snapshot.documentId, epoch: snapshot.epoch,
-          operationId, baseRevision: snapshot.revision, actor: 'agent', runId: context.runId,
-          mutation: { type: 'command', command: { type: 'markdown.replace', source: next } },
-          ...(edit ? { textChanges: { source: [{ from: edit.from, to: edit.to, inserted: edit.newText.length }], flow: [] } } : {}) })
-        if (result.status !== 'applied' && result.status !== 'unchanged') throw new Error(result.status === 'conflict'
-          ? '文档在批准后又被修改，请重新读取' : 'message' in result ? result.message : '正式文档修改未完成')
-        return { data: { path: filename, operationId, status: result.status, documentResult: result,
-          beforeVersion: current.version, afterVersion: `document:${snapshot.documentId}:${snapshot.epoch}:${result.revision}`, saved: false, dirty: true } }
-      }
-      await this.host.tools.attachRunDocument(context.runId, snapshot.documentId, true)
-      const target = await this.host.tools.issueTarget(context.runId, snapshot.documentId,
-        { kind: 'markdown-range', from: edit?.from ?? 0, to: edit?.to ?? current.source.length }, { observed: snapshot })
+      const approvedOutside = context.permission !== 'full' && !isInsideRoot(context.workspaceRoot, filename)
+      if (approvedOutside && !(context.approvedOutsidePaths ?? []).some(approved => samePath(approved, filename)))
+        throw new Error('工作空间外文档的本次修改需要明确批准')
+      if (!context.operationCall) throw new Error('源文件操作缺少宿主调用身份')
       context.assertActive?.()
-      const receipt = await this.host.tools.execute(context.runId, operationId,
-        { name: 'text.replace', input: { target, content: edit?.newText ?? next } })
+      const receipt = await this.host.tools.commitOpenedSource({ runId: context.runId, operationId, call: context.operationCall,
+        snapshot, target: { kind: 'markdown-range', from: edit?.from ?? 0, to: edit?.to ?? current.source.length },
+        content: edit?.newText ?? next, approvedOutside, assertActive: context.assertActive })
       if (receipt.kind === 'error') throw new Error(receipt.message)
       if (receipt.kind !== 'document-operation') throw new Error('正式文档事务未返回修改回执')
       const result = receipt.result
+      if (result.status !== 'applied' && result.status !== 'unchanged')
+        throw new Error(result.status === 'conflict' ? '文档在批准后又被修改，请重新读取并核对后再提交' : '正式文档事务未提交，本次内容没有改变')
       return { data: { path: filename, operationId, status: result.status, documentResult: result,
         beforeVersion: current.version, ...(result.status === 'applied' || result.status === 'unchanged'
           ? { afterVersion: `document:${snapshot.documentId}:${snapshot.epoch}:${result.revision}` } : {}),

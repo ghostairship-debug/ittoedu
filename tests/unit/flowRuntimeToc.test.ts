@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { FlowBlock } from '@/shared/courseProjectTypes'
 import type { PublishedFlowSurface } from '@/shared/publishedCourseTypes'
 import {
@@ -10,6 +10,7 @@ import {
   flowRuntimeTocAnchorId,
   flowRuntimeTocPageAnchorId,
   flowRuntimeTocShellLayout,
+  FlowRuntimeTocChrome,
 } from '@/player/surfaces/flow/flowRuntimeToc'
 
 function flowSurface(): PublishedFlowSurface {
@@ -62,6 +63,27 @@ function secondSurface(): PublishedFlowSurface {
 }
 
 describe('Flow runtime TOC model', () => {
+  it('creates independent accessible drawers when the preview exposes only getRandomValues', () => {
+    const random = globalThis.crypto
+    const getRandomValues = vi.fn((bytes: Uint8Array<ArrayBuffer>) => random.getRandomValues(bytes))
+    vi.stubGlobal('crypto', { getRandomValues })
+    const roots = [document.createElement('div'), document.createElement('div')]
+    const chromes: FlowRuntimeTocChrome[] = []
+    try {
+      for (const root of roots) chromes.push(new FlowRuntimeTocChrome(root, { getEntries: () => [], onNavigate: () => {} }))
+      const ids = roots.map(root => root.querySelector('nav')!.id)
+      expect(getRandomValues).toHaveBeenCalledTimes(2)
+      for (const [index, id] of ids.entries()) {
+        expect(id).toMatch(/^flow-runtime-toc-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u)
+        expect(roots[index]!.querySelector('button')!.getAttribute('aria-controls')).toBe(id)
+      }
+      expect(ids[0]).not.toBe(ids[1])
+    } finally {
+      chromes.forEach(chrome => chrome.destroy())
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('insets the article and paper overlays without accumulating a viewport controller offset', () => {
     const sessionOffset = { dx: 0, dy: 0 }
     const controller = {

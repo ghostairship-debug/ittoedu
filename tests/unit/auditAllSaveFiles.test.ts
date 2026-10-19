@@ -16,9 +16,9 @@ afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)
   if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('unexpected fixture root')
   await fs.rm(root, { recursive: true, force: true })
 } })
-async function fixture() {
+async function fixture(trash = false) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'audit-all-files-')); roots.push(root)
-  const journal = path.join(root, 'journal'), host = new DocumentHostService(journal)
+  const journal = path.join(root, 'journal'), host = new DocumentHostService(journal, trash ? { trashItem: filename => fs.unlink(filename) } : {})
   const context: AgentFileContext = { runId: 'audit', workspaceRoot: root, permission: 'workspace' }
   return { root, journal, host, context }
 }
@@ -162,22 +162,26 @@ describe('Audit existing file owners', () => {
     expect(await read(filename, 'utf8')).toBe('external after read')
   })
 
-  it('CA115 binding intent survives until saved-binding listeners complete, and cold repair repeats only metadata', async () => {
-    const f = await fixture(), source = path.join(f.root, 'old.txt'); await fs.writeFile(source, 'saved')
+  it.each(['rename', 'trash'] as const)('CA115 %s binding intent survives until saved-binding listeners complete, and cold repair repeats only metadata', async action => {
+    const f = await fixture(action === 'trash'), source = path.join(f.root, 'old.txt'); await fs.writeFile(source, 'saved')
     await f.host.open(source)
     let entered!: () => void, release!: () => void
     const waiting = new Promise<void>(resolve => { entered = resolve }), held = new Promise<void>(resolve => { release = resolve })
     f.host.fileCoordinator.subscribeRelocations(async () => { entered(); await held })
     const root = await f.host.files.registerRoot(f.root), sourceEntryId = await entry(f.host.files, root, 'old.txt')
-    const moving = f.host.files.rename({ workspaceId: root.workspaceId, operationId: 'listener-cut', sourceEntryId, name: 'new.txt' })
+    const moving = action === 'rename'
+      ? f.host.files.rename({ workspaceId: root.workspaceId, operationId: 'listener-cut', sourceEntryId, name: 'new.txt' })
+      : f.host.files.trash({ workspaceId: root.workspaceId, operationId: 'listener-cut', entryIds: [sourceEntryId] })
     await waiting
     expect((await fs.readdir(path.join(f.journal, 'binding-intents'))).filter(name => name.endsWith('.json'))).toHaveLength(1)
     const cold = new DocumentHostService(f.journal), listener = vi.fn(async (_action: unknown) => {})
     cold.fileCoordinator.subscribeRelocations(listener)
     await cold.internalAPI.recoverable()
     expect(listener).toHaveBeenCalledOnce()
-    expect(listener.mock.calls[0]![0]).toMatchObject({ sources: [{ resolvedPath: source }], target: { resolvedPath: path.join(f.root, 'new.txt') } })
-    expect(await fs.readFile(path.join(f.root, 'new.txt'), 'utf8')).toBe('saved')
+    expect(listener.mock.calls[0]![0]).toMatchObject({ kind: action, sources: [{ resolvedPath: source }],
+      ...(action === 'rename' ? { target: { resolvedPath: path.join(f.root, 'new.txt') } } : {}) })
+    if (action === 'rename') expect(await fs.readFile(path.join(f.root, 'new.txt'), 'utf8')).toBe('saved')
+    else await expect(fs.stat(source)).rejects.toMatchObject({ code: 'ENOENT' })
     release(); expect((await moving).status).toBe('success')
   })
 

@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { AI_CAPABILITY_INDEX_RECOMMENDED_BYTES, checkAiCapabilityArtifacts, generateAiCapabilityArtifacts, indexSizeWarning, writeAiCapabilityArtifacts } from '../../scripts/generate-ai-capabilities'
 import { describeTools } from '../../src/core/tools/ToolCatalog'
 import { agentFileTools } from '../../src/core/tools/AgentFileTools'
+import { programmaticTools } from '../../src/core/tools/ProgrammaticTools'
 import { courseProjectV10Schema } from '../../src/shared/contracts/component-platform/schema'
 import { publishedCourseV3Schema } from '../../src/shared/contracts/component-platform/published'
 import { builtinComponentSourceKeys } from '../../src/core/components/source/builtinSources'
@@ -24,7 +25,7 @@ const nativeRead = (source: string) => source.split(/\r?\n/).map(line => line.le
 it('publishes complete current public tool schemas and V10/V3/API5 contracts readable through native line limits', async () => {
   const generated = await generateAiCapabilityArtifacts()
   const read = (location: string): unknown => JSON.parse(nativeRead(generated.files.get(location)!))
-  const tools = [...describeTools().map(tool => ({ name: tool.name, inputSchema: tool.schema })), ...agentFileTools]
+  const tools = [...describeTools().map(tool => ({ name: tool.name, inputSchema: tool.schema })), ...agentFileTools, ...programmaticTools]
   for (const tool of tools) expect(read(`tools/${tool.name}.json`)).toMatchObject({ name: tool.name, inputSchema: tool.inputSchema })
   const discovery = read('discovery.json') as { tools: { id: string }[]; protocols: { id: string }[] }
   expect(discovery.tools.map(tool => tool.id).sort()).toEqual(tools.map(tool => tool.name).sort())

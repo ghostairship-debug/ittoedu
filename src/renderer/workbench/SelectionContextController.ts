@@ -16,6 +16,8 @@ export interface SelectionCapture {
   revision: number
   targets: ExecutionSelectionTarget[]
   label: string
+  /** Explicit user restriction, independent of the captured focus. */
+  restrictToSelection?: boolean
   /** Only used to map a live Markdown highlight; never a writer or an authorization. */
   source?: string
 }
@@ -190,8 +192,9 @@ export function usePinnedSelection(documentId: string | null | undefined) {
   useSyncExternalStore(workbenchSelection.subscribe, workbenchSelection.readVersion)
   return documentId ? workbenchSelection.getPinned(documentId) : null
 }
-export function selectionReference(value: SelectionCapture, writable: boolean): ExecutionDocumentReference {
-  return { documentId: value.documentId, epoch: value.epoch, revision: value.revision, selection: structuredClone(value.targets), writable: writable ? structuredClone(value.targets) : [] }
+export function selectionReference(value: SelectionCapture, writable: boolean, restrictToSelection = value.restrictToSelection === true): ExecutionDocumentReference {
+  return { documentId: value.documentId, epoch: value.epoch, revision: value.revision, selection: structuredClone(value.targets),
+    writable: writable ? restrictToSelection ? structuredClone(value.targets) : [{ kind: 'document' }] : [] }
 }
 
 export function captureDocumentReference(snapshot: DocumentSnapshot, writable: boolean, surfaceId?: string | null,

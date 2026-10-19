@@ -1,29 +1,9 @@
 {
-  "description": "提交有明确目标、来源与输出/时长预算的只读子任务，使用父任务冻结的模型连接。sources 原样传入已授权文件路径或材料文本来源；子任务没有工具、主文档 writer 或再次委派权限。返回 job；候选保留来源引用，父任务回读审阅后决定正式应用。",
+  "description": "提交有明确目标和来源的只读子任务，使用父任务冻结的模型连接、参数与真实输出窗口。sources 原样传入已授权文件路径或材料文本来源；子任务没有工具、主文档 writer 或再次委派权限。返回 job；候选保留来源引用，提前结束时标明完整程度，父任务回读审阅后决定正式应用。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
-      "budget": {
-        "additionalProperties": false,
-        "properties": {
-          "maxDurationMs": {
-            "exclusiveMinimum": 0,
-            "maximum": 9007199254740991,
-            "type": "integer"
-          },
-          "maxOutputTokens": {
-            "exclusiveMinimum": 0,
-            "maximum": 9007199254740991,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "maxOutputTokens",
-          "maxDurationMs"
-        ],
-        "type": "object"
-      },
       "goal": {
         "minLength": 1,
         "type": "string"
@@ -34,12 +14,18 @@
           "type": "string"
         },
         "type": "array"
+      },
+      "sourceVersion": {
+        "enum": [
+          "current",
+          "disk"
+        ],
+        "type": "string"
       }
     },
     "required": [
       "goal",
-      "sources",
-      "budget"
+      "sources"
     ],
     "type": "object"
   },

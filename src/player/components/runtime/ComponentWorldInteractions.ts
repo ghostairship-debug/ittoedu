@@ -40,9 +40,47 @@ export class ComponentWorldInteractions {
   private readonly videoThresholds = new Set<{ nodeId: string; seconds: number; previous: number; crossed: boolean; scope: ComponentRuntimeContext['scope']; listener: TriggerListener }>()
   private readonly videoSamples = new WeakSet<object>()
   private readonly stableVisibility = new Map<string, { element: HTMLElement; visible: boolean }>()
+  private readonly clickBindings = new Set<{ nodeId: string; enabled(): boolean }>()
+  private readonly clickableElements = new Set<HTMLElement>()
+  private readonly clickStyles = new Map<Document, HTMLStyleElement>()
   private ownershipProject?: CourseProjectV10
   private readonly surfaceOwners = new Map<string, string | null>()
   constructor(private readonly world: ComponentInteractionWorld) {}
+  private clickTarget(nodeId: string): HTMLElement | undefined {
+    const element = this.world.element(nodeId)
+    if (!this.world.active() || this.world.instanceActive?.(nodeId) === false || !this.canPresent(nodeId) || !element?.isConnected) return
+    const effective = element.ownerDocument.defaultView?.getComputedStyle(element)
+    if (effective?.visibility === 'hidden' || effective?.pointerEvents === 'none') return
+    for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+      if (ancestor.hidden || ancestor.inert || ancestor.getAttribute('aria-disabled') === 'true' || ancestor.matches(':disabled')) return
+      const style = ancestor.ownerDocument.defaultView?.getComputedStyle(ancestor)
+      if (style?.display === 'none') return
+    }
+    return element
+  }
+  /** Derived affordance only; authored CSS and the editor's gestures keep their ownership. */
+  refreshClickAffordances(validateVisibility = true): void {
+    const enabled = new Set<HTMLElement>()
+    for (const binding of this.clickBindings) {
+      if (!binding.enabled()) continue
+      const current = this.world.element(binding.nodeId)
+      // State-only ticks change rule admission, not the already projected DOM.
+      const element = !validateVisibility && current && this.clickableElements.has(current) ? current : this.clickTarget(binding.nodeId)
+      if (element) enabled.add(element)
+    }
+    for (const element of this.clickableElements) if (!enabled.has(element)) {
+      element.removeAttribute('data-guoling-node-click'); this.clickableElements.delete(element)
+    }
+    for (const element of enabled) {
+      const document = element.ownerDocument
+      if (!this.clickStyles.has(document)) {
+        const style = document.createElement('style')
+        style.textContent = '@layer guoling-interaction-default{:where([data-guoling-node-click]){cursor:pointer}}'
+        document.head.prepend(style); this.clickStyles.set(document, style)
+      }
+      element.setAttribute('data-guoling-node-click', ''); this.clickableElements.add(element)
+    }
+  }
   currentSurfaceId(): string { return this.world.navigation?.readLocation() ?? '' }
   private surfaceOwner(project: CourseProjectV10, id: string): string | null | undefined {
     if (this.ownershipProject !== project) { this.ownershipProject = project; this.surfaceOwners.clear() }
@@ -136,7 +174,11 @@ export class ComponentWorldInteractions {
     const presentation = [...(this.presentationVisibility.get(id)?.values() ?? [])].filter(value => value.element === element).at(-1)?.visible
     const initial = Boolean(instance && project && (!this.world.playback() || instance.playbackInitialVisibility !== 'hidden')
       && (this.world.controlsInitiallyVisible?.() !== false || !isGlobalTeacherController(project, id)))
-    const teacherDisabled = Boolean(project && instance && isGlobalTeacherController(project, id) && instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && instance.data.enabled === false)
+    const data = instance?.data, styles = data && typeof data === 'object' && !Array.isArray(data) ? data.sceneStyles : undefined
+    const variant = styles && typeof styles === 'object' && !Array.isArray(styles) ? styles[surfaceId] : undefined
+    const enabled = variant && typeof variant === 'object' && !Array.isArray(variant) && typeof variant.enabled === 'boolean'
+      ? variant.enabled : data && typeof data === 'object' && !Array.isArray(data) ? data.enabled : undefined
+    const teacherDisabled = Boolean(project && instance && isGlobalTeacherController(project, id) && enabled === false)
     const hidden = !instance || !isComponentVisibleAtSurface(instance, surfaceId)
       || teacherDisabled
       || !spatialSemanticVisible(surface?.spatial, id, snapshot?.zoom ?? 1)
@@ -154,6 +196,7 @@ export class ComponentWorldInteractions {
     for (const id of ids) changed = this.applyVisibility(id, state, false) || changed
     if (changed) this.world.notifyVisibility?.()
     this.publishStableVisibility(state?.locationId ?? '', ids)
+    this.refreshClickAffordances()
   }
   private publishStableVisibility(surfaceId = this.currentSurfaceId(), ids = Object.keys(this.world.project()?.instances ?? {})): void {
     const project = this.world.project()
@@ -207,13 +250,18 @@ export class ComponentWorldInteractions {
       this.leases.delete(id); this.motions.get(id)?.dispose(); this.motions.delete(id); this.visibility.delete(id); this.stableVisibility.delete(id); this.applyVisibility(id)
     }
   }
-  retire(id: string): void { this.retirePresentation(id); this.leases.delete(id); this.motions.get(id)?.dispose(); this.motions.delete(id); this.visibility.delete(id); this.stableVisibility.delete(id) }
+  retire(id: string): void { this.retirePresentation(id); this.leases.delete(id); this.motions.get(id)?.dispose(); this.motions.delete(id); this.visibility.delete(id); this.stableVisibility.delete(id); this.refreshClickAffordances() }
   pause(): void {
     this.leases.clear()
     for (const [id, motion] of this.motions) { motion.dispose(); this.applyVisibility(id) }
     this.motions.clear()
+    this.refreshClickAffordances()
   }
-  dispose(): void { this.reset(); this.presenterListeners.clear() }
+  dispose(): void {
+    this.reset(); this.presenterListeners.clear(); this.clickBindings.clear(); this.refreshClickAffordances()
+    for (const style of this.clickStyles.values()) style.remove()
+    this.clickStyles.clear()
+  }
   async dispatchPresenterCommand(command: 'next' | 'previous'): Promise<boolean> {
     if (!this.world.active()) return false
     const results = await Promise.all([...(this.presenterListeners.get(command) ?? [])].map(async listener => {
@@ -229,7 +277,7 @@ export class ComponentWorldInteractions {
     const active = () => scope.isActive() && world.active() && world.instanceActive?.(scope.instanceId) !== false
     const currentSurfaceId = () => world.navigation?.readLocation() ?? null
     const currentStateId = () => world.navigation?.currentStateId?.() ?? null
-    const subscribeTrigger = (trigger: InteractionTrigger, listener: TriggerListener): (() => void) => {
+    const subscribeTrigger = (trigger: InteractionTrigger, listener: TriggerListener, isEnabled?: () => boolean): (() => void) => {
       if (trigger.type === 'animation.completed') return () => {}
       if (trigger.type === 'scene.enter' || trigger.type === 'presentation.enter') {
         const identity = () => trigger.type === 'scene.enter' ? currentSurfaceId() : JSON.stringify([currentSurfaceId(), currentStateId()])
@@ -291,16 +339,23 @@ export class ComponentWorldInteractions {
       }
       if (trigger.type === 'node.click') {
         const document = world.document()
+        const binding = { nodeId: trigger.nodeId, enabled: () => active() && isEnabled?.() !== false }
+        this.clickBindings.add(binding)
+        const refresh = () => this.refreshClickAffordances()
+        refresh()
         const click = (event: Event) => {
           const element = world.element(trigger.nodeId)
-          if (world.active() && this.canPresent(trigger.nodeId) && element && !element.hidden && event.composedPath().includes(element)) listener()
+          if (element && event.composedPath().includes(element) && binding.enabled() && this.clickTarget(trigger.nodeId)) listener()
         }
         document?.addEventListener('click', click, true)
         const off = scope.events.subscribe('__runtime.node-click', value => {
-          const element = world.element(trigger.nodeId)
-          if (world.active() && this.canPresent(trigger.nodeId) && element && !element.hidden && value && typeof value === 'object' && !Array.isArray(value) && value.instanceId === trigger.nodeId) listener()
+          if (value && typeof value === 'object' && !Array.isArray(value) && value.instanceId === trigger.nodeId
+            && binding.enabled() && this.clickTarget(trigger.nodeId)) listener()
         })
-        return () => { document?.removeEventListener('click', click, true); off() }
+        return () => {
+          document?.removeEventListener('click', click, true); off(); this.clickBindings.delete(binding)
+          refresh()
+        }
       }
       // Media controls emit into the same R0 event port, including programmatic playback.
       if (trigger.type === 'video.time') {
@@ -371,7 +426,7 @@ export class ComponentWorldInteractions {
         }
         if (action.type === 'location.go') {
           const surface = world.project()?.surfaces.find(value => value.id === action.locationId)
-          return surface ? world.navigation?.execute({ type: 'scene.go', sceneId: surface.id }, actionContext.signal, actionContext.onNavigationCommit) ?? false : false
+          return surface ? world.navigation?.execute({ type: 'scene.go', sceneId: surface.id, transition: action.transition }, actionContext.signal, actionContext.onNavigationCommit) ?? false : false
         }
         if (action.type === 'presentation.set') {
           const duration = action.transition?.duration ?? 0

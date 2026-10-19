@@ -4,16 +4,20 @@ import { componentModuleFileExtensions, componentModuleSpecifier } from '../sour
 import type { DocumentResources } from '../../../shared/workbench/document'
 import type { ComponentImplementation, CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
 
-type SyntaxNode = {type:string;start:number;end:number;[key:string]:unknown}
+export type SourceSyntaxNode = {type:string;start:number;end:number;[key:string]:unknown}
+type SyntaxNode = SourceSyntaxNode
 type Scope = {parent?:Scope;functionScope:boolean;bindings:Set<string>}
 const syntaxNode=(value:unknown):value is SyntaxNode=>!!value && typeof value==='object' && 'type' in value
-/** Runtime imports and lexical require bindings share the parser for JS, TS and TSX. */
-function sourceImports(source:string):string[] | undefined {
-  const imports:string[]=[]
-  let root:SyntaxNode
+/** A capture can share this syntax tree between import and resource analysis. */
+export function parseSourceSyntax(source:string): SourceSyntaxNode | undefined {
   const read=(jsx:boolean)=>parse(source,{sourceType:'unambiguous',attachComment:false,allowReturnOutsideFunction:true,
     plugins:jsx ? ['estree','typescript','jsx','decorators']:['estree','typescript','decorators']}).program as unknown as SyntaxNode
-  try {root=read(false)}catch{try{root=read(true)}catch{return undefined}} // The compiler owns source diagnostics.
+  try {return read(false)}catch{try{return read(true)}catch{return undefined}} // The compiler owns source diagnostics.
+}
+/** Runtime imports and lexical require bindings share the parser for JS, TS and TSX. */
+function sourceImports(source:string,readSyntax:(source:string)=>SourceSyntaxNode|undefined):string[] | undefined {
+  const imports:string[]=[], root=readSyntax(source)
+  if (!root) return undefined
   const scopes=new Map<SyntaxNode,Scope>(),calls:SyntaxNode[]=[]
   const reference=(node:unknown):void=>{if(syntaxNode(node) && typeof node.value==='string')imports.push(node.value)}
   const expression=(value:unknown):unknown=>syntaxNode(value) && ['TSAsExpression','TSTypeAssertion','TSNonNullExpression','TSSatisfiesExpression','TSInstantiationExpression','ParenthesizedExpression'].includes(value.type) ? expression(value.expression):value
@@ -61,7 +65,8 @@ function sourceImports(source:string):string[] | undefined {
   return imports
 }
 /** Resolve only imports reachable from the current author entry. Dormant bindings do not affect its content. */
-export function liveSourceOwners(project:CourseProjectV10,implementation:ComponentImplementation,resources?:DocumentResources) {
+export function liveSourceOwners(project:CourseProjectV10,implementation:ComponentImplementation,resources?:DocumentResources,
+  importsCache?:Map<string,string[]|undefined>, readSyntax:(source:string)=>SourceSyntaxNode|undefined=parseSourceSyntax) {
   const definitions=new Set<string>(),owners=new Set<string>(),visited=new Set<ComponentImplementation>()
   const sources = new Map<Extract<ComponentImplementation, { kind: 'source' }>, string[]>()
   const modules = new Map<Extract<ComponentImplementation, { kind: 'source' }>, Set<string>>()
@@ -77,8 +82,11 @@ export function liveSourceOwners(project:CourseProjectV10,implementation:Compone
       // Supported CSS/JSON imports are data leaves, never resources API programs.
       // Their workspace bytes and declared bindings remain owned by this source.
       if (/\.(?:css|json)$/i.test(file)) continue
-      texts.push(module.files[file] ?? '')
-      const references = sourceImports(module.files[file] ?? '')
+      const text = module.files[file] ?? ''; texts.push(text)
+      // Import syntax depends on source bytes. Bindings remain scoped to each
+      // owner below, so a capture can share parsing without sharing identities.
+      const references = importsCache?.has(text) ? importsCache.get(text) : sourceImports(text,readSyntax)
+      if (importsCache && !importsCache.has(text)) importsCache.set(text, references)
       // An unfinished author entry is repairable input, not proof of zero dependencies.
       if (!references) for (const id of Object.values(module.moduleBindings ?? {})) {
         dependencies.add(id)

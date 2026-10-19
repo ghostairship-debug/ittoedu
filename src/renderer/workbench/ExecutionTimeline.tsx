@@ -78,13 +78,6 @@ function BlobContent({ content, readBlob, reply = false }: { content: Extract<Ex
   </div>
 }
 const ItemContent = memo(function ItemContent({ item, readBlob }: Pick<ExecutionTimelineProps, 'readBlob'> & { item: ExecutionItem }) {
-  if (item.type === 'usage') {
-    const usage = item.data.usage
-    const parts = usage ? [usage.inputTokens === undefined ? '' : `输入 ${usage.inputTokens}`, usage.outputTokens === undefined ? '' : `输出 ${usage.outputTokens}`,
-      usage.reasoningTokens === undefined ? '' : `思考 ${usage.reasoningTokens}`, usage.cachedInputTokens === undefined ? '' : `缓存输入 ${usage.cachedInputTokens}`,
-      usage.totalTokens === undefined ? '' : `合计 ${usage.totalTokens}`].filter(Boolean) : []
-    return <p>{parts.join(' · ') || '供应商未报告用量。'}</p>
-  }
   const combined: ExecutionContent[] = []
   for (const content of item.content) {
     const previous = combined.at(-1)
@@ -99,8 +92,8 @@ const detailLabels = { input: '参数', output: '工具输出', diff: '实际差
 function QuestionRecord({ item, ended }: { item: ExecutionItem; ended: boolean }) {
   const question = item.data.question!, answer = item.data.answer
   const status = item.data.status === 'waiting' && ended ? '任务已结束，未回答' : statusLabel(item.data.status)
-  return <article data-execution-item={`${item.runId}:${item.itemId}`} className="execution-timeline__card execution-timeline__card--question" aria-label="AI 提问">
-    <header><strong>AI 提问</strong>{status && <span> · {status}</span>}</header>
+  return <article data-execution-item={`${item.runId}:${item.itemId}`} className="execution-timeline__card execution-timeline__card--question" aria-label={item.data.delegationRef ? '子任务提问' : 'AI 提问'}>
+    <header><strong>{item.data.delegationRef ? '子任务提问' : 'AI 提问'}</strong>{status && <span> · {status}</span>}</header>
     <p className="execution-timeline__question">{readableExecutionData(question.text)}</p>
     <ul className="execution-timeline__question-options" aria-label={question.multiple ? '选项（可多选）' : '选项'}>
       {question.options.map((option, index) => {
@@ -146,8 +139,9 @@ const TimelineItem = memo(function TimelineItem({ item, projection, readBlob, on
       定位文档{item.data.documentName ? `：${readableExecutionData(item.data.documentName)}` : ''}</button>{!onLocateDocument && <small> 当前视图未连接文档定位</small>}</p>}
     {item.data.approval && <p className="execution-timeline__approval">修改请求：{readableExecutionData(item.data.approval.summary)}
       {item.data.approval.documents.length ? ` · ${item.data.approval.documents.map(readableExecutionData).join('、')}` : ''} · {item.data.decision
-        ? ({ allow: '你允许了这次修改', 'allow-all': '你允许了本任务的全部修改', deny: '你拒绝了这次修改' } as const)[item.data.decision]
-        : end ? '任务已结束，未处理' : '等待你在输入框上方批准'}</p>}
+        ? item.data.decision === 'allow-all' && item.data.delegationRef ? '你允许了本子任务的全部修改'
+          : ({ allow: '你允许了这次修改', 'allow-all': '你允许了本任务的全部修改', deny: '你拒绝了这次修改' } as const)[item.data.decision]
+        : end || item.data.status !== 'approval' ? '等待已关闭，未提交决定' : '等待你在输入框上方批准'}</p>}
     {item.data.targetLabel && <p>对象：{readableExecutionData(item.data.targetLabel)}</p>}
     {executionDetailKeys.map(field => {
       const text = item.data[field], ref = item.data[`${field}Ref`]
@@ -365,5 +359,10 @@ function TimelineBody({ projection, readBlob, onLocateDocument, onOpenSavedFile,
 /** A read-only view. Pagination, expansion and scrolling never replay a tool or focus the composer. */
 export function ExecutionTimeline(props: ExecutionTimelineProps) {
   const readings = useRef(new Map<string, ReadingState>())
-  return <TimelineBody key={props.projection.conversationId} {...props} readings={readings.current} />
+  const projection = useMemo(() => ({ ...props.projection, items: props.projection.items.filter(item => item.type !== 'usage') }), [props.projection])
+  const searchEvents = useMemo<ExecutionTimelineProps['searchEvents']>(() => props.searchEvents ? async input => {
+    const page = await props.searchEvents!(input)
+    return { ...page, hits: page.hits.filter(hit => hit.event.type !== 'usage') }
+  } : undefined, [props.searchEvents])
+  return <TimelineBody key={projection.conversationId} {...props} projection={projection} searchEvents={searchEvents} readings={readings.current} />
 }

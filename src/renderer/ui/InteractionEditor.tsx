@@ -28,6 +28,7 @@ import type { CourseStateDeclaration } from '../../shared/courseProjectTypes'
 import type { SoundDefinition } from '../../shared/contracts/media-v1'
 import type { InteractionLayerTarget } from '../course/slideInteractionView'
 import { requestNodeMotionPreview } from '../phaser/elementAnimationPreviewBus'
+import { NavigationTransitionFields } from './properties/NavigationTransitionFields'
 
 export interface InteractionSceneListItem {
   readonly id: string
@@ -1684,6 +1685,9 @@ function ActionEditor({
         )
       })() : null}
 
+      {isTerminalNavigationAction(action) && <NavigationTransitionFields transition={action.transition}
+        onChange={transition => updateAction({ ...action, transition })} />}
+
       {action.type === 'scene.go' ? (
         <>
           <div className="form-field">
@@ -1693,7 +1697,7 @@ function ActionEditor({
               className="form-input"
               value={action.sceneId}
               onChange={(event) => updateAction({
-                type: 'scene.go',
+                ...action, targetStateId: undefined,
                 sceneId: event.currentTarget.value,
               })}
             >
@@ -1713,7 +1717,7 @@ function ActionEditor({
                 const targetStateId = event.currentTarget.value
                 updateAction(targetStateId
                   ? { ...action, targetStateId }
-                  : { type: 'scene.go', sceneId: action.sceneId })
+                  : { ...action, targetStateId: undefined })
               }}
             >
               <option value="">播放起点</option>
@@ -1740,7 +1744,7 @@ function ActionEditor({
             className="form-input"
             value={action.locationId}
             onChange={(event) => updateAction({
-              type: 'location.go',
+              ...action,
               locationId: event.currentTarget.value,
             })}
           >

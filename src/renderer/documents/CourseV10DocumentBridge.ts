@@ -208,11 +208,11 @@ export class CourseV10DocumentBridge {
       editingProject: resolveComponentPresentation(project, surfaceId, activeStateId), activeStateId, surfaceId,
       instanceIds: [...(selection?.instanceIds ?? [])], instanceId: selection?.instanceIds[0] ?? null }
   }
-  capture(edits: ComponentEdit[], target = this.captureTarget()): CapturedComponentOperation {
+  capture(edits: ComponentEdit[], target = this.captureTarget(), readPaths: readonly string[][] = []): CapturedComponentOperation {
     const mapped = presentationComponentEdits(target.project, target.surfaceId, target.activeStateId, edits)
-    const command = captureComponentOperation(target.project, mapped)
+    const command = captureComponentOperation(target.project, mapped, readPaths)
     if (mapped !== edits) {
-      const original = captureComponentOperation(target.project, edits)
+      const original = captureComponentOperation(target.project, edits, readPaths)
       command.expected = [...new Map([...command.expected, ...original.expected].map(value => [JSON.stringify(value.path), value])).values()]
     }
     return { ...command, documentId: target.documentId, epoch: target.epoch }

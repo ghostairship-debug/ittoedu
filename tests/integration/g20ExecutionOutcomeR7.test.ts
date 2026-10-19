@@ -9,7 +9,7 @@ import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseP
 import { TEXT_DEFINITION, textDataEdit } from '../../src/components/text/adapters'
 import { createTextComponentData } from '../../src/components/text/data'
 import { htmlImportReceiptResult } from '../../src/core/tools/HtmlImportTools'
-import { executionExitDecision, hasUnresolvedToolFailure, newFileDeliveryFacts, persistedToolWork, runEndSummary, serviceToolOutcome, toolFailed } from '../../src/main/workbench/execution/executionOutcome'
+import { executionExitDecision, hasUnresolvedToolFailure, newFileDeliveryFacts, persistedToolWork, runEndSummary, serviceToolOutcome, toolFailed, unrecoveredReconcileRuntimeFailure } from '../../src/main/workbench/execution/executionOutcome'
 import { applicationEventFacts, committedFact } from '../../src/main/workbench/execution/executionToolFacts'
 import type { ContentApplyResult } from '../../src/core/contentApply/planning/types'
 import type { ExecutionRunRecord, ExecutionToolRecord } from '../../src/shared/workbench/execution'
@@ -47,11 +47,27 @@ const expectCompletedWithWarnings = (record: ExecutionRunRecord, ...failures: Ex
 const expectMissingResultWithWarnings = (record: ExecutionRunRecord, ...failures: ExecutionToolRecord[]) => {
   expectAuditWarnings(record, ...failures)
   expect(hasUnresolvedToolFailure(record)).toBe(true)
-  expect(executionExitDecision(record)).toMatchObject({ status: 'partial', continuable: [],
+  expect(executionExitDecision(record)).toMatchObject({ status: 'continue', continuable: [expect.objectContaining({ name: '交付', status: 'unverified' })],
     remaining: [expect.objectContaining({ name: '交付', status: 'unverified' })] })
 }
 
 describe('M26 R7 receipt-based settlement', () => {
+  it('keeps reconcile runtime failures as goal clues and retires them only after the same operation recovers', () => {
+    const record = (...entries: ExecutionToolRecord[]) => run(tool('file.write', {}, written('C:/fixture/kept.md'), -1), ...entries)
+    const failed = fileWrite(tool('file.reconcile', { path: 'lesson.html', choice: 'disk' }, error('file-tool-runtime-failed'), 0), 'C:/fixture/lesson.html')
+    expectCompletedWithWarnings(record(failed), failed)
+    expect(unrecoveredReconcileRuntimeFailure(record(failed))).toEqual(failed)
+    const recovered = fileWrite(tool('file.reconcile', { path: 'C:/fixture/lesson.html', choice: 'disk' },
+      { kind: 'read', data: { status: 'reconciled', choice: 'disk' } }, 1), 'C:/fixture/lesson.html')
+    expect(unrecoveredReconcileRuntimeFailure(record(failed, { ...recovered, effectPaths: ['C:/fixture/other.html'] } ))).toEqual(failed)
+    const oppositeChoice = { ...recovered, call: { name: 'file.reconcile', input: { path: 'C:/fixture/lesson.html', choice: 'local' } },
+      result: { kind: 'read' as const, data: { status: 'reconciled', choice: 'local' } } }
+    expect(unrecoveredReconcileRuntimeFailure(record(failed, oppositeChoice))).toEqual(failed)
+    expectCompletedWithWarnings(record(failed, recovered), failed)
+    expect(unrecoveredReconcileRuntimeFailure(record(failed, recovered))).toBeUndefined()
+    expectCompletedWithWarnings(record({ ...failed, result: error('file-tool-failed') }), { ...failed, result: error('file-tool-failed') })
+    expect(executionExitDecision(record({ ...failed, result: error('file-create-outcome-unknown') })).status).toBe('continue')
+  })
   it('keeps definite write failures as warnings without requiring path-scoped retries', () => {
     const failed = { ...tool('file.write', { mode: 'create', path: 'lesson/plan.md', content: '策划' }, error('file-tool-failed'), 0),
       rejectedCreationPath: 'C:/fixture/lesson/plan.md' }
@@ -76,7 +92,7 @@ describe('M26 R7 receipt-based settlement', () => {
     const record = run(requested,
       tool('file.write', { path: 'other.md', mode: 'create', content: 'B' }, createdWrite('other.md'), 1))
     expect(hasUnresolvedToolFailure(record)).toBe(true)
-    expect(executionExitDecision(record)).toMatchObject({ status: 'partial', remaining: expect.arrayContaining([
+    expect(executionExitDecision(record)).toMatchObject({ status: 'continue', remaining: expect.arrayContaining([
       expect.objectContaining({ name: 'task.delivery', status: 'unverified', documentId: 'lesson' }),
     ]), warnings: expect.arrayContaining([expect.objectContaining({ callId: requested.callId, status: 'failed' })]) })
     record.status = 'partial'
@@ -104,7 +120,7 @@ describe('M26 R7 receipt-based settlement', () => {
     const record = run(failed,
       tool('file.write', { path: 'other.md', mode: 'create', content: '完成' }, createdWrite('other.md'), 1))
     expect(hasUnresolvedToolFailure(record)).toBe(true)
-    expect(executionExitDecision(record)).toMatchObject({ status: 'partial', remaining: expect.arrayContaining([
+    expect(executionExitDecision(record)).toMatchObject({ status: 'continue', remaining: expect.arrayContaining([
       expect.objectContaining({ name: 'project.save', status: 'unsaved', documentId: 'required' }),
     ]) })
   })
@@ -120,7 +136,7 @@ describe('M26 R7 receipt-based settlement', () => {
     const rejected = tool('artifact.save', input, { kind: 'read', data: { ...identity, status: 'rejected', message: '目标目录不可写' } }, 0)
     expect(serviceToolOutcome(rejected.call.name, rejected.result)).toEqual({ status: 'failed', message: '目标目录不可写' })
     expect(hasUnresolvedToolFailure(run(rejected))).toBe(true)
-    expect(executionExitDecision(run(rejected))).toMatchObject({ status: 'partial', remaining: expect.arrayContaining([
+    expect(executionExitDecision(run(rejected))).toMatchObject({ status: 'continue', remaining: expect.arrayContaining([
       expect.objectContaining({ name: 'artifact.save', status: 'unverified', callId: rejected.callId }),
     ]), warnings: expect.arrayContaining([expect.objectContaining({ name: 'artifact.save', status: 'failed', callId: rejected.callId })]) })
     for (const different of [{ ...identity, path: 'C:/fixture/other.txt' }, { ...identity, sourceKind: 'image' },
@@ -158,7 +174,7 @@ describe('M26 R7 receipt-based settlement', () => {
     const required = { ...failed, call: { name: 'view.observe', input: { target: 'old-handle' } } }
     const differentPage = run(required, tool('view.observe', { target: 'new-handle' }, observation('two'), 1))
     expect(differentPage.tools[0]).toEqual(required)
-    expect(executionExitDecision(differentPage)).toMatchObject({ status: 'partial', remaining: expect.arrayContaining([
+    expect(executionExitDecision(differentPage)).toMatchObject({ status: 'continue', remaining: expect.arrayContaining([
       expect.objectContaining({ name: 'view.observe', callId: required.callId, status: 'unverified' }),
     ]) })
     expectCompletedWithWarnings(run(required, tool('view.observe', { target: 'new-handle' }, observation('one'), 1)), required)
@@ -273,7 +289,7 @@ it('keeps definite content attempts as warnings while missing saves and unknown 
   expectCompletedWithWarnings(run(createdLesson(), earlierSuccess, first, projectSaved()), first)
   const save = { ...tool('project.save', {}, error('target-conflict'), 3), requestId: 'save-first',
     effectTargets: [{ documentId: 'lesson', target: { kind: 'document' as const } }] }
-  expect(executionExitDecision(run(createdLesson(), save))).toMatchObject({ status: 'partial', remaining: expect.arrayContaining([
+  expect(executionExitDecision(run(createdLesson(), save))).toMatchObject({ status: 'continue', remaining: expect.arrayContaining([
     expect.objectContaining({ name: 'project.save', status: 'unsaved', documentId: 'lesson' }),
   ]), warnings: expect.arrayContaining([expect.objectContaining({ callId: save.callId, status: 'failed' })]) })
   const unknown = tool('object.update', {}, error('tool-outcome-unknown'), 4)

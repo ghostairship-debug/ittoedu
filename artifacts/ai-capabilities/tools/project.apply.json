@@ -1,5 +1,5 @@
 {
-  "description": "应用已观察的工程路径，用content、授权工作区from或文本局部edits:[{old,new}]，三者择一。edits在已观察源文上按顺序替换，每处old须唯一（包含重叠出现），new为字面文本；全部成功才一次提交，未命中或多处命中请重读并提供准确、唯一的原文。edits仅用于content/style，不用于insert/redo。project.json 可提供 title/background/designTokens/playback 设置补丁，软件维护身份和版本。已有内容时content只修改原对象的内容，保留人工位置、顺序和其他对象；页面结构insert追加独立内容，redo重做所选范围的整体布局，另可surface.add/move/remove/title。theme.css修改整课主题；body.html/body.md修改连续正文，保留浮层；spatial.json修改镜头与路径，软件维护身份。components/源码修改共享定义；页面内源码只改该实例。默认读写短作者入口，完整实现按需读.dependencies；软件保存真实共享依赖并隔离局部深改。插入/源码/定义变更回执files给当前路径，readPaths先read，refreshPaths先list；unknown沿原操作查证。源码、资产与正式内容为一次可撤销操作并进入恢复稿，不自动存盘。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。",
+  "description": "修改实际工程路径并交由唯一正式事务提交，可撤销、进恢复稿，不自动存盘。已有目标直接使用已知路径；content/from/edits三选一，edits的old须在当前已读源文唯一命中，全部成功才提交。普通content保原对象frame/顺序与邻居；style改结构外观或HTML内CSS。insert向页面结构路径添加普通HTML/CSS/SVG，redo明确重做所选范围；可用region给局部视口及父坐标transform，正式frame持有采用结果。operations成批准备同一工程已有路径并一次提交；pages+surface.add支持pages数组及各页首稿，软件分配身份。source/from可直接用计算或子任务成果来源，软件收齐同组依赖与资源。源码/依赖可直接完整读取后修改；实例源码只改实例，共享定义作用全部引用，主Source可用enhance追加普通JS/TS业务模块，具体API按引用读取。project.json仅改课件设置，theme.css改主题，body修改连续正文，spatial.json改空间旅程。失败给具体操作/目标/期望形状及局部修复入口，原输入保留；staleSnapshot需读当前稿，unknown先查原操作。成功files中的路径/frame/viewport/content为可接续事实，纯目录元数据不代替读取正文。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -7,19 +7,151 @@
         "type": "string"
       },
       "__schema1": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "intent": {
+                "$ref": "#/$defs/__schema6"
+              },
+              "path": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "region": {
+                "$ref": "#/$defs/__schema3"
+              }
+            },
+            "required": [
+              "path",
+              "content"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "from": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "intent": {
+                "$ref": "#/$defs/__schema6"
+              },
+              "path": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "region": {
+                "$ref": "#/$defs/__schema3"
+              }
+            },
+            "required": [
+              "path",
+              "from"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "edits": {
+                "items": {
+                  "$ref": "#/$defs/__schema7"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "intent": {
+                "enum": [
+                  "content",
+                  "style"
+                ],
+                "type": "string"
+              },
+              "path": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "region": {
+                "$ref": "#/$defs/__schema3"
+              }
+            },
+            "required": [
+              "path",
+              "edits"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "__schema2": {
         "minLength": 1,
         "type": "string"
       },
-      "__schema2": {
+      "__schema3": {
+        "$ref": "#/$defs/__schema4",
+        "description": "一次新内容放置范围；width/height 是局部测量视口，transform 将局部坐标映射到父容器。采用后由正式 frame 持有；已有对象 content/redo 保当前外框，改变外框用 object.update。省略时沿用当前目标和默认视口。"
+      },
+      "__schema4": {
+        "additionalProperties": false,
+        "properties": {
+          "height": {
+            "$ref": "#/$defs/__schema5",
+            "exclusiveMinimum": 0
+          },
+          "transform": {
+            "prefixItems": [
+              {
+                "$ref": "#/$defs/__schema5"
+              },
+              {
+                "$ref": "#/$defs/__schema5"
+              },
+              {
+                "$ref": "#/$defs/__schema5"
+              },
+              {
+                "$ref": "#/$defs/__schema5"
+              },
+              {
+                "$ref": "#/$defs/__schema5"
+              },
+              {
+                "$ref": "#/$defs/__schema5"
+              }
+            ],
+            "type": "array"
+          },
+          "width": {
+            "$ref": "#/$defs/__schema5",
+            "exclusiveMinimum": 0
+          }
+        },
+        "required": [
+          "width",
+          "height",
+          "transform"
+        ],
+        "type": "object"
+      },
+      "__schema5": {
+        "type": "number"
+      },
+      "__schema6": {
         "enum": [
           "content",
           "insert",
           "style",
-          "redo"
+          "redo",
+          "enhance"
         ],
         "type": "string"
       },
-      "__schema3": {
+      "__schema7": {
         "additionalProperties": false,
         "properties": {
           "new": {
@@ -36,11 +168,35 @@
         ],
         "type": "object"
       },
-      "__schema4": {
+      "__schema8": {
+        "additionalProperties": false,
+        "properties": {
+          "new": {
+            "type": "string"
+          },
+          "old": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "old",
+          "new"
+        ],
+        "type": "object"
+      },
+      "__schema9": {
         "additionalProperties": false,
         "properties": {
           "before": {
-            "$ref": "#/$defs/__schema1"
+            "$ref": "#/$defs/__schema2"
+          },
+          "content": {
+            "type": "string"
+          },
+          "from": {
+            "minLength": 1,
+            "type": "string"
           },
           "kind": {
             "enum": [
@@ -49,6 +205,9 @@
               "spatial"
             ],
             "type": "string"
+          },
+          "region": {
+            "$ref": "#/$defs/__schema3"
           },
           "title": {
             "type": "string"
@@ -65,17 +224,39 @@
       {
         "additionalProperties": false,
         "properties": {
+          "operations": {
+            "items": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "project": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "operations"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
           "content": {
             "type": "string"
           },
           "intent": {
-            "$ref": "#/$defs/__schema2"
+            "$ref": "#/$defs/__schema6"
           },
           "path": {
-            "$ref": "#/$defs/__schema1"
+            "$ref": "#/$defs/__schema2"
           },
           "project": {
             "$ref": "#/$defs/__schema0"
+          },
+          "region": {
+            "$ref": "#/$defs/__schema3"
           }
         },
         "required": [
@@ -95,13 +276,16 @@
             "type": "string"
           },
           "intent": {
-            "$ref": "#/$defs/__schema2"
+            "$ref": "#/$defs/__schema6"
           },
           "path": {
-            "$ref": "#/$defs/__schema1"
+            "$ref": "#/$defs/__schema2"
           },
           "project": {
             "$ref": "#/$defs/__schema0"
+          },
+          "region": {
+            "$ref": "#/$defs/__schema3"
           }
         },
         "required": [
@@ -115,7 +299,7 @@
         "properties": {
           "edits": {
             "items": {
-              "$ref": "#/$defs/__schema3"
+              "$ref": "#/$defs/__schema8"
             },
             "minItems": 1,
             "type": "array"
@@ -128,10 +312,13 @@
             "type": "string"
           },
           "path": {
-            "$ref": "#/$defs/__schema1"
+            "$ref": "#/$defs/__schema2"
           },
           "project": {
             "$ref": "#/$defs/__schema0"
+          },
+          "region": {
+            "$ref": "#/$defs/__schema3"
           }
         },
         "required": [
@@ -144,7 +331,14 @@
         "additionalProperties": false,
         "properties": {
           "before": {
-            "$ref": "#/$defs/__schema1"
+            "$ref": "#/$defs/__schema2"
+          },
+          "content": {
+            "type": "string"
+          },
+          "from": {
+            "minLength": 1,
+            "type": "string"
           },
           "intent": {
             "const": "surface.add",
@@ -164,6 +358,9 @@
           },
           "project": {
             "$ref": "#/$defs/__schema0"
+          },
+          "region": {
+            "$ref": "#/$defs/__schema3"
           },
           "title": {
             "type": "string"
@@ -185,7 +382,7 @@
           },
           "pages": {
             "items": {
-              "$ref": "#/$defs/__schema4"
+              "$ref": "#/$defs/__schema9"
             },
             "minItems": 1,
             "type": "array"
@@ -209,14 +406,14 @@
         "additionalProperties": false,
         "properties": {
           "before": {
-            "$ref": "#/$defs/__schema1"
+            "$ref": "#/$defs/__schema2"
           },
           "intent": {
             "const": "surface.move",
             "type": "string"
           },
           "path": {
-            "$ref": "#/$defs/__schema1"
+            "$ref": "#/$defs/__schema2"
           },
           "project": {
             "$ref": "#/$defs/__schema0"
@@ -236,7 +433,7 @@
             "type": "string"
           },
           "path": {
-            "$ref": "#/$defs/__schema1"
+            "$ref": "#/$defs/__schema2"
           },
           "project": {
             "$ref": "#/$defs/__schema0"
@@ -256,7 +453,7 @@
             "type": "string"
           },
           "path": {
-            "$ref": "#/$defs/__schema1"
+            "$ref": "#/$defs/__schema2"
           },
           "project": {
             "$ref": "#/$defs/__schema0"

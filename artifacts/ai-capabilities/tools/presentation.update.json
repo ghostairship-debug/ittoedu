@@ -54,8 +54,7 @@
               "assetId": {
                 "anyOf": [
                   {
-                    "minLength": 1,
-                    "type": "string"
+                    "$ref": "#/$defs/__schema7"
                   },
                   {
                     "type": "null"
@@ -79,6 +78,29 @@
                   "own"
                 ],
                 "type": "string"
+              },
+              "paint": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "layers": {
+                        "items": {
+                          "$ref": "#/$defs/__schema8"
+                        },
+                        "minItems": 1,
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "layers"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "type": "object"
@@ -89,6 +111,63 @@
         ]
       },
       "__schema7": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema8": {
+        "additionalProperties": false,
+        "properties": {
+          "resourceBindings": {
+            "additionalProperties": {
+              "$ref": "#/$defs/__schema7"
+            },
+            "propertyNames": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "style": {
+            "additionalProperties": false,
+            "properties": {
+              "background-attachment": {
+                "type": "string"
+              },
+              "background-blend-mode": {
+                "type": "string"
+              },
+              "background-clip": {
+                "type": "string"
+              },
+              "background-color": {
+                "type": "string"
+              },
+              "background-image": {
+                "type": "string"
+              },
+              "background-origin": {
+                "type": "string"
+              },
+              "background-position": {
+                "type": "string"
+              },
+              "background-repeat": {
+                "type": "string"
+              },
+              "background-size": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "style",
+          "resourceBindings"
+        ],
+        "type": "object"
+      },
+      "__schema9": {
         "items": {
           "enum": [
             "color",
@@ -109,7 +188,7 @@
         "$ref": "#/$defs/__schema6"
       },
       "inherit": {
-        "$ref": "#/$defs/__schema7"
+        "$ref": "#/$defs/__schema9"
       },
       "objects": {
         "$ref": "#/$defs/__schema4"

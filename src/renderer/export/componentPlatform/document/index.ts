@@ -232,6 +232,7 @@ export async function buildComponentDocx(document: ComponentExportDocument, opti
     boundary(span.end)
   }
   const background = resolveComponentBackground(document, projection.surface)
+  if (background.paint) diagnostics.push({ surfaceId: options.surfaceId, instanceId: '', code: 'word-background-paint', message: 'Word 语义分页尚不映射复杂 CSS 背景；背景声明和资源保留在工程中。' })
   if (background.assetId) diagnostics.push({ surfaceId: options.surfaceId, instanceId: '', code: 'word-background-image', message: 'Word 语义分页尚不映射背景图片；背景引用保留在工程中。', assetId: background.assetId })
   const plan: FlowPrintPlan = { surfaceId: options.surfaceId, title: projection.title, backgroundColor: projection.surface.flow?.layout.paperBackgroundColor ?? background.color, pageSize, orientation, nodes,
     includesRuntimeToc: false, includesFloatingLayers: false, omittedFloatingLayerCount: 0 }
@@ -350,5 +351,5 @@ export async function buildComponentDocx(document: ComponentExportDocument, opti
   }
   return { bytes: zipSync(files), diagnostics, warnings: base.warnings,
     report: [...base.report.filter(item => !('blockId' in item) || !(item.blockId ?? '').startsWith(markerPrefix)), ...professionalReport],
-    fidelity: diagnostics.some(value => ['asset-missing', 'asset-read-failed', 'asset-decode-failed', 'word-xml-text-substitution', 'word-color-limitation', 'word-table-alpha-limitation', 'word-table-alpha-capture', 'word-affine-capture', 'word-opacity-capture', 'asset-format-not-supported', 'capture-missing', 'capture-failed', 'mermaid-capture-missing', 'custom-visual-missing', 'shape-output-missing', 'professional-data-invalid', 'image-display-limitation', 'floating-frame-missing', 'floating-anchor-unresolved', 'global-reading-placement', 'word-background-image', 'word-text-wrap', 'word-media-playback', 'video-frame-missing'].includes(value.code)) ? 'partial' as const : 'complete' as const }
+    fidelity: diagnostics.some(value => ['asset-missing', 'asset-read-failed', 'asset-decode-failed', 'word-xml-text-substitution', 'word-color-limitation', 'word-table-alpha-limitation', 'word-table-alpha-capture', 'word-affine-capture', 'word-opacity-capture', 'asset-format-not-supported', 'capture-missing', 'capture-failed', 'mermaid-capture-missing', 'custom-visual-missing', 'shape-output-missing', 'professional-data-invalid', 'image-display-limitation', 'floating-frame-missing', 'floating-anchor-unresolved', 'global-reading-placement', 'word-background-image', 'word-background-paint', 'word-text-wrap', 'word-media-playback', 'video-frame-missing'].includes(value.code)) ? 'partial' as const : 'complete' as const }
 }

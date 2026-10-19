@@ -14,7 +14,7 @@ import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEng
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
 import type { ModelEvent, ModelProvider, ModelRequest } from '../../src/shared/workbench/modelProvider'
-import { fileCreated, serviceToolOutcome } from '../../src/main/workbench/execution/executionOutcome'
+import { executionCompletionIssues, fileCreated, serviceToolOutcome } from '../../src/main/workbench/execution/executionOutcome'
 import { createMarkdownTestHost } from '../helpers/markdownDocumentHost'
 import { createLessonDocumentFiles } from '../../src/main/lessonDocumentFiles'
 import { DocumentFileSession } from '../../src/renderer/documentFiles/documentFileSession'
@@ -52,7 +52,7 @@ describe('general agent file tools', () => {
       const step = steps[turn++]
       const calls = step ? [{ id: `step-${turn}`, type: 'function' as const, function: { name: step.name, arguments: JSON.stringify(step.input) } }] : []
       yield { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: `r${turn}`, actualModel: 'fixture', nativeResponse: {}, finishReason: calls.length ? 'tool_calls' : 'stop',
-        toolCalls: calls.map(call => ({ id: call.id, name: call.function.name, argumentsText: call.function.arguments })), assistant: { role: 'assistant', content: '', ...(calls.length ? { tool_calls: calls } : {}) } }
+        toolCalls: calls.map(call => ({ id: call.id, name: call.function.name, argumentsText: call.function.arguments })), assistant: { role: 'assistant', content: calls.length ? '' : '已创建所需目录，并把教学策划写入 new-lesson/plan.md。', ...(calls.length ? { tool_calls: calls } : {}) } }
     } }
     const engine = new ExecutionEngine({ registry: h.host.registry, gateway: h.host.tools, provider, files: h.files,
       runs: new ExecutionRunStore(path.join(h.root, 'create-runs')), events: new ExecutionEventStore({ directory: path.join(h.root, 'create-events') }) })
@@ -182,7 +182,7 @@ describe('general agent file tools', () => {
       turn++
       const calls = turn <= 2 ? [{ id: `create-${turn}`, type: 'function' as const, function: { name: 'file.create', arguments: JSON.stringify({ name: 'uncertain.md' }) } }] : []
       yield { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: `r${turn}`, actualModel: 'fixture', nativeResponse: {}, finishReason: calls.length ? 'tool_calls' : 'stop',
-        toolCalls: calls.map(call => ({ id: call.id, name: call.function.name, argumentsText: call.function.arguments })), assistant: { role: 'assistant', content: '', ...(calls.length ? { tool_calls: calls } : {}) } }
+        toolCalls: calls.map(call => ({ id: call.id, name: call.function.name, argumentsText: call.function.arguments })), assistant: { role: 'assistant', content: calls.length ? '' : '文件创建的原结果仍未确认，没有重复执行；当前无法确认文件已创建。', ...(calls.length ? { tool_calls: calls } : {}) } }
     } }
     const engine = new ExecutionEngine({ registry: h.host.registry, gateway: h.host.tools, provider, files,
       runs: new ExecutionRunStore(path.join(h.root, 'unknown-runs')), events: new ExecutionEventStore({ directory: path.join(h.root, 'unknown-events') }) })
@@ -193,6 +193,9 @@ describe('general agent file tools', () => {
     expect(dispatches).toBe(1)
     expect(result.tools.map(tool => tool.result?.kind === 'error' ? tool.result.code : tool.result?.kind)).toEqual(['file-create-outcome-unknown', 'unresolved-prior-tool'])
     expect(result.status).toBe('partial')
+    expect(result.failure).toBeUndefined()
+    expect(turn).toBe(3)
+    expect(executionCompletionIssues(result)).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'file.create', status: 'unknown' })]))
   })
   it('reports partial completion if a committed new file is followed by a model failure', async () => {
     const h = await fixture()
@@ -219,7 +222,7 @@ describe('general agent file tools', () => {
     const complete = (request: ModelRequest, name?: string, input?: object): Extract<ModelEvent, { type: 'response.completed' }> => {
       const calls = name ? [{ id: `call-${turn}`, type: 'function' as const, function: { name, arguments: JSON.stringify(input) } }] : []
       return { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: `response-${turn}`, actualModel: 'fixture', nativeResponse: {}, finishReason: calls.length ? 'tool_calls' : 'stop',
-        toolCalls: calls.map(call => ({ id: call.id, name: call.function.name, argumentsText: call.function.arguments })), assistant: { role: 'assistant', content: '', ...(calls.length ? { tool_calls: calls } : {}) } }
+        toolCalls: calls.map(call => ({ id: call.id, name: call.function.name, argumentsText: call.function.arguments })), assistant: { role: 'assistant', content: calls.length ? '' : '已打开目标文件，并将当前正文改为“改写正文”。', ...(calls.length ? { tool_calls: calls } : {}) } }
     }
     const provider: ModelProvider = { async *stream(request) {
       turn++
@@ -289,7 +292,7 @@ describe('general agent file tools', () => {
       turn++
       const calls = turn === 1 ? [{ id: 'create', type: 'function' as const, function: { name: 'file.create', arguments: JSON.stringify({ name: 'approved.md', ...(permission === 'workspace' ? { path: targetDirectory } : {}) }) } }] : []
       yield { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: `r${turn}`, actualModel: 'fixture', nativeResponse: {}, finishReason: calls.length ? 'tool_calls' : 'stop',
-        toolCalls: calls.map(call => ({ id: call.id, name: call.function.name, argumentsText: call.function.arguments })), assistant: { role: 'assistant', content: '', ...(calls.length ? { tool_calls: calls } : {}) } }
+        toolCalls: calls.map(call => ({ id: call.id, name: call.function.name, argumentsText: call.function.arguments })), assistant: { role: 'assistant', content: calls.length ? '' : '已在你批准的目录创建 approved.md。', ...(calls.length ? { tool_calls: calls } : {}) } }
     } }
     const engine = new ExecutionEngine({ registry: h.host.registry, gateway: h.host.tools, provider, files: h.files,
       runs: new ExecutionRunStore(path.join(h.root, 'ask-runs')), events: new ExecutionEventStore({ directory: path.join(h.root, 'ask-events') }) })
@@ -810,6 +813,8 @@ it.each([
 it('rejects an approved outside document commit if a user edits after its snapshot was captured', async () => {
   const h = await fixture(), filename = path.join(h.outside, 'external.md')
   const snapshot = await h.host.open(filename), session = h.host.registry.get(snapshot.documentId)
+  await h.host.tools.beginRun({ runId: h.context.runId, actor: 'agent', documents: [],
+    fileAccess: { workspaceRoot: h.context.workspaceRoot, permission: h.context.permission } })
   const execute = session.execute.bind(session)
   const intercepted = vi.spyOn(session, 'execute').mockImplementationOnce(async operation => {
     const current = session.read()

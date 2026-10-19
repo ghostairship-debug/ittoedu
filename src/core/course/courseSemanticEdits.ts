@@ -3,6 +3,7 @@ import type { ComponentEdit } from '../../shared/contracts/component-platform/op
 import type { ProjectPlaybackSettings } from '../../shared/contracts/playback-v1'
 import { resizeComponentSurfacesEdits } from '../drivers/courseV10Operations'
 import { flowSettingsEdits } from './courseFlowEdits'
+import { mergeComponentBackground } from '../../shared/componentBackgroundPaint'
 
 export const defaultCoursePlayback: ProjectPlaybackSettings = { controls: 'none', keyboardNavigation: true,
   presenter: { enabled: false, strategy: 'scene-navigation', additionalBindings: [] } }
@@ -19,7 +20,7 @@ export function courseSettingsEdits(project: CourseProjectV10, patch: CourseSett
   const edits: ComponentEdit[] = []
   if (patch.title !== undefined) edits.push({ type: 'project.title.set', title: patch.title })
   if (patch.background !== undefined) edits.push({ type: 'project.background.set',
-    background: patch.background === null ? null : { ...project.background, ...patch.background } })
+    background: patch.background === null ? null : mergeComponentBackground(project.background, patch.background) })
   if (patch.designTokens !== undefined) edits.push({ type: 'project.designTokens.set', designTokens: patch.designTokens })
   if (patch.playback !== undefined) edits.push({ type: 'project.playback.set',
     playback: patch.playback === null ? null : { ...defaultCoursePlayback, ...project.playback, ...patch.playback } })
@@ -40,7 +41,7 @@ export function surfaceSettingsEdits(project: CourseProjectV10, surfaceId: strin
   const edits: ComponentEdit[] = []
   if (patch.title !== undefined) edits.push({ type: 'surface.title.set', surfaceId, title: patch.title })
   if (patch.background !== undefined) edits.push({ type: 'surface.background.set', surfaceId,
-    background: patch.background === null ? null : { ...surface.background, ...patch.background } })
+    background: patch.background === null ? null : mergeComponentBackground(surface.background, patch.background) })
   if (patch.flowLayout) edits.push(...flowSettingsEdits(project, surfaceId, patch.flowLayout))
   if (patch.resize) edits.push(...resizeComponentSurfacesEdits(project, {
     surfaceIds: patch.resize.surfaceIds ?? [surfaceId], designSize: patch.resize.designSize, mode: patch.resize.mode ?? 'preserve',

@@ -1,0 +1,20 @@
+{
+  "description": "内置任务执行引擎的代码编排入口，用异步JavaScript整理多步数据或工具流程。await tools.describe(names?)按需读取实际工具定义；await tools.call(name,input)执行本任务已有授权工具并返回完整回执，错误抛出且可catch，真实失败仍记录于父失败列表。仅显式return的值进入模型；完整子调用回执可用programmatic.read读取。无Node、shell、网络或原始宿主对象。多次调用不组成原子事务，需一次事务时使用已有batch。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "code": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "code"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "name": "programmatic.execute",
+  "version": 1
+}

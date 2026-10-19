@@ -6,6 +6,7 @@ import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { SpatialPropertiesContext } from './SpatialPropertiesPanel'
 import type { createSpatialAuthoringSlice } from '../../store/slices/spatialAuthoringSlice'
 import { propertiesEffectiveBackground } from './componentProperties'
+import { mergeComponentBackground } from '../../../shared/componentBackgroundPaint'
 
 export function buildSpatialPropertiesOwner(input: {
   read: PropertiesOwnerReadModel
@@ -35,11 +36,11 @@ export function buildSpatialPropertiesOwner(input: {
   }
   const patchBackground: SpatialPropertiesContext['commands']['updateBackground'] = patch => run(() => {
     const target = input.liveTarget(), current = target.project.surfaces.find(value => value.id === surface.id)?.background
-    input.submit([{ type: 'surface.background.set', surfaceId: surface.id, background: { ...current,
+    input.submit([{ type: 'surface.background.set', surfaceId: surface.id, background: mergeComponentBackground(current, {
       ...(patch.backgroundMode === undefined ? {} : { mode: patch.backgroundMode }),
       ...(patch.backgroundColor === undefined ? {} : { color: patch.backgroundColor, mode: 'own' }),
       ...(patch.backgroundAssetId === undefined ? {} : { assetId: patch.backgroundAssetId, mode: 'own' }),
-    } }], target)
+    }) }], target)
   })
   const ids = (roots: readonly string[]): string[] => roots.flatMap(id => [id, ...ids(read.project!.instances[id]?.childIds ?? [])])
   return {
@@ -60,7 +61,7 @@ export function buildSpatialPropertiesOwner(input: {
     commands: {
       setBackgroundColor: backgroundColor => patchBackground({ backgroundColor }), updateBackground: patchBackground,
       previewBackground: patch => run(() => input.preview(patch.backgroundColor == null ? null : [
-        { type: 'surface.background.set', surfaceId: surface.id, background: { ...surface.background, mode: 'own', color: patch.backgroundColor } }], 'surface')),
+        { type: 'surface.background.set', surfaceId: surface.id, background: mergeComponentBackground(surface.background, { mode: 'own', color: patch.backgroundColor }) }], 'surface')),
       setShowCameraFrames: show => actions.setSpatialShowCameraFrames(show, surface.id),
       addCameraFrame: () => run(() => actions.addSpatialCameraFrameFromSession(surface.id, input.liveTarget())),
       renameCameraFrame: (frameId, title) => run(() => actions.renameSpatialCameraFrame(surface.id, frameId, title, input.liveTarget())),

@@ -1,16 +1,15 @@
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
-import { componentDefinitionBuiltinKey, componentIsLocked, containerChildIds, owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentDefinition, type ComponentPresentation, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, componentIsLocked, containerChildIds, owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentDefinition, type ComponentPresentation, type ComponentTarget, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
 import type { ComponentFrame } from '../../shared/contracts/component-platform/frame'
 import type { DocumentResources } from '../../shared/workbench/document'
 import { translateFrame, reparentFrame, composeMatrices, IDENTITY_MATRIX, type AffineMatrix } from '../components/geometry'
 import { extractComponentLibraryEntry } from '../components/library'
 import { rebindComponentLibraryImplementation } from '../components/library/rebindSource'
-import { componentAssetIds, rebindAuthoringAssets, rebindDeclaredTargets, rebindProfessionalAssets, rebindWebAssets, sourceAssetIds, sourceModuleBindings } from '../components/library/references'
-import type { LibraryDiagnostic } from '../components/library/types'
-import { componentRuleEdits, createComponentInteractionCopyIdentities, interactionBehavior, interactionRules, remapComponentInteractionData } from '../../shared/componentInteractionData'
+import { createComponentReferenceCapture, rebindAuthoringAssets, rebindDeclaredTargets, rebindProfessionalAssets, rebindWebAssets, sourceAssetIds, sourceModuleBindings } from '../components/library/references'
+import type { LibraryDiagnostic, LibraryExtractResult } from '../components/library/types'
+import { associatedComponentInteractionRules, componentRuleEdits, createComponentInteractionCopyIdentities, interactionBehavior, interactionRules, remapComponentInteractionData } from '../../shared/componentInteractionData'
 import { remapComponentInputData } from '../../components/input/authoring'
 import { inputDataSchema } from '../../components/input/data'
-import type { InteractionRule } from '../../shared/interactionTypes'
 import { componentParentMatrix, equalComponentValue } from '../drivers/courseV10Operations'
 import { globalVisibilityAtSurface } from './courseSemanticEdits'
 import { courseSurfaceReference, prepareCourseVisibility, type CourseAuthoringReferences } from './courseAuthoringReferences'
@@ -148,6 +147,7 @@ export interface CourseObjectPasteDestination {
   keepOwner?: boolean
 }
 export interface CourseObjectPastePlan {
+  readPaths: string[][]
   edits: ComponentEdit[]
   idMap: ReadonlyMap<string, string>
   professionalIdentities?: ReadonlyMap<string, string>
@@ -157,6 +157,79 @@ export interface CourseObjectPastePlan {
 }
 /** Derives one canonical clone batch; callers combine it with their own document edits. */
 export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, destination: CourseObjectPasteDestination): CourseObjectPastePlan {
+  return prepareCourseObjectPasteWithExtraction(source, destination, extractCourseObjectPasteSource)
+}
+
+interface CourseObjectPasteSourceClosure {
+  extracted: LibraryExtractResult
+  assets: LibraryExtractResult['entry']['assets']
+  referencedAssets: string[]
+}
+
+function extractCourseObjectPasteSource(source: CourseObjectClipboardSource, rootIds: string[], copiedIds: string[]): CourseObjectPasteSourceClosure {
+  const references = createComponentReferenceCapture(source.project, source.resources)
+  const extracted = extractComponentLibraryEntry(source.project, source.resources, { id: `clipboard_${crypto.randomUUID()}`, title: '复制对象', rootIds }, references)
+  const { entry } = extracted, assets = { ...entry.assets }, referencedAssets = new Set(Object.keys(assets))
+  for (const instance of Object.values(entry.example.instances)) {
+    for (const id of references.componentAssetIds(instance, entry.definitions[instance.definitionId])) referencedAssets.add(id)
+  }
+  for (const surface of source.project.surfaces) for (const state of surface.presentation?.states ?? []) {
+    const effective = resolveComponentPresentation(source.project, surface.id, state.id)
+    for (const id of copiedIds) if (Object.hasOwn(state.overrides, id)) {
+      const instance = effective.instances[id]
+      for (const assetId of references.componentAssetIds(instance, effective.definitions[instance.definitionId], effective)) {
+        referencedAssets.add(assetId)
+        if (source.project.assets[assetId]) assets[assetId] = structuredClone(source.project.assets[assetId])
+      }
+    }
+  }
+  for (const definition of Object.values(entry.definitions)) for (const id of sourceAssetIds(definition.implementation)) referencedAssets.add(id)
+  return { extracted, assets, referencedAssets: [...referencedAssets] }
+}
+
+/** One canonical planning batch owns this cache and reports each successfully
+ * applied command. Only unrelated additions retain a captured source closure. */
+export function createCourseObjectPastePlanningBatch() {
+  const captured = new Map<string, { closure: CourseObjectPasteSourceClosure; project: CourseProjectV10 }>()
+  return {
+    prepare(source: CourseObjectClipboardSource, destination: CourseObjectPasteDestination): CourseObjectPastePlan {
+      return prepareCourseObjectPasteWithExtraction(source, destination, (source, rootIds, copiedIds) => {
+        const key = JSON.stringify([source.documentId, source.project.id, rootIds])
+        let value = captured.get(key)
+        if (!value) {
+          value = { closure: extractCourseObjectPasteSource(source, rootIds, copiedIds), project: source.project }
+          captured.set(key, value)
+        }
+        return value.closure
+      })
+    },
+    applied(edits: readonly ComponentEdit[]): void {
+      for (const [key, { closure: { extracted: { entry } }, project }] of captured) {
+        const definitions = new Set(Object.keys(entry.definitions))
+        const owners = new Set(Object.keys(entry.resources.components))
+        for (const implementation of [...Object.values(entry.definitions).map(value => value.implementation),
+          ...Object.values(entry.example.instances).map(value => value.implementationOverride)]) {
+          if (implementation?.kind === 'source') {
+            Object.values(sourceModuleBindings(implementation)).forEach(id => definitions.add(id))
+            if (implementation.workspace) owners.add(implementation.workspace.ownerId)
+          }
+        }
+        const changedDefinitions = new Map(edits.flatMap(edit => edit.type === 'definition.set' ? [[edit.definition.id, edit.definition] as const] : []))
+        const unrelated = edits.every(edit => {
+          if (edit.type === 'definition.set') return !definitions.has(edit.definition.id)
+          if (edit.type === 'component.files.set') return !owners.has(edit.ownerId)
+          if (edit.type === 'instance.insert') return !(edit.container.kind === 'instance' && Object.hasOwn(entry.example.instances, edit.container.instanceId))
+            && edit.instances.every(instance => componentDefinitionBuiltinKey(changedDefinitions.get(instance.definitionId) ?? project.definitions[instance.definitionId]) !== 'guoling.interactions')
+          return false
+        })
+        if (!unrelated) captured.delete(key)
+      }
+    },
+  }
+}
+
+function prepareCourseObjectPasteWithExtraction(source: CourseObjectClipboardSource, destination: CourseObjectPasteDestination,
+  extract: typeof extractCourseObjectPasteSource): CourseObjectPastePlan {
   if (!source.roots.length) throw new Error('请先复制对象')
   const target = destination.capturedTarget, project = target.project
   const moving = destination.identity === 'move'
@@ -199,9 +272,7 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
   const copiedIds = [...copied], idMap = new Map(copiedIds.map(id => [id, moving && !Object.hasOwn(project.instances,id) ? id : crypto.randomUUID()]))
   // The library's existing extractor owns source-module/resource closure, including
   // private implementation workspaces. Clipboard does not infer bindings from code.
-  const extracted = extractComponentLibraryEntry(source.project, source.resources, {
-    id: `clipboard_${crypto.randomUUID()}`, title: '复制对象', rootIds: selectedRoots(source.project, copyRoots),
-  })
+  const sourceClosure = extract(source, selectedRoots(source.project, copyRoots), copiedIds), extracted = sourceClosure.extracted
   const entry = extracted.entry, diagnostics = extracted.diagnostics.filter(item => item.code === 'missing-asset' || item.code === 'dynamic-resource-scope-retained')
   const components: DocumentResources['components'] = entry.resources.components
   const componentIds = new Map(Object.keys(components).map(ownerId => [ownerId, moving && sameDocument ? ownerId : `component_${crypto.randomUUID()}`]))
@@ -233,24 +304,20 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
       copy.actions.forEach((value, key) => { if (!actions.has(key)) actions.set(key, moving ? key : value) })
     }
   }
-  // Ordinary object triggers and their completion chain have the same copy owner
-  // as managed families. Other author rules on the shared behavior remain untouched.
-  const selectRules = (values: readonly InteractionRule[]) => {
-    const selected = new Set(values.filter(rule => familyIds.has(rule.id) || 'nodeId' in rule.trigger && copied.has(rule.trigger.nodeId)).map(rule => rule.id))
-    let added = true
-    while (added) {
-      added = false
-      const selectedActions = new Set(values.filter(rule => selected.has(rule.id)).flatMap(rule => rule.actions.map(step => step.id)))
-      for (const rule of values) if (!selected.has(rule.id) && rule.trigger.type === 'animation.completed' && selectedActions.has(rule.trigger.actionId)) { selected.add(rule.id); added = true }
-    }
-    return values.filter(rule => selected.has(rule.id))
-  }
-  const externalBehaviors = moving && sameDocument ? [] : behaviorIds.filter(id => !copied.has(id)
-    && [source.project.instances[id].data, ...stateData(id)].some(data => selectRules(rulesAt(id, data)).length))
-  const family = externalBehaviors.flatMap(id => selectRules(rulesAt(id)))
-  const familyData = JSON.parse(JSON.stringify({ rules: family })) as JsonValue
-  for (const id of externalBehaviors) for (const data of [source.project.instances[id].data, ...stateData(id)]) {
-    const copy = createComponentInteractionCopyIdentities({ rules: selectRules(rulesAt(id, data)) } as unknown as JsonValue)
+  // One interaction-domain relation supplies every owner and named-state variant.
+  const familySnapshots = [associatedComponentInteractionRules(source.project, copied, familyIds),
+    ...source.project.surfaces.flatMap(surface => (surface.presentation?.states ?? []).map(state =>
+      associatedComponentInteractionRules(source.project, copied, familyIds, Object.fromEntries(Object.entries(state.overrides)
+        .flatMap(([id, override]) => override.data === undefined ? [] : [[id, override.data]])))))]
+  const baseFamilies = familySnapshots[0]
+  const stateFamilies = new Map(source.project.surfaces.flatMap(surface => surface.presentation?.states ?? [])
+    .map((state, index) => [state, familySnapshots[index + 1]] as const))
+  const selectedRules = (id: string, state?: NonNullable<CourseProjectV10['surfaces'][number]['presentation']>['states'][number]) =>
+    (state ? stateFamilies.get(state) : baseFamilies)?.find(family => family.instance.id === id)?.rules ?? []
+  const externalBehaviors = behaviorIds.filter(id => !copied.has(id)
+    && familySnapshots.some(families => families.some(family => family.instance.id === id)))
+  for (const families of familySnapshots) for (const family of families) if (externalBehaviors.includes(family.instance.id)) {
+    const copy = createComponentInteractionCopyIdentities({ rules: family.rules } as unknown as JsonValue)
     copy.rules.forEach((value, key) => { if (!rules.has(key)) rules.set(key, moving ? key : value) })
     copy.actions.forEach((value, key) => { if (!actions.has(key)) actions.set(key, moving ? key : value) })
   }
@@ -259,6 +326,18 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
     { fromInstanceId: id, toInstanceId: mapId(id), rules, stateKeys }))
   for (const id of copiedIds) if (professionalKey(id) === 'guoling.input') for (const data of stateData(id))
     remapComponentInputData(data, { fromInstanceId: id, toInstanceId: mapId(id), rules, stateKeys })
+  if (!sameDocument) {
+    for (const declaration of entry.logic?.courseState ?? []) if (!stateKeys.has(declaration.key)) stateKeys.set(declaration.key,
+      project.logic?.courseState.some(existing => existing.key === declaration.key) ? `state_${crypto.randomUUID()}` : declaration.key)
+    for (const id of copiedIds) for (const key of Object.values(source.project.instances[id].stateBindings ?? {})) {
+      if (stateKeys.has(key) || !project.logic?.courseState.some(existing => existing.key === key)) continue
+      stateKeys.set(key, `state_${crypto.randomUUID()}`)
+      diagnostics.push({ code: 'state-binding-required', instanceId: id,
+        message: `显式状态“${key}”没有随来源提供声明，已保留未绑定引用，未连接目标工程同名状态。` })
+    }
+    for (const id of copiedIds) if (professionalKey(id) === 'guoling.input') inputData.set(id, remapComponentInputData(source.project.instances[id].data,
+      { fromInstanceId: id, toInstanceId: mapId(id), rules, stateKeys }))
+  }
   // As in page copy, references outside the copied graph remain explicit external targets.
   // Only declared identities are rebound; prose and arbitrary component strings stay authored.
   const rewrite = (value: JsonValue) => structuredClone(value)
@@ -267,6 +346,7 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
     return { ...item, id: mapId(id), data: professionalKey(id) === 'guoling.interactions'
       ? remapComponentInteractionData(item.data, { instances: idMap, surfaces: surfaceIds, rules, actions, stateKeys })
       : professionalData(id,inputData.get(id) ?? rewrite(item.data)),
+      ...(item.stateBindings ? { stateBindings: Object.fromEntries(Object.entries(item.stateBindings).map(([alias, key]) => [alias, stateKeys.get(key) ?? key])) } : {}),
       ...(item.visibility ? { visibility: { ...item.visibility, surfaceIds: [...new Set(item.visibility.surfaceIds.map(mapSurfaceId))] } } : {}),
       ...(item.flowPlacement?.paragraphAnchor ? { flowPlacement: { ...item.flowPlacement, paragraphAnchor: {
         ...item.flowPlacement.paragraphAnchor, blockId: mapId(item.flowPlacement.paragraphAnchor.blockId),
@@ -287,22 +367,7 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
     if (logic.courseState.length !== (project.logic?.courseState.length ?? 0)) edits.push({ type: 'project.logic.set', logic })
   }
   const defMap = new Map<string, string>()
-  const definitions = Object.values(entry.definitions), assets = entry.assets
-  const referencedAssets = new Set(Object.keys(assets))
-  for (const instance of Object.values(entry.example.instances)) {
-    for (const id of componentAssetIds(instance, entry.definitions[instance.definitionId], source.project, source.resources)) referencedAssets.add(id)
-  }
-  for (const surface of source.project.surfaces) for (const state of surface.presentation?.states ?? []) {
-    const effective = resolveComponentPresentation(source.project, surface.id, state.id)
-    for (const id of copiedIds) if (Object.hasOwn(state.overrides, id)) {
-      const instance = effective.instances[id]
-      for (const assetId of componentAssetIds(instance, effective.definitions[instance.definitionId], effective, source.resources)) {
-        referencedAssets.add(assetId)
-        if (source.project.assets[assetId]) assets[assetId] = structuredClone(source.project.assets[assetId])
-      }
-    }
-  }
-  for (const definition of definitions) for (const id of sourceAssetIds(definition.implementation)) referencedAssets.add(id)
+  const definitions = Object.values(entry.definitions), assets = sourceClosure.assets, referencedAssets = new Set(sourceClosure.referencedAssets)
   const assetIds = new Map([...referencedAssets].map(id => [id, sameDocument ? id : `asset_${crypto.randomUUID()}`]))
   for (const original of definitions) {
     const implementation = original.implementation
@@ -411,7 +476,12 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
     if (relations.length) edits.push({ type: 'spatial.set', surfaceId: destinationSurface.id,
       spatial: { ...structuredClone(destinationSurface.spatial), relations: [...destinationSurface.spatial.relations ?? [], ...relations] } })
   }
-  let copiedBehaviorId: string | undefined
+  const mergeCopiedRules = (current: ReturnType<typeof interactionRules>, additions: ReturnType<typeof interactionRules>) => {
+    if (!moving) return [...current, ...additions]
+    const restored = new Map(additions.map(rule => [rule.id, rule]))
+    return [...current.map(rule => restored.get(rule.id) ?? rule), ...additions.filter(rule => !current.some(existing => existing.id === rule.id))]
+  }
+  const copiedBehaviorGroups: Array<{ sourceIds: string[]; instanceId: string }> = []
   if (externalBehaviors.length) {
     let owner = destination.container
     while (owner.kind === 'instance') {
@@ -419,13 +489,33 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
       if (!parent) throw new Error('粘贴目标归属已不存在')
       owner = parent
     }
-    const ruleTarget = owner.kind === 'global' ? { kind: 'project' as const } : { kind: 'surface' as const, surfaceId: owner.surfaceId }
-    const remapped = interactionRules({ id: 'clipboard-family', definitionId: 'guoling.interactions',
-      data: remapComponentInteractionData(familyData, { instances: idMap, surfaces: surfaceIds, rules, actions, stateKeys }) })
-    const existing = interactionBehavior(project, ruleTarget)
-    const behaviorEdits = componentRuleEdits(project, ruleTarget, [...interactionRules(existing), ...remapped])
-    copiedBehaviorId = existing?.id ?? behaviorEdits.find(edit => edit.type === 'instance.insert')?.rootIds[0]
-    edits.push(...behaviorEdits)
+    const destinationTarget = owner.kind === 'global' ? { kind: 'project' as const } : { kind: 'surface' as const, surfaceId: owner.surfaceId }
+    const groups = new Map<string, { target: ComponentTarget; sourceIds: string[]; behaviorId?: string }>()
+    for (const id of externalBehaviors) {
+      const family = familySnapshots.flat().find(family => family.instance.id === id)!
+      const ruleTarget: ComponentTarget = family.target.kind === 'project' ? { kind: 'project' }
+        : family.target.kind === 'surface' ? destinationTarget
+        : family.target.kind === 'text-range' ? { ...family.target, instanceId: mapId(family.target.instanceId),
+          rangeId: professionalCopy.identity(family.target.rangeId), dataPath: professionalCopy.path(family.target.dataPath) }
+        : { ...family.target, instanceId: mapId(family.target.instanceId) }
+      const behaviorId = sameDocument && (family.target.kind === 'project' || moving && family.target.kind !== 'surface') && project.instances[id] ? id : undefined
+      const key = behaviorId ?? JSON.stringify(ruleTarget), group = groups.get(key) ?? { target: ruleTarget, sourceIds: [], behaviorId }
+      group.sourceIds.push(id); groups.set(key, group)
+    }
+    for (const group of groups.values()) {
+      const familyData = { rules: group.sourceIds.flatMap(id => selectedRules(id)) } as unknown as JsonValue
+      const remapped = interactionRules({ id: 'clipboard-family', definitionId: 'guoling.interactions',
+        data: remapComponentInteractionData(familyData, { instances: idMap, surfaces: surfaceIds, rules, actions, stateKeys }) })
+      const existing = group.behaviorId ? project.instances[group.behaviorId] : interactionBehavior(project, group.target)
+      const behaviorEdits = componentRuleEdits(project, group.target, mergeCopiedRules(interactionRules(existing), remapped), undefined, existing?.id)
+      if (moving && sameDocument && existing && group.target.kind !== 'project'
+        && !existing.attachments?.some(attachment => attachment.instanceId === existing.id && equalComponentValue(attachment.target, group.target)))
+        behaviorEdits.push({ type: 'attachments.set', instanceId: existing.id,
+          attachments: [...existing.attachments ?? [], { instanceId: existing.id, target: group.target }] })
+      const instanceId = existing?.id ?? behaviorEdits.find(edit => edit.type === 'instance.insert')?.rootIds[0]
+      if (instanceId) copiedBehaviorGroups.push({ sourceIds: group.sourceIds, instanceId })
+      edits.push(...behaviorEdits)
+    }
   }
   // A normal copy keeps every named author state; the current render projection is never its source.
   const presentations = new Map<string, ComponentPresentation>()
@@ -433,8 +523,8 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
     const owned = copiedIds.filter(id => Object.hasOwn(state.overrides, id))
     const ordered = state.order?.filter(id => idMap.has(id)) ?? []
     const changesCopiedRules = externalBehaviors.some(id => state.overrides[id]?.data !== undefined
-      && !equalComponentValue(selectRules(rulesAt(id, state.overrides[id].data!)), selectRules(rulesAt(id))))
-    const ownsRuleState = copiedBehaviorId && (changesCopiedRules
+      && !equalComponentValue(selectedRules(id, state), selectedRules(id)))
+    const ownsRuleState = copiedBehaviorGroups.length > 0 && (changesCopiedRules
       || copiedIds.some(id => { const owner = topOwner(source.project, owningContainer(source.project, id)); return owner?.kind === 'surface' && owner.surfaceId === sourceSurface.id }))
     if (!owned.length && !ordered.length && !ownsRuleState) continue
     const surfaceId = destination.keepOwner && sameDocument ? sourceSurface.id : destinationSurfaceId
@@ -478,13 +568,14 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
       }
       copiedState.overrides[mapId(id)] = override
     }
-    if (copiedBehaviorId && ownsRuleState) {
+    if (ownsRuleState) for (const group of copiedBehaviorGroups) {
+      const copiedBehaviorId = group.instanceId
       const currentData = copiedState.overrides[copiedBehaviorId]?.data ?? project.instances[copiedBehaviorId]?.data ?? { rules: [] }
       const currentRules = interactionRules({ id: copiedBehaviorId, definitionId: 'guoling.interactions', data: currentData })
-      const effectiveRules = externalBehaviors.flatMap(id => selectRules(rulesAt(id, state.overrides[id]?.data ?? source.project.instances[id].data)))
+      const effectiveRules = group.sourceIds.flatMap(id => selectedRules(id, state))
       const rebound = interactionRules({ id: 'clipboard-state', definitionId: 'guoling.interactions', data: remapComponentInteractionData({ rules: effectiveRules } as unknown as JsonValue,
         { instances: idMap, surfaces: surfaceIds, rules, actions, stateKeys }) })
-      copiedState.overrides[copiedBehaviorId] = { ...copiedState.overrides[copiedBehaviorId], data: { rules: [...currentRules, ...rebound] } as unknown as JsonValue }
+      copiedState.overrides[copiedBehaviorId] = { ...copiedState.overrides[copiedBehaviorId], data: { rules: mergeCopiedRules(currentRules, rebound) } as unknown as JsonValue }
     }
     if (state.order) {
       const existing = copiedState.order ?? [...destinationSurface.childIds]
@@ -496,5 +587,9 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
     presentations.set(surfaceId, presentation)
   }
   for (const [surfaceId, presentation] of presentations) edits.push({ type: 'surface.presentation.set', surfaceId, presentation })
-  return { edits, idMap, professionalIdentities: professionalCopy.identities, assetIds, rootIds: selected, diagnostics }
+  return { edits, idMap, professionalIdentities: professionalCopy.identities, assetIds, rootIds: selected, diagnostics,
+    readPaths: sameDocument ? [...copiedIds.map(id => ['instances', id]),
+      ...externalBehaviors.flatMap(id => [['instances', id, 'data'], ['instances', id, 'attachments'], ['@owner', id]]),
+      ...source.project.surfaces.filter(surface => surface.presentation?.states.some(state =>
+        [...copiedIds, ...externalBehaviors].some(id => Object.hasOwn(state.overrides, id)))).map(surface => ['@surface', surface.id, 'presentation'])] : [] }
 }

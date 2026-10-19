@@ -25,9 +25,9 @@ export type ProjectFileToolName = keyof typeof projectFileToolSchemas
 export const isProjectFileToolName = (name: string): name is ProjectFileToolName => Object.hasOwn(projectFileToolSchemas, name)
 
 const descriptions: Record<ProjectFileToolName, string> = {
-  'project.apply': '应用已观察的工程路径，用content、授权工作区from或文本局部edits:[{old,new}]，三者择一。edits在已观察源文上按顺序替换，每处old须唯一（包含重叠出现），new为字面文本；全部成功才一次提交，未命中或多处命中请重读并提供准确、唯一的原文。edits仅用于content/style，不用于insert/redo。project.json 可提供 title/background/designTokens/playback 设置补丁，软件维护身份和版本。已有内容时content只修改原对象的内容，保留人工位置、顺序和其他对象；页面结构insert追加独立内容，redo重做所选范围的整体布局，另可surface.add/move/remove/title。theme.css修改整课主题；body.html/body.md修改连续正文，保留浮层；spatial.json修改镜头与路径，软件维护身份。components/源码修改共享定义；页面内源码只改该实例。默认读写短作者入口，完整实现按需读.dependencies；软件保存真实共享依赖并隔离局部深改。插入/源码/定义变更回执files给当前路径，readPaths先read，refreshPaths先list；unknown沿原操作查证。源码、资产与正式内容为一次可撤销操作并进入恢复稿，不自动存盘。',
-  'project.list': '列出Project V10工程虚拟路径，使用project.read/apply。project可用文档、页面、对象或空间路径/关系的已读target：对象列其内容、源码和依赖，页面列本页及关联源码，文档列完整作者内容和全部文件。路径由软件映射，不猜路径或填写内部身份。目录很长时沿用project，将nextOffset传给offset续读同一捕获目录。',
-  'project.read': '读取project.list返回的工程虚拟路径的当前正式内容与人工修改；不用file.read读取这些路径。普通Web读HTML，专业组件读data.json；正文读body.html/body.md；空间镜头读spatial.json；单路径/关系target只可修改所选图项，保留首页、镜头与其他图项。components/源码作用于共享定义，页面/global内源码为实例独立实现；workspace中的模块和二进制文件原样保留。很长文本将回执nextOffset传给offset并用limit续读，不使用cursor。后续project.apply固定本次观察的原目标，提交失败保留原文与诊断。',
+  'project.apply': '修改实际工程路径并交由唯一正式事务提交，可撤销、进恢复稿，不自动存盘。已有目标直接使用已知路径；content/from/edits三选一，edits的old须在当前已读源文唯一命中，全部成功才提交。普通content保原对象frame/顺序与邻居；style改结构外观或HTML内CSS。insert向页面结构路径添加普通HTML/CSS/SVG，redo明确重做所选范围；可用region给局部视口及父坐标transform，正式frame持有采用结果。operations成批准备同一工程已有路径并一次提交；pages+surface.add支持pages数组及各页首稿，软件分配身份。source/from可直接用计算或子任务成果来源，软件收齐同组依赖与资源。源码/依赖可直接完整读取后修改；实例源码只改实例，共享定义作用全部引用，主Source可用enhance追加普通JS/TS业务模块，具体API按引用读取。project.json仅改课件设置，theme.css改主题，body修改连续正文，spatial.json改空间旅程。失败给具体操作/目标/期望形状及局部修复入口，原输入保留；staleSnapshot需读当前稿，unknown先查原操作。成功files中的路径/frame/viewport/content为可接续事实，纯目录元数据不代替读取正文。',
+  'project.list': '在需要内容地图时列出当前工程虚拟路径、语义摘要、typed入口与正式frame。已有精确目标可直接project.read，无需先列目录。project可用已读文档/页面/对象/空间关系target限定范围。共享API是单独reference路径，按需读取；Source和原始工作区文件完整可读。nextOffset配原project续读固定目录。',
+  'project.read': '直接读取已知工程虚拟路径的当前正式内容及人工修改；无需先project.list。query按字面查找当前未保存正文，返回命中附近/行列/offset/版本；limit是命中数。普通读取limit是字符数，full:true显式完整读取所需文件。nextOffset续读固定来源，省略offset新读当前稿；refresh:true可在给定offset局部读取当前稿，亦可明确重新绑定已改名/重排后的当前自然路径。返回basis/revision/currentRevision区分固定来源与当前稿。frame/viewport是正式外框及内部尺寸，内容续改保外框。共享API按references路径读一次；完整Source/依赖仍可直接按实际路径读取。',
   'project.write': '整份写入一个工程文件：写已有文件前须先读取，读取后若被人改过会失败并提示重读；写新路径即新建（slides/03-名称.html 插入为第 3 页；首次写 slides/01 新标题复用初始空白页）。页面写普通 HTML/CSS/SVG。导航默认复用教师控制台；用户明确自定义时可深改 controller/教师控制台.js，或删除默认控制台后自写独立导航。含脚本页面整体保真并经准入后提交。spaces/<名称>.html 中 .step 是停靠区块，data-x/y 为中心，data-scale 为正比例、data-rotate 为角度；显式像素宽高或简单 class/id/tag CSS 决定区块大小，否则使用课件画布；.fragment 为停靠点内步骤。带位置属性而无 .step 的区块仅作布景，普通 HTML/CSS 保留；含脚本空间整体承载，不拆脚本旅程。docs/<名称>.html 是连续讲义（标题即导航位置，至少一个；图片用 ../assets/…，互动用 <iframe src="../components/<名称>.html" title height>）；theme.css 是整课主题；components/<名称>.html 经准入后所有引用处一起更新，未通过存草稿并返回原因。assets/<名称>.svg 写 SVG 文本；图片也可用 from 从工作区文件或本任务图片结果复制。软件对齐身份，一次可撤销修改；写入不自动存盘。',
   'project.edit': '局部替换工程文件中的原文：每处 old 必须在当前文件中唯一出现，否则失败，请重新读取后给出更长的原文。多处替换按顺序一次提交、一次撤销。',
   'project.move': '改名或移动工程文件：页面可改名或改序号调整顺序（只在同一演示表面内）；讲义、空间改名即改表面名称，保留位置与对象身份；普通文件链接与组件、素材引用一并更新。',
@@ -57,7 +57,13 @@ export const projectFileRegistrations = publicProjectFileNames.map(name => regis
     && (name === 'project.apply'
       ? hasRunWrite(context, ['spatial-graph'], 'course-v10') || context.projectFilesAccess === 'write'
       : hasRunDocument(context, 'course-v10') || context.projectFilesAccess !== undefined),
-  targets: projectToolTarget,
+  targets: async (input, resolver) => {
+    if ('operations' in input) {
+      const targets = await Promise.all(input.operations.map(operation => projectToolTarget({ project: input.project, path: operation.path }, resolver)))
+      return targets.every(Boolean) ? targets.flatMap(value => value!) : undefined
+    }
+    return projectToolTarget(input, resolver)
+  },
   handler: (context, input) => context.projectFiles(name, input),
 }))
 export const projectFileTools = projectFileRegistrations

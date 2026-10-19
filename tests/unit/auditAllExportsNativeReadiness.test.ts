@@ -13,11 +13,12 @@ import type { createVideoRuntimeImplementation } from '../../src/components/medi
 import type { waitForPublishedObservationReady } from '../../src/player/surfaces/publishedCapture'
 import type { resolveComponentOuterPresentation } from '../../src/shared/componentPresentation'
 import type { applyComponentPaintStyle } from '../../src/player/components/componentPlacementStyle'
+import type { ComponentRuntimeWorld } from '../../src/player/components/ComponentRuntimeWorld'
 
 type ProbeApi = { textRuntimeImplementation: typeof textRuntimeImplementation; createComponentSpatialAdapter: typeof createComponentSpatialAdapter;
   createComponentSpatialCameraPort: typeof createComponentSpatialCameraPort; createVideoRuntimeImplementation: typeof createVideoRuntimeImplementation;
   waitForPublishedObservationReady: typeof waitForPublishedObservationReady; resolveComponentOuterPresentation: typeof resolveComponentOuterPresentation;
-  applyComponentPaintStyle: typeof applyComponentPaintStyle }
+  applyComponentPaintStyle: typeof applyComponentPaintStyle; ComponentRuntimeWorld: typeof ComponentRuntimeWorld }
 let browser: Browser, bundle: string
 beforeAll(async () => {
   bundle = (await build({ stdin: { contents: `export {textRuntimeImplementation} from './src/components/text/runtime';
@@ -25,11 +26,129 @@ beforeAll(async () => {
     export {createVideoRuntimeImplementation} from './src/components/media/runtime';
     export {waitForPublishedObservationReady} from './src/player/surfaces/publishedCapture';
     export {resolveComponentOuterPresentation} from './src/shared/componentPresentation';
-    export {applyComponentPaintStyle} from './src/player/components/componentPlacementStyle';`, resolveDir: process.cwd() },
+    export {applyComponentPaintStyle} from './src/player/components/componentPlacementStyle';
+    export {ComponentRuntimeWorld} from './src/player/components/ComponentRuntimeWorld';`, resolveDir: process.cwd() },
     bundle: true, write: false, format: 'iife', globalName: 'auditNative', platform: 'browser' })).outputFiles[0]!.text
   browser = await chromium.launch({ headless: true })
 })
 afterAll(async () => { await browser?.close() })
+
+it('text initial hidden mount uses the formal frame and keeps placement updates in the same runtime', async () => {
+  const page = await browser.newPage()
+  try {
+    await page.setContent('<body><div id="outer" style="display:none;position:absolute;width:400px;height:80px"><div id="projection" style="width:100%;height:100%"></div></div></body>')
+    await page.addScriptTag({ content: bundle })
+    const result = await page.evaluate(async data => {
+      await document.fonts.ready
+      const api = (window as unknown as { auditNative: ProbeApi }).auditNative
+      const outer = document.getElementById('outer')!, projection = document.getElementById('projection')!
+      const project: CourseProjectV10 = { schemaVersion: 10, id: 'initial-frame', revision: 0, title: 'Initial frame', assets: {}, global: { underlay: [], overlay: [] },
+        definitions: { text: { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } } },
+        instances: { text: { id: 'text', definitionId: 'text', data, frame: { width: 400, height: 80, transform: [1, 0, 0, 1, 48, 376] } } },
+        surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['text'] }] }
+      const world = new api.ComponentRuntimeWorld('initial-frame', { mode: 'edit', builtins: new Map([['guoling.text', api.textRuntimeImplementation]]) })
+      world.bind('text', projection); world.bindTarget('text', outer)
+      const before = JSON.stringify(project)
+      try {
+        await world.sync(project, { assets: {}, components: {} })
+        const runtimeRoot = projection.querySelector<HTMLElement>('[data-component-instance-id="text"]')!
+        const hiddenComputedWidth = getComputedStyle(runtimeRoot).width
+        const initialWidth = runtimeRoot.querySelector<HTMLElement>('[data-text-component]')!.style.width
+        outer.style.display = ''
+        const visibleWidth = runtimeRoot.querySelector<HTMLElement>('[data-text-component]')!.getBoundingClientRect().width
+        const updated = structuredClone(project)
+        updated.revision++; updated.instances.text!.frame!.width = 420
+        outer.style.width = '420px'
+        await world.sync(updated, { assets: {}, components: {} })
+        const current = projection.querySelector<HTMLElement>('[data-component-instance-id="text"]')!
+        const updatedWidth = current.querySelector<HTMLElement>('[data-text-component]')!.getBoundingClientRect().width
+        const unchanged = before === JSON.stringify(project)
+        await world.dispose()
+        return { hiddenComputedWidth, initialWidth, visibleWidth, updatedWidth, sameRuntime: current === runtimeRoot,
+          unchanged, transform: updated.instances.text!.frame!.transform, disposed: projection.childElementCount }
+      } finally { await world.dispose() }
+    }, JSON.parse(JSON.stringify(createTextComponentData('生成情境插画 · 非纪实照片'))))
+    expect(result.hiddenComputedWidth).toBe('100%')
+    expect(result.initialWidth).toBe('400px')
+    expect(result.visibleWidth).toBe(400); expect(result.updatedWidth).toBe(420)
+    expect(result.sameRuntime).toBe(true); expect(result.unchanged).toBe(true)
+    expect(result.transform).toEqual([1, 0, 0, 1, 48, 376]); expect(result.disposed).toBe(0)
+  } finally { await page.close() }
+})
+
+it('precise box observations remeasure shrink text from authored fonts and restore them after a resize', async () => {
+  const page = await browser.newPage()
+  try {
+    await page.setContent('<body><div id="outer" style="position:absolute;width:432.664px;height:29.5px"><div id="projection" style="width:100%;height:100%"></div></div></body>')
+    await page.addScriptTag({ content: bundle })
+    const data = createTextComponentData('P = 30 毫米　f = 0.6（60%）　I = 20 毫米')
+    Object.assign(data.appearance, { fontFamily: '"Microsoft YaHei", sans-serif', fontSize: 22, lineHeight: 'normal' })
+    data.sizing.mode = 'shrink-text'
+    const result = await page.evaluate(async (input: unknown) => {
+      const data = input as CourseProjectV10['instances'][string]['data']
+      const api = (window as unknown as { auditNative: ProbeApi }).auditNative
+      const outer = document.getElementById('outer')!, projection = document.getElementById('projection')!
+      const project: CourseProjectV10 = { schemaVersion: 10, id: 'precise-shrink', revision: 0, title: 'Precise shrink', assets: {}, global: { underlay: [], overlay: [] },
+        definitions: { text: { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } } },
+        instances: { text: { id: 'text', definitionId: 'text', data, frame: { width: 432.664, height: 29.5, transform: [1, 0, 0, 1, 0, 0] } } },
+        surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['text'] }] }
+      const original = structuredClone(project)
+      const world = new api.ComponentRuntimeWorld('precise-shrink', { mode: 'play', builtins: new Map([['guoling.text', api.textRuntimeImplementation]]) })
+      world.bind('text', projection); world.bindTarget('text', outer)
+      const settle = async () => {
+        await document.fonts.ready
+        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      }
+      const fontSize = () => getComputedStyle(projection.querySelector('[data-text-component-content]')!).fontSize
+      try {
+        await world.sync(project, { assets: {}, components: {} }); await settle()
+        const initial = fontSize()
+        const narrow = structuredClone(project)
+        narrow.revision++; narrow.instances.text!.frame!.width = 220.671875
+        outer.style.width = '220.671875px'
+        await world.sync(narrow, { assets: {}, components: {} }); await settle()
+        const reduced = fontSize()
+        outer.style.width = '432.664px'
+        await world.sync({ ...project, revision: 2 }, { assets: {}, components: {} }); await settle()
+        return { initial, reduced, restored: fontSize(), project, original }
+      } finally { await world.dispose() }
+    }, JSON.parse(JSON.stringify(data)) as unknown)
+    expect(result.initial).toBe('22px')
+    expect(Number.parseFloat(result.reduced)).toBeLessThan(22)
+    expect(result.restored).toBe('22px')
+    expect(result.project).toEqual(result.original)
+  } finally { await page.close() }
+})
+
+it('hidden free-frame text keeps the padded content box before visibility or layout changes', async () => {
+  const page = await browser.newPage()
+  try {
+    await page.setContent('<body><div id="outer" style="display:none;position:absolute;box-sizing:border-box;width:460px;height:210px;padding:18px;border:2px solid"><div id="projection" style="width:100%;height:100%"></div></div></body>')
+    await page.addScriptTag({ content: bundle })
+    const result = await page.evaluate(async data => {
+      await document.fonts.ready
+      const api = (window as unknown as { auditNative: ProbeApi }).auditNative
+      const outer = document.getElementById('outer')!, projection = document.getElementById('projection')!
+      const project: CourseProjectV10 = { schemaVersion: 10, id: 'hidden-padding', revision: 0, title: 'Hidden padding', assets: {}, global: { underlay: [], overlay: [] },
+        definitions: { text: { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } } },
+        instances: { text: { id: 'text', definitionId: 'text', data, frame: { width: 460, height: 210, transform: [1, 0, 0, 1, 70, 185] } } },
+        surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['text'] }] }
+      const world = new api.ComponentRuntimeWorld('hidden-padding', { mode: 'edit', builtins: new Map([['guoling.text', api.textRuntimeImplementation]]) })
+      world.bind('text', projection); world.bindTarget('text', outer)
+      try {
+        await world.sync(project, { assets: {}, components: {} })
+        const text = projection.querySelector<HTMLElement>('[data-text-component]')!
+        const initial = { width: text.style.width, height: text.style.height }
+        outer.style.display = ''
+        // Merely reveal the retained mount: no font/data/layout event can repair it.
+        const visible = { width: text.getBoundingClientRect().width, height: text.getBoundingClientRect().height }
+        return { initial, visible }
+      } finally { await world.dispose() }
+    }, JSON.parse(JSON.stringify(createTextComponentData('站点一：观察'))))
+    expect(result.initial).toEqual({ width: '420px', height: '170px' })
+    expect(result.visible).toEqual({ width: 420, height: 170 })
+  } finally { await page.close() }
+})
 
 it('GUI free-frame stage honours wrapper padding without shifting child world coordinates or author data', async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } })

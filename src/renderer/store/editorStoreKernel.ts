@@ -22,7 +22,7 @@ export type EditorStoreKernel = {
   readResources(): DocumentResources
   edit(edits: ComponentEdit[], historyGroup?: string, documentId?: string): Promise<DocumentOperationResult>
   captureTarget(documentId?: string): CapturedCourseTarget
-  capture(edits: ComponentEdit[], target?: CapturedCourseTarget): CapturedComponentOperation
+  capture(edits: ComponentEdit[], target?: CapturedCourseTarget, readPaths?: readonly string[][]): CapturedComponentOperation
   editCaptured(command: CapturedComponentOperation, historyGroup?: string): Promise<DocumentOperationResult>
   selectInstances(instanceIds: readonly string[], surfaceId?: string | null, documentId?: string): void
   selectSurface(surfaceId: string, documentId?: string): void
@@ -59,7 +59,7 @@ export function createEditorStoreKernel(host: EditorStoreKernelHost): EditorStor
     },
     edit: (edits, historyGroup, documentId) => bridge.edit(edits, historyGroup, documentId),
     captureTarget: documentId => bridge.captureTarget(documentId),
-    capture: (edits, target) => bridge.capture(edits, target),
+    capture: (edits, target, readPaths) => bridge.capture(edits, target, readPaths),
     editCaptured: (command, historyGroup) => bridge.editCaptured(command, historyGroup),
     selectInstances(instanceIds, surfaceId, documentId = bridge.read().activeDocumentId ?? '') {
       bridge.selectInstances(documentId, instanceIds, surfaceId)

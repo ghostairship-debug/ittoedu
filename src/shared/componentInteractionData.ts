@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { componentDefinitionBuiltinKey, componentIsLocked, type ComponentDefinition, type ComponentInstance, type ComponentTarget, type CourseProjectV10, type JsonValue } from './contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, componentIsLocked, owningContainer, type ComponentDefinition, type ComponentInstance, type ComponentTarget, type CourseProjectV10, type JsonValue } from './contracts/component-platform/project'
 import type { ComponentEdit } from './contracts/component-platform/operations'
 import { sceneInteractionsSchema } from './interactionSchema'
 import type { InteractionActionPayload, InteractionRule } from './interactionTypes'
@@ -12,14 +12,49 @@ export const INTERACTIONS_DEFINITION: ComponentDefinition = {
   id: 'guoling.interactions', title: '互动与动画', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.interactions' },
 }
 export const interactionRules = (instance: ComponentInstance | undefined): InteractionRule[] => instance ? componentInteractionDataSchema.parse(instance.data).rules : []
+
+/** Object triggers and the actions they complete form one family, across behavior owners. */
+export function associatedInteractionRules(rules: readonly InteractionRule[], instances: ReadonlySet<string>, explicit: ReadonlySet<string> = new Set()): InteractionRule[] {
+  const selected = new Set(rules.filter(rule => explicit.has(rule.id) || 'nodeId' in rule.trigger && instances.has(rule.trigger.nodeId)))
+  let changed = true
+  while (changed) {
+    changed = false
+    const actions = new Set([...selected].flatMap(rule => rule.actions.map(action => action.id)))
+    for (const rule of rules) if (!selected.has(rule) && rule.trigger.type === 'animation.completed' && actions.has(rule.trigger.actionId)) {
+      selected.add(rule); changed = true
+    }
+  }
+  return rules.filter(rule => selected.has(rule))
+}
+
+export function componentInteractionOwner(project: CourseProjectV10, instance: ComponentInstance): ComponentTarget {
+  const attached = instance.attachments?.find(attachment => attachment.instanceId === instance.id)?.target
+  if (attached) return attached
+  let owner = owningContainer(project, instance.id)
+  while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
+  return owner?.kind === 'surface' ? { kind: 'surface', surfaceId: owner.surfaceId } : { kind: 'project' }
+}
+
+/** Keeps the actual writer with every selected family; data overrides use the same relation. */
+export function associatedComponentInteractionRules(project: CourseProjectV10, instances: ReadonlySet<string>, explicit: ReadonlySet<string> = new Set(), data: Readonly<Record<string, JsonValue>> = {}) {
+  const owners = Object.values(project.instances)
+    .filter(instance => componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === INTERACTIONS_DEFINITION.id)
+    .flatMap(instance => {
+      const parsed = componentInteractionDataSchema.safeParse(data[instance.id] ?? instance.data)
+      return parsed.success ? [{ instance, target: componentInteractionOwner(project, instance), rules: parsed.data.rules }] : []
+    })
+  const selectedRules = new Set([...explicit, ...owners.filter(owner => instances.has(owner.instance.id)).flatMap(owner => owner.rules.map(rule => rule.id))])
+  const selected = new Set(associatedInteractionRules(owners.flatMap(owner => owner.rules), instances, selectedRules))
+  return owners.map(owner => ({ ...owner, rules: owner.rules.filter(rule => selected.has(rule)) })).filter(owner => owner.rules.length)
+}
 export function interactionBehavior(project: CourseProjectV10, target: ComponentTarget): ComponentInstance | undefined {
   return Object.values(project.instances).find(instance => componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === INTERACTIONS_DEFINITION.id
     && instance.attachments?.some(attachment => attachment.instanceId === instance.id && JSON.stringify(attachment.target) === JSON.stringify(target)))
 }
 /** Main and Renderer prepare the same canonical interaction edits. */
-export function componentRuleEdits(project: CourseProjectV10, target: ComponentTarget, rules: readonly InteractionRule[], references?: CourseAuthoringReferences): ComponentEdit[] {
+export function componentRuleEdits(project: CourseProjectV10, target: ComponentTarget, rules: readonly InteractionRule[], references?: CourseAuthoringReferences, behaviorId?: string): ComponentEdit[] {
   const data = componentInteractionDataSchema.parse({ rules: prepareCourseInteractionRules(project, target, rules, references) })
-  const current = interactionBehavior(project, target)
+  const current = behaviorId ? project.instances[behaviorId] : interactionBehavior(project, target)
   const before = interactionRules(current)
   for (const rule of [...before, ...data.rules]) {
     const previous = before.find(value => value.id === rule.id), next = data.rules.find(value => value.id === rule.id)
@@ -85,14 +120,18 @@ function clickInteractionProgram(target: ComponentInteractionAuthoringTarget) {
     return id === instanceId || (project.instances[id]?.childIds ?? []).some(owns)
   }
   const global = [...project.global.underlay, ...project.global.overlay].some(owns)
-  const owner: ComponentTarget = global ? { kind: 'project' } : { kind: 'surface', surfaceId }
-  const rules = structuredClone(interactionRules(interactionBehavior(project, owner)))
-  const matches = rules.filter(rule => rule.trigger.type === 'node.click' && rule.trigger.nodeId === instanceId)
-  const simple = matches.length === 1 && matches[0]!.conditions.length === 0
+  const families = associatedComponentInteractionRules(project, new Set([instanceId]))
+  const clickOwners = families.filter(family => family.rules.some(rule => rule.trigger.type === 'node.click' && rule.trigger.nodeId === instanceId))
+  const actual = clickOwners[0]
+  const owner: ComponentTarget = actual?.target ?? (global ? { kind: 'project' } : { kind: 'surface', surfaceId })
+  const rules = structuredClone(interactionRules(actual?.instance ?? interactionBehavior(project, owner)))
+  const matches = clickOwners.length === 1 ? rules.filter(rule => rule.trigger.type === 'node.click' && rule.trigger.nodeId === instanceId)
+    : clickOwners.flatMap(family => family.rules.filter(rule => rule.trigger.type === 'node.click' && rule.trigger.nodeId === instanceId))
+  const simple = matches.length === 1 && families.reduce((count, family) => count + family.rules.length, 0) === 1 && matches[0]!.conditions.length === 0
   const unavailableReason = componentIsLocked(project, instanceId) ? '锁定对象的互动不能修改，请先解锁。'
     : matches.length && !simple ? '此对象已有多条或带条件的点击规则，请在“互动与动画”中选择规则编辑。'
     : target.activeStateId && !global ? '命名状态中的条件点击规则请在“互动与动画”中编辑。' : null
-  return { owner, rules, matches, simple, unavailableReason }
+  return { owner, behaviorId: actual?.instance.id, rules, matches, simple, unavailableReason }
 }
 
 /** The simple property editor projects the existing click program; reading it never creates a rule. */
@@ -101,7 +140,7 @@ export function componentClickNavigationView(target: ComponentInteractionAuthori
   const actions = program.matches.flatMap(rule => rule.actions.map(step => step.action))
   const navigation = actions.filter(action => action.type === 'scene.go' || action.type === 'location.go')
   const current = navigation[0]
-  return { action: current?.type === 'location.go' ? { type: 'scene.go' as const, sceneId: current.locationId }
+  return { action: current?.type === 'location.go' ? { type: 'scene.go' as const, sceneId: current.locationId, transition: current.transition }
     : current?.type === 'scene.go' ? current : null,
     otherActions: actions.some(action => action.type !== 'scene.go' && action.type !== 'location.go'),
     unavailableReason: program.unavailableReason ?? (navigation.length > 1 ? '此对象已有多个跳转动作，请在“互动与动画”中编辑。' : null) }
@@ -109,7 +148,7 @@ export function componentClickNavigationView(target: ComponentInteractionAuthori
 
 /** Edits just the navigation action in the ordinary object's canonical click rule. */
 export function componentClickNavigationEdits(target: ComponentInteractionAuthoringTarget, action: ComponentClickNavigationAction | null): ComponentEdit[] {
-  const { owner, rules, matches } = clickInteractionProgram(target), view = componentClickNavigationView(target)
+  const { owner, behaviorId, rules, matches } = clickInteractionProgram(target), view = componentClickNavigationView(target)
   if (view.unavailableReason) throw new Error(view.unavailableReason)
   if (action) {
     const surface = target.project.surfaces.find(surface => surface.id === action.sceneId)
@@ -133,7 +172,7 @@ export function componentClickNavigationEdits(target: ComponentInteractionAuthor
       if (!current.actions.length) rules.splice(rules.indexOf(current), 1)
     } else return []
   }
-  return componentRuleEdits(target.project, owner, rules)
+  return componentRuleEdits(target.project, owner, rules, undefined, behaviorId)
 }
 
 export function componentRevealSequenceEdits(project: CourseProjectV10, target: ComponentTarget, rule: InteractionRule,
@@ -149,26 +188,28 @@ export function componentRevealSequenceEdits(project: CourseProjectV10, target: 
   return [...ids.map(instanceId => ({ type: 'instance.patch' as const, instanceId, patch: { playbackInitialVisibility: 'hidden' as const } })), ...edits]
 }
 
-export function componentClickInteractionEdits(target: ComponentInteractionAuthoringTarget, kind: 'audio-play' | 'location-go', value: string, references?: CourseAuthoringReferences): ComponentEdit[] {
+export function componentClickInteractionEdits(target: ComponentInteractionAuthoringTarget, kind: 'audio-play' | 'location-go' | 'scene.next' | 'scene.previous', value: string | undefined, references?: CourseAuthoringReferences): ComponentEdit[] {
   const { project, instanceId, surfaceId } = target
   if (!instanceId || !project.instances[instanceId] || !surfaceId) throw new Error('点击互动目标已不存在')
   if (componentIsLocked(project, instanceId)) throw new Error('锁定对象的互动不能修改，请先解锁。')
-  value = kind === 'audio-play' ? courseSoundReference(project, value, references) : courseSurfaceReference(project, value, references)
-  if (kind === 'audio-play' && !project.media?.audio.sounds[value]) throw new Error('声音已不存在')
+  if (kind === 'audio-play' || kind === 'location-go')
+    value = kind === 'audio-play' ? courseSoundReference(project, value ?? '', references) : courseSurfaceReference(project, value ?? '', references)
+  if (kind === 'audio-play' && !project.media?.audio.sounds[value ?? '']) throw new Error('声音已不存在')
   if (kind === 'location-go' && !project.surfaces.some(surface => surface.id === value)) throw new Error('目标页面已不存在')
-  const { owner, rules, matches, simple, unavailableReason } = clickInteractionProgram(target)
+  const { owner, behaviorId, rules, matches, simple, unavailableReason } = clickInteractionProgram(target)
   if (unavailableReason) throw new Error(unavailableReason)
-  const action = kind === 'audio-play' ? { type: 'audio.play' as const, soundId: value } : { type: 'location.go' as const, locationId: value }
+  const action = kind === 'audio-play' ? { type: 'audio.play' as const, soundId: value! }
+    : kind === 'location-go' ? { type: 'location.go' as const, locationId: value! } : { type: kind }
   if (simple) {
     const step = matches[0]!.actions.find(step => step.action.type === action.type
-      || kind === 'location-go' && step.action.type === 'scene.go')
+      || kind !== 'audio-play' && ['scene.go', 'location.go', 'scene.next', 'scene.previous'].includes(step.action.type))
     if (step) step.action = action
     else matches[0]!.actions.push({ id: crypto.randomUUID(), start: 'after-previous', delayMs: 0, action })
   }
   else rules.push({ id: crypto.randomUUID(), name: kind === 'audio-play' ? '点击播放声音' : '点击前往页面', enabled: true,
     trigger: { type: 'node.click', nodeId: instanceId }, conditions: [],
     actions: [{ id: crypto.randomUUID(), start: 'after-previous', delayMs: 0, action }] })
-  return componentRuleEdits(project, owner, rules)
+  return componentRuleEdits(project, owner, rules, undefined, behaviorId)
 }
 
 export function duplicateComponentRule(rule: InteractionRule): InteractionRule {

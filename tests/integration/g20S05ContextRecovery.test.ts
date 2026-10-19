@@ -23,7 +23,6 @@ function expectCompleteSummarySource(requests: ModelRequest[], original: string)
   for (const request of helpers) {
     expect(estimateSerializedTokens(serializeModelPayload(request))).toBeLessThanOrEqual(modelContextBudget(request.selection).inputTokens)
     const packet = JSON.parse(String(request.messages[1]!.content)) as { sources: SummarySourcePart[] }
-    expect(packet.sources.reduce((sum, source) => sum + source.text.length, 0)).toBeLessThanOrEqual(20_000)
     parts.push(...packet.sources.filter(source => source.role === 'assistant' && source.total >= original.length))
   }
   const sourceId = parts[0]!.sourceId
@@ -82,6 +81,30 @@ async function fixture(provider: ModelProvider) {
     documents: [{ documentId: document.documentId, writable: [{ kind: 'markdown-range', from: 0, to: 3 }, { kind: 'markdown-range', from: 4, to: 7 }] }] }
   return { host, document, runs, events, engine, input, documentDirectory, runDirectory, eventDirectory }
 }
+
+it('reuses one measured serialization per round for the dispatched payload', async () => {
+  const dispatched: string[] = [], serialized: string[] = []
+  const provider: ModelProvider = { async *stream(request) {
+    dispatched.push(serializeModelPayload(request))
+    yield dispatched.length === 1
+      ? complete(request, [{ id: 'read-current', name: 'read', input: { target: refs(request)[0]?.target } }])
+      : complete(request, [], '当前内容已读取')
+  } }
+  const h = await fixture(provider)
+  const engine = new ExecutionEngine({ registry: h.host.registry, gateway: h.host.tools, provider,
+    runs: h.runs, events: h.events, serializePayload: request => {
+      const wire = serializeModelPayload(request)
+      serialized.push(wire)
+      return wire
+    } })
+  const started = await engine.start(h.input), final = await engine.wait(started.runId)
+  expect(final.status).toBe('completed')
+  expect(final.tools).toMatchObject([{ call: { name: 'read' }, state: 'returned', result: { kind: 'read' } }])
+  expect(dispatched).toHaveLength(2)
+  expect(serialized).toEqual(dispatched)
+  expect(final.requests.map(request => request.payload?.serializedBytes)).toEqual(dispatched.map(wire => Buffer.byteLength(wire)))
+  expect(final.compacted).toBeUndefined()
+})
 
 it('compacts a large completed turn while retaining canonical commit facts and enough room to finish the goal', async () => {
   const observed: ModelRequest[] = []
@@ -215,11 +238,11 @@ it('queries a terminal run lost tool receipt when the task continues without rep
   const provider: ModelProvider = { async *stream(request) {
     requests += 1
     if (requests === 1) yield complete(request, [{ id: 'first', name: 'text.replace', input: { target: refs(request)[0]!.writable[0]!.target, content: 'FIRST' } }])
-    else yield complete(request)
+    else yield complete(request, [], '已完成本次修改。')
   } }
   const h = await fixture(provider)
   const run = await h.engine.start(h.input), final = await h.engine.wait(run.runId)
-  expect(final.status).toBe('completed')
+  expect(final.status, JSON.stringify(final.failure)).toBe('completed')
   const lost = (await h.runs.read(run.runId))!
   lost.tools[0]!.state = 'executing'
   delete lost.tools[0]!.result
@@ -251,7 +274,7 @@ it('blocks a fresh same-name side effect when the previous tool has no recoverab
     else if (requests === 2) yield complete(request, [{ id: 'observe', name: 'read', input: { target: refs(request)[0]!.target } }])
     else if (requests === 3) yield complete(request, [{ id: 'replay-attempt', name: 'text.replace',
       input: { target: refs(request)[0]!.writable[0]!.target, content: 'DUPLICATE' } }])
-    else yield complete(request)
+    else yield complete(request, [], '原操作结果仍未知，不能重放。')
   } }
   const h = await fixture(provider)
   const started = await h.engine.start(h.input)
@@ -262,10 +285,11 @@ it('blocks a fresh same-name side effect when the previous tool has no recoverab
   await h.runs.save(uncertain)
   const continued = await h.engine.resume(started.runId, { ...h.input, taskId: 'continued' })
   const final = await h.engine.wait(continued.runId)
-  expect(final.status).toBe('partial')
+  expect(final.status, JSON.stringify(final.failure)).toBe('partial')
   expect(final.tools.map(tool => tool.result?.kind)).toEqual(['read', 'error'])
   expect(final.tools[1].result).toMatchObject({ kind: 'error', code: 'unresolved-prior-tool' })
-  expect(final.failure?.code).toBe('model-no-progress')
+  expect(final.failure).toBeUndefined()
+  expect(requests).toBe(4)
   expect(final.requests.at(-1)?.state).toBe('completed')
   expect((await h.runs.read(started.runId))!.tools[0]!.state).toBe('executing')
   expect((await h.host.internalAPI.read(h.document.documentId))).toMatchObject({ revision: 0, undoDepth: 0, model: { source: 'AAA BBB' } })
@@ -292,17 +316,23 @@ it('rebuilds queued continuation facts from the run journal instead of trusting 
   expect(requests).toBe(2)
 })
 
-it('rejects oversized frozen history as initial input without treating an old assistant message as compressible work', async () => {
+it('projects oversized frozen history instead of permanently pinning initial assistant prose', async () => {
   let requests = 0
-  const provider: ModelProvider = { async *stream(request) { requests += 1; yield complete(request) } }
+  const provider: ModelProvider = { async *stream(request) {
+    requests += 1
+    expect(JSON.stringify(request.messages)).not.toContain('历史上下文'.repeat(20_000))
+    expect(JSON.stringify(request.messages)).toContain('历史过程文本')
+    expect(JSON.stringify(request.messages)).toContain('把 AAA 改为 FIRST，再把 BBB 改为 SECOND')
+    yield complete(request, [], '已定位原历史与当前要求。')
+  } }
   const h = await fixture(provider)
-  const run = await h.engine.start({ ...h.input, context: [{ role: 'assistant', content: '历史上下文'.repeat(2_000) }], selection: { ...selection, contextWindow: 8_000 } })
+  const run = await h.engine.start({ ...h.input, context: [{ role: 'assistant', content: '历史上下文'.repeat(20_000) }], selection: { ...selection, contextWindow: 32_000 } })
   const final = await h.engine.wait(run.runId)
-  expect(final.status).toBe('failed')
-  expect(final.failure?.message).toContain('初始输入超过模型可用窗口')
-  expect(final.requests).toEqual([])
+  expect(final.status, final.failure?.message).toBe('completed')
+  expect(final.failure).toBeUndefined()
+  expect(final.messages.some(message => message.content === '历史上下文'.repeat(20_000))).toBe(true)
   expect(final.compacted).toBeUndefined()
-  expect(requests).toBe(0)
+  expect(requests).toBe(1)
 })
 
 
@@ -318,7 +348,7 @@ it('uses the declared model window and preserves semantic decisions without repe
     else if (turns === 2) {
       summariesBeforeStaleUsage = summaries
       expect(JSON.stringify(request.messages)).toContain('source-one')
-      const event = complete(request, [{ id: 'note', name: 'task.note', input: { remaining: ['完成'] } }]); event.usage = { inputTokens: 200000, raw: {} }; yield event
+      const event = complete(request, [{ id: 'note', name: 'task.note', input: { remaining: [] } }]); event.usage = { inputTokens: 200000, raw: {} }; yield event
     } else yield complete(request, [], '完成')
   } }
   const h = await fixture(provider)
@@ -333,11 +363,96 @@ it('uses the declared model window and preserves semantic decisions without repe
   expect(JSON.stringify(final.messages)).toContain('内容解释。'.repeat(20))
 })
 
+it('summarizes a large ordinary source in one packet when the helper has a million-token window', async () => {
+  let turns = 0
+  const original = 'source-million: ' + 'ordinary source material. '.repeat(24_000)
+  const requests: ModelRequest[] = []
+  const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {
+    requests.push(structuredClone(request))
+    if (!request.tools?.length) { yield complete(request, [], '已保留 source-million 的结论，剩余只需完成。'); return }
+    turns++
+    yield turns === 1
+      ? complete(request, [{ id: 'read-once', name: 'read', input: { target: refs(request)[0]!.target } }], original)
+      : complete(request, [], '完成')
+  } }
+  const h = await fixture(provider)
+  const run = await h.engine.start({ ...h.input, selection: { ...selection, contextWindow: 20_000 },
+    compressionSelection: { ...selection, model: 'million-window-summary', contextWindow: 1_050_000 } })
+  const final = await h.engine.wait(run.runId)
+  expect(final.status, JSON.stringify(final.failure)).toBe('completed')
+  expect(turns).toBe(2)
+  expect(requests.filter(request => !request.tools?.length)).toHaveLength(1)
+  expect(expectCompleteSummarySource(requests, original)).toBe(1)
+  expect(final.compacted?.summary).toContain('source-million')
+})
+
+it('splits summary sources only as the helper input budget requires, including the previous summary and prompt', async () => {
+  let turns = 0
+  const original = 'source-small: ' + '普通材料与结论。'.repeat(9000)
+  const previous = '已保留前段材料与来源。'.repeat(200)
+  const requests: ModelRequest[] = []
+  const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {
+    requests.push(structuredClone(request))
+    if (!request.tools?.length) { yield complete(request, [], previous); return }
+    turns++
+    yield turns === 1
+      ? complete(request, [{ id: 'read-once', name: 'read', input: { target: refs(request)[0]!.target } }], original)
+      : complete(request, [], '完成')
+  } }
+  const h = await fixture(provider)
+  const run = await h.engine.start({ ...h.input, selection: { ...selection, contextWindow: 20_000 },
+    compressionSelection: { ...selection, contextWindow: 16_000 } })
+  const final = await h.engine.wait(run.runId)
+  expect(final.status, JSON.stringify(final.failure)).toBe('completed')
+  expect(turns).toBe(2)
+  expect(expectCompleteSummarySource(requests, original)).toBeGreaterThan(1)
+  const helpers = requests.filter(request => !request.tools?.length)
+  expect(helpers.slice(1).every(request => JSON.parse(String(request.messages[1]!.content)).previous === previous)).toBe(true)
+  expect(helpers.every(request => request.selection.parameters?.max_tokens === 4000)).toBe(true)
+  expect(final.compacted?.summary).toBe(previous)
+})
+
+it('stops during budgeted summarization without another provider request or replaying a committed edit', async () => {
+  let turns = 0, helpers = 0, summaryAborted = false
+  let enteredSummary!: () => void
+  const summaryStarted = new Promise<void>(resolve => { enteredSummary = resolve })
+  const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request, options) {
+    if (!request.tools?.length) {
+      helpers++
+      enteredSummary()
+      await new Promise<void>(resolve => {
+        const abort = () => { summaryAborted = true; resolve() }
+        const signal = options!.signal!
+        if (signal.aborted) abort()
+        else signal.addEventListener('abort', abort, { once: true })
+      })
+      return
+    }
+    turns++
+    yield complete(request, [{ id: 'one-edit', name: 'text.replace', input: { target: refs(request)[0]!.writable[0]!.target, content: 'FIRST' } }], '等待摘要的普通材料。'.repeat(10_000))
+  } }
+  const h = await fixture(provider)
+  const run = await h.engine.start({ ...h.input, selection: { ...selection, contextWindow: 20_000 },
+    compressionSelection: { ...selection, contextWindow: 16_000 } })
+  await summaryStarted
+  await h.engine.stop(run.runId)
+  const final = await h.engine.wait(run.runId)
+  expect(final.status).toBe('stopped')
+  expect(summaryAborted).toBe(true)
+  expect(turns).toBe(1)
+  expect(helpers).toBe(1)
+  expect(final.requests.filter(request => request.kind === 'context-summary')).toMatchObject([
+    { state: 'failed', failure: { kind: 'aborted' } },
+  ])
+  expect(final.tools).toHaveLength(1)
+  expect(await h.host.internalAPI.read(h.document.documentId)).toMatchObject({ revision: 1, undoDepth: 1, model: { source: 'FIRST BBB' } })
+})
+
 it('reduces a rejected context before retrying and never replays the completed document operation', async () => {
   let turns = 0
   const provider: ModelProvider = { async *stream(request) {
     turns++
-    if (turns === 1) yield complete(request, [{ id: 'one-edit', name: 'text.replace', input: { target: refs(request)[0]!.writable[0]!.target, content: 'FIRST' } }], 'x'.repeat(12000))
+    if (turns === 1) yield complete(request, [{ id: 'one-edit', name: 'text.replace', input: { target: refs(request)[0]!.writable[0]!.target, content: 'FIRST' } }], 'x'.repeat(120_000))
     else if (turns === 2) yield { requestId: request.requestId, sequence: 1, type: 'response.failed', failure: { outcome: 'rejected', kind: 'server', httpStatus: 400, code: 'context_length_exceeded', message: 'maximum context window exceeded' } }
     else { expect(JSON.stringify(request.messages)).not.toContain('x'.repeat(10000)); yield complete(request, [], '完成') }
   } }
@@ -401,7 +516,7 @@ it('finishes sustained research under a 32k window and continues with cited deci
     }
     turns++
     if (turns <= 32) yield complete(request, Array.from({ length: 4 }, (_, index) => ({ id: `source-${turns}-${index}`, name: 'web.open',
-      input: { url: 'https://example.com/source-' + (index % 2 ? 'two' : 'one'), offset: index < 2 ? 0 : 2000, limit: 7000 } })))
+      input: { url: 'https://example.com/source-' + (index % 2 ? 'two' : 'one'), offset: index < 2 ? 0 : 1000, limit: 1000 } })))
     else {
       expect(JSON.stringify(request.messages)).toContain('结构化 JSON')
       yield complete(request, [], '两份来源支持结构化结果保存，合计73。')
@@ -417,7 +532,7 @@ it('finishes sustained research under a 32k window and continues with cited deci
   expect(result.compacted?.summary).toContain('结构化 JSON')
   const facts = JSON.parse(result.compacted!.facts)
   expect(facts.observations.sources).toHaveLength(2)
-  expect(facts.observations.sources[0].readRanges).toEqual([{ from: 0, to: 9000 }])
+  expect(facts.observations.sources[0].readRanges).toEqual([{ from: 0, to: 2000 }])
   expect(result.messages.filter(message => message.role === 'tool')).toHaveLength(128)
   continued = true
   const resumed = await h.engine.resume(started.runId, input)
@@ -425,25 +540,44 @@ it('finishes sustained research under a 32k window and continues with cited deci
 }, 30000)
 
 it('reopens a cited ancestor snapshot through fresh URL permission after its temporary web cache ends', async () => {
-  let turns = 0, sourceId = '', fetches = 0
+  let turns = 0, sourceId = '', sourceVersion = '', fetches = 0
+  const opened: Array<{ runId: string; url?: string; sourceId?: string; version?: string; offset?: number; limit?: number }> = []
   const web = new WebResearchService({ fetch: async url => { fetches++; return { url, status: 200, contentType: 'text/html',
     bytes: new TextEncoder().encode('<title>Original source</title><main>Verified figure 73.</main>') } } })
+  const open = web.open.bind(web)
+  web.open = async input => {
+    const { runId, url, sourceId, version, offset, limit } = input
+    opened.push({ runId, url, sourceId, version, offset, limit })
+    return open(input)
+  }
   const provider: ModelProvider = { async *stream(request) {
     turns++
     if (turns === 1) yield complete(request, [{ id: 'original-page', name: 'web.open', input: { url: 'https://example.com/original' } }])
-    else if (turns === 2) { sourceId = latestToolResult(request).data && JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)!.content)).data.source.sourceId; yield complete(request) }
-    else if (turns === 3) yield complete(request, [{ id: 'continue-page', name: 'web.open', input: { sourceId } }])
-    else { expect(JSON.stringify(latestToolResult(request))).toContain('Verified figure 73.'); yield complete(request) }
+    else if (turns === 2) {
+      const source = JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)!.content)).data.source
+      sourceId = source.sourceId; sourceVersion = source.version
+      yield complete(request, [{ id: 'same-run-page', name: 'web.open', input: { sourceId, offset: 0, limit: 200 } }])
+    }
+    else if (turns === 3) { expect(JSON.stringify(latestToolResult(request))).toContain('Verified figure 73.'); yield complete(request, [], '来源已核对。') }
+    else if (turns === 4) yield complete(request, [{ id: 'continue-page', name: 'web.open', input: { sourceId } }])
+    else { expect(JSON.stringify(latestToolResult(request))).toContain('Verified figure 73.'); yield complete(request, [], '原来源已恢复。') }
   } }
   const h = await fixture(provider)
   h.host.tools.configureHostServices({ web, beginRun: async grant => { web.beginRun(grant.runId) }, stopRun: runId => web.stopRun(runId) })
   const first = await h.engine.start(h.input)
-  expect((await h.engine.wait(first.runId)).status).toBe('completed')
+  const firstResult = await h.engine.wait(first.runId)
+  expect(firstResult.status, JSON.stringify(firstResult.failure)).toBe('completed')
+  expect(firstResult.tools[1]!.call.input).toEqual({ sourceId, offset: 0, limit: 200 })
+  expect(opened[1]).toMatchObject({ runId: first.runId, sourceId, url: 'https://example.com/original', version: sourceVersion, offset: 0, limit: 200 })
+  expect(fetches).toBe(1)
   await web.stopRun(first.runId)
   const resumed = await h.engine.resume(first.runId, h.input)
   const final = await h.engine.wait(resumed.runId)
   expect(final.status, JSON.stringify(final.failure)).toBe('completed')
-  expect(final.tools[0]!.call.input).toMatchObject({ sourceId, url: 'https://example.com/original' })
+  expect(final.tools).toHaveLength(1)
+  expect(final.tools[0]!.providerCallId).toBe('continue-page')
+  expect(final.tools[0]!.call.input).toEqual({ sourceId })
+  expect(opened.at(-1)).toMatchObject({ runId: resumed.runId, sourceId, url: 'https://example.com/original', version: sourceVersion })
   expect(fetches).toBe(2)
 })
 

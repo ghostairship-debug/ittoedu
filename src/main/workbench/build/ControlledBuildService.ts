@@ -17,7 +17,7 @@ import { createHtmlDocumentRuntimeSource, unpackHtmlDocumentRuntimeSource } from
 import { validateRuntimeSource } from '../../../shared/runtimeSourceValidation'
 import { visitProjectDynamicInstances } from '../../../shared/composition/dynamic'
 import { collectCourseProjectInteractionHealth } from '../../../shared/courseProjectHealth/interaction'
-import { resourcePath } from '../documentJournal'
+import { resourcePath } from '../documentSourceResources'
 import { applyDynamicInstanceCaptures, dynamicCaptureRefreshIds } from '../../../core/tools/dynamicCaptureAssets'
 import { prepareImageResource } from '../admittedImageResource'
 import { waitForHostWork } from '../../../shared/workbench/jobWait'

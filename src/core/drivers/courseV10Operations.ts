@@ -1,7 +1,8 @@
 import { componentTextRelationshipCleanupEdits } from '../course/componentTextRelationshipEdits'
+import { canonicalNavigationGuard, removeNavigationGuardSurfaces } from '../../shared/courseNavigationGuards'
 import { allDocumentTextSlots, documentComponentDataVersions, inlineComponentIds } from '../../shared/document/textInteraction'
-import { componentAssetIds } from '../components/library/references'
-import { liveSourceOwners } from '../components/compilation/liveSourceReferences'
+import { createComponentReferenceCapture } from '../components/library/references'
+import { componentBackgroundAssetIds } from '../../shared/componentBackgroundPaint'
 import type { DocumentResources } from '../../shared/workbench/document'
 import type { ComponentAppliedChanges, ComponentEdit, ComponentExpectation, ComponentOperationBatch } from '../../shared/contracts/component-platform/operations'
 import { componentDefinitionBuiltinKey, componentIsLocked, resolveComponentPresentation, containerChildIds, owningContainer, type ComponentContainer, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
@@ -178,9 +179,8 @@ function removeDeletedReferences(project: CourseProjectV10, removed: ReadonlySet
     if (instance.visibility && removedSurfaces.size) instance.visibility.surfaceIds = instance.visibility.surfaceIds.filter(id => !removedSurfaces.has(id))
   }
   if (project.logic && removedSurfaces.size) project.logic.navigationGuards = project.logic.navigationGuards.flatMap(guard => {
-    const toSurfaceIds = guard.toSurfaceIds.filter(id => !removedSurfaces.has(id))
-    if (guard.toSurfaceIds.length && !toSurfaceIds.length) return []
-    return [{ ...guard, toSurfaceIds, ...(guard.fromSurfaceIds ? { fromSurfaceIds: guard.fromSurfaceIds.filter(id => !removedSurfaces.has(id)) } : {}) }]
+    const remaining = removeNavigationGuardSurfaces(guard, removedSurfaces)
+    return remaining ? [remaining] : []
   })
 }
 
@@ -359,8 +359,8 @@ function dependencyPaths(project: CourseProjectV10, edits: ComponentEdit[]): str
   return [...new Map(paths.map(path => [JSON.stringify(path), path])).values()]
 }
 
-export function captureComponentOperation(project: CourseProjectV10, edits: ComponentEdit[]): ComponentOperationBatch {
-  return { type: 'component-platform.apply', edits: structuredClone(edits), expected: dependencyPaths(project, edits)
+export function captureComponentOperation(project: CourseProjectV10, edits: ComponentEdit[], readPaths: readonly string[][] = []): ComponentOperationBatch {
+  return { type: 'component-platform.apply', edits: structuredClone(edits), expected: [...new Map([...dependencyPaths(project, edits), ...readPaths].map(path => [JSON.stringify(path), path])).values()]
     .map(path => ({ path, ...structuredClone(componentValueAt(project, path)) })) }
 }
 
@@ -586,6 +586,21 @@ function flowBodyContentEdit(project: CourseProjectV10, edit: ComponentEdit): bo
 }
 
 export function applyComponentOperation(project: CourseProjectV10, raw: ComponentOperationBatch, resources?:DocumentResources): CourseProjectV10 {
+  return courseProjectV10Schema.parse(applyComponentOperationCandidate(project, raw, resources))
+}
+
+/** Provisional commands still capture/check the current candidate and run the same
+ * edit semantics. Only the final full-project parse belongs to the Session commit. */
+export function beginComponentOperationPlanning(project: CourseProjectV10) {
+  let current = project
+  return { apply(command: ComponentOperationBatch, resources: DocumentResources): CourseProjectV10 {
+    const next = applyComponentOperationCandidate(current, command, resources)
+    current = next
+    return next
+  } }
+}
+
+function applyComponentOperationCandidate(project: CourseProjectV10, raw: ComponentOperationBatch, resources?:DocumentResources): CourseProjectV10 {
   const command = componentOperationBatchSchema.parse(raw)
   checkComponentExpectations(project, command)
   const next = structuredClone(project)
@@ -593,6 +608,8 @@ export function applyComponentOperation(project: CourseProjectV10, raw: Componen
     ? passiveFlowMoves(project, command.edits) : new Set<ComponentEdit>()
   const removedInBatch = new Set<string>()
   for (const edit of command.edits) {
+    // Earlier edits can change definitions, bindings or asset scope on `next`.
+    const references = createComponentReferenceCapture(next, resources)
     // Every author entry reaches this application boundary. Runtime state/animation never does.
     const requireUnlocked = (id: string) => {
       if (project.instances[id] && componentIsLocked(next, id)) throw new Error('对象已锁定，请先解锁')
@@ -611,23 +628,26 @@ export function applyComponentOperation(project: CourseProjectV10, raw: Componen
       const implementationOnly=edit.type==='definition.set' && before && equalComponentValue({...before,implementation:null},{...edit.definition,implementation:null})
       const changed=edit.type==='definition.remove' || !equalComponentValue(before,edit.definition)
       if(changed)for(const instance of Object.values(next.instances)) {
+        if (!project.instances[instance.id] || !componentIsLocked(next, instance.id)) continue
         const implementation=instance.implementationOverride ?? next.definitions[instance.definitionId]?.implementation
         if(!implementation)continue
         const direct=instance.definitionId===id && (!implementationOnly || !instance.implementationOverride)
-        if(direct || liveSourceOwners(next,implementation,resources).definitions.has(id))requireUnlocked(instance.id)
+        if(direct || references.sourceOwners(implementation).definitions.has(id))requireUnlocked(instance.id)
       }
     }
     if (edit.type === 'component.files.set') for (const instance of Object.values(next.instances)) {
+      if (!project.instances[instance.id] || !componentIsLocked(next, instance.id)) continue
       const implementation = instance.implementationOverride ?? next.definitions[instance.definitionId]?.implementation
-      if (implementation && liveSourceOwners(next,implementation,resources).owners.has(edit.ownerId)) requireUnlocked(instance.id)
+      if (implementation && references.sourceOwners(implementation).owners.has(edit.ownerId)) requireUnlocked(instance.id)
     }
     if (edit.type === 'asset.replace') for (const instance of Object.values(next.instances)) {
+      if (!project.instances[instance.id] || !componentIsLocked(next, instance.id)) continue
       const versions = [instance, ...next.surfaces.flatMap(surface => surface.presentation?.states.flatMap(state => {
         const override = state.overrides[instance.id]
         return override ? [{ ...instance, ...(override.data !== undefined ? { data: override.data } : {}),
           ...(override.authoring !== undefined ? { authoring: override.authoring } : {}) }] : []
       }) ?? [])]
-      if (versions.some(value => componentAssetIds(value, next.definitions[instance.definitionId],next,resources).includes(edit.asset.id))) requireUnlocked(instance.id)
+      if (versions.some(value => references.componentAssetIds(value, next.definitions[instance.definitionId]).includes(edit.asset.id))) requireUnlocked(instance.id)
     }
     if (edit.type === 'surface.presentation.set') {
       const old = next.surfaces.find(surface => surface.id === edit.surfaceId)?.presentation
@@ -645,7 +665,11 @@ export function applyComponentOperation(project: CourseProjectV10, raw: Componen
     if (edit.type === 'project.theme.set') { if (edit.theme == null) delete next.theme; else next.theme = structuredClone(edit.theme); continue }
     if (edit.type === 'project.playback.set') { if (edit.playback == null) delete next.playback; else next.playback = structuredClone(edit.playback); continue }
     if (edit.type === 'project.media.set') { if (edit.media == null) delete next.media; else next.media = structuredClone(edit.media); continue }
-    if (edit.type === 'project.logic.set') { if (edit.logic == null) delete next.logic; else next.logic = structuredClone(edit.logic); continue }
+    if (edit.type === 'project.logic.set') {
+      if (edit.logic == null) delete next.logic
+      else { next.logic = structuredClone(edit.logic); next.logic.navigationGuards = next.logic.navigationGuards.map(canonicalNavigationGuard) }
+      continue
+    }
     if (edit.type === 'surface.insert') {
       if (next.surfaces.some(surface => surface.id === edit.surface.id)) throw new Error('表面身份已存在')
       if (edit.index > next.surfaces.length) throw new Error('表面插入位置已不存在')
@@ -699,13 +723,13 @@ export function applyComponentOperation(project: CourseProjectV10, raw: Componen
     }
     if (edit.type === 'asset.remove') {
       if (!Object.hasOwn(next.assets, edit.assetId)) throw new Error('素材已不存在')
-      const referenced = Object.values(next.instances).some(instance => componentAssetIds(instance, next.definitions[instance.definitionId],next,resources).includes(edit.assetId))
-        || next.background?.assetId === edit.assetId || next.surfaces.some(surface => surface.background?.assetId === edit.assetId
-          || surface.presentation?.states.some(state => state.background?.assetId === edit.assetId || Object.entries(state.overrides).some(([instanceId, override]) => {
+      const referenced = Object.values(next.instances).some(instance => references.componentAssetIds(instance, next.definitions[instance.definitionId]).includes(edit.assetId))
+        || componentBackgroundAssetIds(next.background).includes(edit.assetId) || next.surfaces.some(surface => componentBackgroundAssetIds(surface.background).includes(edit.assetId)
+          || surface.presentation?.states.some(state => componentBackgroundAssetIds(state.background).includes(edit.assetId) || Object.entries(state.overrides).some(([instanceId, override]) => {
             if (override.data === undefined && override.authoring === undefined) return false
             const instance = next.instances[instanceId]
-            return instance && componentAssetIds({ ...instance, ...(override.data !== undefined ? { data: override.data } : {}),
-              ...(override.authoring !== undefined ? { authoring: override.authoring } : {}) }, next.definitions[instance.definitionId],next,resources).includes(edit.assetId)
+            return instance && references.componentAssetIds({ ...instance, ...(override.data !== undefined ? { data: override.data } : {}),
+              ...(override.authoring !== undefined ? { authoring: override.authoring } : {}) }, next.definitions[instance.definitionId]).includes(edit.assetId)
           })))
         || Object.values(next.media?.audio.sounds ?? {}).some(sound => sound.assetId === edit.assetId)
         || Object.values(next.theme?.assets ?? {}).some(asset => asset.assetId === edit.assetId)
@@ -749,8 +773,10 @@ export function applyComponentOperation(project: CourseProjectV10, raw: Componen
     }
     else if (edit.type === 'frame.set') { if (edit.frame === null) delete instance.frame; else instance.frame = structuredClone(edit.frame) }
     else if (edit.type === 'instance.patch') {
-      const { visibility, name, viewportPinned, ...patch } = edit.patch
+      const { visibility, name, viewportPinned, stateBindings, ...patch } = edit.patch
       Object.assign(instance, patch)
+      if (stateBindings === null) delete instance.stateBindings
+      else if (stateBindings !== undefined) instance.stateBindings = structuredClone(stateBindings)
       if (viewportPinned === null) delete instance.viewportPinned
       else if (viewportPinned !== undefined) instance.viewportPinned = viewportPinned
       if (name === null) delete instance.name
@@ -821,7 +847,7 @@ export function applyComponentOperation(project: CourseProjectV10, raw: Componen
       if (targets.some(target => project.instances[target] && componentIsLocked(next, target))) throw new Error('互动关联对象已锁定，请先解锁')
     }
   }
-  return courseProjectV10Schema.parse(next)
+  return next
 }
 
 export function describeComponentChanges(before: CourseProjectV10, after: CourseProjectV10): ComponentAppliedChanges {

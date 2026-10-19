@@ -85,7 +85,7 @@ export function providerStreamFailure(error: unknown): Pick<ModelFailure, 'kind'
   const tokens = [providerCode, providerType].filter((item): item is string => !!item).map(item => item.toLowerCase())
   const metadata = { ...(providerCode ? { providerCode } : {}), ...(providerType ? { providerType } : {}) }
   const fixed = (kind: ModelFailure['kind'], code: string, message: string) => ({ kind, code, message, ...metadata })
-  if (tokens.some(code => ['overloaded_error', 'server_error', 'internal_server_error', 'api_error'].includes(code)))
+  if (tokens.some(code => ['overloaded_error', 'server_is_overloaded', 'server_error', 'internal_server_error', 'api_error'].includes(code)))
     return fixed('server', 'provider-transient-sse', '模型服务报告临时服务错误；由现有执行器决定有限重试。')
   if (tokens.some(code => rateLimitCodes.has(code) || code === 'rate_limit_error'))
     return fixed('rate-limit', 'provider-rate-limit-sse', '模型服务报告限流；由现有执行器决定有限重试。')

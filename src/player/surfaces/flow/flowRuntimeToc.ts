@@ -7,6 +7,7 @@ import {
   type FlowPublishedPlaybackDocument,
 } from './flowModel'
 import type { PublishedFlowSurface } from '../../../shared/publishedCourseTypes'
+import { createBrowserUuid } from '../../../shared/browser/createBrowserUuid'
 
 export const FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX = 260
 export const FLOW_RUNTIME_TOC_TOGGLE_HEIGHT_PX = 56
@@ -140,7 +141,7 @@ export class FlowRuntimeTocChrome {
     const dom = root.ownerDocument
 
     this.#drawer = dom.createElement('nav')
-    this.#drawer.id = `flow-runtime-toc-${crypto.randomUUID()}`
+    this.#drawer.id = `flow-runtime-toc-${createBrowserUuid()}`
     this.#drawer.className = 'flow-runtime-toc-drawer'
     this.#drawer.dataset.testid = 'flow-runtime-toc-drawer'
     this.#drawer.setAttribute('aria-label', '目录')

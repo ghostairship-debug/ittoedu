@@ -18,13 +18,15 @@ const eventData = {
   saveStatus: z.enum(['saving', 'saved', 'failed']).optional(),
   toolName: id.optional(), operationId: id.optional(), documentId: id.optional(), revision: count.optional(),
   jobId: id.optional(), resourceIds: z.array(id).optional(),
+  /** A display reference to the original child interaction. Only that run may accept its user decision. */
+  delegationRef: z.object({ runId: id, callId: id, parentRunId: id, jobId: id }).strict().optional(),
   webSources: z.array(z.object({ title: z.string(), url: z.string().min(1) }).strict()).optional(),
   // Built-in ask_user only: the question the option card shows, then what the user actually answered.
   question: userQuestionViewSchema.optional(), answer: userAnswerSchema.optional(),
   // A modification waiting for the user's approval, then the user's actual decision.
   approval: approvalViewSchema.optional(), decision: approvalDecisionSchema.optional(),
   // Actual reported counters only. Absence is unknown, never an inferred zero or charge.
-  usage: z.object({ inputTokens: count.optional(), outputTokens: count.optional(), totalTokens: count.optional(), reasoningTokens: count.optional(), cachedInputTokens: count.optional() }).strict().optional(),
+  usage: z.object({ inputTokens: count.optional(), outputTokens: count.optional(), totalTokens: count.optional(), reasoningTokens: count.optional(), cachedInputTokens: count.optional(), cacheWriteInputTokens: count.optional() }).strict().optional(),
 }
 const envelope = {
   eventId: id, conversationId: id, taskId: id, runId: id, itemId: id, parentItemId: id.optional(),

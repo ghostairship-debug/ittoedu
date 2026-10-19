@@ -70,8 +70,8 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
       </div>
     </div>}
     {count === 0
-      ? <p className="element-ai-card__hint">{text ? '告诉 AI 怎么改这段文字。这里的 AI 只改选中的文字，可以连续追问；关闭卡片即结束，修改会保留。'
-        : '告诉 AI 怎么改它。这里的 AI 只改这一个对象；要牵动其他对象，请用右侧 AI 助手。'}</p>
+      ? <p className="element-ai-card__hint">{text ? '告诉 AI 怎么改这段文字，可以连续追问；选择仅修改选区可限定范围。关闭卡片后修改保留。'
+        : '告诉 AI 怎么改它。AI 会优先处理这个对象，也可按要求协调同文档中的其他内容。'}</p>
       : <ol className="element-ai-card__log" aria-label="修改记录">
         {card.entries.map(entry => <li key={entry.submissionId} className="element-ai-card__entry" data-state={entry.state}>
           <p className="element-ai-card__request">{entry.text}</p>
@@ -94,6 +94,8 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
           if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return
           event.preventDefault(); void send()
         }} />
+      <label className="element-ai-card__scope"><input type="checkbox" checked={card.restrictToSelection}
+        onChange={event => elementCards.setSelectionRestriction(cardKey, event.target.checked)} />仅修改此选区</label>
       <div className="element-ai-card__actions">
         {card.unconfirmed && <button type="button" disabled={sending} onClick={() => {
           setSending(true); setError(''); void elementCards.confirmSend(cardKey).catch(reason => setError(reason instanceof Error ? reason.message : String(reason))).finally(() => setSending(false))

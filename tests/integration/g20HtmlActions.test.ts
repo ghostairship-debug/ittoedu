@@ -5,7 +5,7 @@ import path from 'node:path'
 import { JSDOM } from 'jsdom'
 import { HtmlActionService } from '../../src/main/workbench/observation/HtmlActionService'
 import { htmlActionModelMessage } from '../../src/main/workbench/observation/HtmlActionModelInput'
-import { htmlActionScript, sameHtmlPreviewDocumentUrl,
+import { htmlActionScript, htmlCourseNavigateScript, sameHtmlPreviewDocumentUrl,
   type HtmlPageState } from '../../src/main/workbench/observation/HtmlActionPageScript'
 import { ObservationImageStore } from '../../src/main/workbench/observation/ObservationImageStore'
 import type { HtmlActionFramePort } from '../../src/main/workbench/observation/HtmlActionDesktopPort'
@@ -13,6 +13,7 @@ import type { HtmlPreviewAutomationContext, HtmlPreviewService } from '../../src
 import { HtmlPreviewService as RealHtmlPreviewService } from '../../src/main/workbench/htmlPreview/HtmlPreviewService'
 import { PreviewNetworkPolicy } from '../../src/main/previewNetworkPolicy'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
+import { modelToolResult } from '../../src/core/tools/modelToolResult'
 
 const PNG = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/vS8AAAAASUVORK5CYII=', 'base64'))
 
@@ -61,7 +62,7 @@ function fixture() {
       return () => { stopped += 1 } },
   }
   const service = new HtmlActionService({ preview, frames, images: new ObservationImageStore() })
-  return { service, setRevision: (next: number) => { revision = next },
+  return { service, frames, setRevision: (next: number) => { revision = next },
     freshPreviewRevision: (next: number) => {
       revision = next
       activeContext = { ...context, lease: { ...lease, leaseId: `lease-${next}`, loadId: `load-${next}`, revision: next } }
@@ -79,6 +80,67 @@ function fixture() {
 }
 
 describe('M28 HTML action sessions', () => {
+  it('reports a measured input mismatch without calling it unknown or replaying the trusted input', async () => {
+    const f = fixture(), act = f.frames.act
+    let inputs = 0
+    f.frames.act = async (...args) => {
+      const input = args[2]
+      if (input.type !== 'input') return act(...args)
+      inputs++
+      await act(args[0], args[1], { ...input, value: '8' }, args[3])
+      return { applied: true, inputOutcome: { status: 'value-mismatch', requestedValue: input.value, actualValue: '8' } }
+    }
+    await f.service.beginDocumentRun('run', { documentId: 'doc', epoch: 'epoch', revision: 2 })
+    const first = await f.service.observe('run')
+    const input = { operationId: 'mismatch', handle: first.elements[1]!.handle, value: '40' }
+    await expect(f.service.input('run', input)).rejects.toMatchObject({ code: 'html-input-value-mismatch' })
+    await expect(f.service.input('run', input)).rejects.toMatchObject({ code: 'html-input-value-mismatch' })
+    expect(inputs).toBe(1)
+    const current = await f.service.observe('run')
+    expect(current.structure).toContain('clicked 0; input 8')
+    await f.service.click('run', { operationId: 'new-click', handle: current.elements[0]!.handle })
+    expect(f.clicks()).toBe(1)
+    f.service.stopRun('run')
+  })
+
+  it('reports frame sources without bootstrap HTML through observe, click and input while keeping current handles', async () => {
+    const f = fixture(), observe = f.frames.observe
+    const payload = 'BOOTSTRAP_TRANSPORT_BODY'.repeat(15_000)
+    const source = 'courseware-editor://app/_observation/worker/bootstrap/lab'
+    const internalUrl = `${source}?html=${payload}&variant=web`
+    const externalUrl = 'https://example.test/article?html=public-source#section'
+    let raw: HtmlPageState | undefined
+    f.frames.observe = async (...args) => {
+      const state = await observe(...args)
+      raw = { ...state, observationScope: { kind: 'visible-preview-frames', frames: [
+        ...(['observed', 'not-visible', 'unavailable'] as const).map((status, index) => ({
+          frameId: index + 1, url: internalUrl, status, returnedElements: 0, matchedElements: 0, truncatedElements: 0,
+        })), { frameId: 4, url: externalUrl, status: 'observed', returnedElements: 0, matchedElements: 0, truncatedElements: 0 },
+      ] } }
+      return raw
+    }
+    const onDiagnostic = f.frames.onDiagnostic
+    f.frames.onDiagnostic = (context, token, receive) => onDiagnostic(context, token, diagnostic =>
+      receive({ ...diagnostic, source: internalUrl }))
+    await f.service.beginDocumentRun('report', { documentId: 'doc', epoch: 'epoch', revision: 2 })
+    try {
+      const first = await f.service.observe('report')
+      const clicked = await f.service.click('report', { operationId: 'click', handle: first.elements[0]!.handle })
+      const filled = await f.service.input('report', { operationId: 'input', handle: clicked.elements[1]!.handle, value: '42' })
+      for (const [name, observation] of [['view.observe', first], ['view.click', clicked], ['view.input', filled]] as const) {
+        const message = modelToolResult(name, { kind: 'read', data: observation })
+        expect(JSON.stringify(message).includes('BOOTSTRAP_TRANSPORT_BODY')).toBe(false)
+        expect(observation.observationScope!.frames.slice(0, 3).map(frame => frame.url))
+          .toEqual(Array(3).fill(`${source}?variant=web`))
+        expect(observation.observationScope!.frames[3]!.url).toBe(externalUrl)
+        expect(observation.errors[0]!.source).toBe(`${source}?variant=web`)
+      }
+      expect(filled.structure).toContain('clicked 1; input 42')
+      expect(raw!.observationScope!.frames[0]!.url).toBe(internalUrl)
+      expect(JSON.stringify(await f.service.errors('report')).includes('BOOTSTRAP_TRANSPORT_BODY')).toBe(false)
+    } finally { f.service.stopRun('report') }
+  })
+
   it('observes a newly authorized current HTML document without reusing old handles or an unknown action', async () => {
     const f = fixture(), firstDoc = { documentId: 'doc', epoch: 'epoch', revision: 2 }
     const first = await f.service.executeDocumentAction('switch-doc', firstDoc, { name: 'html.observe', input: {} })
@@ -195,7 +257,7 @@ describe('M28 HTML action sessions', () => {
     await expect(f.service.observe('run')).rejects.toThrow('源码版本已变化')
     const freshIdentity = await f.service.restartDocumentRun('run', { documentId: 'doc', epoch: 'epoch', revision: 3 })
     expect(freshIdentity.revision).toBe(3)
-    await expect(f.service.readResource('run', old.image.resourceId)).rejects.toThrow('不存在')
+    expect((await f.service.readResource('run', old.image.resourceId)).bytes).toEqual(PNG)
     const fresh = await f.service.observe('run')
     expect(fresh.identity.revision).toBe(3)
     expect(fresh.elements[0]!.handle).not.toBe(old.elements[0]!.handle)
@@ -212,14 +274,95 @@ describe('M28 HTML action sessions', () => {
       .rejects.toThrow('已停止')
   })
 
-  it('uses the real page DOM for dynamic clicks and input, and rejects a replaced node', () => {
+  it('reads and navigates the exported player through its existing navigation owner', async () => {
+    const dom = new JSDOM('<!doctype html><html><body><main></main></body></html>', { runScripts: 'outside-only' })
+    const scenes = [{ id: 'cover' }, { id: 'content' }, { id: 'appendix' }]
+    let locationId = scenes[0].id
+    const destinations: string[] = []
+    const player = { navigation: { read: () => ({ locationId, scenes }) },
+      go: async (id: string) => { destinations.push(id); locationId = id; return true } }
+    Object.assign(dom.window, { coursePlayer: player, coursePlayerReady: Promise.resolve(player) })
+    const before = dom.window.eval(htmlActionScript({ type: 'observe' })) as HtmlPageState
+    expect([before.pageIndex, before.pageCount]).toEqual([0, 3])
+    expect(await dom.window.eval(htmlCourseNavigateScript(2))).toBe(true)
+    const after = dom.window.eval(htmlActionScript({ type: 'observe' })) as HtmlPageState
+    expect([after.pageIndex, after.pageCount]).toEqual([2, 3])
+    expect(destinations).toEqual(['appendix'])
+    player.go = async () => false
+    await expect(dom.window.eval(htmlCourseNavigateScript(1))).rejects.toThrow('未接受页面导航')
+    expect(locationId).toBe('appendix')
+    dom.window.close()
+  })
+
+  it('leaves ordinary HTML paging and child-frame markup with the existing preview owner', async () => {
+    const dom = new JSDOM('<!doctype html><html><body><main><section style="display:none">first</section><section>second<iframe></iframe></section></main></body></html>', { runScripts: 'outside-only' })
+    expect(await dom.window.eval(htmlCourseNavigateScript(0))).toBe(false)
+    const state = dom.window.eval(htmlActionScript({ type: 'observe' })) as HtmlPageState
+    expect([state.pageIndex, state.pageCount]).toEqual([1, 2])
+    expect(dom.window.document.querySelector('section')?.style.display).toBe('none')
+    dom.window.close()
+  })
+
+  it('keeps child-frame handles after 120 parent elements and reports the observed frame scope', async () => {
+    const f = fixture(), observe = f.frames.observe
+    f.frames.observe = async (...args) => {
+      const state = await observe(...args)
+      const child = { ...state.elements[0]!, frameToken: 'nested-frame', label: 'Nested control' }
+      return { ...state, elements: [...Array.from({ length: 120 }, (_, index) => ({ ...state.elements[0]!, label: `Parent ${index}` })), child],
+        observationScope: { kind: 'visible-preview-frames', frames: [{ frameId: 1, url: state.url,
+          status: 'observed', matchedElements: 120, returnedElements: 120, truncatedElements: 0 },
+          { frameId: 2, url: 'about:srcdoc', status: 'observed', matchedElements: 1, returnedElements: 1, truncatedElements: 0 }] } }
+    }
+    await f.service.beginDocumentRun('scope', { documentId: 'doc', epoch: 'epoch', revision: 2 })
+    const result = await f.service.observe('scope')
+    expect(result.elements).toHaveLength(121)
+    expect(result.elements.at(-1)?.label).toBe('Nested control')
+    expect(result.observationScope?.frames).toHaveLength(2)
+  })
+
+  it('prepares an SVG group through its hit child without synthetic interaction and keeps input, disabled and covering checks', () => {
+    const dom = new JSDOM('<!doctype html><html><body><svg><g tabindex="0" role="button" aria-label="接线柱 电池 ＋"><circle cx="25" cy="25" r="20"></circle></g></svg><button disabled>禁用</button><div id="cover">遮挡</div></body></html>',
+      { url: 'https://local.test/', runScripts: 'outside-only' })
+    const { window } = dom
+    for (const element of window.document.querySelectorAll('*')) {
+      Object.defineProperty(element, 'getBoundingClientRect', { value: () => ({ x: 1, y: 1, left: 1, top: 1, right: 81, bottom: 21, width: 80, height: 20 }) })
+    }
+    const group = window.document.querySelector('g')!
+    let clicks = 0
+    group.addEventListener('click', () => { clicks += 1 })
+    let hit: Element | null = window.document.querySelector('circle')
+    Object.defineProperty(window.document, 'elementFromPoint', { value: () => hit })
+    const evaluate = <T>(input: Parameters<typeof htmlActionScript>[0]) => window.eval(htmlActionScript(input)) as T
+    const observed = evaluate<HtmlPageState>({ type: 'observe' })
+    const target = observed.elements.find(element => element.tag === 'g')!
+    expect(target).toMatchObject({ role: 'button', label: '接线柱 电池 ＋', editable: false })
+    expect(evaluate({ type: 'click', path: target.path, fingerprint: target.fingerprint })).toMatchObject({ applied: true })
+    expect(clicks).toBe(0)
+    expect(evaluate({ type: 'input', path: target.path, fingerprint: target.fingerprint, value: '改写' }))
+      .toMatchObject({ applied: false, reason: 'not-clickable' })
+    group.setAttribute('aria-disabled', 'true')
+    expect(evaluate({ type: 'click', path: target.path, fingerprint: target.fingerprint }))
+      .toMatchObject({ applied: false, reason: 'not-clickable' })
+    group.removeAttribute('aria-disabled')
+    hit = window.document.querySelector('#cover')
+    expect(evaluate({ type: 'click', path: target.path, fingerprint: target.fingerprint }))
+      .toMatchObject({ applied: false, reason: 'covered-element' })
+    const disabled = observed.elements.find(element => element.tag === 'button')!
+    hit = window.document.querySelector('button')
+    expect(evaluate({ type: 'click', path: disabled.path, fingerprint: disabled.fingerprint }))
+      .toMatchObject({ applied: false, reason: 'not-clickable' })
+    expect(clicks).toBe(0)
+    dom.window.close()
+  })
+
+  it('prepares current DOM targets without synthetic interaction and rejects a replaced node', () => {
     expect(sameHtmlPreviewDocumentUrl('https://local.test/demo.html#step-2', 'https://local.test/demo.html')).toBe(true)
     expect(sameHtmlPreviewDocumentUrl('https://local.test/other.html', 'https://local.test/demo.html')).toBe(false)
     const dom = new JSDOM('<!doctype html><html><body><button id="more">展开</button><input aria-label="回答"><p id="result">初始</p></body></html>',
       { url: 'https://local.test/', runScripts: 'outside-only' })
     const { window } = dom
     for (const element of window.document.querySelectorAll('*')) {
-      Object.defineProperty(element, 'getBoundingClientRect', { value: () => ({ x: 1, y: 1, width: 80, height: 20 }) })
+      Object.defineProperty(element, 'getBoundingClientRect', { value: () => ({ x: 1, y: 1, left: 1, top: 1, right: 81, bottom: 21, width: 80, height: 20 }) })
     }
     window.document.querySelector('button')!.addEventListener('click', () => {
       window.document.querySelector('#result')!.textContent = '已展开'
@@ -228,15 +371,77 @@ describe('M28 HTML action sessions', () => {
       window.document.querySelector('#result')!.textContent = (window.document.querySelector('input') as HTMLInputElement).value
     })
     const evaluate = <T>(input: Parameters<typeof htmlActionScript>[0]) => window.eval(htmlActionScript(input)) as T
+    let hit: Element | null = window.document.querySelector('button')
+    Object.defineProperty(window.document, 'elementFromPoint', { value: () => hit })
     const first = evaluate<HtmlPageState>({ type: 'observe' })
     const button = first.elements.find(item => item.tag === 'button')!
     expect(evaluate<{ applied: boolean }>({ type: 'click', path: button.path, fingerprint: button.fingerprint }).applied).toBe(true)
-    expect(evaluate<HtmlPageState>({ type: 'observe' }).structure[0]).toContain('已展开')
+    expect(evaluate<HtmlPageState>({ type: 'observe' }).structure.join('\n')).toContain('初始')
     const input = evaluate<HtmlPageState>({ type: 'observe' }).elements.find(item => item.tag === 'input')!
+    hit = window.document.querySelector('input')
     expect(evaluate<{ applied: boolean }>({ type: 'input', path: input.path, fingerprint: input.fingerprint, value: '光合作用' }).applied).toBe(true)
-    expect(evaluate<HtmlPageState>({ type: 'observe' }).structure[0]).toContain('光合作用')
+    expect((hit as HTMLInputElement).value).toBe('')
+    const prepared = evaluate<{ applied: boolean; identityFingerprint: string }>({ type: 'input', path: input.path, fingerprint: input.fingerprint, value: '光合作用' })
+    ;(hit as HTMLInputElement).value = 'focus 自己改值'
+    ;(hit as HTMLInputElement).focus()
+    expect(evaluate<{ applied: boolean }>({ type: 'input', path: input.path, fingerprint: input.fingerprint, value: '光合作用',
+      expectedIdentity: prepared.identityFingerprint, requireFocus: true }).applied).toBe(true)
+    ;(hit as HTMLInputElement).blur()
+    expect(evaluate<{ applied: boolean; reason: string }>({ type: 'input', path: input.path, fingerprint: input.fingerprint, value: '光合作用',
+      expectedIdentity: prepared.identityFingerprint, requireFocus: true })).toMatchObject({ applied: false, reason: 'input-focus-changed' })
+    expect(evaluate<HtmlPageState>({ type: 'observe' }).structure.join('\n')).toContain('初始')
     window.document.querySelector('button')!.replaceWith(window.document.createElement('button'))
     expect(evaluate<{ applied: boolean }>({ type: 'click', path: button.path, fingerprint: button.fingerprint }).applied).toBe(false)
     dom.window.close()
   })
+})
+
+
+describe('stops pending browser transport without replaying actions', () => {
+  it('settles an opening frame wait before the frame returns and never attaches late', async () => {
+    const f = fixture()
+    let release!: () => void
+    f.holdFrame(new Promise<void>(resolve => { release = resolve }))
+    const starting = f.service.beginDocumentRun('opening', { documentId: 'doc', epoch: 'epoch', revision: 2 })
+    const rejected = expect(starting).rejects.toThrow('已停止')
+    f.service.stopRun('opening')
+    await rejected
+    release()
+    await expect(f.service.observe('opening')).rejects.toThrow('已停止')
+  }, 1500)
+
+  it('settles a capture that never acknowledges Stop without publishing stale handles', async () => {
+    const f = fixture()
+    await f.service.beginDocumentRun('capture', { documentId: 'doc', epoch: 'epoch', revision: 2 })
+    let entered!: () => void
+    const captureStarted = new Promise<void>(resolve => { entered = resolve })
+    f.frames.capture = () => { entered(); return new Promise(() => {}) }
+    const observed = f.service.observe('capture')
+    const rejected = expect(observed).rejects.toThrow('已停止')
+    await captureStarted
+    f.service.stopRun('capture')
+    await rejected
+    await expect(f.service.observe('capture')).rejects.toThrow('已停止')
+  }, 1500)
+
+  it('keeps the unknown receipt when an issued click never acknowledges Stop', async () => {
+    const f = fixture()
+    await f.service.beginDocumentRun('issued', { documentId: 'doc', epoch: 'epoch', revision: 2 })
+    const first = await f.service.observe('issued')
+    let entered!: () => void, release!: () => void
+    const issued = new Promise<void>(resolve => { entered = resolve })
+    const act = f.frames.act
+    f.frames.act = async (...args) => { const result = await act(...args); entered(); await new Promise<void>(resolve => { release = resolve }); return result }
+    const input = { operationId: 'one-click', handle: first.elements[0]!.handle }
+    const pending = f.service.click('issued', input)
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'html-action-outcome-unknown' })
+    await issued
+    expect(f.clicks()).toBe(1)
+    f.service.stopRun('issued')
+    await rejected
+    expect(() => f.service.click('issued', input)).toThrow('已停止')
+    release()
+    await Promise.resolve()
+    expect(f.clicks()).toBe(1)
+  }, 1500)
 })

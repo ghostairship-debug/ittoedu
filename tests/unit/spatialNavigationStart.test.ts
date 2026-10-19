@@ -71,6 +71,7 @@ it('starts on fragment zero, advances fragments without replacing current pan, a
   let index: number | null = null, frame: string | null = null, active = 'B'
   const nav = new ComponentNavigationOwner({ project: () => value, surfaceId: () => active, select: id => { active = id },
     courseState: { get: key => state.get(key) as never, set: (key, count) => { state.set(key, count) } } })
+  nav.connectRuntime({ read: id => id === 'html' ? { status: 'ready', generation: 1, document: 'web', html: (value.instances.html.data as { html: string }).html } : { status: 'unprepared' }, prepare: async () => true })
   nav.registerCamera('B', camera, { frameId: () => frame, selectFrame: next => { frame = next }, stepIndex: () => index, selectStep: next => { index = next } })
   try {
     await nav.initializeSpatialPlayback(); expect(index).toBe(0); expect(nav.read().progress!.stepCount).toBe(4); expect([...state.values()]).toEqual([0])

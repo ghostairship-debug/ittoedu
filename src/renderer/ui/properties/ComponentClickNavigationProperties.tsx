@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ComponentClickNavigationAction } from '../../../shared/componentInteractionData'
 import type { InteractionSceneListItem } from '../InteractionEditor'
 import { SelectField } from './PropertyControls'
+import { NavigationTransitionFields } from './NavigationTransitionFields'
 
 export interface ComponentClickNavigationPropertiesContext {
   readonly action: ComponentClickNavigationAction | null
@@ -33,7 +34,7 @@ export function ComponentClickNavigationProperties({ context }: { context: Compo
             ...(!targetScene ? [{ value: context.action.sceneId, label: `缺失页面（${context.action.sceneId}）` }] : []),
             ...context.scenes.map(scene => ({ value: scene.id, label: scene.name })),
           ]}
-          onChange={sceneId => change({ type: 'scene.go', sceneId })} />
+          onChange={sceneId => { const { targetStateId: _state, ...action } = context.action!; change({ ...action, sceneId }) }} />
         <SelectField<string> label={targetScene?.spatial ? '进入镜头' : '进入位置'} value={context.action.targetStateId ?? ''}
           options={[
             { value: '', label: '播放起点' },
@@ -42,7 +43,9 @@ export function ComponentClickNavigationProperties({ context }: { context: Compo
             ...targets.map(target => ({ value: target.id, label: target.name })),
           ]}
           onChange={targetStateId => change(targetStateId ? { ...context.action!, targetStateId }
-            : { type: 'scene.go', sceneId: context.action!.sceneId })} />
+            : (() => { const { targetStateId: _state, ...action } = context.action!; return action })())} />
+        <NavigationTransitionFields transition={context.action.transition}
+          onChange={transition => change({ ...context.action!, transition })} />
       </>}
     </fieldset>
     {context.unavailableReason && <p className="property-hint" role="status">{context.unavailableReason}</p>}

@@ -21,7 +21,7 @@ afterEach(async () => {
 describe('V10 composition during discard confirmation', () => {
   it.each(['before-end', 'during-end'] as const)('retains ended IME input through cancellation (%s)', async timing => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'projection-close-v10-')); roots.push(root)
-    const host = new DocumentHostService(root, {}, { discardFlowRecovery: async () => undefined })
+    const host = new DocumentHostService(root)
     const listeners = new Set<(event: DocumentEvent) => void>()
     host.setEventSink(event => { for (const listener of listeners) listener(event) })
     const api: DocumentHostAPI = { ...host.internalAPI, bootstrapCourse: () => host.bootstrapCourse(),
@@ -30,8 +30,10 @@ describe('V10 composition during discard confirmation', () => {
       closeWithDialog: async id => { await host.operate({ type: 'close', documentId: id }); return true },
       discardRecovery: async id => { await host.operate({ type: 'discard-recovery', documentId: id }) },
       subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener) } } }
-    const project = createBlankCourseProjectV10(), id = project.global.overlay[0]!
-    project.instances[id]!.data = { text: 'old' }
+    const project = createBlankCourseProjectV10(), id = 'editable-text'
+    project.definitions.text = { id: 'text', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default { mount() {} }' } }
+    project.instances[id] = { id, definitionId: 'text', data: { text: 'old' } }
+    project.global.overlay.push(id)
     const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'course.h5lesson')
     const courseDriver = new CourseV10Driver()
     let wait: Promise<void> | undefined, release!: () => void

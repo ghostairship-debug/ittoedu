@@ -1,13 +1,15 @@
 import { createHash } from 'node:crypto'
 import type {
   ModelAssistantMessage, ModelConnectionSnapshot, ModelEvent, ModelFailure, ModelJson,
-  ModelJsonObject, ModelNativeToolCall, ModelProvider, ModelRequest, ModelUsage,
+  ModelJsonObject, ModelNativeToolCall, ModelProvider, ModelRequest, ModelUsage, PreparedModelRequest, ModelTransportDiagnostic,
 } from '../../../shared/workbench/modelProvider'
+import { modelAcceptsImages } from '../../../shared/workbench/modelProvider'
 import { effectiveModelProtocol } from '../../../shared/workbench/modelRouting'
 import { normalizeModelOutputParameters } from '../../../shared/workbench/modelOutputParameters'
 import { serverSentEvents } from './serverSentEvents'
-import { modelFetch, responseIdleTimeoutCode } from './modelFetch'
+import { modelFetch, responseIdleTimeoutCode, transportDiagnostic } from './modelFetch'
 import { httpFailure, providerStreamFailure } from './providerHttpFailure'
+import { providerSessionCacheParameters } from './providerSessionAffinity'
 
 export interface OpenAIChatProviderOptions {
   /** Main-owned resolver. Product configuration uses secure references, never ambient environment keys. */
@@ -25,38 +27,8 @@ export interface ToolFragmentDiagnostic {
   index: number | 'large' | 'invalid'
   hasFunction: boolean
 }
-export interface ChatTransportDiagnostic {
-  phase: 'fetch-before-headers' | 'body-read'
-  errorClass: 'TypeError' | 'Error' | 'AbortError' | 'AggregateError' | 'SocketError' | 'ConnectTimeoutError' | 'HeadersTimeoutError' | 'BodyTimeoutError' | 'other'
-  errorCode?: 'ECONNRESET' | 'ECONNREFUSED' | 'ENOTFOUND' | 'ETIMEDOUT' | 'EPIPE' | 'UND_ERR_SOCKET' | 'UND_ERR_CONNECT_TIMEOUT' | 'UND_ERR_HEADERS_TIMEOUT' | 'UND_ERR_BODY_TIMEOUT'
-  httpResponseReceived: boolean
-  httpStatus?: number
-}
+export type ChatTransportDiagnostic = ModelTransportDiagnostic
 class ProtocolError extends Error {}
-const transportClasses = new Set<ChatTransportDiagnostic['errorClass']>([
-  'TypeError', 'Error', 'AbortError', 'AggregateError', 'SocketError', 'ConnectTimeoutError', 'HeadersTimeoutError', 'BodyTimeoutError',
-])
-const transportCodes = new Set<NonNullable<ChatTransportDiagnostic['errorCode']>>([
-  'ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'EPIPE',
-  'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
-])
-function transportDiagnostic(error: unknown, response: Response | undefined, httpStatus: number | undefined): ChatTransportDiagnostic {
-  const outer = error && typeof error === 'object' ? error as { name?: unknown; code?: unknown; cause?: unknown } : null
-  const name = typeof outer?.name === 'string' ? outer.name : ''
-  let cause: unknown = error, code: ChatTransportDiagnostic['errorCode']
-  for (let depth = 0; depth < 3; depth++) {
-    if (!cause || typeof cause !== 'object') break
-    const item = cause as { code?: unknown; cause?: unknown }
-    if (typeof item.code === 'string' && transportCodes.has(item.code as NonNullable<ChatTransportDiagnostic['errorCode']>)) {
-      code = item.code as NonNullable<ChatTransportDiagnostic['errorCode']>; break
-    }
-    cause = item.cause
-  }
-  return { phase: response ? 'body-read' : 'fetch-before-headers',
-    errorClass: transportClasses.has(name as ChatTransportDiagnostic['errorClass']) ? name as ChatTransportDiagnostic['errorClass'] : 'other',
-    ...(code ? { errorCode: code } : {}), httpResponseReceived: Boolean(response),
-    ...(httpStatus !== undefined ? { httpStatus } : {}) }
-}
 const object = (value: unknown): value is ModelJsonObject => value !== null && typeof value === 'object' && !Array.isArray(value)
 const validCounter = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 const same = (left: ModelJson, right: ModelJson) => JSON.stringify(left) === JSON.stringify(right)
@@ -125,7 +97,7 @@ export function modelToolWireName(name: string): string {
   const stem = name.replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 55) || 'tool'
   return `${stem}_${createHash('sha256').update(name).digest('hex').slice(0, 8)}`
 }
-export type ModelRequestPayload = Pick<ModelRequest, 'selection' | 'messages' | 'tools'>
+export type ModelRequestPayload = Pick<ModelRequest, 'selection' | 'messages' | 'tools' | 'sessionAffinity'>
 function prepare(request: ModelRequestPayload) {
   const connection = request.selection.connection
   if (!request.selection.model || !connection.id || !connection.accountId || !connection.auth.credentialRef
@@ -133,7 +105,7 @@ function prepare(request: ModelRequestPayload) {
   const base = new URL(connection.baseURL)
   if (base.username || base.password || base.search || base.hash || !['http:', 'https:'].includes(base.protocol)) throw new Error('invalid-endpoint')
   if (connection.capabilities.stream === 'unsupported' || (request.tools?.length && connection.capabilities.tools === 'unsupported')) throw new Error('unsupported-capability')
-  if (connection.capabilities.vision === 'unsupported' && request.messages.some(message => Array.isArray(message.content)
+  if (!modelAcceptsImages(connection.capabilities.vision) && request.messages.some(message => Array.isArray(message.content)
     && message.content.some(part => object(part) && ['image_url', 'input_image'].includes(String(part.type))))) throw new Error('unsupported-vision')
   if (!request.messages.length) throw new Error('missing-messages')
   if (request.messages.some(message => message.nativeResponses !== undefined || message.nativeAnthropic !== undefined)) throw new Error('incompatible-native-continuation')
@@ -156,7 +128,7 @@ function prepare(request: ModelRequestPayload) {
     return { type: 'function', function: { name, description: tool.description, parameters } }
   })
   const endpoint = connection.baseURL.replace(/\/+$/, '') + '/chat/completions'
-  return { endpoint, names, body: { ...parameters, model: request.selection.model, messages: request.messages,
+  return { endpoint, names, body: { ...providerSessionCacheParameters(request), ...parameters, model: request.selection.model, messages: request.messages,
     ...(tools?.length ? { tools } : {}), stream: true, stream_options: { include_usage: true } } }
 }
 
@@ -170,7 +142,24 @@ export class OpenAIChatProvider implements ModelProvider {
   readonly retrySafety = 'pure-generation' as const
   constructor(private readonly options: OpenAIChatProviderOptions) {}
 
+  prepare(input: ModelRequestPayload): PreparedModelRequest {
+    const request = structuredClone(input)
+    const prepared = prepare(request)
+    const serialized = JSON.stringify(prepared.body)
+    return { serialized, stream: (requestId, options) => this.streamPrepared({ ...request, requestId }, prepared, serialized, options) }
+  }
   async *stream(input: ModelRequest, options: { signal?: AbortSignal } = {}): AsyncGenerator<ModelEvent> {
+    let prepared: PreparedModelRequest
+    try { if (!input.requestId) throw new Error('missing-request-id'); prepared = this.prepare(input) }
+    catch {
+      yield { requestId: input.requestId, sequence: 1, type: 'response.failed', failure: {
+        outcome: 'not-sent', kind: 'configuration', code: 'invalid-model-request', message: '模型连接、能力或请求配置无效；请求未发送。' } }
+      return
+    }
+    yield* prepared.stream(input.requestId, options)
+  }
+  private async *streamPrepared(input: ModelRequest, prepared: ReturnType<typeof prepare>, serialized: string,
+    options: { signal?: AbortSignal } = {}): AsyncGenerator<ModelEvent> {
     let sequence = 0
     const requestId = input.requestId
     const event = <T extends Omit<ModelEvent, 'requestId' | 'sequence'>>(value: T) => ({ ...value, requestId, sequence: ++sequence }) as unknown as ModelEvent
@@ -184,13 +173,7 @@ export class OpenAIChatProvider implements ModelProvider {
     let response: Response | undefined
     try {
       // Freeze configuration and messages before the first asynchronous credential resolution.
-      const request = structuredClone(input)
-      let prepared: ReturnType<typeof prepare>
-      try { if (!request.requestId) throw new Error('missing-request-id'); prepared = prepare(request) }
-      catch {
-        yield event({ type: 'response.failed', failure: { outcome: 'not-sent', kind: 'configuration', code: 'invalid-model-request', message: '模型连接、能力或请求配置无效；请求未发送。' } })
-        return
-      }
+      const request = input
       let credential: string
       try { credential = await waitForModelOperation(() => this.options.credentialResolver(request.selection.connection), controller.signal) }
       catch {
@@ -206,7 +189,7 @@ export class OpenAIChatProvider implements ModelProvider {
       attempted = true
       response = await modelFetch(this.options.fetch)(prepared.endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${credential}` },
-        body: serializeModelRequest(request), signal: controller.signal, redirect: 'error',
+        body: serialized, signal: controller.signal, redirect: 'error',
       })
       httpStatus = response.status
       // Only opaque IDs are exported; error bodies/headers may echo auth and never enter events.
@@ -321,7 +304,7 @@ export class OpenAIChatProvider implements ModelProvider {
         ...(usage ? { usage: usage.raw } : {}), stream_chunks: chunks }
       yield event({ type: 'response.completed', responseId, actualModel, assistant,
         toolCalls: ordered.map(([, call]) => ({ id: call.id, name: prepared.names.get(call.function.name) ?? call.function.name, argumentsText: call.function.arguments })),
-        finishReason, ...(usage ? { usage } : {}), nativeResponse })
+        finishReason, finishDetails: { reason: finishReason }, ...(usage ? { usage } : {}), nativeResponse })
     } catch (error) {
       const idleCode = controller.signal.aborted ? undefined : responseIdleTimeoutCode(error)
       const kind: ModelFailure['kind'] = controller.signal.aborted ? 'aborted' : idleCode ? 'timeout' : error instanceof ProtocolError ? 'protocol' : 'transport'

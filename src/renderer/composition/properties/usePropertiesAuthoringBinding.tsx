@@ -3,6 +3,7 @@ import { backgroundImportHandler } from '../../ui/properties/SharedBackgroundPro
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
 import type { ComponentInstance, JsonValue } from '../../../shared/contracts/component-platform/project'
 import { resolveComponentPresentation } from '../../../shared/contracts/component-platform'
+import { mergeComponentBackground } from '../../../shared/componentBackgroundPaint'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import type { TextRunEdit } from '../../../shared/textRuns'
 import { formatTextComponentRange, replaceTextComponentRange, textComponentDataSchema, type TextComponentData } from '../../../components/text/data'
@@ -30,6 +31,8 @@ import { chartDataSchema } from '../../../components/chart/data'
 import { useCourseEditorActions } from '../../documents/CourseEditorActionsContext'
 import { componentClickNavigationEdits, componentClickNavigationView } from '../../../shared/componentInteractionData'
 import { componentNavigationScene } from '../../interactions/componentInteractionAuthoring'
+import { componentEntranceMotionEdits, componentExitMotionEdits, componentMotionPropertiesView } from '../../../shared/componentMotionAuthoring'
+import { previewComponentMotion } from '../../interactions/componentMotionPreview'
 
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
 const STALE = '属性草稿对应的编辑目标已经改变，请按 Esc 放弃草稿后重试。'
@@ -328,7 +331,18 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
     notices: { surfaceBaseEditing: false, sceneOwner: read.surface?.kind === 'slide' && !read.selectedIsGlobal,
       presentationStateName: read.surface?.presentation?.states.find(state => state.id === read.activeStateId)?.title ?? null,
       stateOverrideApplied: Boolean(read.activeStateId && read.surface?.presentation?.states.find(state => state.id === read.activeStateId)?.overrides[selected.id]) },
-    videoDiagnostics: [], animation: null, interaction: null, globalInteraction: null,
+    videoDiagnostics: [],
+    animation: read.project && read.surface ? {
+      ...componentMotionPropertiesView({ project: read.project, surfaceId: read.surface.id,
+        instanceId: selected.id, activeStateId: read.activeStateId }),
+      instanceId: selected.id, disabled: node.locked,
+      onChangeEntrance: (config, enabled) => commit(() => { const target = liveTarget(); return submit(componentEntranceMotionEdits({ ...target, project: target.editingProject }, config, enabled), target) }),
+      onChangeExit: (reference, config) => commit(() => { const target = liveTarget(); return submit(componentExitMotionEdits({ ...target, project: target.editingProject }, reference, config), target) }),
+      onPreview: (action, delayMs) => run(() => previewComponentMotion({ target: liveTarget(), action, delayMs })),
+      onOpenProfessional: openAutomation,
+      onOpenSource: () => run(() => { liveTarget(); useEditorStore.getState().setActiveTab('developer') }),
+    } : null,
+    interaction: null, globalInteraction: null,
     clickNavigation: read.project && read.surface ? {
       ...componentClickNavigationView({ project: read.baseProject ?? read.project, surfaceId: read.surface.id,
         instanceId: selected.id, activeStateId: read.activeStateId }),
@@ -409,7 +423,7 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       ...(inherit ? { inherit: [inherit] } : {}) }), target)
   })
   const previewSurface = (value: { backgroundColor?: string | null }) => run(() => preview(value.backgroundColor == null ? null : [
-    { type: 'surface.background.set', surfaceId: surface.id, background: { ...background, mode: 'own', color: value.backgroundColor } }], 'surface'))
+    { type: 'surface.background.set', surfaceId: surface.id, background: mergeComponentBackground(background, { mode: 'own', color: value.backgroundColor }) }], 'surface'))
   return { kind: 'empty-scene', draftBindingKey: key, surfaceOnly: true, assets, slideSurface: null,
     state: activeState ? { id: activeState.id, name: activeState.title, backgroundColor: activeState.background?.color, backgroundAssetId: activeState.background?.assetId,
       effective: propertiesEffectiveBackground(read.project, baseSurface, activeState) } : null,
@@ -430,6 +444,6 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       importSceneBackgroundAsset: importBackground, importSlideSurfaceBackgroundAsset: importBackground,
       updateStateBackground: changeStateBackground, inheritStateColor: () => changeStateBackground({}, 'color'), inheritStateAsset: () => changeStateBackground({}, 'assetId'),
       previewStateBackground: value => run(() => preview(value.backgroundColor == null ? null : [
-        { type: 'surface.background.set', surfaceId: surface.id, background: { ...surface.background, mode: 'own', color: value.backgroundColor } }], 'state')),
+        { type: 'surface.background.set', surfaceId: surface.id, background: mergeComponentBackground(surface.background, { mode: 'own', color: value.backgroundColor }) }], 'state')),
       openAutomation, openProfessionalAutomation: openAutomation }, onStale: () => report(STALE) }
 }

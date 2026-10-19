@@ -87,6 +87,18 @@ export function courseInstancePropertyEdits(model: DocumentModel, target: Course
     edits.push({ type: 'frame.set', instanceId: instance.id, frame })
   }
   if (properties.data !== undefined) edits.push(...componentDataEdits(project, target, { kind: 'patch', data: properties.data }))
+  if (properties.stateBindings !== undefined) {
+    const bindings = { ...instance.stateBindings }
+    for (const [alias, key] of Object.entries(properties.stateBindings ?? {})) {
+      if (key === null) delete bindings[alias]
+      else {
+        if (!project.logic?.courseState.some(state => state.key === key)) throw new Error(`状态别名 ${alias} 的来源尚未声明：${key}；请沿 course.logic 声明该标量。`)
+        bindings[alias] = key
+      }
+    }
+    const next = properties.stateBindings === null || !Object.keys(bindings).length ? null : bindings
+    if (!equalComponentValue(instance.stateBindings ?? null, next)) edits.push({ type: 'instance.patch', instanceId: instance.id, patch: { stateBindings: next } })
+  }
   if (properties.appearance !== undefined) edits.push(...courseInstanceAppearanceEdits(model, target, properties.appearance))
   // CSS null remains an explicit cleared value under the existing style contract.
   const style = { ...properties.style, ...(properties.opacity !== undefined ? { opacity: properties.opacity } : {}) }

@@ -5,10 +5,11 @@ import { DocumentSession } from '@/core/documents/DocumentSession'
 import { CourseV10Driver } from '@/core/drivers/CourseV10Driver'
 import { captureComponentOperation } from '@/core/drivers/courseV10Operations'
 import { componentProjectFiles } from '@/core/projectFiles/componentPlatform/projection'
-import { WEB_DEFINITION } from '@/components/web/data'
+import { HTML_PROGRAM_DEFINITION, WEB_DEFINITION } from '@/components/web/data'
+import { TEXT_DEFINITION } from '@/components/text/adapters'
 import { ContentApplyService } from '@/main/workbench/contentApply/applyService'
 import type { ContentApplyResult, ContentApplySource } from '@/core/contentApply/planning/types'
-import type { ComponentEdit, CourseProjectV10 } from '@/shared/contracts/component-platform'
+import type { ComponentEdit, ComponentFrame, CourseProjectV10 } from '@/shared/contracts/component-platform'
 import { modelToolResult } from '@/core/tools/modelToolResult'
 import { ComponentProjectFileCoordinator, type ComponentProjectSnapshot } from '@/core/projectFiles/componentPlatform/coordinator'
 import { componentProjectApplyReceiptFiles } from '@/core/projectFiles/componentPlatform/applyReceiptFiles'
@@ -22,7 +23,7 @@ function project() {
 }
 async function fixture(initial: CourseProjectV10) {
   let nextSource: ContentApplySource | undefined, outcome: 'unknown' | 'not_committed' | undefined
-  let afterApply: (() => Promise<void>) | undefined, readFailure: Error | undefined, reads = 0, sequence = 0
+  let afterApply: (() => Promise<void>) | undefined, readFailure: Error | undefined, reads = 0, applies = 0, sequence = 0
   const session = await DocumentSession.create({ documentId: 'receipt', epoch: 'epoch',
     binding: { kind: 'untitled', suggestedName: 'receipt.h5lesson' },
     model: { kind: 'course-v10', project: initial, resources: { assets: {}, components: {} } } }, new CourseV10Driver(),
@@ -33,6 +34,7 @@ async function fixture(initial: CourseProjectV10) {
     async source() { return { filename: 'fixture.html', bytes: new TextEncoder().encode('<p>fixture</p>'), text: '<p>fixture</p>' } },
     async prepareSource(_input, file) { return nextSource ?? { kind: 'html', html: file.content ?? '' } },
     async apply(_run, operationId, _digest, baseline, request) {
+      applies++
       if (outcome) return { commit: outcome, usability: 'unverified', delivery: 'not_requested', input: request, insertedIds: [], diagnostics: [] }
       const service = new ContentApplyService({
         session: { project: () => baseline.model.project, resources: () => baseline.model.resources,
@@ -59,14 +61,76 @@ async function fixture(initial: CourseProjectV10) {
     return session.execute({ documentId: before.documentId, epoch: before.epoch, operationId: `human-${++sequence}`,
       baseRevision: before.revision, actor: 'human', mutation: { type: 'command', command: captureComponentOperation(before.model.project, edits) } })
   }
-  return { snapshot, execute, files, human, coordinator, get reads() { return reads },
+  return { snapshot, execute, files, human, coordinator, get reads() { return reads }, get applies() { return applies },
     source(value: ContentApplySource) { nextSource = value }, outcome(value: typeof outcome) { outcome = value },
     afterApply(value: typeof afterApply) { afterApply = value }, failReads() { readFailure = new Error('任务已停止') } }
 }
 const data = (result: Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>['execute']>>) => {
   if (result.kind !== 'read') throw new Error(JSON.stringify(result))
-  return result.data as ContentApplyResult & { path: string; currentPath?: string; files?: { path: string; type: string }[]; next?: string }
+  return result.data as ContentApplyResult & { path: string; content?: string; currentPath?: string; files?: {
+    path: string; type: string; content?: string; frame?: ComponentFrame; viewport?: { width: number; height: number };
+    revision?: number; currentRevision?: number; staleSnapshot?: true;
+  }[]; next?: string; repair?: { next?: string; read: Array<{ tool: string; input: { path: string; refresh?: boolean; project?: string } }> } }
 }
+
+it('returns geometry and the generated program author entry for immediate Source editing, without echoing native content or dependencies', async () => {
+  const initial = project()
+  initial.definitions[HTML_PROGRAM_DEFINITION.id] = HTML_PROGRAM_DEFINITION
+  initial.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
+  const f = await fixture(initial), page = f.files().find(file => file.kind === 'structure')!
+  const listing = data(await f.execute('project.list', {}))
+  expect(listing.files?.every(file => file.content === undefined)).toBe(true)
+  const placed = { ...frame, transform: [1, 0, 0, 1, 52, 196] as ComponentFrame['transform'] }
+  f.source({ kind: 'objects', objects: [
+    { definitionId: HTML_PROGRAM_DEFINITION.id, data: { html: '<button>Run</button><script>void 0;</script>' }, frame: placed },
+    { definitionId: TEXT_DEFINITION.id, data: { content: { inlines: [{ type: 'text', text: 'Independent explanation' }] } }, frame },
+  ] })
+  const reply = await f.execute('project.apply', { path: page.path, intent: 'insert', content: '<button>Run</button>' })
+  const result = data(reply), entries = result.files?.filter(file => file.content !== undefined) ?? []
+  expect(result.commit).toBe('committed')
+  expect(entries).toHaveLength(1)
+  const entry = entries[0]
+  expect(entry.path).toMatch(/\.view\.js$/)
+  expect(entry.path).not.toContain('.dependencies/')
+  expect(entry.content).toContain("import implementation from './implementation'")
+  expect(entry).toMatchObject({ frame: placed, viewport: { width: 320, height: 180 }, revision: result.receipt && 'revision' in result.receipt ? result.receipt.revision : -1 })
+  expect(result.files?.find(file => file.path === result.path)).toMatchObject({ frame: placed, viewport: { width: 320, height: 180 } })
+  expect(f.coordinator.captureFile('run', f.snapshot(), entry.path, true).file.content).toBe(entry.content)
+  expect(modelToolResult('project.apply', reply)).toMatchObject({ kind: 'read', data: { files: result.files } })
+  const source = entry.content!.replace('return implementation.mount(context);', 'context.root?.setAttribute("data-authored", "first");\n    return implementation.mount(context);')
+  const written = data(await f.execute('project.apply', { path: entry.path, content: source }))
+  expect(written.commit).toBe('committed')
+  expect(written.files?.find(file => file.path === entry.path)?.content).toBe(source)
+  expect(data(await f.execute('project.apply', { path: entry.path, edits: [{ old: '"first"', new: '"second"' }] })).commit).toBe('committed')
+  expect(f.files().find(file => file.path === entry.path)?.content).toContain('"second"')
+  const currentListing = data(await f.execute('project.list', {}))
+  expect(currentListing.files?.find(file => file.path === entry.path)).toMatchObject({ frame: placed, viewport: { width: 320, height: 180 } })
+  expect(currentListing.files?.every(file => file.content === undefined)).toBe(true)
+})
+
+it('returns the committed Source fact rather than absorbing a later human edit into the next CAS baseline', async () => {
+  const initial = project(), implementation = { kind: 'source' as const, language: 'javascript' as const,
+    source: 'export default { mount() { return { dispose() {} }; } };' }
+  initial.instances.item = { id: 'item', definitionId: WEB_DEFINITION.id, data: { html: '<p>Preserve</p>' }, frame, implementationOverride: implementation }
+  initial.surfaces[0].childIds = ['item']
+  const f = await fixture(initial), entry = f.files().find(file => file.binding?.kind === 'instance-source' && !file.authorSource?.dependencyId)!
+  await f.execute('project.read', { path: entry.path })
+  const ownSource = implementation.source.replace('dispose() {}', 'dispose() { /* own */ }')
+  const humanSource = implementation.source.replace('dispose() {}', 'dispose() { /* human */ }')
+  f.afterApply(async () => {
+    f.afterApply(undefined)
+    await f.human([{ type: 'implementation.set', instanceId: 'item', implementation: { ...implementation, source: humanSource } }])
+  })
+  const result = data(await f.execute('project.apply', { path: entry.path, content: ownSource }))
+  expect(result.commit).toBe('committed')
+  const fact = result.files?.find(file => file.path === entry.path)
+  expect(fact).toMatchObject({ content: ownSource, staleSnapshot: true })
+  expect(fact!.currentRevision).toBe(fact!.revision! + 1)
+  expect(f.coordinator.captureFile('run', f.snapshot(), entry.path, true).file.content).toBe(ownSource)
+  const rejected = data(await f.execute('project.apply', { path: entry.path, edits: [{ old: '/* own */', new: '/* continue */' }] }))
+  expect(rejected).toMatchObject({ commit: 'not_committed', receipt: { status: 'conflict', code: 'component-field-conflict' } })
+  expect(f.files().find(file => file.path === entry.path)?.content).toBe(humanSource)
+})
 
 it('returns inserted object paths, including descendants, and introduces their ACK baseline for the next edit', async () => {
   const f = await fixture(project()), page = f.files().find(file => file.kind === 'structure')!
@@ -167,22 +231,35 @@ it('reports a same-name path collision without rebinding the old observed object
   const second = f.files().find(file => file.target?.kind === 'instance' && file.target.instanceId === 'second' && file.kind === 'html')!
   await f.execute('project.list', {}); f.source(objects('<p>inserted</p>'))
   const result = data(await f.execute('project.apply', { path: first.path, intent: 'insert', content: '<p>inserted</p>' }))
-  expect(result.commit).toBe('committed'); expect(result.next).toContain('project.list')
+  expect(result.commit).toBe('committed'); expect(result.next).toContain('project.read refresh:true')
+  expect(result.repair).toBeDefined()
+  expect(result.repair!.read).toEqual(expect.arrayContaining([{ tool: 'project.read', input: { path: second.path, refresh: true } }]))
   expect(result.currentPath).toBe(second.path)
   expect(f.coordinator.captureFile('run', f.snapshot(), second.path, true).file.target).toEqual({ kind: 'instance', instanceId: 'second' })
 })
 
-it('preserves a committed receipt when the after read stops, and skips after reads for unknown or rejected results', async () => {
+it('preserves committed receipts after read failure and supplies local repair without writing or replaying unresolved results', async () => {
   const f = await fixture(project()), page = f.files().find(file => file.kind === 'structure')!
   await f.execute('project.list', {}); f.source(objects('<p>committed</p>')); f.afterApply(async () => f.failReads())
   const result = data(await f.execute('project.apply', { path: page.path, intent: 'insert', content: '<p>committed</p>' }))
   expect(result).toMatchObject({ commit: 'committed', receipt: { status: 'applied' }, diagnostics: [{ code: 'content-paths-unavailable', message: '任务已停止' }] })
   for (const outcome of ['unknown', 'not_committed'] as const) {
     const g = await fixture(project()), target = g.files().find(file => file.kind === 'structure')!
-    await g.execute('project.list', {}); g.source(objects('<p>not applied</p>')); g.outcome(outcome)
-    const readCount = g.reads, revision = g.snapshot().revision
-    expect(data(await g.execute('project.apply', { path: target.path, intent: 'insert', content: '<p>not applied</p>' }))).toMatchObject({ commit: outcome })
-    expect(g.reads).toBe(readCount); expect(g.snapshot().revision).toBe(revision)
+    const pendingSource = objects('<p>not applied</p>')
+    await g.execute('project.list', {}); g.source(pendingSource); g.outcome(outcome)
+    const before = g.snapshot()
+    const rejected = data(await g.execute('project.apply', { path: target.path, intent: 'insert', content: '<p>not applied</p>' }))
+    expect(rejected).toMatchObject({ commit: outcome, input: { intent: 'insert', target: target.target, source: pendingSource } })
+    const local = rejected.repair?.read.find(read => read.tool === 'project.read' && read.input.path === target.path)
+    expect(local).toBeDefined()
+    const repair = data(await g.execute('project.read', local!.input))
+    expect(repair).toMatchObject({ path: target.path })
+    expect(repair.content).toBe(target.content)
+    if (outcome === 'unknown') expect(rejected.repair?.next).toContain('不重新应用原输入')
+    expect(g.applies).toBe(1)
+    expect(g.snapshot().revision).toBe(before.revision)
+    expect(g.snapshot().undoDepth).toBe(before.undoDepth)
+    expect(g.snapshot().model).toEqual(before.model)
   }
 })
 

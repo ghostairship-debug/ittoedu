@@ -15,7 +15,7 @@ import { componentAuthorRecordSchema } from '../../shared/contracts/component-pl
 import { documentTextLength, documentTextContentSchema, documentVisibleTextSlots, walkDocument, normalizeDocumentText, sliceDocumentText, plainDocumentText, type FlowTextContent } from '../../shared/document/content'
 import { replaceDocumentText } from '../../shared/document/textInteraction'
 import { projectFlowDocument } from '../components/document/flowDocumentProjection'
-import { documentSourceEdits, sequenceSourceEdits } from '../../shared/document/sourceMerge'
+import { documentSourceEdits, sequenceSourceEditRanges } from '../../shared/document/sourceMerge'
 import { parseDocumentMarkdown } from '../../shared/document/markdown'
 import { inlineHtml } from '../../shared/document/html'
 import { readHtmlDocumentText, type DocumentHtmlNode } from '../../shared/document/htmlText'
@@ -23,6 +23,7 @@ import { parse, parseFragment, type DefaultTreeAdapterTypes } from 'parse5'
 import { spatialGraphItem, spatialGraphDependencyPaths } from '../course/courseSpatialEdits'
 import { formatTextContent, type TextStyle } from './textFormatting'
 import { authorSpotEdits } from '../components/authoring/componentAuthorEdits'
+import { normalizeOwnedDocumentPath } from '../../components/web/ownedDocumentIdentity'
 import { readAuthorSourceText } from '../components/authoring/sourceAuthorText'
 import type { ComponentAuthorField, ComponentAuthorSpot } from '../../shared/contracts/component-platform/runtime'
 import { allocateTextSelectionReplacement } from '../../shared/document/textSelectionReplacement'
@@ -102,6 +103,10 @@ export function courseAuthorFieldReadPaths(model: DocumentModel, target: CourseI
   else if (field.authorKey) {
     const record = [...base, 'authoring', 'records', field.authorKey]
     paths.push(...['kind', 'scope', 'binding'].map(key => [...record, key]), [...record, 'overrides', field.kind === 'text' ? 'text' : 'src'])
+    const path = field.scope?.['document:path']
+    // A first observed child address still uses parser positions until the
+    // same edit persists its software frame keys. Its source is a dependency.
+    if (path && normalizeOwnedDocumentPath(path) !== path) paths.push([...base, 'data', 'html'])
   } else if (field.dataPath) paths.push([...base, field.fieldScope ?? 'data', ...field.dataPath])
   if (target.stateId) {
     const index = model.kind === 'course-v10' ? model.project.surfaces.find(surface => surface.id === target.surfaceId)?.presentation?.states.findIndex(state => state.id === target.stateId) : -1
@@ -123,7 +128,28 @@ export function replaceCourseAuthorField(model: DocumentModel, target: CourseIns
 }
 function mapCourseAuthorField(before: DocumentModel, after: DocumentModel, target: CourseInstanceTarget, followInside: boolean): CourseInstanceTarget {
   const field = target.authorField!
-  if (!field.sourceRegion) { readCourseAuthorField(after, target); return target }
+  if (!field.sourceRegion) {
+    let mapped = target
+    const path = field.scope?.['document:path'], stable = path && normalizeOwnedDocumentPath(path)
+    if (followInside && field.authorKey && field.binding && path && stable && stable !== path) {
+      const previous = courseInstanceContext(before, { ...target, authorField: undefined }).instance.authoring?.records?.[field.authorKey]
+      const recorded = courseInstanceContext(after, { ...target, authorField: undefined }).instance.authoring?.records?.[field.authorKey]
+      // This planned first edit persists the observed software frame keys in
+      // the same transaction. Follow only that promotion, keeping every other
+      // part of the author's address strict; arbitrary rebindings still fail.
+      const scope = { ...field.scope, 'document:path': stable }
+      if (!previous && recorded && equalComponentValue({ kind: recorded.kind, scope: recorded.scope, binding: recorded.binding },
+        { kind: field.kind, scope, binding: field.binding })) mapped = { ...target, authorField: { ...field, scope } }
+    }
+    readCourseAuthorField(after, mapped)
+    if (path && stable !== path && mapped === target) {
+      const previous = courseInstanceContext(before, { ...target, authorField: undefined }).instance.data
+      const current = courseInstanceContext(after, { ...target, authorField: undefined }).instance.data
+      if (!equalComponentValue((previous as { html?: JsonValue }).html, (current as { html?: JsonValue }).html))
+        throw new Error('子文档源码已变化，请重新选择文字')
+    }
+    return mapped
+  }
   const region = field.sourceRegion, fromSource = authorFieldSource(before, target), toSource = authorFieldSource(after, target)
   const range = mapSequenceRange(fromSource, toSource, { from: region.start, to: region.end }, followInside)
   const next = { ...target, authorField: { ...field, sourceRegion: { ...region, start: range.from, end: range.to } } }
@@ -714,6 +740,32 @@ export function readTarget(model: DocumentModel, target: ToolTarget): unknown {
   throw new Error('当前工具不支持此目标；请重新选择组件、表面或素材')
 }
 
+/** Model-facing content read. Full object inspection and internal CAS keep readTarget's exact projection. */
+export function readSemanticTarget(model: DocumentModel, target: ToolTarget): unknown {
+  const plain = (value: unknown) => {
+    const text = documentTextContentSchema.safeParse(value)
+    return text.success ? plainDocumentText(text.data) : value
+  }
+  if (target.kind === 'course-instance' && model.kind === 'course-v10' && !target.authorField && target.dataPath === undefined) {
+    const { project, instance } = courseInstanceContext(model, target)
+    const text = readCourseInstanceText(model, target)
+    if (text !== null) return typeof text === 'string' ? text : plainDocumentText(text)
+    if (componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.text') {
+      const content = documentTextContentSchema.safeParse((instance.data as Record<string, unknown>)?.content)
+      if (content.success) return plainDocumentText(content.data)
+    }
+    return { id: instance.id, definitionId: instance.definitionId, ...(instance.name ? { name: instance.name } : {}),
+      data: instance.data, ...(instance.childIds ? { childIds: instance.childIds } : {}) }
+  }
+  const current = readTarget(model, target)
+  if (target.kind === 'course-surface' && model.kind === 'course-v10') {
+    const surface = current as CourseProjectV10['surfaces'][number]
+    return { ...surface, ...(surface.presentation ? { presentation: { ...surface.presentation,
+      states: surface.presentation.states.map(({ id, title, order }) => ({ id, title, ...(order ? { order } : {}) })) } } : {}) }
+  }
+  return plain(current)
+}
+
 export function targetFootprint(model: DocumentModel, target: ToolTarget): string {
   if (target.kind === 'text-selection') return documentDigest(target.fragments.map(fragment => ({ separator: fragment.separatorBefore ?? '', footprint: targetFootprint(model, fragment.target) })))
   if (target.kind === 'course-instance' && target.dataPath) target = courseInstanceTextTarget(model, target)
@@ -769,6 +821,11 @@ export function mapExternalCourseTextTarget(before: DocumentModel, after: Docume
   return target
 }
 /** The same verified mapping for source code units or rich-text code-point/atom tokens. */
+function sameSequenceSpan<T>(before: ArrayLike<T>, from: number, after: ArrayLike<T>, nextFrom: number, length: number) {
+  for (let index = 0; index < length; index++) if (before[from + index] !== after[nextFrom + index]) return false
+  return true
+}
+
 export function mapSequenceRange<T, R extends { from: number; to: number }>(
   before: { readonly length: number; readonly [index: number]: T },
   after: { readonly length: number; readonly [index: number]: T }, range: R, followInside = false): R {
@@ -778,28 +835,45 @@ export function mapSequenceRange<T, R extends { from: number; to: number }>(
   // replacement must not split or shorten the manual draft being confirmed.
   const currentEnd = range.to + after.length - before.length
   if (followInside && currentEnd >= range.from && range.from <= before.length && range.to <= before.length
-    && Array.from({ length: range.from }, (_, index) => before[index] === after[index]).every(Boolean)
-    && Array.from({ length: before.length - range.to }, (_, index) => before[range.to + index] === after[currentEnd + index]).every(Boolean))
+    && sameSequenceSpan(before, 0, after, 0, range.from) && sameSequenceSpan(before, range.to, after, currentEnd, before.length - range.to))
     return { ...range, to: currentEnd }
-  const original = Array.from({ length: before.length }, (_, index) => before[index]!)
-  const edits = sequenceSourceEdits(original, Array.from({ length: after.length }, (_, index) => after[index]!))
+  const edits = sequenceSourceEditRanges(before, after)
   if (edits.length > 1) {
-    let current = original, mapped = { ...range }
+    let current = before, mapped = { ...range }
     for (const edit of [...edits].reverse()) {
-      const next = [...current.slice(0, edit.from), ...edit.text, ...current.slice(edit.to)]
-      mapped = mapSequenceRange(current, next, mapped, followInside)
+      const currentSource: unknown = current, nextSource: unknown = after
+      const next = typeof currentSource === 'string' && typeof nextSource === 'string'
+        ? (currentSource.slice(0, edit.from) + nextSource.slice(edit.nextFrom, edit.nextTo) + currentSource.slice(edit.to)) as unknown as typeof before
+        : [...Array.from({ length: edit.from }, (_, index) => current[index]!),
+          ...Array.from({ length: edit.nextTo - edit.nextFrom }, (_, index) => after[edit.nextFrom + index]!),
+          ...Array.from({ length: current.length - edit.to }, (_, index) => current[edit.to + index]!)]
+      mapped = mapSingleSequenceRange(current, next, mapped, followInside,
+        { from: edit.from, to: edit.to, inserted: edit.nextTo - edit.nextFrom })
       current = next
     }
-    if (!followInside && ambiguousRangeCorrespondence(original,
-      Array.from({ length: after.length }, (_, index) => after[index]!), range, mapped,
-      edits.reduce((cost, edit) => cost + edit.to - edit.from + edit.text.length, 0)))
+    if (!followInside && ambiguousRangeCorrespondence(before, after, range, mapped,
+      edits.reduce((cost, edit) => cost + edit.to - edit.from + edit.nextTo - edit.nextFrom, 0)))
       throw new Error('重复文字导致范围映射不唯一，请重新读取目标')
     return mapped
   }
-  let from = 0
+  return mapSingleSequenceRange(before, after, range, followInside)
+}
+
+/** A known replacement must not recursively regain a fresh fine-diff budget. */
+function mapSingleSequenceRange<T, R extends { from: number; to: number }>(before: ArrayLike<T>, after: ArrayLike<T>, range: R, followInside: boolean,
+  known?: { from: number; to: number; inserted: number }): R {
+  const currentEnd = range.to + after.length - before.length
+  if (known && followInside && currentEnd >= range.from && range.from <= before.length && range.to <= before.length
+    && sameSequenceSpan(before, 0, after, 0, range.from) && sameSequenceSpan(before, range.to, after, currentEnd, before.length - range.to))
+    return { ...range, to: currentEnd }
+  // The diff already proves the unchanged prefix/suffix around this one stage.
+  // Re-scanning those spans (or diffing the stage again) multiplies large-source work by every edit.
+  let from = known?.from ?? 0
   while (from < before.length && from < after.length && before[from] === after[from]) from += 1
   if (from === before.length && from === after.length) return { ...range }
-  let oldTo = before.length, newTo = after.length
+  let oldTo = known?.to ?? before.length, newTo = known ? known.from + known.inserted : after.length
+  const slide = Math.max(0, from - Math.min(oldTo, newTo))
+  oldTo += slide; newTo += slide
   while (oldTo > from && newTo > from && before[oldTo - 1] === after[newTo - 1]) { oldTo -= 1; newTo -= 1 }
   // Explicit current-draft confirmation can adopt edits inside this same logical range.
   // Ordinary write/read mapping keeps the strict overlap behavior below.
@@ -809,7 +883,7 @@ export function mapSequenceRange<T, R extends { from: number; to: number }>(
     const added = after.length - before.length
     // Equal surrounding text can make several insertion points explain the same
     // snapshots. A frozen range remains usable only if every point maps it alike.
-    let earliest = before.length
+    let earliest = from
     while (earliest > 0 && before[earliest - 1] === after[earliest - 1 + added]) earliest -= 1
     if (from <= range.from) return { ...range, from: range.from + added, to: range.to + added }
     if (earliest >= range.to && earliest > range.from) return { ...range }
@@ -817,7 +891,7 @@ export function mapSequenceRange<T, R extends { from: number; to: number }>(
   }
   if (newTo === from) {
     const removed = before.length - after.length
-    let earliest = after.length
+    let earliest = from
     while (earliest > 0 && before[earliest - 1 + removed] === after[earliest - 1]) earliest -= 1
     if (from + removed <= range.from) return { ...range, from: range.from - removed, to: range.to - removed }
     if (earliest >= range.to && earliest > range.from) return { ...range }
@@ -832,38 +906,38 @@ export function mapSequenceRange<T, R extends { from: number; to: number }>(
 }
 
 /** Check alternate equally good alignments, without re-binding a target by text search. */
-function ambiguousRangeCorrespondence<T>(before: T[], after: T[], range: { from: number; to: number }, mapped: { from: number; to: number }, distance: number): boolean {
-  const selected = before.slice(range.from, range.to)
-  if (!selected.length) return false
-  const prefix = new Array<number>(selected.length).fill(0)
-  for (let index = 1, length = 0; index < selected.length; index++) {
-    while (length && selected[index] !== selected[length]) length = prefix[length - 1]!
-    if (selected[index] === selected[length]) length++
+function ambiguousRangeCorrespondence<T>(before: ArrayLike<T>, after: ArrayLike<T>, range: { from: number; to: number }, mapped: { from: number; to: number }, distance: number): boolean {
+  const selectedLength = range.to - range.from, selected = (index: number) => before[range.from + index]
+  if (!selectedLength) return false
+  const prefix = new Uint32Array(selectedLength)
+  for (let index = 1, length = 0; index < selectedLength; index++) {
+    while (length && selected(index) !== selected(length)) length = prefix[length - 1]!
+    if (selected(index) === selected(length)) length++
     prefix[index] = length
   }
   const placements: number[] = []
   for (let index = 0, length = 0; index < after.length; index++) {
-    while (length && after[index] !== selected[length]) length = prefix[length - 1]!
-    if (after[index] === selected[length]) length++
-    if (length === selected.length) { placements.push(index + 1 - length); length = prefix[length - 1]! }
+    while (length && after[index] !== selected(length)) length = prefix[length - 1]!
+    if (after[index] === selected(length)) length++
+    if (length === selectedLength) { placements.push(index + 1 - length); length = prefix[length - 1]! }
   }
   if (placements.length < 2) return false
-  const leading = prefixEditCosts(before.slice(0, range.from), after, distance)
-  const trailing = prefixEditCosts(before.slice(range.to).reverse(), [...after].reverse(), distance)
-  const cost = (from: number) => (leading.get(from) ?? Infinity) + (trailing.get(after.length - from - selected.length) ?? Infinity)
+  const leading = prefixEditCosts(before, after, distance, 0, range.from)
+  const trailing = prefixEditCosts(before, after, distance, range.to, before.length, true)
+  const cost = (from: number) => (leading.get(from) ?? Infinity) + (trailing.get(after.length - from - selectedLength) ?? Infinity)
   const actual = cost(mapped.from)
   return placements.some(from => from !== mapped.from && cost(from) <= actual)
 }
 
 /** Indel distance to each possible boundary, using the same bounded edit cost as the actual diff. */
-function prefixEditCosts<T>(before: T[], after: T[], limit: number): Map<number, number> {
+function prefixEditCosts<T>(before: ArrayLike<T>, after: ArrayLike<T>, limit: number, from: number, to: number, reverse = false): Map<number, number> {
   let previous = new Map<number, number>()
   for (let index = 0; index <= Math.min(after.length, limit); index++) previous.set(index, index)
-  for (let row = 1; row <= before.length; row++) {
+  for (let row = 1; row <= to - from; row++) {
     const current = new Map<number, number>()
     for (let column = Math.max(0, row - limit); column <= Math.min(after.length, row + limit); column++) {
       const value = Math.min((previous.get(column) ?? Infinity) + 1, (current.get(column - 1) ?? Infinity) + 1,
-        column > 0 && before[row - 1] === after[column - 1] ? previous.get(column - 1) ?? Infinity : Infinity)
+        column > 0 && before[reverse ? to - row : from + row - 1] === after[reverse ? after.length - column : column - 1] ? previous.get(column - 1) ?? Infinity : Infinity)
       if (value <= limit) current.set(column, value)
     }
     previous = current

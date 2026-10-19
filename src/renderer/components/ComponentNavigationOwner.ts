@@ -1,5 +1,7 @@
 import type { CourseProjectV10, TeacherControllerAction, TeacherControllerPort, TeacherControllerSnapshot } from '../../shared/contracts/component-platform'
+import { navigationGuardHasSource } from '../../shared/courseNavigationGuards'
 import type { ComponentSpatialCameraPort } from '../../player/surfaces/spatial/componentSpatialAdapter'
+import type { ComponentRuntimeNavigationPort } from '../../player/components/runtime/ComponentRuntimeHost'
 import { spatialFramePose, spatialTourSteps, spatialPlaybackPathId, spatialFragmentProgress, type SpatialTourStep } from '../../player/surfaces/spatial/componentPlatform/graph'
 import { componentSurfaceGeometryTargets } from '../../player/componentPlatform/spatialTargets'
 import { componentFragmentStateKey } from '../../player/componentPlatform/fragments'
@@ -8,7 +10,7 @@ import type { AudioManager } from '../../player/AudioManager'
 import { createTeacherControllerHudGeometry, isGlobalTeacherController, teacherControllerAuthoredCollapsed, teacherControllerExpandedWidth, teacherControllerFrameOrigin, teacherControllerIsCollapsed, teacherControllerReferenceSize, teacherControllerViewportFrame } from '../../shared/teacherControllerViewportGeometry'
 import { multiplyMatrices } from '../../core/components/geometry'
 import { plainDocumentText, documentTextContentSchema } from '../../shared/document/content'
-import { componentDefinitionBuiltinKey, isComponentVisibleAtSurface } from '../../shared/contracts/component-platform'
+import { componentDefinitionBuiltinKey, isComponentVisibleAtSurface, owningContainer } from '../../shared/contracts/component-platform'
 import { NavigationTasks } from '../../player/behaviors/navigation/NavigationTasks'
 import type { PlaybackKeyCommand } from '../../player/PlayerPresenterInput'
 import type { ComponentCameraMotion } from '../../shared/contracts/component-platform/navigationMotion'
@@ -61,16 +63,35 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
   private readonly fragmentCache = new Map<string, { html: string; count: number }>()
   private fragmentProject?: CourseProjectV10
   private readonly surfaceFragments = new Map<string, ReadonlyMap<string, number>>()
+  private runtime?: ComponentRuntimeNavigationPort
+  private fragmentRevision = 0
   private readonly cameras = new Map<string, { camera: ComponentSpatialCameraPort; binding?: ComponentCameraBinding; frameId: string | null; stepIndex: number | null; off(): void }>()
   private readonly observations = new Map<string, ComponentObservationBinding>()
   private directoryProject?: CourseProjectV10
   private readonly directories = new Map<string, NonNullable<TeacherControllerSnapshot['scenes'][number]['targets']>>()
-  private readonly cursorSteps = new Map<string, { project: CourseProjectV10; pathId: string | null; steps: readonly SpatialTourStep[] }>()
+  private readonly cursorSteps = new Map<string, { project: CourseProjectV10; pathId: string | null; fragmentRevision: number; steps: readonly SpatialTourStep[] }>()
   private transition?: AbortController
   private teacherNavigation?: TeacherControllerPort & { subscribeSceneReplay: ComponentNavigationOwner['subscribeSceneReplay']; placement: ComponentNavigationOwner['placement'] }
   private editorNavigation?: TeacherControllerPort & Pick<ComponentNavigationOwner, 'placement'>
   private retired = false
   constructor(private readonly ports: NavigationPorts) {}
+  /** World owns preparation; navigation consumes only the actual loaded generation. */
+  connectRuntime = (runtime: ComponentRuntimeNavigationPort): (() => void) => {
+    if (this.retired) return () => {}
+    this.runtime = runtime; this.surfaceFragments.clear(); this.fragmentRevision++; this.changed()
+    return () => {
+      if (this.runtime !== runtime) return
+      this.runtime = undefined; this.surfaceFragments.clear(); this.fragmentRevision++; this.changed()
+    }
+  }
+  runtimeCapabilitiesChanged = (instanceId: string): void => {
+    if (this.retired || !this.runtime) return
+    const project = this.ports.project()
+    let owner = owningContainer(project, instanceId)
+    while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
+    if (owner?.kind === 'surface') this.surfaceFragments.delete(owner.surfaceId)
+    this.fragmentRevision++; this.changed()
+  }
   subscribe = (listener: () => void) => { if (this.retired) return () => {}; this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   /** Explicit same-scene entry, after navigation/presentation succeeds. */
   subscribeSceneReplay = (listener: (surfaceId: string) => void) => {
@@ -124,16 +145,44 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
       const instance = project.instances[id]
       if (!instance) return
       for (const child of instance.childIds ?? []) visit(child)
-      const implementation = instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation
-      const data = instance.data, html = data && typeof data === 'object' && !Array.isArray(data) ? data.html : undefined
-      if (implementation?.kind !== 'builtin' || !['guoling.web', 'guoling.html-program'].includes(implementation.key) || typeof html !== 'string') return
-      let cached = this.fragmentCache.get(instance.id)
-      if (cached?.html !== html) { cached = { html, count: new DOMParser().parseFromString(html, 'text/html').querySelectorAll('.fragment').length }; this.fragmentCache.set(instance.id, cached) }
-      if (cached.count) counts.set(instance.id, cached.count)
+      const capability = this.runtime?.read(id)
+      if (!capability || !['ready', 'preparing'].includes(capability.status) || capability.document !== 'web' || typeof capability.html !== 'string') return
+      const count = this.htmlFragmentCount(id, capability.html)
+      if (count) counts.set(instance.id, count)
     }
     for (const id of project.surfaces.find(surface => surface.id === surfaceId)?.childIds ?? []) visit(id)
     this.surfaceFragments.set(surfaceId ?? '', counts)
     return counts
+  }
+  private htmlFragmentCount(id: string, html: string): number {
+    let cached = this.fragmentCache.get(id)
+    if (cached?.html !== html) { cached = { html, count: new DOMParser().parseFromString(html, 'text/html').querySelectorAll('.fragment').length }; this.fragmentCache.set(id, cached) }
+    return cached.count
+  }
+  private stepTargetId(surfaceId: string, step: SpatialTourStep): string | undefined {
+    return step.frameId ? this.ports.project().surfaces.find(surface => surface.id === surfaceId)?.spatial?.frames.find(frame => frame.id === step.frameId)?.targetInstanceId : step.instanceId
+  }
+  private pendingStepTarget(surfaceId: string, step: SpatialTourStep | undefined): string | undefined {
+    if (!this.runtime || !step) return
+    const id = this.stepTargetId(surfaceId, step)
+    if (!id) return
+    const capability = this.runtime.read(id)
+    if (capability.status === 'ready' || capability.status === 'failed') return
+    const data = this.ports.project().instances[id]?.data
+    const html = capability.html ?? (data && typeof data === 'object' && !Array.isArray(data) ? data.html : undefined)
+    return typeof html === 'string' && this.htmlFragmentCount(id, html) > 0 ? id : undefined
+  }
+  private currentStepPending(): boolean {
+    const surface = this.activeSurface()
+    return surface?.kind === 'spatial' && Boolean(this.pendingStepTarget(surface.id, (this.steps() as SpatialTourStep[])[this.stepIndex()]))
+  }
+  private async prepareStepTarget(surfaceId: string, step: SpatialTourStep, signal?: AbortSignal): Promise<boolean> {
+    const id = this.pendingStepTarget(surfaceId, step)
+    if (!id || !this.runtime) return !signal?.aborted
+    const runtime = this.runtime, cancelled = signal ?? new AbortController().signal
+    if (!await runtime.prepare(id, cancelled) || cancelled.aborted || this.runtime !== runtime) return false
+    this.runtimeCapabilitiesChanged(id)
+    return true
   }
   private applyFragments(): void {
     if (!this.ports.courseState?.set) return
@@ -158,17 +207,33 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
     const project = this.ports.project(), pathId = spatialPlaybackPathId(project.surfaces.find(surface => surface.id === surfaceId)?.spatial, entry.binding?.pathId?.()), steps = this.steps(surfaceId) as SpatialTourStep[]
     let index = entry.binding?.stepIndex?.() ?? entry.stepIndex
     const previous = this.cursorSteps.get(surfaceId)
-    if (previous && (previous.project !== project || previous.pathId !== pathId) && index !== null) {
+    if (previous && (previous.project !== project || previous.pathId !== pathId || previous.fragmentRevision !== this.fragmentRevision) && index !== null) {
       const old = previous.steps[index]
-      const rebased = previous.pathId !== pathId || !old ? -1 : steps.findIndex(step => step.frameId === old.frameId && step.instanceId === old.instanceId
-        && step.fragmentInstanceId === old.fragmentInstanceId && step.fragmentStep === old.fragmentStep)
+      const rebased = previous.pathId !== pathId || !old ? -1 : this.relocateStep(steps, old, this.stopOccurrence(previous.steps, index))
       index = rebased < 0 ? null : rebased
       entry.binding?.selectStep?.(index); entry.stepIndex = index
       const frameId = index === null ? null : steps[index].frameId
       entry.binding?.selectFrame(frameId); entry.frameId = frameId
     }
-    this.cursorSteps.set(surfaceId, { project, pathId, steps })
+    this.cursorSteps.set(surfaceId, { project, pathId, fragmentRevision: this.fragmentRevision, steps })
     return index
+  }
+  private stopOccurrence(steps: readonly SpatialTourStep[], index: number): number {
+    const target = steps[index]!
+    return steps.slice(0, index + 1).filter(step => step.frameId === target.frameId && step.instanceId === target.instanceId && (step.fragmentStep ?? 0) === 0).length - 1
+  }
+  private relocateStep(steps: readonly SpatialTourStep[], target: SpatialTourStep, occurrence: number, edge?: 'last'): number {
+    let at = -1
+    const candidates = steps.flatMap((step, index) => {
+      if (step.frameId !== target.frameId || step.instanceId !== target.instanceId) return []
+      if ((step.fragmentStep ?? 0) === 0) at++
+      return at === occurrence ? [index] : []
+    })
+    if (!candidates.length) return -1
+    if (edge === 'last') return candidates[candidates.length - 1]!
+    // First discovery expands the same stop at fragment zero; loss/reduction of
+    // Web capability stays at this stop rather than resetting the whole cursor.
+    return candidates[Math.min(target.fragmentStep ?? 0, candidates.length - 1)]!
   }
   private async presentState(surfaceId: string, stateId: string | null, signal?: AbortSignal, motion?: ComponentCameraMotion, onCommit?: () => void): Promise<boolean> {
     if (signal?.aborted) return false
@@ -192,24 +257,37 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
     entry.binding?.selectStep?.(null); entry.stepIndex = null; onCommit?.()
     this.changed(); return true
   }
-  private async presentStep(index: number, signal?: AbortSignal, surfaceId = this.ports.surfaceId(), forcePose = false, motion?: ComponentCameraMotion, onCommit?: () => void): Promise<boolean> {
+  private async presentStep(index: number, signal?: AbortSignal, surfaceId = this.ports.surfaceId(), forcePose = false, motion?: ComponentCameraMotion, onCommit?: () => void, edge?: 'last'): Promise<boolean> {
     if (signal?.aborted) return false
-    const surface = this.ports.project().surfaces.find(value => value.id === surfaceId), step = this.steps(surfaceId)[index]
+    const initialSteps = this.steps(surfaceId), surface = this.ports.project().surfaces.find(value => value.id === surfaceId), step = initialSteps[index]
     if (!surface || !step) return false
     if (surface.kind !== 'spatial') return this.presentState(surface.id, step.frameId, signal, motion, onCommit)
     const entry = this.cameras.get(surface.id)
     if (!entry || !('pose' in step)) return false
+    const occurrence = this.stopOccurrence(initialSteps as SpatialTourStep[], index)
+    const pathId = spatialPlaybackPathId(surface.spatial, entry.binding?.pathId?.())
     const previousIndex = this.spatialCursorIndex(surface.id, entry)
     const previous = previousIndex === null ? undefined : this.steps(surfaceId)[previousIndex]
     const sameFragmentStop = previous && 'pose' in previous && step.fragmentInstanceId !== undefined
       && previous.fragmentInstanceId === step.fragmentInstanceId && previous.frameId === step.frameId && previous.instanceId === step.instanceId
     // Revealing another fragment at this stop keeps the teacher's current pan/zoom.
     if ((forcePose || !sameFragmentStop) && !await entry.camera.present(step.pose, { ...motion, signal }) || signal?.aborted) return false
-    if (entry.binding) entry.binding.selectFrame(step.frameId)
-    else entry.frameId = step.frameId
-    if (entry.binding?.selectStep) entry.binding.selectStep(index)
-    else entry.stepIndex = index
-    onCommit?.(); this.changed(); return true
+    const selectTarget = (): boolean => {
+      const project = this.ports.project(), current = project.surfaces.find(value => value.id === surface.id)
+      if (signal?.aborted || this.cameras.get(surface.id) !== entry || spatialPlaybackPathId(current?.spatial, entry.binding?.pathId?.()) !== pathId) return false
+      const steps = this.steps(surface.id) as SpatialTourStep[], selected = this.relocateStep(steps, step, occurrence, edge)
+      if (selected < 0) return false
+      this.cursorSteps.set(surface.id, { project, pathId, fragmentRevision: this.fragmentRevision, steps })
+      entry.frameId = steps[selected].frameId; entry.stepIndex = selected
+      entry.binding?.selectFrame(entry.frameId); entry.binding?.selectStep?.(selected)
+      this.changed(); return true
+    }
+    // Arrive through the existing camera/projection first, then wait only for
+    // this stop. Stable target/edge intent survives any newly discovered steps.
+    if (!selectTarget()) return false
+    onCommit?.()
+    if (!await this.prepareStepTarget(surface.id, step, signal) || signal?.aborted) return false
+    return selectTarget()
   }
   private async presentSpatialStart(surfaceId: string, signal?: AbortSignal, motion?: ComponentCameraMotion, onCommit?: () => void): Promise<boolean> {
     return this.steps(surfaceId).length ? this.presentStep(0, signal, surfaceId, true, motion, onCommit) : this.presentState(surfaceId, null, signal, motion, onCommit)
@@ -237,7 +315,7 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
   }
   private blocked(destination: string, report = false): boolean {
     const guard = this.ports.project().logic?.navigationGuards.find(value => value.toSurfaceIds.includes(destination)
-      && (!value.fromSurfaceIds?.length || value.fromSurfaceIds.includes(this.ports.surfaceId() ?? ''))
+      && navigationGuardHasSource(value, this.ports.surfaceId() ?? '')
       && (value.match === 'all' ? value.conditions.every(condition => matchesPublishedCourseStateCondition(this.ports.courseState ?? { get: () => undefined }, condition))
         : value.conditions.some(condition => matchesPublishedCourseStateCondition(this.ports.courseState ?? { get: () => undefined }, condition))))
     if (guard && report) this.ports.report?.(guard.message)
@@ -297,6 +375,7 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
     if (action.type === 'camera.present') return Boolean(this.cameras.get(this.ports.surfaceId() ?? ''))
     const state = this.read(), index = state.progress?.sceneIndex ?? -1
     const lastStep = this.steps().length - (this.activeSurface()?.kind === 'spatial' ? 1 : 0)
+    if (action.type === 'step.next' && this.currentStepPending()) return true
     if (action.type === 'step.previous' && this.stepIndex() > 0 || action.type === 'step.next' && this.stepIndex() < lastStep) return true
     if (action.type === 'scene.previous' || action.type === 'step.previous') return index > 0 && !this.blocked(state.scenes[index - 1].id)
     if (action.type === 'scene.next' || action.type === 'step.next') return index >= 0 && index < state.scenes.length - 1 && !this.blocked(state.scenes[index + 1].id)
@@ -352,6 +431,7 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
       const commit = () => { if (!committed) { committed = true; onCommit?.() } }
       const navigate = () => this.executeNavigation(action, next, teacher, commit)
       if ('transition' in action && action.transition) {
+        if (this.ports.capture || action.transition.effect === 'none' || action.transition.durationMs === 0) return navigate()
         const root = this.ports.presentationRoot?.()
         if (!root) throw new Error('当前宿主没有页面转场画面；页面尚未切换。')
         return presentNavigationTransition(root, action.transition, navigate, next)
@@ -379,10 +459,15 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
     if (this.retired) return
     this.retired = true; this.cancel()
     for (const entry of this.cameras.values()) entry.off()
-    this.views.clear(); this.instancePorts.clear(); this.placementListeners.clear(); this.cameras.clear(); this.observations.clear(); this.listeners.clear(); this.replayListeners.clear(); this.states.clear(); this.fragmentCache.clear(); this.surfaceFragments.clear(); this.fragmentProject = undefined; this.cursorSteps.clear()
+    this.views.clear(); this.instancePorts.clear(); this.placementListeners.clear(); this.cameras.clear(); this.observations.clear(); this.listeners.clear(); this.replayListeners.clear(); this.states.clear(); this.fragmentCache.clear(); this.surfaceFragments.clear(); this.fragmentProject = undefined; this.cursorSteps.clear(); this.runtime = undefined
   }
   private async executeNavigation(action: TeacherControllerAction, signal?: AbortSignal, teacher = false, onCommit?: () => void): Promise<boolean> {
     if (signal?.aborted) return false
+    if (action.type === 'step.next' || action.type === 'step.previous') {
+      const current = this.activeSurface(), step = (this.steps() as SpatialTourStep[])[this.stepIndex()]
+      if (current?.kind === 'spatial' && step && !await this.prepareStepTarget(current.id, step, signal)) return false
+      if (signal?.aborted) return false
+    }
     const state = this.read(), index = state.progress?.sceneIndex ?? -1
     const motion = 'camera' in action ? action.camera : undefined
     const spatial = this.activeSurface()?.kind === 'spatial', cursor = this.stepIndex(), lastStep = this.steps().length - (spatial ? 1 : 0)
@@ -390,8 +475,8 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
       : cursor === 1 ? this.presentState(state.locationId!, null, signal, motion, onCommit) : this.presentStep(cursor - 2, signal, undefined, false, motion, onCommit)
     if (action.type === 'step.next' && cursor < lastStep) return this.presentStep(cursor + (spatial ? 1 : 0), signal, undefined, false, motion, onCommit)
     let destination: string | undefined, stateId: string | null | undefined
-    if (action.type === 'scene.previous' || action.type === 'step.previous') destination = state.scenes[index - 1].id
-    else if (action.type === 'scene.next' || action.type === 'step.next') destination = state.scenes[index + 1].id
+    if (action.type === 'scene.previous' || action.type === 'step.previous') destination = state.scenes[index - 1]?.id
+    else if (action.type === 'scene.next' || action.type === 'step.next') destination = state.scenes[index + 1]?.id
     else if (action.type === 'scene.go') { destination = action.sceneId; stateId = action.targetStateId }
     else if (action.type === 'scene.replay') { destination = state.locationId!; stateId = this.activeSurface()?.presentation?.initialStateId ?? null }
     else if (action.type === 'course.restart') destination = state.scenes[0].id
@@ -419,7 +504,7 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
           const target = (this.steps(destination) as SpatialTourStep[]).findIndex(step => step.instanceId === targetInstanceId)
           if (target < 0 || !await this.presentStep(target, signal, destination, true, motion, onCommit)) return false
         }
-      } else if (!(last >= 0 ? await this.presentStep(last, signal, destination, false, motion, onCommit)
+      } else if (!(last >= 0 ? await this.presentStep(last, signal, destination, false, motion, onCommit, 'last')
         : action.type === 'scene.replay' || stateId === undefined ? await this.presentSurfaceStart(destination, signal, motion, onCommit)
         : await this.presentState(destination, stateId, signal, motion, onCommit))) return false
       if (signal?.aborted) return false
@@ -429,6 +514,7 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
         for (const listener of this.replayListeners) listener(destination)
       }
     }
+    else if (action.type === 'step.next' || action.type === 'step.previous' || action.type === 'scene.next' || action.type === 'scene.previous') return false
     this.changed(); return true
   }
   subscribePlacement = (listener: () => void) => {
@@ -502,4 +588,3 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
   viewportBounds = () => this.retired ? undefined : this.ports.viewportBounds?.()
   placement = () => ({ x: 0, y: 0, zoom: this.zoom })
 }
-

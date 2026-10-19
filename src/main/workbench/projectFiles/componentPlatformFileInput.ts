@@ -8,7 +8,7 @@ import type { ComponentProjectFile, ComponentProjectFileInput } from '../../../c
 import { componentFileContentSource } from '../../../core/projectFiles/componentPlatform'
 import type { ContentApplyIntent, ContentApplySource } from '../../../core/contentApply/planning/types'
 import type { ComponentImplementation } from '../../../shared/contracts/component-platform'
-import { readHtmlClosure } from '../htmlImport/readHtmlClosure'
+import { readHtmlClosure, resolveSourceInputPath } from '../htmlImport/readHtmlClosure'
 import { readComponentSourceClosure } from './componentSourceClosure'
 import { prepareContentResources, prepareImageResource } from '../contentApply/resources/contentResources'
 import { assetReferencePath, cssUrlReferences, projectReferencePath } from '../../../shared/composition/projectReferences'
@@ -33,32 +33,34 @@ export async function readComponentProjectFileInput(input: {
   const { fileAccess, signal } = input
   if (!fileAccess?.workspaceRoot) throw new Error('按路径应用内容需要本任务的工作空间。')
   signal?.throwIfAborted()
-  const root = await fs.realpath(fileAccess.workspaceRoot)
-  const filename = await fs.realpath(path.resolve(fileAccess.workspaceRoot, input.from))
+  const root = (await resolveSourceInputPath(fileAccess.workspaceRoot)).filename
+  const selected = await resolveSourceInputPath(path.resolve(fileAccess.workspaceRoot, input.from)), filename = selected.filename
   if (fileAccess.permission !== 'full' && !isInsideRoot(root, filename)) throw new Error('内容源文件位于本任务授权工作空间外。')
   const extension = path.extname(filename).toLowerCase()
   const html = extension === '.html' || extension === '.htm'
-  const current = html && input.sourceHtml !== undefined ? input.sourceHtml
-    : TEXT.has(extension) ? await input.currentSource?.(filename) : undefined
+  const opened = TEXT.has(extension) && (!html || input.sourceHtml === undefined || selected.missing)
+    ? await input.currentSource?.(filename) : undefined
+  if (selected.missing && opened === undefined) throw selected.missing
+  const current = html && input.sourceHtml !== undefined ? input.sourceHtml : opened
   const bytes = current === undefined ? new Uint8Array(await fs.readFile(filename)) : new TextEncoder().encode(current)
   const text = current ?? (html ? decodeComponentHtmlSource(bytes).text : TEXT.has(extension) ? new TextDecoder('utf-8', { fatal: true }).decode(bytes) : undefined)
   if (extension === '.html' || extension === '.htm') {
     const closure = await readHtmlClosure({ htmlPath: filename, rootDir: fileAccess.permission === 'full' ? path.parse(filename).root : root,
       sourceHtml: text, currentSource: input.currentSource })
     signal?.throwIfAborted()
-    return { filename, bytes, text, siblingFiles: closure.siblingFiles }
+    return { filename, bytes, text, siblingFiles: closure.siblingFiles, diagnostics: closure.diagnostics.map(issue => ({ ...issue, repairable: true })) }
   }
   if (extension === '.css' || extension === '.md' || extension === '.markdown') {
     const closure = await readHtmlClosure({ htmlPath: filename, rootDir: fileAccess.permission === 'full' ? path.parse(filename).root : root,
       sourceHtml: extension === '.css' ? `<style>${text ?? ''}</style>` : await marked.parse(text ?? '', { async: false }), currentSource: input.currentSource })
     signal?.throwIfAborted()
-    return { filename, bytes, text, siblingFiles: closure.siblingFiles }
+    return { filename, bytes, text, siblingFiles: closure.siblingFiles, diagnostics: closure.diagnostics.map(issue => ({ ...issue, repairable: true })) }
   }
   if (SOURCE.has(extension) && text !== undefined) {
     const closure = await readComponentSourceClosure({ filename,
       rootDir: fileAccess.permission === 'full' ? path.parse(filename).root : root, bytes, text, signal, currentSource: input.currentSource })
     signal?.throwIfAborted()
-    return { filename, bytes, text, sourceEntry: closure.entry, siblingFiles: closure.files }
+    return { filename, bytes, text, sourceEntry: closure.entry, siblingFiles: closure.files, diagnostics: closure.diagnostics.map(issue => ({ ...issue, repairable: true })) }
   }
   signal?.throwIfAborted()
   return { filename, bytes, ...(text !== undefined ? { text } : {}) }
@@ -134,7 +136,7 @@ export async function prepareComponentProjectFileSource(input: ComponentProjectF
     const prepared = await prepareContentResources({ html, siblingFiles: siblings }, randomUUID)
     const bindings = new Map<string, string>()
     input.resourceEdits = []; input.resourceBindings = {}
-    input.diagnostics = prepared.diagnostics.map(issue => ({ ...issue, repairable: true }))
+    input.diagnostics = [...input.diagnostics ?? [], ...prepared.diagnostics.map(issue => ({ ...issue, repairable: true }))]
     for (const resource of prepared.resources) {
       const existing = resource.origins.map(origin => {
         const path = assetReferencePath(origin.reference)

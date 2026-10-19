@@ -21,6 +21,10 @@ import { ExecutionEventStore } from '../../src/main/workbench/execution/Executio
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { executionFinalReply } from '../../src/main/workbench/execution/executionOutcome'
 import { HostJobService } from '../../src/main/workbench/jobs/HostJobService'
+import { ProgrammaticToolRunner } from '../../src/main/workbench/execution/ProgrammaticToolRunner'
+import { observationModelMessage } from '../../src/main/workbench/execution/observationModelInput'
+import type { ObservationResult } from '../../src/shared/workbench/toolPorts'
+import type { AgentFileService } from '../../src/core/tools/AgentFileTools'
 import { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
 import type { ExecutionRunRecord, ExecutionStart } from '../../src/shared/workbench/execution'
 import type { ModelEvent, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
@@ -66,6 +70,69 @@ async function projectedReply(run: ExecutionRunRecord) {
   return { record, update }
 }
 
+it.each(['blocked', 'recovered', 'cancelled', 'correctable', 'self-claim'] as const)('settles the current remaining goal from real reconcile receipts: %s', async scenario => {
+  let turns = 0, executions = 0
+  const cancelArrived = deferred(), cancelReleased = deferred()
+  const provider: ModelProvider = { async *stream(request) {
+    turns++
+    if (turns === 1) yield response(request, '同步当前预览前先保留已完成修改', [
+      { name: 'text.replace', input: { content: 'after' } },
+      ...(scenario === 'self-claim' ? [] : [{ name: 'file.reconcile', input: { path: 'lesson.html', choice: 'disk' } }]),
+      { name: 'task.note', input: { remaining: ['完成当前预览验证'] } },
+    ])
+    else if ((scenario === 'recovered' || scenario === 'correctable') && turns === 2) yield response(request, '沿原操作恢复', [
+      { name: 'file.reconcile', input: { path: 'lesson.html', choice: 'disk' } },
+      { name: 'task.note', input: { remaining: [] } },
+    ])
+    else if (scenario === 'cancelled' && turns === 2) {
+      cancelArrived.resolve(); await cancelReleased.promise; yield response(request, '收到调整前的结果')
+    } else if (scenario === 'cancelled' && turns === 3) {
+      expect(JSON.stringify(request.messages)).toContain('取消旧HTML同步，只保存report.md')
+      yield response(request, '按用户调整保存报告', [{ name: 'file.write', input: { mode: 'create', path: 'report.md', content: '当前报告' } },
+        { name: 'task.note', input: { remaining: [] } }])
+    } else {
+      expect(JSON.stringify(request.messages)).toContain('宿主当前工作记录')
+      expect(JSON.stringify(request.messages)).not.toContain('最近工作笔记仍有剩余事项')
+      yield response(request, scenario === 'self-claim' ? '我认为软件阻断，无法继续' : '本轮实际结果已说明')
+    }
+  } }
+  const h = await fixture(provider)
+  const engine = new ExecutionEngine({ provider, registry: h.registry, gateway: h.gateway,
+    runs: new ExecutionRunStore(path.join(h.directory, 'runtime-runs')),
+    events: new ExecutionEventStore({ directory: path.join(h.directory, 'runtime-events') }),
+    files: { preflightMutation: async (_context: unknown, _name: string, raw: { path: string }) => ({ paths: [path.join(h.directory, raw.path)], outside: false }),
+      execute: async (_context: unknown, name: string) => {
+        executions++
+        if (name === 'file.write') {
+          await writeFile(path.join(h.directory, 'report.md'), '当前报告')
+          return { data: { status: 'written', path: path.join(h.directory, 'report.md'), saved: true, dirty: false,
+            operationId: 'saved-report', beforeVersion: 'none', afterVersion: 'report-version' } }
+        }
+        if (executions === 1) { if (scenario === 'correctable') throw new Error('请先比较当前文件与磁盘版本'); throw new RangeError('Maximum call stack size exceeded') }
+        return { data: { status: 'reconciled', choice: 'disk' } }
+      },
+    } as unknown as AgentFileService })
+  cleanups.push(() => engine.shutdown())
+  const started = await engine.start({ ...h.input, permission: 'workspace', workspaceRoot: h.directory })
+  if (scenario === 'cancelled') {
+    await cancelArrived.promise
+    await engine.steer(started.runId, 'cancel-old-html', '取消旧HTML同步，只保存report.md')
+    cancelReleased.resolve()
+  }
+  const ended = await engine.wait(started.runId)
+  // A known intermediate runtime error and an advisory old note do not let
+  // the host invent a blocked decision after the model's informed reply.
+  expect(ended.status).toBe('completed')
+  expect(ended.failure).toBeUndefined()
+  if (scenario !== 'self-claim') expect(ended.tools.find(tool => tool.call.name === 'file.reconcile')?.result).toMatchObject({ kind: 'error',
+    code: scenario === 'correctable' ? 'file-tool-failed' : 'file-tool-runtime-failed' })
+  expect(ended.remainingGoal).toBeUndefined()
+  expect(turns).toBe(scenario === 'blocked' || scenario === 'self-claim' ? 2 : scenario === 'cancelled' ? 4 : 3)
+  expect(executions).toBe(scenario === 'blocked' ? 1 : scenario === 'self-claim' ? 0 : 2)
+  if (scenario === 'cancelled') expect(await readFile(path.join(h.directory, 'report.md'), 'utf8')).toBe('当前报告')
+  expect(h.session.read()).toMatchObject({ revision: 1, undoDepth: 1, model: { source: 'after' } })
+})
+
 it('naturally continues after a canonical write and projects only the real final reply without rewriting it', async () => {
   let requests = 0
   const finalText = '# 已修改\n\n保留原始 **Markdown**，以及比旧摘要限制更长的解释。\n' + '原文。'.repeat(400)
@@ -88,12 +155,72 @@ it('naturally continues after a canonical write and projects only the real final
   expect(update).toHaveBeenCalledOnce()
 })
 
+it('delivers an editable first version without continuing optional export, exhaustive checks or polish', async () => {
+  let requests = 0
+  const followUps = ['可选导出 HTML', '额外逐页检查所有路径并复位', '继续调整装饰细节']
+  const provider: ModelProvider = { async *stream(request) {
+    if (++requests === 1) {
+      const guidance = request.messages.filter(message => message.role === 'system').map(message => message.content).join('\n')
+      expect(guidance).toContain('创作默认迅速交付可继续编辑的可用首版')
+      expect(guidance).toContain('用户明确要求终稿、导出或完整验用时，完成其要求再交付')
+      yield response(request, '形成可继续编辑的首版', [
+        { name: 'text.replace', input: { content: 'after' } },
+        { name: 'task.note', input: { remaining: [], followUps } },
+      ])
+    } else {
+      expect(JSON.stringify(request.messages)).not.toContain('最近工作笔记仍有剩余事项')
+      yield response(request, '可用首版已完成，可以继续编辑。')
+    }
+  } }
+  const h = await fixture(provider), started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('completed')
+  expect(final.failure).toBeUndefined()
+  expect(final.workingNote).toMatchObject({ remaining: [], followUps })
+  expect(final.remainingGoal).toBeUndefined()
+  expect(final.tools.map(tool => tool.call.name)).toEqual(['text.replace', 'task.note'])
+  expect(requests).toBe(2)
+  expect(h.session.read()).toMatchObject({ revision: 1, undoDepth: 1, model: { source: 'after' } })
+  expect((await new ExecutionRunStore(path.join(h.directory, 'runs')).read(started.runId))?.workingNote)
+    .toMatchObject({ remaining: [], followUps })
+})
+
+it('continues required core work even when optional follow-ups are also recorded', async () => {
+  let requests = 0
+  const provider: ModelProvider = { async *stream(request) {
+    if (++requests === 1) yield response(request, '先写首版', [
+      { name: 'text.replace', input: { content: 'after' } },
+      { name: 'task.note', input: { remaining: ['修复核心内容错误'], followUps: ['可选导出 HTML'] } },
+    ])
+    else if (requests === 2) {
+      expect(JSON.stringify(request.messages)).toContain('宿主当前工作记录')
+      expect(JSON.stringify(request.messages)).toContain('修复核心内容错误')
+      yield response(request, '修复当前必要错误', [
+        { name: 'text.replace', input: { content: 'fixed' } },
+        { name: 'task.note', input: { remaining: [] } },
+      ])
+    } else yield response(request, '核心内容已修复，可用首版已完成。')
+  } }
+  const h = await fixture(provider), started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('completed')
+  expect(final.workingNote).toMatchObject({ remaining: [], followUps: ['可选导出 HTML'] })
+  expect(requests).toBe(3)
+  expect(h.session.read()).toMatchObject({ revision: 2, undoDepth: 2, model: { source: 'fixed' } })
+})
+
 it.each(['length', 'interrupted', 'stopped'] as const)('keeps %s process text out of the final reply and never copies history', async kind => {
   let requests = 0
   const startedText = deferred(), release = deferred()
   const provider: ModelProvider = { async *stream(request) {
     requests++
-    if (kind === 'length') { yield response(request, '只有截断片段', [], 'length'); return }
+    if (kind === 'length') {
+      if (requests === 1) yield { ...response(request, '只有截断片段', [], 'length'), finishDetails: { reason: 'max_output_tokens', limit: 'output' } }
+      else {
+        expect(JSON.stringify(request.messages)).toContain('generationContinuation')
+        expect(JSON.stringify(request.messages)).toContain('max_output_tokens')
+        yield response(request, '续接后确认的完整回复')
+      }
+      return
+    }
     yield { type: 'text.delta', requestId: request.requestId, sequence: 1, text: '正在处理的片段' }
     startedText.resolve()
     if (kind === 'stopped') await release.promise
@@ -103,11 +230,14 @@ it.each(['length', 'interrupted', 'stopped'] as const)('keeps %s process text ou
   const h = await fixture(provider), started = await h.engine.start(h.input)
   if (kind === 'stopped') { await startedText.promise; const stopping = h.engine.stop(started.runId); release.resolve(); await stopping }
   const final = await h.engine.wait(started.runId)
-  expect(final.status).toBe(kind === 'length' ? 'partial' : kind === 'stopped' ? 'stopped' : 'failed')
-  expect(executionFinalReply(final)).toBeNull()
-  expect((await projectedReply(final)).update).not.toHaveBeenCalled()
+  expect(final.status).toBe(kind === 'length' ? 'completed' : kind === 'stopped' ? 'stopped' : 'failed')
+  expect(executionFinalReply(final)).toBe(kind === 'length' ? '续接后确认的完整回复' : null)
+  if (kind === 'length') {
+    expect(final.requests[0].finishDetails).toEqual({ reason: 'max_output_tokens', limit: 'output' })
+    expect((await projectedReply(final)).record.messages).toEqual([expect.objectContaining({ text: '续接后确认的完整回复' })])
+  } else expect((await projectedReply(final)).update).not.toHaveBeenCalled()
   expect(h.session.read()).toMatchObject({ revision: 0, model: { source: 'before' } })
-  expect(requests).toBe(1)
+  expect(requests).toBe(kind === 'length' ? 2 : 1)
 })
 
 it('ends after an acknowledged known failure and keeps the model explanation without requiring finish approval', async () => {
@@ -137,7 +267,7 @@ it.each([false, true])('waits a requested read-only child in software, returning
     parentRequests++
     if (parentRequests === 1) { yield response(request, '', [{ name: 'tools.load', input: { families: ['jobs'] } }]); return }
     if (parentRequests === 2) { yield response(request, '提交研究子任务。', [{ name: 'delegate.readonly', input: {
-      goal: '给出有限研究结论', sources: [], budget: { maxOutputTokens: 128, maxDurationMs: 5000 } } }]); return }
+      goal: '给出有限研究结论', sources: [] } }]); return }
     if (parentRequests === 3) {
       const receipt = JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)!.content))
       job = receipt.data.job
@@ -436,4 +566,370 @@ it('historical host-only completion restores its receipt but does not swallow a 
   expect((await resume(1)).status).toBe('completed')
   expect(turns).toBe(3)
   expect(h.session.read()).toMatchObject({ revision: 1, undoDepth: 1, model: { source: 'after' } })
+})
+
+
+it('lets a known rejected edit recover through another canonical path without inheriting a failed goal', async () => {
+  let turns = 0, target = ''
+  const h = await fixture({ async *stream(request) {
+    turns++
+    if (turns === 1) {
+      target = JSON.parse(String(request.messages.find(message => String(message.content).startsWith('当前默认语义目标 target='))!.content).match(/target=("[^"]+")/)![1])
+      expect(request.tools?.map(tool => tool.name)).toEqual([...(request.tools ?? [])].map(tool => tool.name).sort((a, b) => a.localeCompare(b)))
+      expect(request.tools?.some(tool => tool.name === 'project.read' || tool.name === 'delegate.agent')).toBe(false)
+      yield response(request, '尝试直接编辑', [{ name: 'text.replace', input: { content: 'rejected' } }])
+    } else if (turns === 2) {
+      expect(JSON.stringify(request.messages)).toContain('请换用当前正式目标')
+      yield response(request, '改用同一事务的批量入口', [{ name: 'batch', input: { operations: [
+        { name: 'text.replace', input: { target, content: 'recovered' } },
+      ] } }])
+    } else yield response(request, '已完成正文修改。')
+  } })
+  const execute = h.gateway.execute.bind(h.gateway)
+  vi.spyOn(h.gateway, 'execute').mockImplementationOnce(async () => ({ kind: 'error', code: 'invalid-target', message: '请换用当前正式目标' }))
+    .mockImplementation(execute)
+  const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('completed')
+  expect(final.failure).toBeUndefined()
+  expect(turns).toBe(3)
+  expect(final.tools[0].result).toMatchObject({ kind: 'error', code: 'invalid-target' })
+  expect(h.session.read()).toMatchObject({ revision: 1, undoDepth: 1, model: { source: 'recovered' } })
+})
+
+it('continues a truncated mixed tool response from committed facts and leaves incomplete arguments unexecuted', async () => {
+  let turns = 0
+  const h = await fixture({ async *stream(request) {
+    if (++turns === 1) {
+      const result = response(request, '截断前完成第一段', [{ name: 'text.replace', input: { content: 'first' } }], 'length')
+      const incomplete = { id: 'unfinished-call', name: 'text.replace', argumentsText: '{"content":"unfinished' }
+      yield { ...result, finishDetails: { reason: 'max_tokens', limit: 'output' }, toolCalls: [...result.toolCalls, incomplete],
+        assistant: { ...result.assistant, tool_calls: [...result.assistant.tool_calls!, { id: incomplete.id, type: 'function', function: { name: incomplete.name, arguments: incomplete.argumentsText } }] } }
+    } else if (turns === 2) {
+      expect(JSON.stringify(request.messages)).toContain('generationContinuation')
+      expect(JSON.stringify(request.messages)).toContain('invalid-tool-arguments')
+      yield response(request, '根据已生效第一段继续完成', [{ name: 'text.replace', input: { content: 'complete' } }])
+    } else yield response(request, '已完成。')
+  } })
+  const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('completed')
+  expect(turns).toBe(3)
+  expect(final.requests[0]).toMatchObject({ finishReason: 'length', finishDetails: { reason: 'max_tokens', limit: 'output' } })
+  expect(final.tools.filter(tool => tool.result?.kind === 'document-operation')).toHaveLength(2)
+  expect(final.tools.find(tool => tool.providerCallId === 'unfinished-call')?.result).toMatchObject({ kind: 'error', code: 'invalid-tool-arguments' })
+  expect(h.session.read()).toMatchObject({ revision: 2, undoDepth: 2, model: { source: 'complete' } })
+})
+
+it('keeps an unknown effect scoped to its document while an independent authorized document can still change', async () => {
+  let turns = 0, runId = '', otherDocument = ''
+  const h = await fixture({ async *stream(request) {
+    if (++turns === 1) yield response(request, '第一处结果待查', [{ name: 'text.replace', input: { content: 'unknown-write' } }])
+    else if (turns === 2) {
+      expect(JSON.stringify(request.messages)).toContain('tool-outcome-unknown')
+      const other = await h.gateway.issueTarget(runId, otherDocument, { kind: 'markdown-range', from: 0, to: 6 })
+      yield response(request, '不重放第一处副作用，继续独立任务', [
+        { name: 'text.replace', input: { content: 'blocked-replay' } },
+        { name: 'batch', input: { operations: [{ name: 'text.replace', input: { target: other, content: 'safe' } }] } },
+      ])
+    } else yield response(request, '独立修改已完成；第一处原操作结果仍未知，需按原操作查证。')
+  } })
+  const other = await h.registry.create(h.driver.load(new TextEncoder().encode('before')), 'other.md')
+  otherDocument = other.documentId
+  const execute = h.gateway.execute.bind(h.gateway)
+  vi.spyOn(h.gateway, 'execute').mockImplementationOnce(async () => ({ kind: 'error', code: 'tool-outcome-unknown', message: '仅第一处效应未知' }))
+    .mockImplementation(execute)
+  const started = await h.engine.start({ ...h.input, documents: [...h.input.documents,
+    { documentId: other.documentId, writable: [{ kind: 'markdown-range', from: 0, to: 6 }] }] })
+  runId = started.runId
+  const final = await h.engine.wait(runId)
+  expect(final.status).toBe('partial')
+  expect(final.failure).toBeUndefined()
+  expect(turns).toBe(3)
+  expect(final.tools[1].result).toMatchObject({ kind: 'error', code: 'unresolved-prior-tool' })
+  expect(final.tools[2].result, JSON.stringify(final.tools.map(tool => ({ call: tool.call, targets: tool.effectTargets, result: tool.result })))).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  expect(h.session.read()).toMatchObject({ revision: 0, model: { source: 'before' } })
+  expect(other.read()).toMatchObject({ revision: 1, model: { source: 'safe' } })
+})
+
+it('routes programmatic children through the same Engine writer and retains only their requested aggregate in model history', async () => {
+  let turns = 0
+  const provider: ModelProvider = { async *stream(request) {
+    if (++turns === 1) {
+      expect(request.tools?.some(tool => tool.name === 'programmatic.execute')).toBe(false)
+      yield response(request, '需要代码组织当前两步', [{ name: 'tools.load', input: { families: ['jobs'] } }])
+    } else if (turns === 2) {
+      expect(request.tools?.some(tool => tool.name === 'programmatic.execute')).toBe(true)
+      yield response(request, '执行工具代码', [{ name: 'programmatic.execute', input: { code: 'fixture runtime runs a canonical edit' } }])
+    } else {
+      const messages = request.messages.filter(message => message.role === 'tool')
+      const receipt = JSON.parse(String(messages.at(-1)!.content))
+      expect(receipt).toMatchObject({ kind: 'read', data: { status: 'completed', value: { changed: true }, children: [{ name: 'text.replace', status: 'completed' }] } })
+      expect(messages.some(message => String(message.tool_call_id).includes(':ptc:'))).toBe(false)
+      yield response(request, '已按当前目标完成修改。')
+    }
+  } }
+  const h = await fixture(provider)
+  const engine = new ExecutionEngine({ provider, registry: h.registry, gateway: h.gateway,
+    runs: new ExecutionRunStore(path.join(h.directory, 'ptc-runs')), events: new ExecutionEventStore({ directory: path.join(h.directory, 'ptc-events') }),
+    programmatic: new ProgrammaticToolRunner({ execute: async input => {
+      await input.call('text.replace', { content: 'ptc-after' })
+      return { status: 'completed', value: { changed: true } }
+    } }) })
+  cleanups.push(() => engine.shutdown())
+  const started = await engine.start(h.input), final = await engine.wait(started.runId)
+  expect(final.failure).toBeUndefined()
+  expect(final.status).toBe('completed')
+  expect(final.tools.find(tool => tool.call.name === 'text.replace')).toMatchObject({ origin: 'host', state: 'returned', result: { kind: 'document-operation', result: { status: 'applied' } } })
+  expect(h.session.read()).toMatchObject({ revision: 1, undoDepth: 1, model: { source: 'ptc-after' } })
+  const stored = await new ExecutionRunStore(path.join(h.directory, 'ptc-runs')).read(started.runId)
+  expect(stored?.tools.find(tool => tool.call.name === 'text.replace')?.callId).toContain(':ptc:1')
+})
+
+
+it.each([false, true])('reads a partial task programmatic child from its exact durable lineage without replaying the script or writer (insideScript=%s)', async insideScript => {
+  let phase = 0, turns = 0, originalRun = '', childId = '', writes = 0
+  const provider: ModelProvider = { async *stream(request) {
+    turns++
+    if (phase === 0 && turns === 1) yield response(request, '执行并保留每个真实子回执', [{ name: 'programmatic.execute', input: { code: 'partial fixture' } }])
+    else if (phase === 0) yield response(request, '已保留第一段；第二段原副作用未知，需要查证。')
+    else if (turns === 1) yield response(request, '只读取原已完成子调用', insideScript
+      ? [{ name: 'programmatic.execute', input: { code: 'read original child fixture' } }]
+      : [{ name: 'programmatic.read', input: { runId: originalRun, callId: childId } }])
+    else {
+      const receipt = JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)!.content))
+      expect(insideScript ? receipt.data.value : receipt).toMatchObject({ kind: 'read', data: { runId: originalRun, callId: childId,
+        value: { kind: 'document-operation', result: { status: 'applied' } } } })
+      yield response(request, '原已完成子调用已读回；未知原操作没有重放。')
+    }
+  } }
+  const h = await fixture(provider), execute = h.gateway.execute.bind(h.gateway)
+  vi.spyOn(h.gateway, 'execute').mockImplementation(async (run, callId, call) => {
+    if (call.name === 'text.replace' && ++writes === 2) return { kind: 'error', code: 'tool-outcome-unknown', message: '第二段原副作用尚未确认' }
+    return execute(run, callId, call)
+  })
+  const engine = new ExecutionEngine({ provider, registry: h.registry, gateway: h.gateway,
+    runs: new ExecutionRunStore(path.join(h.directory, 'lineage-runs')), events: new ExecutionEventStore({ directory: path.join(h.directory, 'lineage-events') }),
+    programmatic: new ProgrammaticToolRunner({ execute: async input => {
+      if (phase === 1) return { status: 'completed', value: await input.call('programmatic.read', { runId: originalRun, callId: childId }) }
+      await input.call('text.replace', { content: 'first-part' })
+      await input.call('text.replace', { content: 'unknown-part' })
+      return { status: 'completed', value: null }
+    } }) })
+  cleanups.push(() => engine.shutdown())
+  const first = await engine.start(h.input), partial = await engine.wait(first.runId)
+  expect(partial.status).toBe('partial')
+  expect(writes).toBe(2)
+  originalRun = partial.runId; childId = partial.tools.find(tool => tool.origin === 'host')!.callId
+  phase = 1; turns = 0
+  const resumed = await engine.resume(partial.runId, { ...partial.input, taskId: 'readback' }), ended = await engine.wait(resumed.runId)
+  expect(ended.taskContinuedFrom).toBe(partial.runId)
+  expect(ended.tools.map(tool => tool.call.name)).toEqual(insideScript ? ['programmatic.execute', 'programmatic.read'] : ['programmatic.read'])
+  expect(ended.messages.some(message => message.role === 'tool' && String(message.tool_call_id).includes(':ptc:'))).toBe(false)
+  expect(ended.failure).toBeUndefined()
+  expect(writes).toBe(2)
+  expect(h.session.read()).toMatchObject({ revision: 1, model: { source: 'first-part' } })
+})
+
+
+it.each([false, true])('keeps programmatic questions and superseded children out of the native model tool chain (steer=%s)', async steer => {
+  const waiting = deferred()
+  let turns = 0, questionId = ''
+  const provider: ModelProvider = { async *stream(request) {
+    if (++turns === 1) yield response(request, '工具代码需要当前任务内选择', [{ name: 'programmatic.execute', input: { code: 'ask then edit fixture' } }])
+    else {
+      expect(request.messages.some(message => message.role === 'tool' && String(message.tool_call_id).includes(':ptc:'))).toBe(false)
+      yield response(request, steer ? '已按新要求只报告当前结果。' : '已按回答完成当前修改。')
+    }
+  } }
+  const h = await fixture(provider)
+  const engine = new ExecutionEngine({ provider, registry: h.registry, gateway: h.gateway,
+    runs: new ExecutionRunStore(path.join(h.directory, 'question-runs')), events: new ExecutionEventStore({ directory: path.join(h.directory, 'question-events') }),
+    programmatic: new ProgrammaticToolRunner({ execute: async input => {
+      await input.call('ask_user', { question: '采用当前修改吗？', responseKind: 'confirm', options: [{ label: '采用' }] })
+      await input.call('text.replace', { content: 'confirmed' })
+      return { status: 'completed', value: 'finished' }
+    } }) })
+  cleanups.push(() => engine.shutdown())
+  engine.subscribe(event => { if (event.type === 'tool' && event.data.status === 'waiting') { questionId = event.itemId; waiting.resolve() } })
+  const started = await engine.start(h.input)
+  await waiting.promise
+  if (steer) await engine.steer(started.runId, 'new-task-choice', '改为只报告，不修改正文')
+  else await engine.answer({ runId: started.runId, callId: questionId, answer: { choices: [0] } })
+  const final = await engine.wait(started.runId)
+  expect(final.failure).toBeUndefined()
+  expect(final.messages.some(message => message.role === 'tool' && String(message.tool_call_id).includes(':ptc:'))).toBe(false)
+  expect(final.tools.find(tool => tool.call.name === 'ask_user')).toMatchObject({ origin: 'host', state: 'returned' })
+  expect(h.session.read()).toMatchObject({ revision: steer ? 0 : 1, model: { source: steer ? 'before' : 'confirmed' } })
+  if (steer) expect(final.tools.filter(tool => tool.call.name === 'text.replace').every(tool => tool.notInvokedReason === 'steering')).toBe(true)
+})
+
+
+it('exposes an OAuth-style incomplete delta as a pageable retained draft and continues without replay', async () => {
+  let turns = 0
+  const prefix = '{"content":"未完整写作参数'
+  const h = await fixture({ async *stream(request) {
+    turns++
+    if (turns === 1) {
+      yield { type: 'tool.delta', requestId: request.requestId, sequence: 1, index: 0, id: 'draft-only', name: 'text.replace', argumentsDelta: prefix }
+      yield { ...response(request, '只保留已确认正文', [], 'length'), sequence: 2, finishDetails: { reason: 'max_output_tokens', limit: 'output' } }
+    } else if (turns === 2) {
+      const current = request.messages.findLast(message => String(message.content).startsWith('宿主当前工作记录'))!
+      const data = JSON.parse(String(current.content).slice(String(current.content).indexOf('\n') + 1))
+      const sourceId = data.currentWork.generationContinuation.unfinishedArguments[0].sourceId
+      expect(sourceId).toContain(':draft:')
+      yield response(request, '取回原未执行参数', [{ name: 'context.read', input: { sourceId, maxChars: 200 } }])
+    } else if (turns === 3) {
+      const read = JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)!.content))
+      expect(read.data).toMatchObject({ state: 'incomplete-prefix', toolName: 'text.replace', text: prefix })
+      yield response(request, '修正并完成一次正式调用', [{ name: 'text.replace', input: { content: 'restored draft' } }])
+    } else yield response(request, '已从原参数续接并完成。')
+  } })
+  const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('completed')
+  expect(final.requests[0].argumentDrafts).toEqual([{ state: 'incomplete-prefix', providerCallId: 'draft-only', toolName: 'text.replace', argumentsText: prefix }])
+  expect(final.messages[final.requests[0].assistantMessageIndex!].tool_calls).toBeUndefined()
+  expect(final.tools.filter(tool => tool.call.name === 'text.replace')).toHaveLength(1)
+  expect(h.session.read()).toMatchObject({ revision: 1, undoDepth: 1, model: { source: 'restored draft' } })
+})
+
+it('returns an automatic job wait error to the model so independent authorized work can continue', async () => {
+  let turns = 0, waits = 0
+  const h = await fixture({ async *stream(request) {
+    if (++turns === 1) yield response(request, '启动原子任务', [{ name: 'delegate.readonly', input: {} }])
+    else if (turns === 2) yield response(request, '原子任务尚未交付')
+    else if (turns === 3) {
+      expect(JSON.stringify(request.messages)).toContain('原作业状态服务暂时不可读')
+      yield response(request, '原作业不重发，先处理独立正文', [{ name: 'text.replace', input: { content: 'independent work' } }])
+    } else yield response(request, '独立正文已完成；原子任务仍需核对。')
+  } })
+  const execute = h.gateway.execute.bind(h.gateway)
+  vi.spyOn(h.gateway, 'execute').mockImplementation(async (runId, callId, call) => {
+    if (call.name === 'delegate.readonly') return { kind: 'read', data: { job: 'existing-child', status: 'preparing' } }
+    if (call.name === 'job.wait') { waits++; return { kind: 'error', code: 'job-status-unavailable', message: '原作业状态服务暂时不可读' } }
+    return execute(runId, callId, call)
+  })
+  const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('partial')
+  expect(final.failure).toBeUndefined()
+  expect(waits).toBe(1)
+  expect(turns).toBe(4)
+  expect(h.session.read()).toMatchObject({ revision: 1, model: { source: 'independent work' } })
+  expect(final.tools.filter(tool => tool.call.name === 'delegate.readonly')).toHaveLength(1)
+})
+
+
+it.each(['stop', 'steer'] as const)('preserves unexecuted length drafts before a complete tool is interrupted by %s', async action => {
+  const entered = deferred(), release = deferred()
+  let turns = 0
+  const prefix = '{"content":"retained unfinished prefix'
+  const h = await fixture({ async *stream(request) {
+    if (++turns === 1) {
+      yield { type: 'tool.delta', requestId: request.requestId, sequence: 1, index: 1, id: 'unexecuted-draft', name: 'text.replace', argumentsDelta: prefix }
+      yield { ...response(request, '完整调用与未完整调用同时返回', [{ name: 'text.replace', input: { content: 'first' } }], 'length'), sequence: 2,
+        finishDetails: { reason: 'max_output_tokens', limit: 'output' } }
+    } else {
+      expect(JSON.stringify(request.messages)).toContain(':draft:')
+      yield response(request, '已保留原现场并按最新要求报告。')
+    }
+  } })
+  const execute = h.gateway.execute.bind(h.gateway)
+  vi.spyOn(h.gateway, 'execute').mockImplementation(async (runId, callId, call) => {
+    if (call.name === 'text.replace') { entered.resolve(); await release.promise }
+    return execute(runId, callId, call)
+  })
+  const started = await h.engine.start(h.input)
+  await entered.promise
+  if (action === 'stop') { const stopping = h.engine.stop(started.runId); release.resolve(); await stopping }
+  else { await h.engine.steer(started.runId, 'retain-prefix', '停止扩写，只报告目前已保留的现场'); release.resolve() }
+  const final = await h.engine.wait(started.runId)
+  expect(final.status).toBe(action === 'stop' ? 'stopped' : 'completed')
+  expect(final.requests[0].argumentDrafts).toEqual([{ state: 'incomplete-prefix', providerCallId: 'unexecuted-draft', toolName: 'text.replace', argumentsText: prefix }])
+  const stored = await new ExecutionRunStore(path.join(h.directory, 'runs')).read(started.runId)
+  expect(stored?.requests[0].argumentDrafts).toEqual(final.requests[0].argumentDrafts)
+  expect(final.tools.some(tool => tool.providerCallId === 'unexecuted-draft')).toBe(false)
+})
+
+
+it.each([false, true])('reads a stopped run exact full observation and original PNG from its retained tool source on Continue (clip=%s)', async clip => {
+  const waiting = deferred()
+  let phase = 0, turns = 0, sourceId = ''
+  const png = await sharp({ create: { width: 3, height: 2, channels: 4, background: '#ff0000' } }).png().toBuffer()
+  const imageDataUrl = `data:image/png;base64,${png.toString('base64')}`
+  const provider: ModelProvider = { async *stream(request, options) {
+    turns++
+    if (phase === 0 && turns === 1) yield response(request, '捕获一个裁剪观察', [{ name: 'view.observe', input: { target: 'fixture', purpose: 'diagnostic' } }])
+    else if (phase === 0) {
+      const receipt = JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)!.content))
+      sourceId = receipt.data.fullObservationSource.sourceId
+      expect(receipt.data).not.toHaveProperty('fullObservation')
+      waiting.resolve()
+      await new Promise<void>(resolve => options?.signal?.addEventListener('abort', () => resolve(), { once: true }))
+    } else if (turns === 1) yield response(request, '从同任务原始回执读取完整结构和原图', [{ name: 'context.read', input: { sourceId, maxChars: 20000, imageIndexes: [0] } }])
+    else {
+      const receipt = JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)!.content))
+      expect(receipt.data).toMatchObject({ sourceId, imagesPrepared: 1, images: [{ resourceId: 'original-png' }] })
+      const data = JSON.parse(receipt.data.text).data
+      expect((data.fullObservation ?? data).elements).toHaveLength(2)
+      expect(receipt.data.text).not.toContain(png.toString('base64'))
+      expect(request.messages.some(message => Array.isArray(message.content) && message.content.some(part => part && typeof part === 'object'
+        && !Array.isArray(part) && part.type === 'image_url' && (part.image_url as { url?: string })?.url === imageDataUrl))).toBe(true)
+      yield response(request, '原完整结构与原PNG已精确读回，未重新观察。')
+    }
+  } }
+  const h = await fixture(provider), snapshot = h.session.read(), execute = h.gateway.execute.bind(h.gateway)
+  vi.spyOn(h.gateway, 'execute').mockImplementation(async (runId, callId, call) => {
+    if (call.name !== 'view.observe') return execute(runId, callId, call)
+    const full = { source: 'live', identity: { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: 0, locationId: 'fixture-location' },
+      coverage: { width: 3, height: 2 }, structure: ['完整观察独有文字'], diagnostics: [], generation: 1,
+      image: { resourceId: 'original-png', mimeType: 'image/png', width: 3, height: 2, byteLength: png.byteLength }, imageDataUrl,
+      elements: [{ handle: 'original-one', text: '第一项' }, { handle: 'original-two', text: '第二项' }] }
+    const { imageDataUrl: _privatePixels, ...publicFull } = full
+    return { kind: 'read', data: clip ? { ...publicFull, image: { resourceId: 'cropped-png', mimeType: 'image/png', width: 1, height: 1 },
+      originalImage: full.image, elements: [full.elements[0]], fullObservation: full } : publicFull }
+  })
+  const resource = vi.spyOn(h.gateway, 'readObservationResource').mockRejectedValue(new Error('旧资源 owner 已清理'))
+  const first = await h.engine.start(h.input)
+  await waiting.promise
+  const stopped = (await h.engine.stop(first.runId))!
+  expect(stopped.status).toBe('stopped')
+  if (clip) expect(stopped.tools[0].result).toMatchObject({ kind: 'read', data: { fullObservation: { imageDataUrl } } })
+  else {
+    // Seed the carrier's original full-image message using the same host builder;
+    // ordinary captures already store these bytes once instead of in fullObservation.
+    const observation = (stopped.tools[0].result as Extract<NonNullable<typeof stopped.tools[0]['result']>, { kind: 'read' }>).data as ObservationResult
+    stopped.messages.push(observationModelMessage({ toolCallId: stopped.tools[0].providerCallId, target: 'fixture', observation, bytes: png }))
+    await new ExecutionRunStore(path.join(h.directory, 'runs')).save(stopped)
+  }
+  phase = 1; turns = 0
+  const resumed = await h.engine.resume(stopped.runId, { ...stopped.input, taskId: 'read-retained-observation' }), ended = await h.engine.wait(resumed.runId)
+  expect(ended.failure).toBeUndefined()
+  expect(ended.tools.map(tool => tool.call.name)).toEqual(['context.read'])
+  expect(resource).not.toHaveBeenCalled()
+  expect(h.session.read().revision).toBe(0)
+})
+
+
+it('blocks only the same scopeless unknown operation while a distinct computation can proceed', async () => {
+  let turns = 0
+  const calls: string[] = []
+  const h = await fixture({ async *stream(request) {
+    if (++turns === 1) yield response(request, '先计算一个来源', [{ name: 'compute.run', input: { code: 'print("uncertain")', sources: ['material'] } }])
+    else if (turns === 2) yield response(request, '原计算不盲重发，另一项计算可以继续', [
+      { name: 'compute.run', input: { sources: ['material'], code: 'print("uncertain")' } },
+      { name: 'compute.run', input: { code: 'print("independent")', sources: ['material'] } },
+    ])
+    else yield response(request, '独立计算已完成；原计算副作用仍需查证。')
+  } })
+  vi.spyOn(h.gateway, 'execute').mockImplementation(async (_run, _id, call) => {
+    const code = String((call.input as { code?: string })?.code)
+    calls.push(code)
+    return code.includes('uncertain') ? { kind: 'error', code: 'tool-outcome-unknown', message: '原计算结果尚未确认' }
+      : { kind: 'read', data: { job: 'independent-result', status: 'ready', artifacts: [{ name: 'result.txt' }] } }
+  })
+  const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('partial')
+  expect(final.failure).toBeUndefined()
+  expect(calls).toEqual(['print("uncertain")', 'print("independent")'])
+  expect(final.tools[1].result).toMatchObject({ kind: 'error', code: 'unresolved-prior-tool' })
+  expect(final.tools[2].result).toMatchObject({ kind: 'read', data: { status: 'ready' } })
+  expect(turns).toBe(3)
 })

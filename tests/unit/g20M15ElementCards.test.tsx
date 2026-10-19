@@ -145,42 +145,42 @@ function documentsFixture() {
   return { documents: documents as unknown as Pick<DocumentHostAPI, 'subscribe'>, close: (documentId: string) => { for (const listener of listeners) listener({ type: 'closed', documentId }) } }
 }
 
-it('inherits the latest host preference only when creating a card and then sends with the card conversation owner', async () => {
+it('does not copy a host or card legacy preference into local edits', async () => {
   const f = executionFixture()
   const parent = await f.api.createConversation('workspace', '宿主会话')
   const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings() })
-  cards.setWorkspace('workspace'); cards.setAdvancementPreferenceOwner(parent)
-  // The metadata changes after the host passed its identity; the current owner is read at send time.
+  cards.setWorkspace('workspace')
   await f.api.setAdvancementMode({ workspaceId: 'workspace', conversationId: parent.conversationId, advancementMode: 'stepwise' })
   const a = cards.ensure({ documentId: 'doc', target: target('a'), label: '标题' })
   await cards.send(a, '局部修改', capture('a'))
-  expect(f.api.send.mock.calls[0]![0]).toMatchObject({ conversationId: 'c2', advancementMode: 'stepwise', expectedRevision: 1 })
-  expect(f.api.setAdvancementMode.mock.calls.at(-1)![0]).toEqual({ workspaceId: 'workspace', conversationId: 'c2', advancementMode: 'stepwise' })
+  expect(f.api.send.mock.calls[0]![0]).toMatchObject({ conversationId: 'c2', expectedRevision: 1 })
+  expect(f.api.send.mock.calls[0]![0].advancementMode).toBeUndefined()
+  expect(f.api.setAdvancementMode).toHaveBeenCalledTimes(1)
 
-  // An existing card keeps its own preference even after the selected host conversation changes.
-  await f.api.setAdvancementMode({ workspaceId: 'workspace', conversationId: parent.conversationId, advancementMode: 'automatic' })
-  await cards.send(a, '继续局部修改', capture('a'))
-  expect(f.api.send.mock.calls[1]![0]).toMatchObject({ conversationId: 'c2', advancementMode: 'stepwise' })
-  await f.api.setAdvancementMode({ workspaceId: 'workspace', conversationId: 'c2', advancementMode: 'automatic' })
-  await cards.send(a, '卡片的新选择', capture('a'))
-  expect(f.api.send.mock.calls[2]![0]).toMatchObject({ conversationId: 'c2', advancementMode: 'automatic' })
+  // Old card metadata may still exist on disk; it does not become a new instruction.
+  await f.api.setAdvancementMode({ workspaceId: 'workspace', conversationId: 'c2', advancementMode: 'stepwise' })
+  await cards.send(a, '先给我看修改建议，等确认后再改', capture('a'))
+  expect(f.api.send.mock.calls[1]![0]).toMatchObject({ conversationId: 'c2', text: '先给我看修改建议，等确认后再改' })
+  expect(f.api.send.mock.calls[1]![0].advancementMode).toBeUndefined()
+  expect(f.api.setAdvancementMode).toHaveBeenCalledTimes(2)
   const b = cards.ensure({ documentId: 'doc', target: target('b'), label: '图示' })
   await cards.send(b, '修改另一对象', capture('b'))
-  expect(f.api.send.mock.calls[3]![0]).toMatchObject({ conversationId: 'c3', advancementMode: 'automatic' })
+  expect(f.api.send.mock.calls[2]![0]).toMatchObject({ conversationId: 'c3' })
+  expect(f.api.send.mock.calls[2]![0].advancementMode).toBeUndefined()
+  expect(f.api.setAdvancementMode).toHaveBeenCalledTimes(2)
 })
 
-it('leaves a newly created card preference unknown when the host has not chosen one', async () => {
+it('sends a new card directly without setting a mode', async () => {
   const f = executionFixture()
-  const parent = await f.api.createConversation('workspace', '未选模式')
   const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings() })
-  cards.setWorkspace('workspace'); cards.setAdvancementPreferenceOwner(parent)
+  cards.setWorkspace('workspace')
   const key = cards.ensure({ documentId: 'doc', target: target('a'), label: '标题' })
   await cards.send(key, '局部修改', capture('a'))
   expect(f.api.send.mock.calls[0]![0].advancementMode).toBeUndefined()
   expect(f.api.setAdvancementMode).not.toHaveBeenCalled()
 })
 
-it('M15 a card sends only its object as writable, queues behind a busy request, asks inside the card and ends with its document', async () => {
+it('M15 an explicitly restricted card sends only its object as writable, queues behind a busy request, asks inside the card and ends with its document', async () => {
   const f = executionFixture(), d = documentsFixture()
   const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings(), documents: () => d.documents })
   cards.setWorkspace('workspace')
@@ -188,6 +188,7 @@ it('M15 a card sends only its object as writable, queues behind a busy request, 
   expect(key).toBe(elementCardKey('doc', target('a')))
   expect(cards.view(key)).toMatchObject({ label: '标题', entries: [], busy: false })
 
+  cards.setSelectionRestriction(key, true)
   await cards.send(key, ' 改成红色 ', capture('a'))
   expect(f.api.createConversation).toHaveBeenCalledWith('workspace', '标题', undefined, { kind: 'element', documentId: 'doc', label: '标题' })
   expect(f.api.send.mock.calls[0]![0]).toMatchObject({ workspaceId: 'workspace', conversationId: 'c1', text: '改成红色', mode: 'queue', permission: 'workspace',
@@ -238,7 +239,11 @@ it('M15 the quick bar opens the card, the top bar shows cards at work and jumps 
     expect(screen.queryByRole('button', { name: /AI 进行中|AI 需回答/ })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }))
     const card = screen.getByRole('dialog', { name: 'AI 修改：标题' })
-    expect(card).toHaveTextContent('这里的 AI 只改这一个对象')
+    expect(card).toHaveTextContent('AI 会优先处理这个对象，也可按要求协调同文档中的其他内容。')
+    const restriction = within(card).getByRole('checkbox', { name: '仅修改此选区' })
+    expect(restriction).not.toBeChecked()
+    fireEvent.click(restriction)
+    expect(restriction).toBeChecked()
     const input = within(card).getByRole('textbox', { name: 'AI 修改要求' })
     fireEvent.change(input, { target: { value: '改成红色' } })
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -328,6 +333,7 @@ it('M15 a text card sends to where its text is now, waits for the previous reque
   expect(cards.texts()).toMatchObject([{ key, kind: 'text', anchor: { left: 10, top: 20 }, textLost: null }])
   expect(cards.active()).toEqual([])
 
+  cards.setSelectionRestriction(key, true)
   await cards.send(key, '换个说法', undefined)
   expect(f.api.createConversation).toHaveBeenCalledWith('workspace', '“加粗”', undefined, { kind: 'element', documentId: 'doc', label: '“加粗”' })
   expect(f.api.send.mock.calls[0]![0].documents).toEqual([{ documentId: 'doc', epoch: 'epoch', revision: 1, selection: [first], writable: [first] }])
@@ -406,6 +412,7 @@ it('preserves unsent card input once through conversation drafts, surfaces failu
     snapshot: async () => ({ documentId: 'doc', epoch: 'epoch', revision: 3, model: { kind: 'markdown', source: 'text' } }) as DocumentSnapshot })
   cards.setWorkspace('workspace')
   const key = cards.openText({ documentId: 'doc', target: selected, capture: textCapture(selected, 3), content: 'text', label: '文字', anchor: { left: 0, top: 0 } })
+  cards.setSelectionRestriction(key, true)
   cards.setDraft(key, '  尚未发送的修改要求  ')
   const first = cards.flushDrafts()
   expect(cards.flushDrafts()).toBe(first)
@@ -588,4 +595,20 @@ it('pauses the accepted queue before stopping the card run and preserves a newer
   await cards.resumeQueue(key)
   await waitFor(() => expect(cards.view(key)!.entries[1]!.queuePausedReason).toBeUndefined())
   cards.forgetDocument('doc')
+})
+
+
+it('treats an element card as focus by default and freezes an explicit restriction per submission', async () => {
+  const f = executionFixture(), d = documentsFixture()
+  const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings(), documents: () => d.documents })
+  cards.setWorkspace('workspace')
+  const key = cards.ensure({ documentId: 'doc', target: target('a'), label: '标题' })
+  await cards.send(key, '调整这一页的标题与说明', capture('a'))
+  expect(f.api.send.mock.calls[0]![0].documents[0]).toMatchObject({ selection: [target('a')], writable: [{ kind: 'document' }] })
+  cards.setSelectionRestriction(key, true)
+  f.control.next = 'queued'
+  await cards.send(key, '仅修改标题', capture('a'))
+  expect(f.api.send.mock.calls[1]![0].documents[0]).toMatchObject({ selection: [target('a')], writable: [target('a')] })
+  expect(f.api.send.mock.calls[0]![0].documents[0].writable).toEqual([{ kind: 'document' }])
+  act(() => d.close('doc'))
 })

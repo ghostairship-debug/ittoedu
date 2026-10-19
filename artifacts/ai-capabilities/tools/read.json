@@ -1,5 +1,5 @@
 {
-  "description": "分页读取目标文字或属性；返回 data.target 是当前内容的新短句柄，后续编辑应使用它。nextCursor 续读仍配原调用的 target；外部修改目标时明确冲突。",
+  "description": "直接读取已知目标的语义正文，省略detail不附工程目录或源码；detail=object显式读取完整目标属性。返回 data.target 对应本次读取的当前基线。nextCursor 续读仍配原调用的 target。本任务已回执的修改由软件续接既有目标，目标未改变、未冲突时不需为每次操作重读或刷新句柄；外部修改仍明确冲突。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -19,6 +19,13 @@
     "properties": {
       "cursor": {
         "minLength": 1,
+        "type": "string"
+      },
+      "detail": {
+        "enum": [
+          "semantic",
+          "object"
+        ],
         "type": "string"
       },
       "limit": {

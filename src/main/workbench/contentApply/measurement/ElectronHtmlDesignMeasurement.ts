@@ -2,7 +2,7 @@ import { app, BrowserWindow, session } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { configureRestrictedSession, hardenWebContents } from '../../../security'
 import { HTML_PREVIEW_SCHEME } from '../../../protocols'
-import { assembleMeasuredHtml, sourceProgramAssembly, type HtmlAssembly, type HtmlAssemblyDiagnostic, type HtmlDesignCapture } from '../../../../core/contentApply/assembly/htmlAssembly'
+import { assembleMeasuredHtml, confirmProgramRootSize, measuredHtmlKind, sourceProgramAssembly, type HtmlAssembly, type HtmlAssemblyDiagnostic, type HtmlDesignCapture } from '../../../../core/contentApply/assembly/htmlAssembly'
 import { captureHtmlDesignViewport } from './browserCapture'
 import { prepareMeasurementDocument, retainedMeasurementScopeHtml } from './prepareMeasurementDocument'
 import { cssUsesViewport } from '../../../../components/web/measuredFragmentBox'
@@ -14,6 +14,8 @@ export interface HtmlDesignMeasurementRequest {
   /** Software operation context may preserve an explicit whole-page redo. */
   framing?: 'viewport' | 'content'
   themeCss?: string
+  /** Live course layer for measurement only; never copied into the assembled source. */
+  courseThemeCss?: string
   /** Prepared cw-resource references/keys -> browser URLs (normally data URLs), supplied by the resource owner. */
   resourceUrls?: Readonly<Record<string, string>>
   diagnostics?: readonly HtmlAssemblyDiagnostic[]
@@ -84,12 +86,31 @@ export async function measureHtmlAtDesignViewport(request: HtmlDesignMeasurement
       // a missing native view; logical CSS sizing must still be independent of window/DPI rounding.
       worker.webContents.enableDeviceEmulation({ screenPosition: 'desktop', screenSize: { width, height },
         viewPosition: { x: 0, y: 0 }, deviceScaleFactor: 1, viewSize: { width, height }, scale: 1 })
-      return await worker.webContents.executeJavaScript(`(${captureHtmlDesignViewport.toString()})(${JSON.stringify(resourceWaitMs)},(${cssUsesViewport.toString()}))`) as HtmlDesignCapture
+      return await worker.webContents.executeJavaScript(`(${captureHtmlDesignViewport.toString()})(${JSON.stringify(resourceWaitMs)},(${cssUsesViewport.toString()}),(${measuredHtmlKind.toString()}))`) as HtmlDesignCapture
     })()])
     if (capture.viewport.width !== width || capture.viewport.height !== height) capture.diagnostics.push({
       level: 'warning', code: 'html-design-viewport',
       message: `测量视口实际为 ${capture.viewport.width}×${capture.viewport.height}，请求为 ${width}×${height}；已保留实测几何与原始源码。`,
     })
+    if (prepared.documentProgramReason && capture.programRoot) {
+      const root = capture.programRoot
+      // Explicit documents retain their document canvas. A fragment's fixed
+      // absolute root instead uses a local carrier with a software-owned origin.
+      if (prepared.documentKind !== 'fragment') delete root.localPlacement
+      const candidate = { width: Math.ceil(root.width + (root.localPlacement ? 0 : root.x)), height: Math.ceil(root.height + (root.localPlacement ? 0 : root.y)) }
+      worker.webContents.enableDeviceEmulation({ screenPosition: 'desktop', screenSize: candidate,
+        viewPosition: { x: 0, y: 0 }, deviceScaleFactor: 1, viewSize: candidate, scale: 1 })
+      const checked = await Promise.race([stopped, worker.webContents.executeJavaScript(`(async function(path, media) {
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        let node = document.body;
+        for (const index of path) node = node && node.childNodes[index];
+        if (!(node instanceof Element)) return undefined;
+        const box = node.getBoundingClientRect();
+        return { x: box.x, y: box.y, width: box.width, height: box.height, mediaMatches: media.map(query => matchMedia(query).matches) };
+      })(${JSON.stringify(root.sourcePath)},${JSON.stringify(root.media?.map(value => value.query) ?? [])})`) as Promise<{ x: number; y: number; width: number; height: number; mediaMatches: boolean[] } | undefined>])
+      confirmProgramRootSize(capture, checked)
+      request.signal?.throwIfAborted()
+    }
     // Do not persist temporary browser URLs in an assembly style or resource diagnostic.
     const references = Object.entries(request.resourceUrls ?? {}).map(([key, value]) => [value, key.startsWith('cw-resource:') ? key : /^[a-zA-Z0-9_.-]+$/.test(key) ? `cw-resource:${key}` : key] as const)
       .sort(([left], [right]) => right.length - left.length)

@@ -11,7 +11,7 @@ export const toolFamilies = ['content', 'layout', 'navigation', 'interaction', '
 export type ToolFamily = typeof toolFamilies[number]
 
 /** These are the existing service owners, supplied by the composition root. */
-export type ToolSupportContext = Partial<Record<'componentContent' | 'images' | 'skills' | 'deliveries' | 'observations'
+export type ToolSupportContext = Partial<Record<'componentContent' | 'images' | 'skills' | 'deliveries' | 'observations' | 'viewActions'
   | 'projectFiles' | 'files' | 'office' | 'artifacts' | 'materials' | 'htmlActions' | 'pptxImport' | 'jobs' | 'compute' | 'delegation' | 'web' | 'mcp' | 'media' | 'openImages' | 'assetLibrary', boolean>> & {
   scopes?: readonly RunToolScope[]
   standaloneImage?: boolean
@@ -87,6 +87,11 @@ export function hasRunDocument(context: ToolSupportContext, kind?: DocumentKind)
 export function hasRunWrite(context: ToolSupportContext, kinds: readonly ToolTarget['kind'][] = [], documentKind?: DocumentKind): boolean {
   return context.scopes === undefined || context.scopes.some(scope => (!documentKind || scope.kind === documentKind)
     && (scope.wholeDocumentWritable || kinds.some(kind => scope.writableTargetKinds.includes(kind))))
+}
+/** Saving current Session content is independent of the target range allowed for edits. */
+export function hasRunDelivery(context: ToolSupportContext, kind?: DocumentKind): boolean {
+  return context.scopes === undefined || context.scopes.some(scope => (!kind || scope.kind === kind)
+    && (scope.wholeDocumentWritable || scope.writableTargetKinds.length > 0))
 }
 export function supportsWorkbenchService(context: ToolSupportContext, service: 'jobs' | 'compute' | 'delegation' | 'web' | 'mcp' | 'media' | 'openImages' | 'assetLibrary'): boolean {
   return context.workbenchServices !== false && context[service] !== false

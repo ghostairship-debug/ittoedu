@@ -30,6 +30,39 @@ function request(): ModelRequest { return { requestId: 'test', selection: { mode
   tools: [{ name: 'text.replace', description: 'replace', inputSchema: { type: 'object', properties: { text: { type: 'string' } } } }] } }
 async function collect(provider: ChatGPTResponsesProvider, input: ModelRequest, signal?: AbortSignal) { const events: ModelEvent[] = []; for await (const event of provider.stream(input, { signal })) events.push(event); return events }
 
+it.each((['chatgpt-responses', 'openai-responses'] as const).flatMap(protocol =>
+  [0, 7, undefined].map(cacheWriteTokens => ({ protocol, cacheWriteTokens }))))(
+  'preserves reported cache_write_tokens=$cacheWriteTokens for $protocol without inferring missing usage', async ({ protocol, cacheWriteTokens }) => {
+    const input = request()
+    input.selection.connection.protocol = protocol
+    if (protocol === 'openai-responses') {
+      input.selection.connection.baseURL = 'https://api.openai.com/v1'
+      input.selection.connection.auth = { kind: 'api-key', credentialRef: 'own-api-ref' }
+    }
+    const rawUsage = { input_tokens: 20, output_tokens: 5, total_tokens: 25,
+      input_tokens_details: { cached_tokens: 3, ...(cacheWriteTokens === undefined ? {} : { cache_write_tokens: cacheWriteTokens }) } }
+    const transport = await serve(async (req, res) => {
+      await body(req)
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      res.end(frame({ type: 'response.completed', response: { id: 'usage-response', model: 'fixture-model', status: 'completed',
+        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'OK' }] }], usage: rawUsage } }))
+    })
+    const provider = protocol === 'chatgpt-responses'
+      ? new ChatGPTResponsesProvider({ fetch: transport, credentialResolver: async () => ({ accessToken: 'own-token', accountId: 'account' }) })
+      : new OpenAIResponsesProvider({ fetch: transport, credentialResolver: async () => 'own-api-token' })
+    const events = await collect(provider, input)
+    const reported = events.find(event => event.type === 'usage.reported')
+    const completed = events.at(-1)
+    expect(reported?.type).toBe('usage.reported')
+    expect(completed?.type).toBe('response.completed')
+    if (reported?.type !== 'usage.reported' || completed?.type !== 'response.completed') throw new Error(JSON.stringify(events))
+    for (const usage of [reported.usage, completed.usage]) {
+      expect(usage).toMatchObject({ inputTokens: 20, outputTokens: 5, totalTokens: 25, cachedInputTokens: 3, raw: rawUsage })
+      if (cacheWriteTokens === undefined) expect(usage).not.toHaveProperty('cacheWriteInputTokens')
+      else expect(usage?.cacheWriteInputTokens).toBe(cacheWriteTokens)
+    }
+  })
+
 it('maps the selected OAuth reasoning strength only through the Responses reasoning object', () => {
   const input = request()
   input.selection.parameters = { reasoning_effort: 'low', max_output_tokens: 512 }
@@ -360,6 +393,37 @@ it('classifies ChatGPT structured 429 insufficient_quota without leaking its res
   const events = await collect(provider, request())
   expect(events.at(-1)).toMatchObject({ type: 'response.failed', failure: { kind: 'quota', outcome: 'rejected', code: 'http-429' } })
   expect(JSON.stringify(events)).not.toContain('own-token')
+})
+
+it('retains bounded transport stage, cause code and last event without exception or stream secrets', async () => {
+  const secret = 'private-token https://private.example/path prompt stack'
+  let calls = 0
+  const beforeHeaders = new ChatGPTResponsesProvider({ fetch: async () => {
+    calls++; throw new TypeError(secret, { cause: Object.assign(new Error(secret), { code: 'ECONNRESET' }) })
+  }, credentialResolver: async () => ({ accessToken: secret, accountId: 'account' }) })
+  const before = await collect(beforeHeaders, request())
+  expect(before.at(-1)).toMatchObject({ type: 'response.failed', failure: { code: 'chatgpt-transport', kind: 'transport', outcome: 'unknown',
+    transport: { phase: 'fetch-before-headers', errorClass: 'TypeError', errorCode: 'ECONNRESET', httpResponseReceived: false } } })
+  for (const eventType of ['response.output_text.delta', secret]) {
+    let read = 0
+    const provider = new ChatGPTResponsesProvider({ fetch: async () => {
+      calls++
+      return new Response(new ReadableStream({ pull(controller) {
+        if (read++ === 0) controller.enqueue(new TextEncoder().encode(frame({ type: 'response.created', response: { id: 'one' } })))
+        else if (read === 2) controller.enqueue(new TextEncoder().encode(frame({ type: eventType, delta: 'visible' })))
+        else controller.error(new TypeError(secret, { cause: Object.assign(new Error(secret), { code: eventType === secret ? secret : 'UND_ERR_SOCKET' }) }))
+      } }), { headers: { 'content-type': 'text/event-stream' } })
+    }, credentialResolver: async () => ({ accessToken: secret, accountId: 'account' }) })
+    const events = await collect(provider, request()), terminal = events.at(-1)
+    expect(terminal).toMatchObject({ type: 'response.failed', failure: { code: 'chatgpt-transport', outcome: 'unknown',
+      transport: { phase: 'body-read', httpResponseReceived: true, httpStatus: 200,
+        lastEventType: eventType === secret ? 'other' : eventType } } })
+    expect(JSON.stringify(events)).not.toContain(secret)
+    if (terminal?.type !== 'response.failed') throw new Error('missing failure')
+    expect(terminal.failure.transport?.errorCode).toBe(eventType === secret ? undefined : 'UND_ERR_SOCKET')
+  }
+  expect(JSON.stringify(before)).not.toContain(secret)
+  expect(calls).toBe(3)
 })
 
 it('distinguishes provider terminal SSE events from local protocol mismatch and stream truncation without leaking payloads', async () => {

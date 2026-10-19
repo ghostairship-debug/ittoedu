@@ -1,4 +1,5 @@
 import { hasWebContentData } from '../../../components/web/sourcePreparation'
+import { ownedDocumentExecutionSource } from '../../../components/web/ownedDocumentIdentity'
 import type {
   ComponentDefinition, ComponentImplementation, ComponentInstance, ComponentRuntimeImplementation,
   ComponentRuntimeScope, ComponentRuntimeTarget, JsonValue, MountedComponent,
@@ -7,6 +8,20 @@ import type {
 import type { WebModuleGraph } from '../../../components/web/moduleGraph'
 
 export type ComponentRuntimePorts = Pick<ComponentRuntimeScope, 'target' | 'events' | 'state'>
+
+/** An observation of the existing runtime slot, never author metadata. */
+export interface ComponentRuntimeCapabilities {
+  status: 'unprepared' | 'preparing' | 'ready' | 'failed'
+  generation?: number
+  document?: 'web'
+  html?: string
+}
+
+export interface ComponentRuntimeNavigationPort {
+  read(instanceId: string): ComponentRuntimeCapabilities
+  /** The navigation owner makes its target visible before asking for readiness. */
+  prepare(instanceId: string, signal: AbortSignal): Promise<boolean>
+}
 
 /** A transient loaded module, not a second author definition or source store. */
 export interface PreparedComponentRuntime {
@@ -35,6 +50,9 @@ export interface ComponentRuntimeHostOptions {
   interactions?(context: ComponentRuntimeContext): ComponentRuntimeContext['interactions']
   /** Dormant instances stay alive, while the World owns whether they may affect the current scene. */
   canInteract?(runScopeId: string, instanceId: string): boolean
+  /** A carrier may materialize compact delivery data through its existing reader. */
+  documentHtml?(instance: ComponentInstance): string | undefined
+  capabilitiesChanged?(runScopeId: string, instanceId: string): void
   reportError?(error: unknown, phase: 'prepare' | 'update' | 'dispose', runScopeId: string, instanceId: string): void
 }
 
@@ -83,6 +101,7 @@ interface Preparation {
 interface RuntimeSlot {
   active?: RuntimeRecord
   preparing?: Preparation
+  failed?: boolean
   retiring: Promise<void>
 }
 
@@ -92,7 +111,8 @@ function webSource(request: ComponentRuntimeRequest, preparing = true, sourceWeb
   // HTML and local modules jointly own their iframe generation. Source replacement
   // retires old globals, timers and pending module evaluation through the existing realm lifecycle.
   return hasWebContentData(data) && (implementation.kind === 'source' ? preparing || sourceWeb : ['guoling.web', 'guoling.html-program'].includes(implementation.key))
-      ? preparing || implementation.kind === 'source' ? [data.html, data.modules, data.moduleGraph] : [data.html, data.moduleGraph] : undefined
+      ? preparing || implementation.kind === 'source' ? [ownedDocumentExecutionSource(data.html), data.modules, data.moduleGraph]
+        : [ownedDocumentExecutionSource(data.html), data.moduleGraph] : undefined
 }
 
 function implementationSignature(request: ComponentRuntimeRequest): string {
@@ -130,6 +150,27 @@ export class ComponentRuntimeHost {
   private generation = 0
 
   constructor(private readonly options: ComponentRuntimeHostOptions) {}
+
+  capabilities(runScopeId: string, instanceId: string): ComponentRuntimeCapabilities {
+    const slot = this.scopes.get(runScopeId)?.get(instanceId)
+    const active = slot?.active
+    // Preparation may retain the current executable generation. Its capability
+    // remains factual until that generation is actually retired.
+    if (active?.scope.isActive()) return { status: slot?.preparing ? 'preparing' : 'ready', generation: active.scope.generation,
+      ...(active.webDocument ? { document: 'web', html: this.documentHtml(active.request.instance) } : {}) }
+    if (slot?.preparing) return { status: 'preparing', generation: slot.preparing.record?.scope.generation,
+      html: this.documentHtml(slot.preparing.request.instance) }
+    return { status: slot?.failed ? 'failed' : 'unprepared' }
+  }
+
+  private documentHtml(instance: ComponentInstance): string | undefined {
+    return this.options.documentHtml ? this.options.documentHtml(instance) : hasWebContentData(instance.data) ? instance.data.html : undefined
+  }
+
+  private notifyCapabilities(request: { runScopeId: string; instance: Pick<ComponentInstance, 'id'> }): void {
+    try { this.options.capabilitiesChanged?.(request.runScopeId, request.instance.id) }
+    catch { /* A view notification cannot change runtime ownership or cleanup. */ }
+  }
 
   create(request: ComponentRuntimeRequest): Promise<ComponentRuntimeHandle | null> {
     return this.sync(request)
@@ -175,8 +216,10 @@ export class ComponentRuntimeHost {
     const preparation: Preparation = {
       request, signature, controller: new AbortController(), promise: Promise.resolve(null),
     }
+    slot.failed = false
     slot.preparing = preparation
     preparation.promise = this.prepare(slot, preparation)
+    this.notifyCapabilities(request)
     return preparation.promise
   }
 
@@ -189,7 +232,9 @@ export class ComponentRuntimeHost {
     slot.preparing = undefined
     const active = slot.active
     slot.active = undefined
+    slot.failed = false
     active?.cancel()
+    this.notifyCapabilities({ runScopeId, instance: { id: instanceId } })
     // A resolver still in flight releases its returned module when it observes cancellation.
     slot.retiring = Promise.all([slot.retiring, active?.release(), pending?.record?.release()]).then(() => {})
     await slot.retiring
@@ -249,12 +294,13 @@ export class ComponentRuntimeHost {
         previous.signature = pending.signature
         slot.preparing = undefined
         // Hidden data remains pending: do not advance record.request until it can be projected.
-        if (pending.request.canProject?.() === false) return previous
+        if (pending.request.canProject?.() === false) { this.notifyCapabilities(pending.request); return previous }
         previous.updates = previous.updates.catch(() => {}).then(() => {
           const request = pending.request
           return this.update(previous, request, runtimeRequest(request).instance)
         })
         await previous.updates
+        this.notifyCapabilities(pending.request)
         return previous.scope.isActive() ? previous : null
       }
 
@@ -262,6 +308,7 @@ export class ComponentRuntimeHost {
       if (previous) {
         slot.active = undefined
         previous.cancel()
+        this.notifyCapabilities(pending.request)
         slot.retiring = Promise.all([slot.retiring, previous.release()]).then(() => {})
       }
       await slot.retiring
@@ -272,6 +319,7 @@ export class ComponentRuntimeHost {
       if (pending.request.canProject?.() === false) {
         if (slot.preparing === pending) slot.preparing = undefined
         await releasePrepared()
+        this.notifyCapabilities(pending.request)
         return null
       }
 
@@ -325,6 +373,7 @@ export class ComponentRuntimeHost {
       if (!record.mounted && pending.request.canProject?.() === false) {
         slot.preparing = undefined
         await record.release()
+        this.notifyCapabilities(pending.request)
         return null
       }
       if (!record.mounted || typeof record.mounted.update !== 'function' || typeof record.mounted.dispose !== 'function') {
@@ -332,7 +381,7 @@ export class ComponentRuntimeHost {
       }
       // The Source chooses its document only after its one real import. Keep that
       // observation with this generation so ordinary Source data remains incremental.
-      record.webDocument = prepared.isWebDocument?.() ?? false
+      record.webDocument = prepared.isWebDocument?.() ?? prepared.implementation.document === 'web'
       record.generationSignature = generationSignature(readyRequest, prepared, record.webDocument)
       // Activity can change while mount is awaiting. Apply its latest value to
       // this same instance before accepting subsequent author-data updates.
@@ -354,13 +403,18 @@ export class ComponentRuntimeHost {
       }
       slot.active = record
       slot.preparing = undefined
+      this.notifyCapabilities(pending.request)
       return record
     } catch (error) {
       const cancelled = controller.signal.aborted
       controller.abort()
       if (record) await record.release()
       else await releasePrepared?.()
-      if (slot.preparing === pending) slot.preparing = undefined
+      if (slot.preparing === pending) {
+        slot.preparing = undefined
+        slot.failed = !cancelled
+        this.notifyCapabilities(pending.request)
+      }
       if (cancelled) return null
       this.report(error, 'prepare', pending.request)
       throw error
@@ -394,7 +448,9 @@ export class ComponentRuntimeHost {
       if (JSON.stringify(record.request.instance.frame) !== JSON.stringify(request.instance.frame)) {
         record.mounted.updatePlacement?.(request.instance.frame)
       }
+      const oldHtml = record.webDocument && hasWebContentData(record.request.instance.data) ? record.request.instance.data.html : undefined
       record.request = request
+      if (record.webDocument && hasWebContentData(request.instance.data) && oldHtml !== request.instance.data.html) this.notifyCapabilities(request)
     } catch (error) {
       this.report(error, 'update', request)
       throw error

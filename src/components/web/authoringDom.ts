@@ -1,4 +1,4 @@
-import type { ComponentAuthorBinding, ComponentAuthorRecord, ComponentAuthorScope, ComponentAuthorGeometryObservation, ComponentAuthorGeometry } from '../../shared/contracts/component-platform/runtime'
+import type { ComponentAuthorBinding, ComponentAuthorRecord, ComponentAuthorScope, ComponentAuthorGeometryObservation, ComponentAuthorGeometry, ComponentAuthorSpotInput } from '../../shared/contracts/component-platform/runtime'
 
 export interface DomAuthorObservation {
   node: Text | HTMLImageElement
@@ -7,6 +7,7 @@ export interface DomAuthorObservation {
   initialValue: string
   bindingStatus: 'bound' | 'unresolved'
   geometry?: ComponentAuthorGeometryObservation
+  textStyle?: ComponentAuthorSpotInput['textStyle']
 }
 
 /**
@@ -16,6 +17,8 @@ export interface DomAuthorObservation {
  */
 export function createDomAuthoring(root: HTMLElement, options: {
   records(): Record<string, ComponentAuthorRecord>
+  /** Parser document identity, shared by observation and record rebinding. */
+  scope?: ComponentAuthorScope
   resolveResource?(reference: string): string | undefined
   resourceReference?(url: string): string | undefined
   originalText?(node: Text): string | undefined
@@ -131,7 +134,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
   const scopeOf = (element: Element): ComponentAuthorScope => {
     const cached = lookup?.scopes.get(element)
     if (cached) return cached
-    const scope = { ...reactScopes.get(element) }
+    const scope = { ...reactScopes.get(element), ...options.scope }
     let depth = 0
     for (let current: Element | null = element; current && root.contains(current); current = current.parentElement) {
       for (const attribute of [...current.attributes]) {
@@ -446,7 +449,6 @@ export function createDomAuthoring(root: HTMLElement, options: {
       let linear: Matrix = [1, 0, 0, 1, 0, 0]
       for (let current: HTMLElement | null = target; current; current = current.parentElement) {
         const style = win.getComputedStyle(current)
-        if (style.perspective && style.perspective !== 'none') return undefined
         const transform = new win.DOMMatrix(style.transform === 'none' ? undefined : style.transform)
         if (!transform.is2D) return undefined
         let rotation = 0
@@ -562,7 +564,14 @@ export function createDomAuthoring(root: HTMLElement, options: {
       }
       refresh()
     },
-    scan(): DomAuthorObservation[] { refresh(); return withLookup(() => targets().filter(visible).flatMap(node => { const value = describe(node); return value ? [{ ...value, geometry: geometry(node) }] : [] })) },
+    scan(): DomAuthorObservation[] { refresh(); return withLookup(() => targets().filter(visible).flatMap(node => {
+      const value = describe(node)
+      if (!value) return []
+      const style = node.nodeType === 3 ? win.getComputedStyle(elementOf(node)) : undefined
+      const textStyle = style ? Object.fromEntries(['font-family', 'font-size', 'color', 'font-weight', 'font-style', 'text-decoration-line',
+        'background-color', 'text-align', 'line-height', 'fill'].map(name => [name, style.getPropertyValue(name)])) : undefined
+      return [{ ...value, geometry: geometry(node), ...(textStyle ? { textStyle } : {}) }]
+    })) },
     hit(x: number, y: number): DomAuthorObservation | undefined {
       const element = doc.elementsFromPoint(x, y)[0]
       if (!element || !root.contains(element)) return undefined

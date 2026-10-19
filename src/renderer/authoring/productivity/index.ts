@@ -19,9 +19,9 @@ export function createProductivityPreview(context: ProductivityContext, request:
 export function createTextReplacePreview(context: ProductivityContext, request: Omit<Extract<ProductivityRequest, { kind: 'text' }>, 'kind'>) { return createProductivityPreview(context, { ...request, kind: 'text' }) }
 export function createTokenApplyPreview(context: ProductivityContext, request: Omit<Extract<ProductivityRequest, { kind: 'color' }>, 'kind'>) { return createProductivityPreview(context, { ...request, kind: 'color' }) }
 
-export function designProductionStep(context: ProductivityContext, edits: ComponentEdit[]): DesignProductionStep {
+export function designProductionStep(context: ProductivityContext, edits: ComponentEdit[], readPaths: readonly string[][] = []): DesignProductionStep {
   const mapped = presentationComponentEdits(context.target.project, context.target.surfaceId, context.target.activeStateId, edits)
-  return { ...captureComponentOperation(context.target.project, mapped), documentId: context.target.documentId, epoch: context.target.epoch, originSurfaceId: context.target.surfaceId }
+  return { ...captureComponentOperation(context.target.project, mapped, readPaths), documentId: context.target.documentId, epoch: context.target.epoch, originSurfaceId: context.target.surfaceId }
 }
 export function applyProductivityPreview(context: ProductivityContext, preview: ProductivityPreview, selectedIds: readonly string[]): ProductivityApplyResult {
   try {

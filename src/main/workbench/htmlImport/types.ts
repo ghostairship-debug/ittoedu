@@ -40,6 +40,8 @@ export interface ExtractHtmlResourcesInput {
 
 export interface ExtractHtmlResourcesResult {
   html: string
+  /** Actual normalized local dependencies, including unresolved references. */
+  localReferences: string[]
   /** Local ES-module source stays editable; runtime compilation is a projection. */
   modules?: Record<string, string>
   resources: ExtractedResource[]

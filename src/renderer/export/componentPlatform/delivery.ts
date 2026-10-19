@@ -32,6 +32,8 @@ export interface ComponentDeliveryReport {
 export interface ComponentOutputCapture {
   captureInstance(surfaceId: string, instanceId: string): Promise<PdfPrintImage | undefined>
   captureSurface(surfaceId: string, spatialFrameId?: string): Promise<PdfPrintImage | undefined>
+  /** Only the effective formal background; authored objects and global planes are absent. */
+  captureBackground?(surfaceId: string): Promise<PdfPrintImage | undefined>
   dispose(): void | Promise<void>
 }
 export interface ComponentDeliveryArtifact {
@@ -112,6 +114,9 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
           } : undefined,
           captureSurface: options.createCapture ? async ({ surface, page }) => {
             check(); const image = await (await getCapture())?.captureSurface(surface.id, page.spatialFrameId); check(); return image?.dataUrl
+          } : undefined,
+          captureBackground: options.createCapture ? async ({ surface }) => {
+            check(); const image = await (await getCapture())?.captureBackground?.(surface.id); check(); return image?.dataUrl
           } : undefined,
           onDiagnostic: () => check(),
         })

@@ -44,12 +44,15 @@ export function measuredFragmentBoxStyle(style: Readonly<Record<string, unknown>
 
 /** Visible overflow is a runtime projection. Explicit scrolling/clipping remains an internal author boundary. */
 export function measuredFragmentExtent(element: Element, frame: { width: number; height: number },
-  mode: ComponentLayoutInput['mode'] = 'free-frame'): { width: number; height: number } {
+  mode: ComponentLayoutInput['mode'] = 'free-frame', includeOrigin = false): { width: number; height: number; left?: number; top?: number } {
   const origin = element.getBoundingClientRect(), view = element.ownerDocument.defaultView
   let width = frame.width, height = mode === 'flow-content' ? origin.height : frame.height
+  let left = 0, top = 0
   const include = (rect: DOMRect, horizontal: boolean, vertical: boolean) => {
     if (horizontal) width = Math.max(width, rect.right - origin.left)
     if (vertical) height = Math.max(height, rect.bottom - origin.top)
+    if (includeOrigin && horizontal) left = Math.min(left, rect.left - origin.left)
+    if (includeOrigin && vertical) top = Math.min(top, rect.top - origin.top)
   }
   const walk = (parent: Element, horizontal: boolean, vertical: boolean) => {
     const style = view?.getComputedStyle(parent)
@@ -68,6 +71,7 @@ export function measuredFragmentExtent(element: Element, frame: { width: number;
     }
   }
   walk(element, true, true)
+  if (includeOrigin) return { left: Math.floor(left), top: Math.floor(top), width: Math.ceil(width) - Math.floor(left), height: Math.ceil(height) - Math.floor(top) }
   return { width: Math.ceil(width), height: Math.ceil(height) }
 }
 

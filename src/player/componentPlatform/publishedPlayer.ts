@@ -222,7 +222,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
   catch (error) { stopped = true; resourceController.abort(); navigation.dispose(); await player.dispose(); if (root !== hostRoot) root.remove(); throw error }
   if (surfaceId) player.revealSurface(surfaceId)
   if (!options.capture) navigation.changed()
-  const pointerChrome = options.capture ? undefined : mountPlaybackNavigationChrome(hostRoot, navigation, { content: root, report: options.report })
+  const pointerChrome = options.capture ? undefined : mountPlaybackNavigationChrome(hostRoot, navigation, { content: root, playback: model.project.playback, report: options.report })
   const tasks = navigation.createKeyTasks()
   const stopKeys = options.capture || options.keyboardNavigation === false ? undefined : attachComponentPlatformNavigationKeys({ root, navigation: tasks,
     keyboardNavigation: model.project.playback?.keyboardNavigation ?? true,

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { VisualAnalysisService } from '../../src/main/workbench/execution/VisualAnalysisService'
-import type { ModelChatMessage, ModelEvent, ModelSelection } from '../../src/shared/workbench/modelProvider'
+import type { ModelChatMessage, ModelEvent, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
 import type { ObservationResult } from '../../src/shared/workbench/toolPorts'
 
 const bytes = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'))
@@ -41,7 +41,7 @@ describe('frozen visual fallback', () => {
     ] })
   })
 
-  it('does not call again after unknown or failed response', async () => {
+  it('does not replay the same unknown request and allows a distinct observation purpose or capture', async () => {
     const facts: string[] = []
     const stream = vi.fn(async function* (): AsyncIterable<ModelEvent> {
       yield { requestId: 'r', sequence: 1, type: 'response.failed', failure: {
@@ -52,10 +52,14 @@ describe('frozen visual fallback', () => {
     expect(await service.analyze({ runId: 'run', observation, question: 'What?',
       onRequestEvent: async event => { facts.push(event.type) },
     })).toMatchObject({ status: 'vision-unavailable', outcome: 'unknown' })
+    expect(await service.analyze({ runId: 'run', observation, question: 'What?' }))
+      .toMatchObject({ status: 'vision-unavailable', outcome: 'unknown' })
+    expect(stream).toHaveBeenCalledOnce()
+    await service.analyze({ runId: 'run', observation, question: 'Is the title clipped?' })
     expect(await service.analyze({ runId: 'run', observation: { ...observation,
       image: { ...observation.image, resourceId: 'new-capture-of-same-page' } }, question: 'What?' }))
       .toMatchObject({ status: 'vision-unavailable', outcome: 'unknown' })
-    expect(stream).toHaveBeenCalledOnce()
+    expect(stream).toHaveBeenCalledTimes(3)
     expect(facts).toEqual(['sending', 'failed'])
   })
 
@@ -77,14 +81,49 @@ describe('frozen visual fallback', () => {
     ] })
   })
 
-  it('refuses a frozen connection whose image capability is unknown', async () => {
+  it('refuses only an explicitly unsupported frozen image capability', async () => {
     const stream = vi.fn()
     const service = new VisualAnalysisService({ frozenSelection: () => ({ ...selection, connection: {
-      ...selection.connection, capabilities: { ...selection.connection.capabilities, vision: 'unknown' },
+      ...selection.connection, capabilities: { ...selection.connection.capabilities, vision: 'unsupported' },
     } }), provider: { stream }, observation: { readResource: vi.fn() } })
     expect(await service.analyze({ runId: 'run', observation, question: 'What?' })).toMatchObject({
-      status: 'vision-unavailable', reason: expect.stringContaining('尚未验证'),
+      status: 'vision-unavailable', reason: expect.stringContaining('不支持图片'),
     })
     expect(stream).not.toHaveBeenCalled()
   })
+
+  it('uses the frozen unknown image capability once, without a probe or model switch', async () => {
+    const stream = vi.fn(async function* (_request: ModelRequest): AsyncIterable<ModelEvent> {
+      yield { requestId: 'r', sequence: 1, type: 'response.completed', responseId: 'response',
+        assistant: { role: 'assistant', content: '看到了真实截图。' }, toolCalls: [], finishReason: 'stop', nativeResponse: {} }
+    })
+    const unknown = { ...selection, connection: { ...selection.connection,
+      capabilities: { ...selection.connection.capabilities, vision: 'unknown' as const } } }
+    const service = new VisualAnalysisService({ frozenSelection: () => unknown, provider: { stream },
+      observation: { readResource: async () => ({ mimeType: 'image/png', bytes }) } })
+    const input = { runId: 'run', observation, question: '当前画面是什么？' }
+    expect(await service.analyze(input)).toMatchObject({ status: 'analyzed', conclusion: '看到了真实截图。' })
+    expect(await service.analyze(input)).toMatchObject({ status: 'analyzed' })
+    expect(stream).toHaveBeenCalledOnce()
+    expect(stream.mock.calls[0]![0]).toMatchObject({ selection: unknown, tools: [] })
+  })
+})
+
+
+it('keys image analysis by full question and actual bytes, preserving reported usage before an unknown ending', async () => {
+  const events: unknown[] = []
+  const usage = { inputTokens: 41, outputTokens: 7, totalTokens: 48, cachedInputTokens: 22, reasoningTokens: 4, raw: { vendor_counter: 9 } }
+  const stream = vi.fn(async function* (): AsyncIterable<ModelEvent> {
+    yield { requestId: 'r', sequence: 1, type: 'usage.reported', usage }
+    yield { requestId: 'r', sequence: 2, type: 'response.failed', failure: { outcome: 'unknown', kind: 'transport', code: 'lost', message: 'lost' } }
+  })
+  const service = new VisualAnalysisService({ frozenSelection: () => selection, provider: { stream }, observation: { readResource: vi.fn() } })
+  const source: ModelChatMessage = { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }] }
+  const input = { runId: 'run', sourceId: 'same', source, question: 'x'.repeat(2100) + ' A', onRequestEvent: async (event: unknown) => { events.push(event) } }
+  await Promise.all([service.analyzeImage(input), service.analyzeImage(input)])
+  expect(stream).toHaveBeenCalledOnce()
+  expect(events).toEqual([expect.objectContaining({ type: 'sending' }), expect.objectContaining({ type: 'usage', usage }), expect.objectContaining({ type: 'failed', failure: { outcome: 'unknown', kind: 'transport', code: 'lost', message: 'lost' } })])
+  await service.analyzeImage({ ...input, question: 'x'.repeat(2100) + ' B' })
+  await service.analyzeImage({ ...input, source: { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,BBBB' } }] } })
+  expect(stream).toHaveBeenCalledTimes(3)
 })

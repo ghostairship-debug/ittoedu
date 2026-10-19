@@ -1,11 +1,13 @@
 import { isDeepStrictEqual } from 'node:util'
-import type { ModelAssistantMessage, ModelConnectionSnapshot, ModelEvent, ModelFailure, ModelJsonObject, ModelProvider, ModelRequest, ModelUsage } from '../../../shared/workbench/modelProvider'
+import type { ModelAssistantMessage, ModelConnectionSnapshot, ModelEvent, ModelFailure, ModelJsonObject, ModelProvider, ModelRequest, ModelUsage, PreparedModelRequest, ModelTransportDiagnostic } from '../../../shared/workbench/modelProvider'
+import { modelAcceptsImages } from '../../../shared/workbench/modelProvider'
 import { effectiveModelProtocol } from '../../../shared/workbench/modelRouting'
 import { normalizeModelOutputParameters } from '../../../shared/workbench/modelOutputParameters'
 import { modelToolWireName, waitForModelOperation } from './OpenAIChatProvider'
 import { serverSentEvents } from './serverSentEvents'
-import { modelFetch, responseIdleTimeoutCode } from './modelFetch'
+import { modelFetch, responseIdleTimeoutCode, transportDiagnostic } from './modelFetch'
 import { httpFailure, providerStreamFailure } from './providerHttpFailure'
+import { providerSessionCacheParameters } from './providerSessionAffinity'
 
 export const CHATGPT_RESPONSES_BASE_URL = 'https://chatgpt.com/backend-api/codex'
 interface ResponsesTransportOptions {
@@ -33,7 +35,14 @@ class ProviderResponseError extends Error {
   constructor(readonly code: 'chatgpt-provider-sse-error' | 'chatgpt-provider-response-failed' | 'chatgpt-provider-response-incomplete',
     readonly incompleteReason?: 'max_output_tokens' | 'content_filter', readonly failure?: ReturnType<typeof providerStreamFailure>) { super(code) }
 }
-type Payload = Pick<ModelRequest, 'selection' | 'messages' | 'tools' | 'nativeSearch'>
+type Payload = Pick<ModelRequest, 'selection' | 'messages' | 'tools' | 'nativeSearch' | 'sessionAffinity'>
+const diagnosticEventTypes = new Set<NonNullable<ModelTransportDiagnostic['lastEventType']>>([
+  'response.created', 'response.in_progress', 'response.output_item.added', 'response.output_item.done',
+  'response.content_part.added', 'response.content_part.done', 'response.output_text.delta', 'response.output_text.done',
+  'response.function_call_arguments.delta', 'response.function_call_arguments.done', 'response.reasoning_summary_text.delta',
+  'response.reasoning_summary_text.done', 'response.refusal.delta', 'response.refusal.done',
+  'response.completed', 'response.failed', 'response.incomplete', 'error',
+])
 
 function prepare(request: Payload, protocol: ResponsesProtocol) {
   const { connection, model, parameters = {} } = request.selection
@@ -94,12 +103,12 @@ function prepare(request: Payload, protocol: ResponsesProtocol) {
         if (!object(part)) throw new Error('invalid-content')
         if (part.type === 'text' && typeof part.text === 'string') return { ...part, type: 'input_text' }
         if (part.type === 'image_url' && object(part.image_url) && text(part.image_url.url)) {
-          if (connection.capabilities.vision === 'unsupported') throw new Error('unsupported-vision')
+          if (!modelAcceptsImages(connection.capabilities.vision)) throw new Error('unsupported-vision')
           if (Object.keys(part).some(key => !['type', 'image_url'].includes(key)) || Object.keys(part.image_url).some(key => !['url', 'detail'].includes(key))) throw new Error('unsupported-image-fields')
           return { type: 'input_image', image_url: part.image_url.url, ...(part.image_url.detail ? { detail: part.image_url.detail } : {}) }
         }
         if (['input_text', 'input_image', 'input_file', 'output_text'].includes(String(part.type))) {
-          if (part.type === 'input_image' && connection.capabilities.vision === 'unsupported') throw new Error('unsupported-vision')
+          if (part.type === 'input_image' && !modelAcceptsImages(connection.capabilities.vision)) throw new Error('unsupported-vision')
           return structuredClone(part)
         }
         throw new Error('unsupported-content')
@@ -108,7 +117,7 @@ function prepare(request: Payload, protocol: ResponsesProtocol) {
     input.push({ role: message.role, content })
   }
   if (!input.length) throw new Error('missing-input')
-  return { names, endpoint: connection.baseURL.replace(/\/+$/, '') + '/responses', body: { ...wireParameters, model, instructions: instructions.join('\n\n') || 'You are a helpful assistant.', input, ...(tools?.length ? { tools } : {}), stream: true, store: false,
+  return { names, endpoint: connection.baseURL.replace(/\/+$/, '') + '/responses', body: { ...providerSessionCacheParameters(request), ...wireParameters, model, instructions: instructions.join('\n\n') || 'You are a helpful assistant.', input, ...(tools?.length ? { tools } : {}), stream: true, store: false,
     ...(request.nativeSearch ? { tool_choice: { type: 'web_search' } } : {}),
     include: ['reasoning.encrypted_content', ...(request.nativeSearch ? ['web_search_call.action.sources'] : [])] } }
 }
@@ -121,6 +130,7 @@ function usageOf(raw: ModelJsonObject): ModelUsage {
   const usage: ModelUsage = { raw: structuredClone(raw) }
   for (const [key, value] of Object.entries({ inputTokens: raw.input_tokens, outputTokens: raw.output_tokens, totalTokens: raw.total_tokens,
     cachedInputTokens: object(raw.input_tokens_details) ? raw.input_tokens_details.cached_tokens : undefined,
+    cacheWriteInputTokens: object(raw.input_tokens_details) ? raw.input_tokens_details.cache_write_tokens : undefined,
     reasoningTokens: object(raw.output_tokens_details) ? raw.output_tokens_details.reasoning_tokens : undefined })) {
     if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) Object.assign(usage, { [key]: value })
   }
@@ -136,7 +146,25 @@ function retryAfter(value: string | null, now: number): number | undefined {
 class ResponsesProvider implements ModelProvider {
   readonly retrySafety = 'pure-generation' as const
   constructor(private readonly options: ChatGPTResponsesProviderOptions | OpenAIResponsesProviderOptions, private readonly protocol: ResponsesProtocol) {}
+  prepare(input: Payload): PreparedModelRequest {
+    const request = structuredClone(input)
+    const prepared = prepare(request, this.protocol)
+    const serialized = JSON.stringify(prepared.body)
+    return { serialized, stream: (requestId, options) => this.streamPrepared({ ...request, requestId }, prepared, serialized, options) }
+  }
   async *stream(input: ModelRequest, options: { signal?: AbortSignal } = {}): AsyncGenerator<ModelEvent> {
+    let prepared: PreparedModelRequest
+    try { if (!input.requestId) throw new Error('missing-request-id'); prepared = this.prepare(input) }
+    catch {
+      const providerLabel = this.protocol === 'chatgpt-responses' ? 'ChatGPT' : 'Responses API'
+      yield { requestId: input.requestId, sequence: 1, type: 'response.failed', failure: {
+        outcome: 'not-sent', kind: 'configuration', code: 'invalid-model-request', message: `${providerLabel} 连接或请求配置无效；请求未发送。` } }
+      return
+    }
+    yield* prepared.stream(input.requestId, options)
+  }
+  private async *streamPrepared(input: ModelRequest, prepared: ReturnType<typeof prepare>, serialized: string,
+    options: { signal?: AbortSignal } = {}): AsyncGenerator<ModelEvent> {
     let sequence = 0, attempted = false
     const providerLabel = this.protocol === 'chatgpt-responses' ? 'ChatGPT' : 'Responses API'
     const failureCode = (code: string) => this.protocol === 'chatgpt-responses' ? code : code.replace(/^chatgpt-/, 'responses-')
@@ -146,11 +174,9 @@ class ResponsesProvider implements ModelProvider {
     options.signal?.addEventListener('abort', abort, { once: true })
     if (options.signal?.aborted) abort()
     let response: Response | undefined, providerRequestId: string | undefined
+    let lastEventType: ModelTransportDiagnostic['lastEventType']
     try {
-      const request = structuredClone(input)
-      let prepared: ReturnType<typeof prepare>
-      try { if (!request.requestId) throw new Error(); prepared = prepare(request, this.protocol) }
-      catch { yield event({ type: 'response.failed', failure: { outcome: 'not-sent', kind: 'configuration', code: 'invalid-model-request', message: `${providerLabel} 连接或请求配置无效；请求未发送。` } }); return }
+      const request = input
       let credential: string | { accessToken: string; accountId: string }
       try { credential = await waitForModelOperation<string | { accessToken: string; accountId: string }>(() => this.options.credentialResolver(request.selection.connection), controller.signal) }
       catch { controller.signal.throwIfAborted(); yield event({ type: 'response.failed', failure: { outcome: 'not-sent', kind: 'auth', code: 'credential-unavailable', message: `${providerLabel} 凭据不可用；请求未发送。` } }); return }
@@ -172,7 +198,7 @@ class ResponsesProvider implements ModelProvider {
       attempted = true
       response = await modelFetch(this.options.fetch)(prepared.endpoint, {
         method: 'POST', redirect: 'error', signal: controller.signal,
-        headers, body: JSON.stringify(prepared.body),
+        headers, body: serialized,
       })
       providerRequestId = response.headers.get('x-request-id') ?? response.headers.get('request-id') ?? undefined
       credential = { accessToken: '', accountId: '' }
@@ -209,6 +235,8 @@ class ResponsesProvider implements ModelProvider {
         sawFramedEvent = true
         const chunk: unknown = JSON.parse(data)
         if (!object(chunk) || !text(chunk.type)) throw new ProtocolError()
+        lastEventType = diagnosticEventTypes.has(chunk.type as NonNullable<ModelTransportDiagnostic['lastEventType']>)
+          ? chunk.type as NonNullable<ModelTransportDiagnostic['lastEventType']> : 'other'
         if (object(chunk.response) && object(chunk.response.usage)) yield event({ type: 'usage.reported', usage: usageOf(chunk.response.usage) })
         // These are explicit provider terminal events. Never forward their untrusted error text or payload.
         if (chunk.type === 'error') throw new ProviderResponseError('chatgpt-provider-sse-error', undefined, providerStreamFailure(chunk.error ?? chunk))
@@ -332,7 +360,9 @@ class ResponsesProvider implements ModelProvider {
             id: item.call_id as string, type: 'function', function: { name: item.name as string, arguments: item.arguments as string },
           }))
           yield event({ type: 'response.completed', responseId, ...(headerModel || streamModel ? { actualModel: headerModel || streamModel } : {}), assistant, toolCalls: calls,
-            finishReason: lengthTerminated ? 'length' : calls.length ? 'tool_calls' : 'stop', ...(object(native.usage) ? { usage: usageOf(native.usage) } : {}),
+            finishReason: lengthTerminated ? 'length' : calls.length ? 'tool_calls' : 'stop',
+            ...(lengthTerminated ? { finishDetails: { reason: 'max_output_tokens', limit: 'output' } } : {}),
+            ...(object(native.usage) ? { usage: usageOf(native.usage) } : {}),
             nativeResponse: structuredClone({ ...native, output }) })
           completed = true; break
         }
@@ -365,7 +395,9 @@ class ResponsesProvider implements ModelProvider {
               : attempted ? `${providerLabel} 请求未取得完整结果，执行状态未知；是否重试由执行器决定，已提交工具不会重放。` : `${providerLabel} 请求未发送。`
       yield event({ type: 'response.failed', failure: { ...(providerFailure?.failure ?? {}), ...(providerRequestId ? { providerRequestId } : {}),
         ...(providerFailure ? { httpStatus: 200 } : {}), outcome: providerFailure && providerFailure.code !== 'chatgpt-provider-response-incomplete'
-        ? 'rejected' : attempted ? 'unknown' : 'not-sent', kind, code: providerFailure?.failure?.code ?? failureCode(code), message: providerFailure?.failure?.message ?? message } })
+        ? 'rejected' : attempted ? 'unknown' : 'not-sent', kind, code: providerFailure?.failure?.code ?? failureCode(code), message: providerFailure?.failure?.message ?? message,
+        ...((kind === 'transport' || kind === 'timeout') ? { transport: { ...transportDiagnostic(error, response, response?.status),
+          ...(lastEventType ? { lastEventType } : {}) } } : {}) } })
     } finally {
       options.signal?.removeEventListener('abort', abort); controller.abort()
       if (response?.body && !response.body.locked) await response.body.cancel().catch(() => undefined)

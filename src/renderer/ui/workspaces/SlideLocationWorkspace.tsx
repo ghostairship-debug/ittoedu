@@ -2,6 +2,7 @@ import type { TextRangeProjection } from '../../../shared/document/textInteracti
 import { Hand, Maximize2, Minus, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { resolveComponentBackground, resolveComponentPresentation, isComponentVisibleAtSurface, type ComponentAuthorGeometry, type ComponentAuthorSpot, type ComponentEdit, type ComponentFrame, type CourseProjectV10 } from '../../../shared/contracts/component-platform'
+import { ComponentBackgroundPaint } from '../../components/ComponentBackgroundPaint'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import type { SlideContentEdit } from '../../store/slices/slideAuthoringSlice'
 import { NativeSelectionContext } from '../../workbench/NativeSelectionContext'
@@ -162,6 +163,8 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     instanceToSurface: AffineMatrix; frame?: ComponentFrame; geometry?: ReturnType<AuthorSpotTransformGesture['update']>['geometry']; moved: boolean;
     preview?: SlideWorkspacePorts['previewAuthorSpot'] } | null>(null)
   const suppressSpotClick = useRef(false)
+  const plainSpotPointer = useRef<{ id: number; ended: boolean; resolved: boolean } | null>(null)
+  const hoverHitSequence = useRef(0)
   const [, refreshNavigation] = useState(0)
   useEffect(() => ports.teacherController?.subscribe(() => refreshNavigation(value => value + 1)), [ports.teacherController])
   useEffect(() => ports.teacherController?.subscribePlacement?.(() => refreshNavigation(value => value + 1)), [ports.teacherController])
@@ -352,15 +355,32 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     return undefined
   }
   const spotAt = (at: GeometryPoint) => spotTargetAt(at)?.spot
+  // These fields never start an internal transform gesture. Their carrier's
+  // transparent full frame must be resolved by its existing realm paint owner.
+  const plainRealmSpotAt = (at: GeometryPoint) => [...spotTargets].reverse().find(value => {
+    if (value.spot.geometry || !frameContainsPoint(value.frame, at)) return false
+    const instance = project!.instances[value.spot.instanceId]
+    const implementation = instance?.implementationOverride ?? project!.definitions[instance?.definitionId]?.implementation
+    return implementation?.kind === 'source' || implementation?.kind === 'builtin' && ['guoling.web', 'guoling.html-program'].includes(implementation.key)
+  })
   const resolveSpotAt = async (at: GeometryPoint) => {
-    const candidate = spotTargetAt(at)
-    if (!candidate) return undefined
-    const local = transformPoint(invertMatrix(frameToSpaceMatrix(candidate.target.frame, candidate.target.parentToSurface)), at)
-    const root = [...(stageRef.current?.querySelectorAll<HTMLElement>('[data-component-render]') ?? [])]
-      .find(element => element.dataset.componentRender === candidate.spot.instanceId) ?? null
-    const key = await requestComponentAuthorHit(root, local)
-    return key === undefined ? candidate.spot : key === null ? undefined
-      : ports.authorSpots?.().find(spot => spot.instanceId === candidate.spot.instanceId && spot.authorKey === key)
+    const roots = [...(stageRef.current?.querySelectorAll<HTMLElement>('[data-component-render]') ?? [])]
+    for (const target of [...listSlideWorkspaceHitTargets(state())].reverse()) {
+      const candidate = [...spotTargets].reverse().find(value => value.spot.instanceId === target.instanceId && frameContainsPoint(value.frame, at))
+      const contains = Boolean(hitFreeObject([target], at, true, mapping()))
+      if (!candidate && !contains) continue
+      const local = transformPoint(invertMatrix(frameToSpaceMatrix(target.frame, target.parentToSurface)), at)
+      const root = roots.find(element => element.dataset.componentRender === target.instanceId) ?? null
+      const result = await requestComponentAuthorHit(root, local)
+      if (result === undefined) {
+        if (candidate) return candidate.spot
+        if (contains) return undefined
+      } else {
+        if (result.authorKey) return latest.current.ports.authorSpots?.().find(spot => spot.instanceId === target.instanceId && spot.authorKey === result.authorKey)
+        if (result.painted) return undefined
+      }
+    }
+    return undefined
   }
   const beginSpot = async (spot: ComponentAuthorSpot, at: GeometryPoint, client: GeometryPoint, captured?: CapturedCourseTarget): Promise<boolean> => {
     if (spot.kind !== 'text') return false
@@ -433,7 +453,6 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
   const chromeMatrix: AffineMatrix = [scale * viewportScale, 0, 0, scale * viewportScale,
     (viewportBounds?.left ?? 0) + stageTransform.stageRect.x * viewportScale, (viewportBounds?.top ?? 0) + stageTransform.stageRect.y * viewportScale]
   const background = resolveComponentBackground(project, surface)
-  const backgroundUrl = background.assetId ? snapshot.assetUrls[background.assetId] : undefined
   const recoverableProject = { ...project, instances: Object.fromEntries(Object.entries(project.instances).map(([id, instance]) =>
     [id, instance.visible === false ? { ...instance, visible: true } : instance])) }
   const hidden = listSlideWorkspaceHitTargets({ project: recoverableProject, surfaceId: surface.id, documentId: snapshot.documentId ?? '',
@@ -462,6 +481,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       }
     }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setMediaDragOver(false) }} onDrop={onDrop}
     onPointerDownCapture={event => {
+      plainSpotPointer.current = null
       if (outsideStage(event.target) || snapshot.canvasMode !== 'edit') return
       if (event.button === 1 || (event.button === 0 && space.current)) {
         stop(event); pan.current = { id: event.pointerId, start: { x: event.clientX, y: event.clientY }, x: view.x, y: view.y }
@@ -473,6 +493,31 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         const outerHandle = !selectedHandle && event.target instanceof Element && event.target.closest('[data-handle]')
         const at = surfacePoint(event.clientX, event.clientY)
         const hit = selectedHandle ? selectedInternal : outerHandle ? undefined : spotTargetAt(at)
+        const plain = !selectedHandle && !outerHandle ? plainRealmSpotAt(at) : undefined
+        if (plain && (!hit || hit.spot.id === plain.spot.id)) {
+          stop(event); suppressSpotClick.current = false
+          const pending = { id: event.pointerId, ended: false, resolved: false }, owner = event.currentTarget
+          const documentId = snapshot.documentId, surfaceId = snapshot.surfaceId, stateId = snapshot.activeStateId
+          plainSpotPointer.current = pending; owner.setPointerCapture(event.pointerId)
+          void resolveSpotAt(at).then(spot => {
+            const current = latest.current.ports.read()
+            if (plainSpotPointer.current !== pending || current.documentId !== documentId || current.surfaceId !== surfaceId
+              || current.activeStateId !== stateId || current.canvasMode !== 'edit' || current.contentEdit) {
+              if (plainSpotPointer.current === pending) plainSpotPointer.current = null
+              return
+            }
+            pending.resolved = true
+            setSelectedSpotKey(spot ? spotKey(spot) : null)
+            if (spot) {
+              if (!componentIsLocked(current.project!, spot.instanceId)) latest.current.ports.select([spot.instanceId])
+            } else {
+              const hit = hitFreeObject(listSlideWorkspaceHitTargets(state()), at)
+              latest.current.ports.select(hit ? [hit.instanceId] : [])
+            }
+            if (pending.ended) plainSpotPointer.current = null
+          }).catch(error => { if (plainSpotPointer.current === pending) plainSpotPointer.current = null; ports.report(String(error)) })
+          return
+        }
         if (hit) {
           stop(event); suppressSpotClick.current = false
           if (componentIsLocked(project, hit.spot.instanceId)) return
@@ -559,6 +604,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       setPreview(authoring.current!.pointerDown({ x: event.clientX, y: event.clientY, additive: event.shiftKey || event.ctrlKey || event.metaKey, altKey: event.altKey }, mapping(), handle ?? undefined))
     }}
     onPointerMoveCapture={event => {
+      if (plainSpotPointer.current?.id === event.pointerId) { stop(event); return }
       if (internalGesture.current?.pointerId === event.pointerId) {
         stop(event); const gesture = internalGesture.current, update = gesture.value.update({ x: event.clientX, y: event.clientY }, { shift: event.shiftKey, alt: event.altKey })
         gesture.frame = update.frame; gesture.geometry = update.geometry
@@ -572,7 +618,13 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       }
       if (pan.current?.id === event.pointerId) { stop(event); const p = pan.current; setView(current => ({ ...current, x: p.x + event.clientX - p.start.x, y: p.y + event.clientY - p.start.y })); return }
       if (pointer.current !== event.pointerId) {
-        if (snapshot.canvasMode === 'edit') setHoveredSpot(spotAt(surfacePoint(event.clientX, event.clientY))?.id ?? null)
+        if (snapshot.canvasMode === 'edit') {
+          const at = surfacePoint(event.clientX, event.clientY), sequence = ++hoverHitSequence.current
+          if (plainRealmSpotAt(at)) void resolveSpotAt(at).then(spot => {
+            if (hoverHitSequence.current === sequence) setHoveredSpot(spot?.id ?? null)
+          }).catch(() => {})
+          else setHoveredSpot(spotAt(at)?.id ?? null)
+        }
         return
       }
       stop(event)
@@ -590,6 +642,12 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       setPreview(next)
     }}
     onPointerUpCapture={event => {
+      if (plainSpotPointer.current?.id === event.pointerId) {
+        stop(event); const pending = plainSpotPointer.current; pending.ended = true
+        event.currentTarget.releasePointerCapture(event.pointerId)
+        if (pending.resolved) plainSpotPointer.current = null
+        return
+      }
       if (internalGesture.current?.pointerId === event.pointerId) {
         stop(event); const gesture = internalGesture.current; internalGesture.current = null; setInternalPreview(null)
         event.currentTarget.releasePointerCapture(event.pointerId); suppressSpotClick.current = gesture.moved
@@ -648,6 +706,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       setPreview(emptyPreview())
     }}
     onPointerCancelCapture={event => {
+      if (plainSpotPointer.current?.id === event.pointerId) { plainSpotPointer.current = null; return }
       if (internalGesture.current?.pointerId === event.pointerId) { internalGesture.current.preview?.(internalGesture.current.value.spot.id, null); internalGesture.current = null; setInternalPreview(null); suppressSpotClick.current = true; return }
       if (hudGesture.current?.pointerId === event.pointerId) { hudGesture.current = null; setPreview(emptyPreview()); return }
       if (pointer.current !== event.pointerId) return
@@ -663,7 +722,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         ports.select([hudHit.instanceId]); window.setTimeout(() => requestObjectContextMenu(root, { ...point, itemIds: [hudHit.instanceId] }), 0); return
       }
       const at = surfacePoint(point.x, point.y), captured = ports.capture()
-      const candidate = spotAt(at)
+      const candidate = spotAt(at) ?? plainRealmSpotAt(at)?.spot
       if (candidate) {
         void resolveSpotAt(at).then(spot => {
         if (!spot) return
@@ -692,7 +751,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     }}
     onDoubleClickCapture={event => {
       if (outsideStage(event.target) || snapshot.canvasMode !== 'edit' || snapshot.contentEdit || snapshot.drawTool) return
-      const at = surfacePoint(event.clientX, event.clientY), client = { x: event.clientX, y: event.clientY }, candidate = spotAt(at)
+      const at = surfacePoint(event.clientX, event.clientY), client = { x: event.clientX, y: event.clientY }, candidate = spotAt(at) ?? plainRealmSpotAt(at)?.spot
       if (candidate) {
         event.preventDefault(); event.stopPropagation()
         void resolveSpotAt(at).then(spot => {
@@ -745,9 +804,8 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       data-observation-state-id={snapshot.activeStateId ?? ''} data-observation-ready="true">
       <div ref={stageRef} className="canvas-stage-stack" data-panning={panning || undefined}
         style={{ left: stageTransform.stageRect.x, top: stageTransform.stageRect.y, width: canvas.width, height: canvas.height,
-          transform: 'scale(' + scale + ')', transition: 'none', visibility: 'visible', overflow: 'visible', backgroundColor: background.color,
-          backgroundImage: backgroundUrl ? 'url(' + JSON.stringify(backgroundUrl) + ')' : undefined, backgroundRepeat: 'no-repeat',
-          backgroundPosition: 'center', backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit }}>
+          transform: 'scale(' + scale + ')', transition: 'none', visibility: 'visible', overflow: 'visible', isolation: 'isolate' }}>
+        <ComponentBackgroundPaint background={background} resolveAsset={id => snapshot.assetUrls[id]} />
         <div className="canvas-stage canvas-stage--authoring" data-testid="canvas-stage" style={{ position: 'absolute', inset: 0, visibility: 'visible', pointerEvents: 'auto' }}>
           {project.global.underlay.map(id => <SlideInstance key={id} id={id} project={stageDisplayProject!} surfaceId={surface.id} preview={stagePreview} ports={ports} clipCanvas={canvas} authorGuides={snapshot.canvasMode === 'edit'} />)}
           {project.surfaces.filter(value => value.kind === 'slide' && (value.id === surface.id || visitedSurfaces.has(value.id))).map(value => <div key={value.id} hidden={value.id !== surface.id} style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>

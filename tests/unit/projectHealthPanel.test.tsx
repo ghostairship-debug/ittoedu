@@ -3,16 +3,16 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { collectComponentProjectHealth } from '@/shared/componentProjectHealth'
-import { selectActiveCourseProjectDocument, selectMediaAssetFiles, useEditorStore } from '@/renderer/store/editorStore'
+import { collectComponentProjectHealth } from '@/core/components/componentProjectHealth'
+import { selectActiveCourseProjectDocument, selectActiveCourseResources, useEditorStore } from '@/renderer/store/editorStore'
 import { ProjectHealthPanel } from '@/renderer/ui/ProjectHealthPanel'
 import { DocumentHostService } from '@/main/workbench/DocumentHostService'
 import type { DocumentHostAPI } from '@/shared/workbench/desktop'
 import type { CourseProjectV10 } from '@/shared/contracts/component-platform/project'
 import { createImageData, IMAGE_DEFINITION } from '@/components/image'
 
-vi.mock('@/shared/componentProjectHealth', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/shared/componentProjectHealth')>()
+vi.mock('@/core/components/componentProjectHealth', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/core/components/componentProjectHealth')>()
   return { ...actual, collectComponentProjectHealth: vi.fn(actual.collectComponentProjectHealth) }
 })
 
@@ -45,7 +45,7 @@ it('collects the latest V10 project/resources only while open and locates a real
   expect(collectComponentProjectHealth).not.toHaveBeenCalled()
   rerender(<ProjectHealthPanel open onClose={onClose} />)
   expect(collectComponentProjectHealth).toHaveBeenCalledOnce()
-  expect(collectComponentProjectHealth).toHaveBeenCalledWith(selectActiveCourseProjectDocument(latest), { assetFiles: selectMediaAssetFiles(latest) })
+  expect(collectComponentProjectHealth).toHaveBeenCalledWith(selectActiveCourseProjectDocument(latest), selectActiveCourseResources(latest))
   expect(screen.getByRole('dialog', { name: '工程检查' })).toBeInTheDocument()
   expect(screen.getByRole('heading', { name: '错误 · 演示页 · 缺图页' })).toBeInTheDocument()
   const issue = screen.getAllByText('image-asset-reference-missing')[0].closest('li')!
@@ -57,4 +57,7 @@ it('collects the latest V10 project/resources only while open and locates a real
   vi.mocked(collectComponentProjectHealth).mockClear()
   await act(async () => { await useEditorStore.getState().editComponents([{ type: 'instance.patch', instanceId: 'picture', patch: { name: '关闭后修改' } }]) })
   expect(collectComponentProjectHealth).not.toHaveBeenCalled()
+  rerender(<ProjectHealthPanel open diagnostics={[]} onClose={onClose} />)
+  expect(collectComponentProjectHealth).not.toHaveBeenCalled()
+  expect(screen.queryByText('image-asset-reference-missing')).not.toBeInTheDocument()
 })

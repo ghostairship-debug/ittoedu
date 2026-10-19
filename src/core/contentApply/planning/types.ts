@@ -39,11 +39,17 @@ export interface ContentChangeRequest {
   intent: ContentApplyIntent
   target: ContentApplyTarget
   source: ContentApplySource
+  /** Source/file preparation findings travel with the same canonical application. */
+  diagnostics?: ContentApplyDiagnostic[]
   projection?: HtmlContentProjection
   /** Captured by desktop authoring; never inferred from later focus. */
   editingContext?: { surfaceId: string; stateId: string | null }
   /** Measured editing viewport for content without a fixed authored design size. */
   viewport?: { width: number; height: number }
+  /** One-time local design canvas and placement in the destination parent's coordinates.
+   * After insert/container redo, only the resulting instances' formal frames persist.
+   * Existing-object content/redo keep their current frame; use object.update to resize. */
+  region?: ComponentFrame
 }
 
 /** Paths are resolved by the project-file adapter; identities remain software-owned. */

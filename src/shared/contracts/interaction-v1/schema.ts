@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { componentNavigationTransitionSchema } from '../component-platform/navigationMotion'
 import {
   courseStateCompareOperatorSchema,
   courseStateKeySchema,
@@ -180,18 +181,19 @@ const audioActionSchemas = [
 
 const baseActionSchemas = [
   presentationActionSchema,
-  z.object({ type: z.literal('location.go'), locationId: stableIdSchema }).strict(),
+  z.object({ type: z.literal('location.go'), locationId: stableIdSchema, transition: componentNavigationTransitionSchema.optional() }).strict(),
   z.object({
     type: z.literal('scene.go'),
     sceneId: stableIdSchema,
     targetStateId: stableIdSchema.optional(),
+    transition: componentNavigationTransitionSchema.optional(),
   }).strict(),
-  z.object({ type: z.literal('step.next') }).strict(),
-  z.object({ type: z.literal('step.previous') }).strict(),
-  z.object({ type: z.literal('scene.next') }).strict(),
-  z.object({ type: z.literal('scene.previous') }).strict(),
-  z.object({ type: z.literal('scene.replay') }).strict(),
-  z.object({ type: z.literal('course.restart') }).strict(),
+  z.object({ type: z.literal('step.next'), transition: componentNavigationTransitionSchema.optional() }).strict(),
+  z.object({ type: z.literal('step.previous'), transition: componentNavigationTransitionSchema.optional() }).strict(),
+  z.object({ type: z.literal('scene.next'), transition: componentNavigationTransitionSchema.optional() }).strict(),
+  z.object({ type: z.literal('scene.previous'), transition: componentNavigationTransitionSchema.optional() }).strict(),
+  z.object({ type: z.literal('scene.replay'), transition: componentNavigationTransitionSchema.optional() }).strict(),
+  z.object({ type: z.literal('course.restart'), transition: componentNavigationTransitionSchema.optional() }).strict(),
   z.object({
     type: z.literal('course-state.set'),
     key: courseStateKeySchema,

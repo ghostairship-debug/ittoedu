@@ -82,9 +82,9 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
       return result
     } catch (error) { report(error) }
   }
-  const write = async (edits: ComponentEdit[], target = kernel.captureTarget(), selectedIds?: readonly string[]) => {
+  const write = async (edits: ComponentEdit[], target = kernel.captureTarget(), selectedIds?: readonly string[], readPaths: readonly string[][] = []) => {
     if (!edits.length) return
-    await kernel.editCaptured(kernel.capture(edits, target))
+    await kernel.editCaptured(kernel.capture(edits, target, readPaths))
     if (selectedIds && capturedCourseViewIsCurrent(kernel.readView(), target)) kernel.selectInstances(selectedIds, target.surfaceId, target.documentId)
   }
   const flush = async () => {
@@ -168,9 +168,9 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
       // Freeze the destination before the cut ACK; a later tab switch cannot
       // retarget paste. Only the first successful paste restores cut IDs.
       await source.removal
-      const { edits, rootIds: selected, diagnostics } = prepareCourseObjectPaste(source, { capturedTarget: target, container: destination,
+      const { edits, rootIds: selected, diagnostics, readPaths } = prepareCourseObjectPaste(source, { capturedTarget: target, container: destination,
         index: containerChildIds(project, destination).length, offset: { x: 20, y: 20 }, keepOwner, identity: moving ? 'move' : 'copy' })
-      await write(edits, { ...target, activeStateId: null, editingProject: target.project })
+      await write(edits, { ...target, activeStateId: null, editingProject: target.project }, undefined, readPaths)
       if (capturedCourseViewIsCurrent(kernel.readView(), target)) kernel.selectInstances(selected, target.surfaceId, target.documentId)
       if (diagnostics.length) kernel.setFeedback({ errorMessage: [...new Set(diagnostics.map(item => item.message))].join('\n') })
     } catch (error) { if (moving) source.moveAvailable = true; throw error }

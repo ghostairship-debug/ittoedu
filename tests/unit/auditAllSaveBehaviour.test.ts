@@ -15,6 +15,7 @@ import { captureComponentOperation } from '../../src/core/drivers/courseV10Opera
 import { componentProjectFiles } from '../../src/core/projectFiles/componentPlatform/projection'
 import { captureComponentSourceSession } from '../../src/renderer/components/ComponentSourceEditor'
 import { CourseV10DocumentBridge } from '../../src/renderer/documents/CourseV10DocumentBridge'
+import { createTextComponentData, TEXT_DEFINITION } from '../../src/components/text'
 
 const roots: string[] = [], views: Array<{ dispose(): void }> = []
 afterEach(async () => {
@@ -37,6 +38,14 @@ async function observe(f: Awaited<ReturnType<typeof fixture>>) {
   await (f.session as any).observe(observation)
 }
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
+function projectWithText() {
+  const project = createBlankCourseProjectV10()
+  project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
+  project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id,
+    data: JSON.parse(JSON.stringify(createTextComponentData('body'))) }
+  project.global.overlay = ['body']
+  return project
+}
 
 describe('Audit save owners', () => {
   it('CA183 own publication before ACK remains clean', async () => {
@@ -103,8 +112,14 @@ describe('Audit save owners', () => {
     const restarted = createMarkdownTestHost(f.journal)
     const view = new DocumentFileSession({ kind: 'file', path: f.filename }, { ...f.port, documents: restarted.documents }); views.push(view); await view.open()
     expect(view.committedDocument!.model).toMatchObject({ source: expect.stringContaining('A accepted') })
-    expect(Object.values(view.getSnapshot().conflictDrafts)).toContain('C handtyped and unapplied')
+    expect(view.getSnapshot().conflictDrafts).toEqual({})
+    expect(view.getSnapshot().retainedSourceConflicts.flatMap(candidate => candidate.hunks.map(hunk => hunk.text))).toContain('C handtyped and unapplied')
+    expect(view.getSnapshot().error).toContain('冲突基线')
     expect(view.committedDocument!.model).not.toMatchObject({ source: expect.stringContaining('handtyped') })
+    view.setConflictDraft(view.getSnapshot().conflictHunks[0]!.id, 'new current conflict input')
+    expect(await view.preserveDraft()).toBe(true)
+    const retained = await restarted.documents.readAuthoringDrafts(view.documentId!)
+    expect(retained!.sourceConflicts!.flatMap(candidate => candidate.hunks.map(hunk => hunk.text))).toEqual(expect.arrayContaining(['C handtyped and unapplied', 'new current conflict input']))
   })
 
   it('CA065 newly referenced local image previews, saves elsewhere and cold opens', async () => {
@@ -169,27 +184,28 @@ describe('Audit save owners', () => {
   })
 
   it('CA068 cancelling unchanged V10 IME reveals the external formal update', async () => {
-    const f = await fixture(), project = createBlankCourseProjectV10(), id = project.global.overlay[0]!
-    project.instances[id]!.data = { text: 'original' }
+    const f = await fixture(), project = projectWithText(), id = project.global.overlay[0]!
+    project.instances[id]!.data = JSON.parse(JSON.stringify(createTextComponentData('original')))
     const snapshot = await f.host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'ime.glx')
     const api = documentHostAPI(f.host), projection = await DocumentProjection.attach(api, snapshot.documentId, new CourseV10Driver()); views.push(projection)
-    projection.beginComposition(id, ['text'])
-    const result = await f.host.internalAPI.dispatch({ documentId: snapshot.documentId, epoch: snapshot.epoch, operationId: 'external', baseRevision: snapshot.revision, actor: 'agent', mutation: { type: 'command', command: captureComponentOperation(project, [{ type: 'data.set', instanceId: id, path: ['text'], value: 'external' }]) } })
+    projection.beginComposition(id, ['content'])
+    const external = JSON.parse(JSON.stringify(createTextComponentData('external').content))
+    const result = await f.host.internalAPI.dispatch({ documentId: snapshot.documentId, epoch: snapshot.epoch, operationId: 'external', baseRevision: snapshot.revision, actor: 'agent', mutation: { type: 'command', command: captureComponentOperation(project, [{ type: 'data.set', instanceId: id, path: ['content'], value: external }]) } })
     expect(result.status).toBe('applied'); await projection.endComposition()
-    expect((await projection.drain()).model).toMatchObject({ project: { instances: { [id]: { data: { text: 'external' } } } } })
+    expect((await projection.drain()).model).toMatchObject({ project: { instances: { [id]: { data: { content: external } } } } })
     expect(projection.read().error).toBeNull()
   })
 
   it('CA128 valid formal whitespace IDs keep all project file observations available', async () => {
-    const project = createBlankCourseProjectV10(), surface = project.surfaces[0]!
+    const project = projectWithText(), surface = project.surfaces[0]!
     surface.kind = 'flow'; const id = surface.childIds[0] ?? project.global.overlay[0]!, original = project.instances[id]!
-    delete project.instances[id]; const adapted = { ...original, id: ' intro ', data: { text: 'body' } }; project.instances[adapted.id] = adapted
+    delete project.instances[id]; const adapted = { ...original, id: ' intro ' }; project.instances[adapted.id] = adapted
     surface.childIds = [adapted.id]; project.global.overlay = project.global.overlay.filter(value => value !== id)
     expect(componentProjectFiles(project, { assets: {}, components: {} }).find(file => file.path.endsWith('.body.md'))?.content).toBeDefined()
   })
 
   it('CA253 a definition draft can reload its baseline after the representative was removed', async () => {
-    const f = await fixture(), project = createBlankCourseProjectV10(), id = project.global.overlay[0]!, definitionId = project.instances[id]!.definitionId
+    const f = await fixture(), project = projectWithText(), id = project.global.overlay[0]!, definitionId = project.instances[id]!.definitionId
     delete project.instances[id]; project.global.overlay = []
     const snapshot = await f.host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'definition.glx')
     const bridge = new CourseV10DocumentBridge(); views.push(bridge); await bridge.connect(documentHostAPI(f.host)); await bridge.activate(snapshot.documentId)

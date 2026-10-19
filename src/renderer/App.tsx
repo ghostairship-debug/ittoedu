@@ -19,10 +19,8 @@ import {
 } from '../shared/constants'
 import { toUserMessage, UserFacingError } from '../shared/errors'
 import { formatPageInsets, WINDOW_PAGE_INSETS } from '../shared/pageFrame'
-import {
-  collectComponentProjectHealth,
-  summarizeCourseProjectHealth,
-} from '../shared/componentProjectHealth'
+import { collectComponentProjectHealth } from '../core/components/componentProjectHealth'
+import { summarizeCourseProjectHealth } from '../shared/componentProjectHealth'
 import { createSlideLightEditingPort } from './composition/selection/slideLightEditingPort'
 import { useComponentLibrary } from './app/useComponentLibrary'
 import { insertComponentDefinitionAtTarget, insertComponentPackagesAtTarget } from './components/insertComponentPackages'
@@ -33,6 +31,7 @@ import { resolveCourseProjectDeliveryFindingRoute } from './diagnostics/projectH
 import { CoursePreviewNotices } from './app/CoursePreviewNotices'
 import { useCourseProjectLifecycle } from './app/useCourseProjectLifecycle'
 import { useFlowDocumentRecovery } from './app/useFlowDocumentRecovery'
+import { createFlowDocumentRecoveryPort } from './authoring/flowDocumentDraft'
 import { captureFlowMenuTarget, resolveFlowMenuInsertionOptions, insertFlowMenu as commitFlowMenu, type CapturedFlowMenuTarget, type FlowInsertCommand } from './ui/flow/flowInsertCommands'
 import { insertCourseMedia, insertCoursePreparedMedia, transformCourseImageAtTarget, type CourseInsertionOptions } from './media/commitCourseMediaAuthoring'
 import { readComponentInteractionSounds, setComponentClickInteraction } from './interactions/componentInteractionAuthoring'
@@ -49,7 +48,7 @@ import type { DocumentHostAPI, SaveDirectoryContext } from '../shared/workbench/
 import {
   selectCanUndoActiveSurface, selectCanRedoActiveSurface,
   selectActiveCourseLocationId, selectActiveCourseProjectDocument,
-  selectEditingNodes, selectEditingScope, selectMediaAssetFiles,
+  selectEditingNodes, selectEditingScope, selectMediaAssetFiles, selectActiveCourseResources,
   selectSelectedNodeIds, selectHasUnsavedCourseChanges, selectHasUnsavedCourseDocuments, useEditorStore,
 } from './store/editorStore'
 import { ConfirmDialog } from './ui/ConfirmDialog'
@@ -235,6 +234,7 @@ export default function App() {
   const activeCourseDocument = useEditorStore(selectActiveCourseProjectDocument)
   const projectColors = useMemo(() => activeCourseDocument?.designTokens?.colors.map(token => ({ name: token.label, value: token.color })) ?? [], [activeCourseDocument?.designTokens])
   const sidecarFiles = useEditorStore(selectMediaAssetFiles)
+  const courseResources = useEditorStore(selectActiveCourseResources)
   const flowDocumentDraft = useEditorStore(state => state.flowDocumentDraft)
   const localDraftVersion = useEditorStore(state => state.localDraftVersion)
   const [retainedFlowOpen, setRetainedFlowOpen] = useState(false)
@@ -260,11 +260,9 @@ export default function App() {
   const statusMessage = useEditorStore((state) => state.statusMessage)
   const courseProjectHealthDiagnostics = useMemo(
     () => activeCourseDocument && projectHealthOpen
-      ? collectComponentProjectHealth(activeCourseDocument, {
-          assetFiles: sidecarFiles,
-        })
+      ? collectComponentProjectHealth(activeCourseDocument, courseResources)
       : null,
-    [activeCourseDocument, sidecarFiles, projectHealthOpen],
+    [activeCourseDocument, courseResources, projectHealthOpen],
   )
   const projectHealthSummary = useMemo(
     () => courseProjectHealthDiagnostics
@@ -293,18 +291,19 @@ export default function App() {
     [setError],
   )
 
-  const flowRecoveryPort = useMemo(() => window.desktopAPI?.flowDocumentRecovery ?? null, [])
+  const flowRecoveryPort = useMemo(() => rawDocuments ? createFlowDocumentRecoveryPort(rawDocuments) : null, [rawDocuments])
   const flowRecovery = useFlowDocumentRecovery({
     target: insertSurface === 'flow' && activeCourseDocument && courseConnection.snapshot && courseConnection.surfaceId ? {
-      projectId: activeCourseDocument.id, projectPath, surfaceId: courseConnection.surfaceId,
+      documentId: courseConnection.snapshot.documentId, projectId: activeCourseDocument.id, projectPath, surfaceId: courseConnection.surfaceId,
       revision: activeCourseDocument.revision, epoch: courseConnection.snapshot.epoch,
     } : null,
     draft: flowDocumentDraft,
     port: flowRecoveryPort,
     onRestore(draft) {
       const current = useEditorStore.getState()
-      if (current.courseView.surfaceId !== draft.surfaceId || current.courseView.project?.revision !== draft.revision || current.flowDocumentDraft) return
+      if (current.courseView.activeDocumentId !== courseConnection.snapshot?.documentId || current.courseView.surfaceId !== draft.surfaceId || current.courseView.project?.revision !== draft.revision || current.flowDocumentDraft) return false
       current.restoreFlowDocumentDraft(draft)
+      return useEditorStore.getState().flowDocumentDraft === draft
     },
     onError: setError,
   })
@@ -347,7 +346,7 @@ export default function App() {
       if (!draft || documentIds && !documentIds.includes(documentId)) return []
       const snapshot = state.courseView.documents.find(value => value.documentId === documentId)
       if (!snapshot || snapshot.model.kind !== 'course-v10') return []
-      return [{ target: { projectId: snapshot.model.project.id, projectPath: snapshot.binding.kind === 'file' ? snapshot.binding.path : null,
+      return [{ target: { documentId, projectId: snapshot.model.project.id, projectPath: snapshot.binding.kind === 'file' ? snapshot.binding.path : null,
         surfaceId: draft.surfaceId, revision: draft.revision, epoch: snapshot.epoch }, draft }]
     })
     return flowRecovery.flushAll(entries)
@@ -991,7 +990,7 @@ export default function App() {
           <header className="copyable-summary-dialog__header"><h2 id="retained-flow-title">保留的正文原稿</h2>
             <button type="button" className="icon-button" title="关闭原稿" aria-label="关闭原稿" onClick={() => setRetainedFlowOpen(false)}><X size={17} /></button>
           </header>
-          {flowRecovery.retained.map((record, index) => <details key={`${record.epoch}:${record.revision}`} open={index === 0}>
+          {flowRecovery.retained.map((record, index) => <details key={record.recovery.id} open={index === 0}>
             <summary>版本 {record.revision} · {record.surfaceId}</summary>
             <textarea className="copyable-summary-dialog__content" aria-label={`版本 ${record.revision} 的正文原稿`} value={record.source} readOnly />
           </details>)}
@@ -1044,6 +1043,7 @@ export default function App() {
       />
       <ProjectHealthPanel
         open={projectHealthOpen}
+        diagnostics={courseProjectHealthDiagnostics ?? undefined}
         onClose={() => setProjectHealthOpen(false)}
         onExportDiagnostics={handleExportDiagnostics}
       />

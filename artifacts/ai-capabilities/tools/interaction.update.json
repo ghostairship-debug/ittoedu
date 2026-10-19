@@ -1,5 +1,5 @@
 {
-  "description": "编辑页面或全局互动规则：add/update/remove/duplicate；reveal 同时设置依次出现的初始隐藏。节点、页面和命名状态引用可使用已观察句柄；规则和动作新身份由软件生成，更新引用使用已观察 ruleId/动作id。click 可在对象上设置播放声音或跳转页面。命名状态须使用该状态的页面句柄。",
+  "description": "编辑页面或全局互动规则：add/update/remove/duplicate；reveal 同时设置依次出现的初始隐藏。节点、页面和命名状态引用可使用已观察句柄；规则和动作新身份由软件生成，更新引用使用已观察 ruleId/动作id。click 可在对象上设置播放声音、跳转已观察页面路径/句柄，或scene.next/scene.previous相对导航（无需value）。命名状态须使用该状态的页面句柄。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -446,6 +446,9 @@
                       "locationId": {
                         "$ref": "#/$defs/__schema2"
                       },
+                      "transition": {
+                        "$ref": "#/$defs/__schema13"
+                      },
                       "type": {
                         "const": "location.go",
                         "type": "string"
@@ -466,6 +469,9 @@
                       "targetStateId": {
                         "$ref": "#/$defs/__schema2"
                       },
+                      "transition": {
+                        "$ref": "#/$defs/__schema13"
+                      },
                       "type": {
                         "const": "scene.go",
                         "type": "string"
@@ -480,6 +486,9 @@
                   {
                     "additionalProperties": false,
                     "properties": {
+                      "transition": {
+                        "$ref": "#/$defs/__schema13"
+                      },
                       "type": {
                         "const": "step.next",
                         "type": "string"
@@ -493,6 +502,9 @@
                   {
                     "additionalProperties": false,
                     "properties": {
+                      "transition": {
+                        "$ref": "#/$defs/__schema13"
+                      },
                       "type": {
                         "const": "step.previous",
                         "type": "string"
@@ -506,6 +518,9 @@
                   {
                     "additionalProperties": false,
                     "properties": {
+                      "transition": {
+                        "$ref": "#/$defs/__schema13"
+                      },
                       "type": {
                         "const": "scene.next",
                         "type": "string"
@@ -519,6 +534,9 @@
                   {
                     "additionalProperties": false,
                     "properties": {
+                      "transition": {
+                        "$ref": "#/$defs/__schema13"
+                      },
                       "type": {
                         "const": "scene.previous",
                         "type": "string"
@@ -532,6 +550,9 @@
                   {
                     "additionalProperties": false,
                     "properties": {
+                      "transition": {
+                        "$ref": "#/$defs/__schema13"
+                      },
                       "type": {
                         "const": "scene.replay",
                         "type": "string"
@@ -545,6 +566,9 @@
                   {
                     "additionalProperties": false,
                     "properties": {
+                      "transition": {
+                        "$ref": "#/$defs/__schema13"
+                      },
                       "type": {
                         "const": "course.restart",
                         "type": "string"
@@ -626,7 +650,7 @@
                         "$ref": "#/$defs/__schema12"
                       },
                       "target": {
-                        "$ref": "#/$defs/__schema13"
+                        "$ref": "#/$defs/__schema16"
                       },
                       "type": {
                         "const": "audio.pause",
@@ -646,7 +670,7 @@
                         "$ref": "#/$defs/__schema12"
                       },
                       "target": {
-                        "$ref": "#/$defs/__schema13"
+                        "$ref": "#/$defs/__schema16"
                       },
                       "type": {
                         "const": "audio.resume",
@@ -666,7 +690,7 @@
                         "$ref": "#/$defs/__schema12"
                       },
                       "target": {
-                        "$ref": "#/$defs/__schema13"
+                        "$ref": "#/$defs/__schema16"
                       },
                       "type": {
                         "const": "audio.stop",
@@ -683,7 +707,7 @@
                     "additionalProperties": false,
                     "properties": {
                       "target": {
-                        "$ref": "#/$defs/__schema13"
+                        "$ref": "#/$defs/__schema16"
                       },
                       "type": {
                         "const": "audio.toggle-mute",
@@ -824,7 +848,7 @@
                             "$ref": "#/$defs/__schema12"
                           },
                           "easing": {
-                            "$ref": "#/$defs/__schema14"
+                            "$ref": "#/$defs/__schema17"
                           },
                           "effect": {
                             "const": "slide",
@@ -855,7 +879,7 @@
                             "$ref": "#/$defs/__schema12"
                           },
                           "easing": {
-                            "$ref": "#/$defs/__schema14"
+                            "$ref": "#/$defs/__schema17"
                           },
                           "effect": {
                             "enum": [
@@ -902,7 +926,7 @@
                             "$ref": "#/$defs/__schema12"
                           },
                           "easing": {
-                            "$ref": "#/$defs/__schema14"
+                            "$ref": "#/$defs/__schema17"
                           },
                           "effect": {
                             "const": "slide",
@@ -933,7 +957,7 @@
                             "$ref": "#/$defs/__schema12"
                           },
                           "easing": {
-                            "$ref": "#/$defs/__schema14"
+                            "$ref": "#/$defs/__schema17"
                           },
                           "effect": {
                             "enum": [
@@ -993,6 +1017,98 @@
         "type": "number"
       },
       "__schema13": {
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "enum": [
+              "left",
+              "right",
+              "up",
+              "down"
+            ],
+            "type": "string"
+          },
+          "durationMs": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "easing": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "effect": {
+            "enum": [
+              "none",
+              "fade",
+              "slide",
+              "zoom"
+            ],
+            "type": "string"
+          },
+          "incoming": {
+            "$ref": "#/$defs/__schema14"
+          },
+          "outgoing": {
+            "$ref": "#/$defs/__schema14"
+          }
+        },
+        "type": "object"
+      },
+      "__schema14": {
+        "additionalProperties": false,
+        "properties": {
+          "keyframes": {
+            "items": {
+              "$ref": "#/$defs/__schema15"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "timing": {
+            "additionalProperties": false,
+            "properties": {
+              "delay": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "duration": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "easing": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "keyframes"
+        ],
+        "type": "object"
+      },
+      "__schema15": {
+        "additionalProperties": false,
+        "properties": {
+          "easing": {
+            "type": "string"
+          },
+          "offset": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "opacity": {
+            "type": "number"
+          },
+          "transform": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "__schema16": {
         "oneOf": [
           {
             "additionalProperties": false,
@@ -1049,7 +1165,7 @@
           }
         ]
       },
-      "__schema14": {
+      "__schema17": {
         "enum": [
           "linear",
           "ease-in",
@@ -1173,7 +1289,9 @@
               "action": {
                 "enum": [
                   "audio-play",
-                  "location-go"
+                  "location-go",
+                  "scene.next",
+                  "scene.previous"
                 ],
                 "type": "string"
               },
@@ -1186,9 +1304,8 @@
               }
             },
             "required": [
-              "kind",
               "action",
-              "value"
+              "kind"
             ],
             "type": "object"
           }

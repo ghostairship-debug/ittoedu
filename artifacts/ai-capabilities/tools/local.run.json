@@ -1,5 +1,5 @@
 {
-  "description": "调用已安装的原生 EXE 工具。宿主先展示实际可执行路径、参数、隔离副本目录和冻结输入，逐次批准后执行；工作空间权限不授予命令执行。sources 是已授权文件或文本材料来源，复制后的 name 位于 cwd；cwd 是副本内相对目录，stdin 为标准输入，outputs 点名相对成果。返回 job，用 job.wait/logs/read 与 artifact.save 读取或交付；失败退出或未知结果不重放。",
+  "description": "调用已安装的原生 EXE 工具。宿主先准备实际可执行路径、参数、隔离副本目录和冻结输入，按当前真实执行授权决定是否需要批准。sources 是已授权文件或文本材料来源，复制后的 name 位于 cwd；cwd 是副本内相对目录，stdin 为标准输入，outputs 点名相对成果。返回 job，用 job.wait/logs/read 与 artifact.save 读取或交付；失败退出或未知结果不重放。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -34,6 +34,13 @@
           "$ref": "#/$defs/__schema0"
         },
         "type": "array"
+      },
+      "sourceVersion": {
+        "enum": [
+          "current",
+          "disk"
+        ],
+        "type": "string"
       },
       "stdin": {
         "type": "string"

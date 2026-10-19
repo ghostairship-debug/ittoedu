@@ -513,6 +513,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
   private async file(session: Session, scope: CallScope, ticket: string, tool: HostTool, input: unknown, approve: boolean): Promise<ToolResult> {
     const { runId } = scope
     const name = tool.name as AgentFileToolName
+    this.options.gateway.captureHostOperation(runId, this.options.gateway.operationIdentity(runId, ticket), { name, input })
     const context: AgentFileContext = { runId, workspaceRoot: scope.workspaceRoot, permission: scope.permission, boundPaths: scope.boundPaths, assertActive: () => this.assertActive(session, runId) }
     if (approve && (agentFileMutationNames as readonly string[]).includes(name)) {
       const preflight = await this.options.files.preflightMutation(context, name as AgentFileMutationName, input)

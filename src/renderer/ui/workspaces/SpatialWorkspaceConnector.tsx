@@ -6,7 +6,6 @@ import { createSpatialStateCameraPort } from '../../componentPlatform/surfaces/s
 import { initialSpatialSurfaceView } from '../../store/slices/spatialAuthoringSlice'
 import { SpatialLocationWorkspace } from './SpatialLocationWorkspace'
 import type { WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
-import { resolveComponentBackground } from '../../../shared/contracts/component-platform'
 import { projectWithBackgroundPreview } from '../../authoring/backgroundPreview'
 import { proEditorRailController } from '../proEditorRailController'
 
@@ -60,13 +59,12 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWork
   const projection = source.canvasMode === 'edit' ? projectWithBackgroundPreview(runtime.project, source.previewBackgroundColor,
     runtime.documentId, surface.id, source.courseView.activeStateId, source.courseView.snapshot?.epoch) : runtime.project
   const projectedSurface = projection.surfaces.find(value => value.id === surface.id)!
-  const background = resolveComponentBackground(projection, projectedSurface)
   const safe = (result: unknown) => { void Promise.resolve(result).catch(error => state().setError(error instanceof Error ? error.message : String(error))) }
   return <SpatialLocationWorkspace documentId={runtime.documentId} project={projection} surface={projectedSurface} view={view}
     teacherController={runtime.navigation.editorPort()}
     activeStateId={source.courseView.activeStateId}
     selectionIds={runtime.selectedInstanceIds} canvasMode={source.canvasMode} renderInstance={(id, displayProjection) => runtime.renderInstance(id, displayProjection ?? projection)}
-    backgroundAssetUrl={background.assetId ? runtime.world.assetUrl(background.assetId) : null}
+    resolveBackgroundAsset={id => runtime.world.assetUrl(id) ?? undefined}
     onViewportChange={size => state().setSpatialViewport(size, surface.id, runtime.documentId)}
     captureTarget={() => state().courseKernel.captureTarget(runtime.documentId)}
     onEdits={(edits, captured = state().courseKernel.captureTarget(runtime.documentId)) => state().courseKernel.editCaptured(state().courseKernel.capture(edits, captured))}

@@ -87,6 +87,15 @@ export function componentInputDataPropertyEdits(project: CourseProjectV10, surfa
   })
 }
 /** Rebind software-managed defaults and rule-family identities during a surface clone. */
+/** The input owner names its state references; arbitrary component data is not searched. */
+export function componentInputStateReferences(data: JsonValue): { path: string[]; key: string; scalar: boolean }[] {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return []
+  const references = typeof data.stateKey === 'string' ? [{ path: ['stateKey'], key: data.stateKey, scalar: false }] : []
+  const answer = data.answer
+  if (answer && typeof answer === 'object' && !Array.isArray(answer)) for (const field of ['stateKey', 'validityKey'] as const)
+    if (typeof answer[field] === 'string') references.push({ path: ['answer', field], key: answer[field], scalar: true })
+  return references
+}
 export function remapComponentInputData(data: JsonValue, copy: {
   fromInstanceId: string; toInstanceId: string; rules: ReadonlyMap<string, string>; stateKeys: Map<string, string>
 }): JsonValue {
@@ -94,14 +103,23 @@ export function remapComponentInputData(data: JsonValue, copy: {
   if (next.answer) {
     for (const [field, suffix] of [['stateKey', 'value'], ['validityKey', 'valid']] as const) {
       const previous = next.answer[field]
-      if (previous === `input:${copy.fromInstanceId}:${suffix}`) {
+      const mapped = copy.stateKeys.get(previous)
+      if (mapped !== undefined) next.answer[field] = mapped
+      else if (previous === `input:${copy.fromInstanceId}:${suffix}`) {
         const rebound = `input:${copy.toInstanceId}:${suffix}`
         copy.stateKeys.set(previous, rebound); next.answer[field] = rebound
       }
     }
     next.answer.ruleFamilyRuleIds = next.answer.ruleFamilyRuleIds.map(id => copy.rules.get(id) ?? id)
   }
-  if (next.stateKey === `interaction:${copy.fromInstanceId}`) next.stateKey = `interaction:${copy.toInstanceId}`
+  if (next.stateKey !== undefined) {
+    const previous = next.stateKey, mapped = copy.stateKeys.get(previous)
+    if (mapped !== undefined) next.stateKey = mapped
+    else if (previous === `interaction:${copy.fromInstanceId}`) {
+      next.stateKey = `interaction:${copy.toInstanceId}`
+      copy.stateKeys.set(previous, next.stateKey)
+    }
+  }
   return JSON.parse(JSON.stringify(next)) as JsonValue
 }
 export async function configureComponentInputRules(kernel: EditorStoreKernel, target: CapturedCourseTarget, request: ComponentInputRuleRequest): Promise<string | null> {

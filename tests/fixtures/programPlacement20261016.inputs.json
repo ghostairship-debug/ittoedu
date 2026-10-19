@@ -1,0 +1,125 @@
+{
+  "evidence": {
+    "tool": 33,
+    "id": "evidence",
+    "frame": {
+      "width": 813,
+      "height": 366,
+      "transform": [
+        1,
+        0,
+        0,
+        1,
+        409,
+        216
+      ]
+    },
+    "html": "<section id=\"evidence\" style=\"position:absolute;left:409px;top:216px;width:813px;height:366px;box-sizing:border-box;padding:25px;background:#e1ece7;border-radius:22px;font:20px 'Microsoft YaHei',sans-serif;color:#173b43\"><h2 style=\"margin:0 0 15px;font-size:25px\">你的实验记录 · 最近两组</h2><div id=\"record-table\" style=\"min-height:142px;line-height:1.8\">暂无已保存记录。请到第3页调参并点击“保存这组证据”。<br>这里不会用默认示例冒充你的实验。</div><p id=\"comparison\" style=\"font-size:20px;line-height:1.65;margin:15px 0 0\"></p><p style=\"font-size:16px;color:#637a7b;margin:12px 0 0\">只读本次播放的真实保存记录；比较结果不代表真实校园表现。</p><script>/* 本局部区域由实例源码读取正式课程共享记录。 */</script></section>"
+  },
+  "advice": {
+    "tool": 34,
+    "id": "advice",
+    "frame": {
+      "width": 1180,
+      "height": 366,
+      "transform": [
+        1,
+        0,
+        0,
+        1,
+        50,
+        210
+      ]
+    },
+    "html": "<section id=\"advice\" style=\"position:absolute;left:50px;top:210px;width:1180px;height:366px;box-sizing:border-box;padding:25px;background:#e1ece7;border-radius:22px;font:20px 'Microsoft YaHei',sans-serif;color:#173b43\"><style>#advice button{font:18px 'Microsoft YaHei';padding:12px 15px;border:2px solid #257c7a;border-radius:10px;background:white;color:#173b43;cursor:pointer}#advice button:disabled{opacity:.45;cursor:default}#advice button[aria-pressed=true]{background:#257c7a;color:white}#advice .panel{background:white;padding:16px 20px;border-radius:14px}</style><p id=\"baseline\" style=\"margin:0 0 18px;font-size:22px\">暂无已保存的实验记录。请回第3页，亲手调参并保存，再来评估方案。</p><div style=\"display:flex;gap:14px\"><button data-plan=\"surface\" disabled>增加绿地：f减少20个百分点</button><button data-plan=\"soil\" disabled>改善土壤：I增加10毫米</button><button data-plan=\"both\" disabled>两项一起试</button></div><div style=\"display:grid;grid-template-columns:330px 1fr;gap:20px;margin-top:18px\"><div class=\"panel\"><p style=\"margin:0;font-size:17px;color:#637a7b\">方案计算 · 同一场雨</p><p id=\"proposal-result\" style=\"font-size:27px;font-weight:bold;margin:12px 0\">等待你的记录</p><p id=\"proposal-params\" style=\"font-size:17px;margin:0\"></p></div><div class=\"panel\"><p id=\"proposal-explain\" style=\"font-size:21px;line-height:1.65;margin:0\">没有记录就不能声称“依据你的实验”。本页不预填一段成功经历。</p><p id=\"proposal-boundary\" style=\"font-size:17px;line-height:1.6;color:#637a7b;margin:10px 0 0\">模型映射：增加绿地→降低f；改善土壤→提高I。参数变化是假设，不是现实保证。</p></div></div><script>/* 方案程序消费已保存的实验基线；无记录保持空态。 */</script></section>"
+  },
+  "route": {
+    "tool": 35,
+    "id": "lab-route",
+    "frame": {
+      "width": 1164,
+      "height": 48,
+      "transform": [
+        1,
+        0,
+        0,
+        1,
+        58,
+        650
+      ]
+    },
+    "html": "<nav id=\"lab-route\" aria-label=\"雨水调查路线\" style=\"position:absolute;left:58px;top:650px;width:1164px;height:48px;display:flex;gap:10px;font:18px 'Microsoft YaHei',sans-serif\"><style>#lab-route button{flex:1;border:1px solid #90b5ac;border-radius:12px;background:#fffefa;color:#173b43;font:18px 'Microsoft YaHei';cursor:pointer}#lab-route button:hover,#lab-route button:focus-visible{background:#d5e9de;outline:2px solid #257c7a}#route-hint{display:none}</style><button data-go=\"0\">01 · 发现疑问</button><button data-go=\"1\">02 · 理解模型</button><button data-go=\"2\">03 · 动手实验</button><button data-go=\"3\">04 · 比较证据</button><button data-go=\"4\">05 · 改造校园</button><button data-go=\"5\">06 · 行动边界</button><span id=\"route-hint\" role=\"status\"></span><script>/* 正式场景导航由本实例的宿主端口执行。 */</script></nav>"
+  },
+  "run2-sim": {
+    "id": "",
+    "selector": "[data-rain-lab=\"sim\"]",
+    "frame": {
+      "width": 842,
+      "height": 397,
+      "transform": [
+        1,
+        0,
+        0,
+        1,
+        374,
+        195
+      ]
+    },
+    "html": "<section style=\"position:absolute;left:374px;top:195px;width:842px;height:397px;box-sizing:border-box;background:#FFFDF5;border:2px solid #C9D8CC;border-radius:18px;padding:20px;color:#153D3A;font:19px 'Microsoft YaHei',sans-serif\" data-rain-lab=\"sim\"><style>*{box-sizing:border-box}p{margin:0}button{font:inherit;border:0;background:#153D3A;color:#FFFDF5;padding:11px 17px;border-radius:10px;cursor:pointer}button:focus-visible,input:focus-visible{outline:3px solid #E89755;outline-offset:3px}label{display:block}input[type=range]{width:100%;accent-color:#3978A8;height:30px}output{font-weight:bold} .metric{background:#E3EEDC;border-radius:10px;padding:13px}small{font-size:15px;color:#536B63}</style><div style=\"display:grid;grid-template-columns:270px minmax(0,1fr);gap:24px;height:100%\"><div><label for=\"rain-p\">降雨量 P　<output data-out=\"P\">30</output> mm</label><input id=\"rain-p\" data-param=\"P\" aria-label=\"降雨量P毫米\" type=\"range\" min=\"0\" max=\"100\" step=\"1\" value=\"30\"><small>0 ～ 100 mm</small><label for=\"rain-f\" style=\"margin-top:15px\">硬化比例 f　<output data-out=\"f\">60</output>%</label><input id=\"rain-f\" data-param=\"f\" aria-label=\"硬化地面百分比\" type=\"range\" min=\"0\" max=\"100\" step=\"5\" value=\"60\"><small>0% ～ 100%（f = <span data-f-decimal=\"\">0.60</span>）</small><label for=\"rain-i\" style=\"margin-top:15px\">土壤入渗能力 I　<output data-out=\"I\">20</output> mm</label><input id=\"rain-i\" data-param=\"I\" aria-label=\"土壤本次最多入渗I毫米\" type=\"range\" min=\"0\" max=\"100\" step=\"1\" value=\"20\"><small>0 ～ 100 mm / 本次降雨</small><button type=\"button\" data-record=\"\" style=\"margin-top:14px;width:100%\">＋ 记入证据本</button></div><div><p style=\"font-size:17px\">当前预览 · 100 m²</p><p style=\"font-size:22px;margin:8px 0 14px\">总雨量 <b data-total=\"\" style=\"font-size:32px;color:#3978A8\">3000</b> L</p><div style=\"display:grid;grid-template-columns:1fr 1fr;gap:12px\"><div class=\"metric\"><p>↓ 入渗量</p><p style=\"font-size:30px;font-weight:bold;margin-top:7px\"><span data-infil=\"\">800</span> L</p></div><div class=\"metric\" style=\"background:#F3E0CB\"><p>→ 地表径流</p><p style=\"font-size:30px;font-weight:bold;margin-top:7px\"><span data-runoff=\"\">2200</span> L</p></div></div><div role=\"img\" data-waterbar=\"\" aria-label=\"入渗800升，径流2200升\" style=\"display:flex;height:28px;margin-top:16px;overflow:hidden;border-radius:8px;background:#DFE4DF\"><span data-infil-bar=\"\" style=\"width:26.667%;background:#6AAB83\"></span><span data-runoff-bar=\"\" style=\"width:73.333%;background:#E89755\"></span></div><p data-calc=\"\" style=\"font-size:17px;margin-top:12px;line-height:1.5\">入渗 = 0.40 × 20 × 100 = 800 L</p><p data-feedback=\"\" style=\"font-size:17px;margin-top:10px;line-height:1.5\">P 大于 I，土壤达到本次入渗上限。</p><p data-status=\"\" aria-live=\"polite\" style=\"font-size:16px;margin-top:11px;color:#3978A8\">尚无实验记录。预览不是实验经历。</p></div></div><script>/* 本局部实验由同对象 API5 作者入口连接正式共享状态。 */</script></section>",
+    "beforeRepairHtml": "<!doctype html><html><head><style>html,body{margin:0!important;padding:0!important;border:0!important;background:transparent!important;min-width:0!important;min-height:0!important;width:100%!important;height:100%!important;box-sizing:border-box!important}\nbody[data-guoling-program-viewport]{position:relative!important;left:-374px!important;top:-195px!important;width:1280px!important;height:720px!important}</style></head><body data-guoling-program-viewport=\"\"><section style=\"position:absolute;left:374px;top:195px;width:842px;height:397px;box-sizing:border-box;background:#FFFDF5;border:2px solid #C9D8CC;border-radius:18px;padding:20px;color:#153D3A;font:19px 'Microsoft YaHei',sans-serif\" data-rain-lab=\"sim\"><style>*{box-sizing:border-box}p{margin:0}button{font:inherit;border:0;background:#153D3A;color:#FFFDF5;padding:11px 17px;border-radius:10px;cursor:pointer}button:focus-visible,input:focus-visible{outline:3px solid #E89755;outline-offset:3px}label{display:block}input[type=range]{width:100%;accent-color:#3978A8;height:30px}output{font-weight:bold} .metric{background:#E3EEDC;border-radius:10px;padding:13px}small{font-size:15px;color:#536B63}</style><div style=\"display:grid;grid-template-columns:270px minmax(0,1fr);gap:24px;height:100%\"><div><label for=\"rain-p\">降雨量 P　<output data-out=\"P\">30</output> mm</label><input id=\"rain-p\" data-param=\"P\" aria-label=\"降雨量P毫米\" type=\"range\" min=\"0\" max=\"100\" step=\"1\" value=\"30\"><small>0 ～ 100 mm</small><label for=\"rain-f\" style=\"margin-top:15px\">硬化比例 f　<output data-out=\"f\">60</output>%</label><input id=\"rain-f\" data-param=\"f\" aria-label=\"硬化地面百分比\" type=\"range\" min=\"0\" max=\"100\" step=\"5\" value=\"60\"><small>0% ～ 100%（f = <span data-f-decimal=\"\">0.60</span>）</small><label for=\"rain-i\" style=\"margin-top:15px\">土壤入渗能力 I　<output data-out=\"I\">20</output> mm</label><input id=\"rain-i\" data-param=\"I\" aria-label=\"土壤本次最多入渗I毫米\" type=\"range\" min=\"0\" max=\"100\" step=\"1\" value=\"20\"><small>0 ～ 100 mm / 本次降雨</small><button type=\"button\" data-record=\"\" style=\"margin-top:14px;width:100%\">＋ 记入证据本</button></div><div><p style=\"font-size:17px\">当前预览 · 100 m²</p><p style=\"font-size:22px;margin:8px 0 14px\">总雨量 <b data-total=\"\" style=\"font-size:32px;color:#3978A8\">3000</b> L</p><div style=\"display:grid;grid-template-columns:1fr 1fr;gap:12px\"><div class=\"metric\"><p>↓ 入渗量</p><p style=\"font-size:30px;font-weight:bold;margin-top:7px\"><span data-infil=\"\">800</span> L</p></div><div class=\"metric\" style=\"background:#F3E0CB\"><p>→ 地表径流</p><p style=\"font-size:30px;font-weight:bold;margin-top:7px\"><span data-runoff=\"\">2200</span> L</p></div></div><div role=\"img\" data-waterbar=\"\" aria-label=\"入渗800升，径流2200升\" style=\"display:flex;height:28px;margin-top:16px;overflow:hidden;border-radius:8px;background:#DFE4DF\"><span data-infil-bar=\"\" style=\"width:26.667%;background:#6AAB83\"></span><span data-runoff-bar=\"\" style=\"width:73.333%;background:#E89755\"></span></div><p data-calc=\"\" style=\"font-size:17px;margin-top:12px;line-height:1.5\">入渗 = 0.40 × 20 × 100 = 800 L</p><p data-feedback=\"\" style=\"font-size:17px;margin-top:10px;line-height:1.5\">P 大于 I，土壤达到本次入渗上限。</p><p data-status=\"\" aria-live=\"polite\" style=\"font-size:16px;margin-top:11px;color:#3978A8\">尚无实验记录。预览不是实验经历。</p></div></div><script>/* 本局部实验由同对象 API5 作者入口连接正式共享状态。 */</script></section></body></html>"
+  },
+  "run2-evidence": {
+    "id": "",
+    "selector": "[data-rain-lab=\"evidence\"]",
+    "frame": {
+      "width": 1152,
+      "height": 285,
+      "transform": [
+        1,
+        0,
+        0,
+        1,
+        64,
+        197
+      ]
+    },
+    "html": "<section style=\"position:absolute;left:64px;top:197px;width:1152px;height:285px;box-sizing:border-box;padding:22px 26px;background:#FFFDF5;border:2px solid #C9D8CC;border-radius:18px;color:#153D3A;font:20px 'Microsoft YaHei',sans-serif\" data-rain-lab=\"evidence\"><style>*{box-sizing:border-box}p{margin:0}button{font:inherit;border:0;background:#153D3A;color:#FFFDF5;padding:10px 18px;border-radius:10px;cursor:pointer}table{width:100%;border-collapse:collapse;font-size:19px;text-align:left}th,td{padding:8px 12px;border-bottom:1px solid #D9E4D8}th{font-size:17px;color:#536B63}button:focus-visible{outline:3px solid #E89755}</style><p data-record-title=\"\" style=\"font-size:24px;font-weight:bold;margin-bottom:14px\">证据本 · 尚无记录</p><div data-table=\"\"><p style=\"font-size:23px;line-height:1.8;margin:20px 0\">你还没有记入任何实验。请到实验台调节条件并点击“记入证据本”。<br>这里不会把示例或默认预览当成你做过的实验。</p></div><p data-comparison=\"\" style=\"font-size:19px;line-height:1.6;margin-top:14px;color:#3978A8\">至少有两条记录，才能尝试对照。</p><script>/* 读取同一播放会话的真实证据记录，不生成虚构经历。 */</script></section>",
+    "beforeRepairHtml": "<!doctype html><html><head><style>html,body{margin:0!important;padding:0!important;border:0!important;background:transparent!important;min-width:0!important;min-height:0!important;width:100%!important;height:100%!important;box-sizing:border-box!important}\nbody[data-guoling-program-viewport]{position:relative!important;left:-64px!important;top:-197px!important;width:1280px!important;height:720px!important}</style></head><body data-guoling-program-viewport=\"\"><section style=\"position:absolute;left:64px;top:197px;width:1152px;height:285px;box-sizing:border-box;padding:22px 26px;background:#FFFDF5;border:2px solid #C9D8CC;border-radius:18px;color:#153D3A;font:20px 'Microsoft YaHei',sans-serif\" data-rain-lab=\"evidence\"><style>*{box-sizing:border-box}p{margin:0}button{font:inherit;border:0;background:#153D3A;color:#FFFDF5;padding:10px 18px;border-radius:10px;cursor:pointer}table{width:100%;border-collapse:collapse;font-size:19px;text-align:left}th,td{padding:8px 12px;border-bottom:1px solid #D9E4D8}th{font-size:17px;color:#536B63}button:focus-visible{outline:3px solid #E89755}</style><p data-record-title=\"\" style=\"font-size:24px;font-weight:bold;margin-bottom:14px\">证据本 · 尚无记录</p><div data-table=\"\"><p style=\"font-size:23px;line-height:1.8;margin:20px 0\">你还没有记入任何实验。请到实验台调节条件并点击“记入证据本”。<br>这里不会把示例或默认预览当成你做过的实验。</p></div><p data-comparison=\"\" style=\"font-size:19px;line-height:1.6;margin-top:14px;color:#3978A8\">至少有两条记录，才能尝试对照。</p><script>/* 读取同一播放会话的真实证据记录，不生成虚构经历。 */</script></section></body></html>"
+  },
+  "run2-design": {
+    "id": "",
+    "selector": "[data-rain-lab=\"design\"]",
+    "frame": {
+      "width": 1152,
+      "height": 376,
+      "transform": [
+        1,
+        0,
+        0,
+        1,
+        64,
+        197
+      ]
+    },
+    "html": "<section style=\"position:absolute;left:64px;top:197px;width:1152px;height:376px;box-sizing:border-box;padding:22px 26px;background:#FFFDF5;border:2px solid #C9D8CC;border-radius:18px;color:#153D3A;font:20px 'Microsoft YaHei',sans-serif\" data-rain-lab=\"design\"><style>*{box-sizing:border-box}p{margin:0}button{font:inherit;border:2px solid #C9D8CC;background:#E7EDE2;color:#153D3A;padding:12px 18px;border-radius:10px;cursor:pointer}button[aria-pressed=true]{background:#153D3A;color:#FFFDF5;border-color:#153D3A}button:disabled{opacity:.5;cursor:not-allowed}button:focus-visible{outline:3px solid #E89755} .number{font-size:32px;font-weight:bold}</style><p data-base=\"\" style=\"font-size:23px;font-weight:bold;margin-bottom:16px\">暂无改造基线：你还没有实验记录。</p><div style=\"display:grid;grid-template-columns:360px 1fr;gap:26px\"><div><p style=\"font-size:18px;margin-bottom:12px\">选择模拟方案（不改变降雨量）</p><button data-plan=\"open\" disabled=\"\" style=\"width:100%;margin-bottom:10px;text-align:left\">A　增加可入渗地面<br><small style=\"font-size:16px\">f 减少 0.20，最低到 0</small></button><button data-plan=\"soil\" disabled=\"\" style=\"width:100%;text-align:left\">B　改善土壤入渗能力<br><small style=\"font-size:16px\">I 增加 10 mm，其他不变</small></button></div><div style=\"background:#E8EFE5;padding:18px 22px;border-radius:12px\"><p data-result=\"\" style=\"font-size:24px;font-weight:bold\">先到实验台留下证据</p><p data-change=\"\" style=\"font-size:20px;line-height:1.6;margin-top:12px\">有记录后，这里会显示改造前后入渗量、径流量和减少的升数。</p><p data-reason=\"\" style=\"font-size:19px;line-height:1.6;margin-top:12px\">不预先承诺一定有效，也不承诺不会积水。</p></div></div><p data-selection=\"\" aria-live=\"polite\" style=\"font-size:17px;color:#3978A8;margin-top:14px\">尚未选择方案；第六页不会替你作出选择。</p><script>/* 正式共享状态承接基线与读者选择。 */</script></section>",
+    "beforeRepairHtml": "<!doctype html><html><head><style>html,body{margin:0!important;padding:0!important;border:0!important;background:transparent!important;min-width:0!important;min-height:0!important;width:100%!important;height:100%!important;box-sizing:border-box!important}\nbody[data-guoling-program-viewport]{position:relative!important;left:-64px!important;top:-197px!important;width:1280px!important;height:720px!important}</style></head><body data-guoling-program-viewport=\"\"><section style=\"position:absolute;left:64px;top:197px;width:1152px;height:376px;box-sizing:border-box;padding:22px 26px;background:#FFFDF5;border:2px solid #C9D8CC;border-radius:18px;color:#153D3A;font:20px 'Microsoft YaHei',sans-serif\" data-rain-lab=\"design\"><style>*{box-sizing:border-box}p{margin:0}button{font:inherit;border:2px solid #C9D8CC;background:#E7EDE2;color:#153D3A;padding:12px 18px;border-radius:10px;cursor:pointer}button[aria-pressed=true]{background:#153D3A;color:#FFFDF5;border-color:#153D3A}button:disabled{opacity:.5;cursor:not-allowed}button:focus-visible{outline:3px solid #E89755} .number{font-size:32px;font-weight:bold}</style><p data-base=\"\" style=\"font-size:23px;font-weight:bold;margin-bottom:16px\">暂无改造基线：你还没有实验记录。</p><div style=\"display:grid;grid-template-columns:360px 1fr;gap:26px\"><div><p style=\"font-size:18px;margin-bottom:12px\">选择模拟方案（不改变降雨量）</p><button data-plan=\"open\" disabled=\"\" style=\"width:100%;margin-bottom:10px;text-align:left\">A　增加可入渗地面<br><small style=\"font-size:16px\">f 减少 0.20，最低到 0</small></button><button data-plan=\"soil\" disabled=\"\" style=\"width:100%;text-align:left\">B　改善土壤入渗能力<br><small style=\"font-size:16px\">I 增加 10 mm，其他不变</small></button></div><div style=\"background:#E8EFE5;padding:18px 22px;border-radius:12px\"><p data-result=\"\" style=\"font-size:24px;font-weight:bold\">先到实验台留下证据</p><p data-change=\"\" style=\"font-size:20px;line-height:1.6;margin-top:12px\">有记录后，这里会显示改造前后入渗量、径流量和减少的升数。</p><p data-reason=\"\" style=\"font-size:19px;line-height:1.6;margin-top:12px\">不预先承诺一定有效，也不承诺不会积水。</p></div></div><p data-selection=\"\" aria-live=\"polite\" style=\"font-size:17px;color:#3978A8;margin-top:14px\">尚未选择方案；第六页不会替你作出选择。</p><script>/* 正式共享状态承接基线与读者选择。 */</script></section></body></html>"
+  },
+  "run2-proposal": {
+    "id": "",
+    "selector": "[data-rain-lab=\"proposal\"]",
+    "frame": {
+      "width": 1152,
+      "height": 276,
+      "transform": [
+        1,
+        0,
+        0,
+        1,
+        64,
+        197
+      ]
+    },
+    "html": "<section style=\"position:absolute;left:64px;top:197px;width:1152px;height:276px;box-sizing:border-box;padding:22px 26px;background:#153D3A;border-radius:18px;color:#FFFDF5;font:21px 'Microsoft YaHei',sans-serif\" data-rain-lab=\"proposal\"><style>*{box-sizing:border-box}p{margin:0}textarea{font:18px 'Microsoft YaHei',sans-serif;background:#F5F5EC;color:#153D3A;border:2px solid #BCE4CA;border-radius:10px;padding:10px;resize:none;width:100%;height:78px}textarea:focus-visible{outline:3px solid #E89755}</style><div style=\"display:grid;grid-template-columns:1.6fr 1fr;gap:28px\"><div><p style=\"font-size:17px;color:#BCE4CA;letter-spacing:2px;margin-bottom:12px\">我的证据提案 / 本次会话</p><p data-proposal=\"\" style=\"font-size:23px;line-height:1.65\">尚无实验记录，无法写出有数据支持的改造提案。请返回实验台记入一条证据，再去工作室选择方案。</p><p data-limit=\"\" style=\"font-size:17px;color:#BCE4CA;margin-top:12px;line-height:1.5\">这是教学模型下的建议，不是现场工程结论。</p></div><div><label for=\"rain-question\" style=\"display:block;font-size:19px;margin-bottom:12px\">我想进一步调查的问题</label><textarea id=\"rain-question\" data-question=\"\" maxlength=\"180\" placeholder=\"例如：校园低洼处的排水口是否畅通？\"></textarea><p data-writing=\"\" style=\"font-size:16px;color:#BCE4CA;margin-top:10px;line-height:1.5\">可自由填写；只在本次播放会话保留，不自动评价答案。</p></div></div><script>/* 提案只消费真实记录与实际方案，调查问题保留本会话。 */</script></section>",
+    "beforeRepairHtml": "<!doctype html><html><head><style>html,body{margin:0!important;padding:0!important;border:0!important;background:transparent!important;min-width:0!important;min-height:0!important;width:100%!important;height:100%!important;box-sizing:border-box!important}\nbody[data-guoling-program-viewport]{position:relative!important;left:-64px!important;top:-197px!important;width:1280px!important;height:720px!important}</style></head><body data-guoling-program-viewport=\"\"><section style=\"position:absolute;left:64px;top:197px;width:1152px;height:276px;box-sizing:border-box;padding:22px 26px;background:#153D3A;border-radius:18px;color:#FFFDF5;font:21px 'Microsoft YaHei',sans-serif\" data-rain-lab=\"proposal\"><style>*{box-sizing:border-box}p{margin:0}textarea{font:18px 'Microsoft YaHei',sans-serif;background:#F5F5EC;color:#153D3A;border:2px solid #BCE4CA;border-radius:10px;padding:10px;resize:none;width:100%;height:78px}textarea:focus-visible{outline:3px solid #E89755}</style><div style=\"display:grid;grid-template-columns:1.6fr 1fr;gap:28px\"><div><p style=\"font-size:17px;color:#BCE4CA;letter-spacing:2px;margin-bottom:12px\">我的证据提案 / 本次会话</p><p data-proposal=\"\" style=\"font-size:23px;line-height:1.65\">尚无实验记录，无法写出有数据支持的改造提案。请返回实验台记入一条证据，再去工作室选择方案。</p><p data-limit=\"\" style=\"font-size:17px;color:#BCE4CA;margin-top:12px;line-height:1.5\">这是教学模型下的建议，不是现场工程结论。</p></div><div><label for=\"rain-question\" style=\"display:block;font-size:19px;margin-bottom:12px\">我想进一步调查的问题</label><textarea id=\"rain-question\" data-question=\"\" maxlength=\"180\" placeholder=\"例如：校园低洼处的排水口是否畅通？\"></textarea><p data-writing=\"\" style=\"font-size:16px;color:#BCE4CA;margin-top:10px;line-height:1.5\">可自由填写；只在本次播放会话保留，不自动评价答案。</p></div></div><script>/* 提案只消费真实记录与实际方案，调查问题保留本会话。 */</script></section></body></html>"
+  }
+}

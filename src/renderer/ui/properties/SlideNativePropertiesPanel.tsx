@@ -54,7 +54,6 @@ import {
 } from '../../../shared/opacity'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { ComponentManifest } from '../../../shared/componentTypes'
-import type { InteractionRule } from '../../../shared/interactionTypes'
 import { NativeColorInput as ColorInput } from './NativeColorPreview'
 import { ComponentPropertiesEditor } from '../ComponentPropertiesEditor'
 import type { ComponentAsset, ComponentDefinition, ComponentInstance, JsonValue } from '../../../shared/contracts/component-platform/project'
@@ -67,8 +66,7 @@ import {
   InteractionEditor,
   type InteractionEditorProps,
 } from '../InteractionEditor'
-import { SimpleEntranceAnimationEditor } from '../SimpleEntranceAnimationEditor'
-import type { SlideSimpleEntranceAnimationConfig } from '../../course/v9SlideContentCommands'
+import { ComponentMotionProperties, type ComponentMotionPropertiesContext } from './ComponentMotionProperties'
 import { FlowSpatialInteractionUnavailableSection } from './FlowSpatialInteractionUnavailableSection'
 import { ComponentClickNavigationProperties, type ComponentClickNavigationPropertiesContext } from './ComponentClickNavigationProperties'
 import {
@@ -178,13 +176,7 @@ export interface SlideNativePropertiesContext {
   readonly runtime?: RuntimePropertiesContext | null
   readonly notices: SlideNativeNoticesView
   readonly videoDiagnostics: readonly string[]
-  readonly animation: {
-    readonly layerItemId: string
-    readonly interactions: readonly InteractionRule[]
-    readonly activeStateId: string | null
-    readonly onChange: (config: SlideSimpleEntranceAnimationConfig | null) => void
-    readonly onOpenProfessional: () => void
-  } | null
+  readonly animation: ComponentMotionPropertiesContext | null
   readonly interaction: InteractionEditorProps | null
   readonly globalInteraction: InteractionEditorProps | null
   readonly clickNavigation?: ComponentClickNavigationPropertiesContext | null
@@ -991,15 +983,7 @@ export function SlideNativePropertiesPanel({
       />
       <CommonNodeProperties node={node} update={update} showGeometryFields={context.frameEditingEnabled !== false}
         showDimensions={(context.frameDimensionsEditingEnabled ?? context.frameEditingEnabled) !== false} />
-      {animation && (
-        <SimpleEntranceAnimationEditor
-          layerItemId={animation.layerItemId}
-          interactions={animation.interactions}
-          activeStateId={animation.activeStateId}
-          onChange={animation.onChange}
-          onOpenProfessional={animation.onOpenProfessional}
-        />
-      )}
+      {animation && <ComponentMotionProperties context={animation} />}
       {afterCommon}
       {context.clickNavigation && <ComponentClickNavigationProperties key={context.draftBindingKey} context={context.clickNavigation} />}
       {node.type === 'input' && commands.input && <SlideInputProperties

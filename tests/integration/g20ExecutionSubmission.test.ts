@@ -44,7 +44,7 @@ async function waitUntil(read: () => Promise<boolean>) {
 }
 
 describe('durable execution submissions', () => {
-  it('M07-T03 queries an attachment submission after lost ACK then retries its frozen receipt without creating another task', async () => {
+  it.each([undefined, 'workspace'] as const)('M07-T03 queries an attachment submission after lost ACK with %s permission then retries its frozen receipt without creating another task', async permission => {
     let calls = 0
     const payloads: unknown[] = []
     const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => { payloads.push(JSON.parse(String(init?.body))); return completed(++calls) })
@@ -54,7 +54,7 @@ describe('durable execution submissions', () => {
     const draft = await service.operate({ type: 'draft', workspaceId: conversation.workspaceId, conversationId: conversation.conversationId,
       expectedRevision: conversation.revision, text: '只执行一次', documents: [], attachments }) as ConversationRecord
     const input = { type: 'send' as const, workspaceId: conversation.workspaceId, conversationId: conversation.conversationId,
-      submissionId: '11111111-1111-4111-8111-111111111111', expectedRevision: draft.revision, text: '只执行一次', documents: [], attachments }
+      submissionId: '11111111-1111-4111-8111-111111111111', expectedRevision: draft.revision, text: '只执行一次', documents: [], attachments, permission }
     const first = await service.operate(input) as ExecutionSendResult
     await service.engine.wait(first.run!.runId)
     // The transport can lose the ACK after Main accepted it. Receipt queries are read-only.
@@ -65,7 +65,7 @@ describe('durable execution submissions', () => {
     const originalBytes = await service.attachments.readRepresentation(attachment.id, 'original-text')
     expect(Buffer.from(originalBytes.bytes).toString()).toBe('附件正文')
     // Simulate the renderer losing the first return value and retrying the exact submission with its stale CAS revision.
-    const retried = await service.operate(input) as ExecutionSendResult
+    const retried = await service.operate({ ...input, permission: undefined }) as ExecutionSendResult
     expect(retried.run!.runId).toBe(first.run!.runId)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(retried.submission).toMatchObject({ state: 'accepted', attachments, runId: first.run!.runId,

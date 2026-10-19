@@ -96,6 +96,8 @@ export interface AgentFileContext {
   boundPaths?: readonly string[]
   /** Exact outside paths approved for this one mutation after host preflight. */
   approvedOutsidePaths?: readonly string[]
+  /** Original host call, for a single digest across file and document admission. */
+  operationCall?: import('../../shared/workbench/tools').ModelToolCall
   /** Main-owned stop barrier, checked again immediately before a physical or document commit. */
   assertActive?: () => void
 }

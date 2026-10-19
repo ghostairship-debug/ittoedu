@@ -1,5 +1,5 @@
 import type { DocumentSlot } from '../document/ports'
-import type { DocumentSaveIdentity } from './documentSave'
+import type { DocumentSaveIdentity, DocumentSourcePublication, PreparedDocumentSave } from './documentSave'
 import type { CourseProjectDocument } from '../courseProjectTypes'
 import type { CompositionContentEdit } from '../composition/edit'
 import type { CourseProjectV10 } from '../contracts/component-platform/project'
@@ -96,6 +96,8 @@ export interface DocumentSnapshot {
   /** Transient facts from this session, not journal availability. */
   saveError?: string | null
   recovered?: boolean
+  /** Recovery candidate backed only by retained unsubmitted input; restoring opens a new formal document. */
+  rawInputOnly?: boolean
   recoverable: boolean
   recoveryUnavailable?: string
   undoDepth: number
@@ -116,8 +118,11 @@ export interface DocumentHistoryEntry {
 }
 
 /** Complete recovery state; binary resources and history share the commit boundary. */
+export type DocumentDisposition = 'active' | 'closed' | 'discarded'
 export interface DurableDocumentState {
-  schemaVersion: 1
+  /** Version 1 is a legacy active record. Version 2 requires disposition, so an old reader rejects terminal records. */
+  schemaVersion: 1 | 2
+  disposition?: DocumentDisposition
   documentId: DocumentId
   epoch: string
   sequence: number
@@ -143,6 +148,10 @@ export interface DocumentDriver {
   readonly kind: DocumentKind
   validate(model: DocumentModel): void
   apply(model: DocumentModel, command: DocumentCommand): DocumentModel | Promise<DocumentModel>
+  /** Canonical batch planning only: detach/validate the initial model once, then keep
+   * per-command expectations and edit semantics. Candidates are provisional and must
+   * be committed by the ordinary Session command path, which validates the full result. */
+  beginPlanningBatch?(model: DocumentModel): { apply(command: DocumentCommand): DocumentModel | Promise<DocumentModel> }
   /** Session-only: input is an owned, validated snapshot. Do not mutate it; validate the candidate once.
    * Unchanged resource bytes may be shared because public snapshots remain detached. */
   applyValidated?(model: DocumentModel, command: DocumentCommand): DocumentModel | Promise<DocumentModel>
@@ -156,7 +165,10 @@ export interface DocumentDriver {
 /** No filesystem, Electron, DOM or renderer dependency is permitted in the core. */
 export interface DocumentPersistence {
   append(state: DurableDocumentState): Promise<void>
+  /** Durably end the supplied active state at sequence + 1 before its Session closes. */
+  finalize?(state: DurableDocumentState, disposition: Exclude<DocumentDisposition, 'active'>): Promise<void>
   /** File owner captures dependencies of the frozen source, before serialization/publication. */
-  prepareSaveModel?(input: { model: DocumentModel; sourceBinding: DocumentBinding; targetBinding: DocumentBinding }): Promise<DocumentModel>
-  save(input: { documentId: DocumentId; revision: number; model: DocumentModel; binding: DocumentBinding; bytes: Uint8Array; saveIdentity?: DocumentSaveIdentity }): Promise<Extract<DocumentBinding, { kind: 'file' }>>
+  prepareSave?(input: { model: DocumentModel; sourceBinding: DocumentBinding; targetBinding: DocumentBinding }): Promise<PreparedDocumentSave>
+  save(input: { documentId: DocumentId; revision: number; model: DocumentModel; binding: DocumentBinding; bytes: Uint8Array;
+    sourcePublication?: DocumentSourcePublication; saveIdentity?: DocumentSaveIdentity }): Promise<Extract<DocumentBinding, { kind: 'file' }>>
 }

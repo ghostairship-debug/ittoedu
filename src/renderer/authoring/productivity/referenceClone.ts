@@ -8,6 +8,6 @@ export function prepareReferenceClone(context: ProductivityContext, sourceSurfac
 export function cloneReferencePage(context: ProductivityContext, sourceSurfaceId: string, _assetFiles: Readonly<Record<string, Uint8Array>> = {}): ProductivityApplyResult {
   try {
     const clone = prepareReferenceClone(context, sourceSurfaceId)
-    return { ok: true, step: { ...designProductionStep(context, clone.edits), createdSurfaceId: clone.surface.id } }
+    return { ok: true, step: { ...designProductionStep(context, clone.edits, clone.readPaths), createdSurfaceId: clone.surface.id } }
   } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : '参考页克隆失败' } }
 }

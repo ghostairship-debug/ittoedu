@@ -1,4 +1,5 @@
 import { courseStateDeclarationSchema } from '../../shared/contracts/course-state/schema'
+import { canonicalNavigationGuard } from '../../shared/courseNavigationGuards'
 import type { CourseStateDeclaration } from '../../shared/contracts/course-state/types'
 import { courseStateScalarType } from '../../shared/contracts/course-state/types'
 import { courseProjectLogicSchema } from '../../shared/contracts/component-platform/schema'
@@ -7,6 +8,7 @@ import { componentDefinitionBuiltinKey } from '../../shared/contracts/component-
 import type { InteractionRule } from '../../shared/interactionTypes'
 import { interactionRules } from '../../shared/componentInteractionData'
 import { prepareCourseNavigationGuard, type CourseAuthoringReferences } from './courseAuthoringReferences'
+import { componentInputStateReferences } from '../../components/input/authoring'
 
 export type CourseNavigationGuard = CourseProjectLogic['navigationGuards'][number]
 export type CourseNetworkDeclaration = NonNullable<CourseProjectLogic['network']>
@@ -52,6 +54,11 @@ export function executeCourseLogicAuthoringCommand(project: CourseProjectV10, co
       return data === undefined ? [] : [{ surfaceId: surface.id, stateId: state.id, instance, data, rules: interactionRules({ ...instance, data }) }]
     })))
     const rules = [...behaviors.flatMap(instance => interactionRules(instance)), ...stateRules.flatMap(slot => slot.rules)]
+    const inputs = Object.values(project.instances).filter(instance => componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.input')
+    const inputSlots = project.surfaces.flatMap(surface => (surface.presentation?.states ?? []).flatMap(state => inputs.flatMap(instance => {
+      const data = state.overrides[instance.id]?.data
+      return data === undefined ? [] : [{ surfaceId: surface.id, stateId: state.id, instance, data }]
+    })))
     const edits: ComponentEdit[] = []
     let statusMessage = ''
     if (command.kind.startsWith('course-state.')) {
@@ -66,12 +73,15 @@ export function executeCourseLogicAuthoringCommand(project: CourseProjectV10, co
         const sensitive = command.kind === 'course-state.update' && logic.courseState[index]!.valueType !== command.declaration.valueType
         const referenced = logic.navigationGuards.some(guard => guard.conditions.some(condition => condition.key === key && (!sensitive || condition.type === 'compare')))
           || rules.some(rule => referencesState(rule, key, sensitive))
+          || (!sensitive && Object.values(project.instances).some(instance => Object.values(instance.stateBindings ?? {}).includes(key)))
+          || [...inputs.map(instance => instance.data), ...inputSlots.map(slot => slot.data)].some(data => componentInputStateReferences(data)
+            .some(reference => reference.key === key && (!sensitive || reference.scalar)))
         if (command.kind === 'course-state.delete') {
-          if (referenced) throw new LogicError('state-referenced', `状态“${key}”仍被守卫或互动使用，请先调整引用。`)
+          if (referenced) throw new LogicError('state-referenced', `状态“${key}”仍被守卫、互动、输入或组件绑定使用，请先调整引用。`)
           logic.courseState.splice(index, 1); statusMessage = `已删除状态“${key}”`
         } else {
           const declaration = courseStateDeclarationSchema.parse(command.declaration)
-          if (sensitive && referenced) throw new LogicError('state-type-referenced', `状态“${key}”被比较或赋值使用，请先调整这些操作。`)
+          if (sensitive && referenced) throw new LogicError('state-type-referenced', `状态“${key}”被比较、赋值或输入使用，请先调整这些操作。`)
           if (declaration.key !== key && logic.courseState.some(state => state.key === declaration.key)) throw new LogicError('state-key-exists', '新状态键已经存在。')
           logic.courseState[index] = declaration
           if (declaration.key !== key) {
@@ -83,12 +93,30 @@ export function executeCourseLogicAuthoringCommand(project: CourseProjectV10, co
               const next = renameRules(interactionRules(instance))
               if (JSON.stringify(next) !== JSON.stringify(interactionRules(instance))) edits.push({ type: 'data.set', instanceId: instance.id, path: ['rules'], value: json(next) })
             }
+            for (const instance of Object.values(project.instances)) if (Object.values(instance.stateBindings ?? {}).includes(key)) edits.push({
+              type: 'instance.patch', instanceId: instance.id,
+              patch: { stateBindings: Object.fromEntries(Object.entries(instance.stateBindings!).map(([alias, stateKey]) => [alias, stateKey === key ? declaration.key : stateKey])) },
+            })
+            for (const instance of inputs) for (const reference of componentInputStateReferences(instance.data)) if (reference.key === key) edits.push({
+              type: 'data.set', instanceId: instance.id, path: reference.path, value: declaration.key,
+            })
             const presentations = new Map<string, ComponentPresentation>()
             for (const slot of stateRules) {
               const next = renameRules(slot.rules)
               if (JSON.stringify(next) === JSON.stringify(slot.rules)) continue
               const presentation = presentations.get(slot.surfaceId) ?? structuredClone(project.surfaces.find(surface => surface.id === slot.surfaceId)!.presentation!)
               presentation.states.find(state => state.id === slot.stateId)!.overrides[slot.instance.id]!.data = { ...(slot.data as JsonObject), rules: json(next) }
+              presentations.set(slot.surfaceId, presentation)
+            }
+            for (const slot of inputSlots) {
+              const matching = componentInputStateReferences(slot.data).filter(reference => reference.key === key)
+              if (!matching.length) continue
+              const presentation = presentations.get(slot.surfaceId) ?? structuredClone(project.surfaces.find(surface => surface.id === slot.surfaceId)!.presentation!)
+              const data = presentation.states.find(state => state.id === slot.stateId)!.overrides[slot.instance.id]!.data! as JsonObject
+              for (const reference of matching) {
+                if (reference.path.length === 1) data[reference.path[0]!] = declaration.key
+                else (data.answer as JsonObject)[reference.path[1]!] = declaration.key
+              }
               presentations.set(slot.surfaceId, presentation)
             }
             for (const [surfaceId, presentation] of presentations) edits.push({ type: 'surface.presentation.set', surfaceId, presentation })
@@ -101,7 +129,7 @@ export function executeCourseLogicAuthoringCommand(project: CourseProjectV10, co
       if (command.kind !== 'navigation-guard.add' && index < 0) throw new LogicError('guard-not-found', '导航守卫已经不存在。')
       if (command.kind === 'navigation-guard.delete') logic.navigationGuards.splice(index, 1)
       else {
-        const guard = courseProjectLogicSchema.shape.navigationGuards.element.parse(prepareCourseNavigationGuard(project, command.guard, references))
+        const guard = canonicalNavigationGuard(courseProjectLogicSchema.shape.navigationGuards.element.parse(prepareCourseNavigationGuard(project, command.guard, references)))
         if (logic.navigationGuards.some((value, i) => value.id === guard.id && i !== index)) throw new LogicError('guard-id-exists', '导航守卫身份重复。')
         const surfaces = new Set(project.surfaces.map(surface => surface.id))
         if ([...(guard.fromSurfaceIds ?? []), ...guard.toSurfaceIds].some(id => !surfaces.has(id))) throw new LogicError('invalid-document', '守卫引用的页面已不存在。')

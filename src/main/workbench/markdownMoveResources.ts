@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs, type Stats } from 'node:fs'
 import path from 'node:path'
 import type { DocumentResources } from '../../shared/workbench/document'
-import { DocumentJournalError, markdownReferences, readDocumentFileVersion, readDocumentMarkdownResources, resourcePath } from './documentJournal'
+import { DocumentJournalError, readDocumentFileVersion } from './documentJournal'
+import { markdownReferences, readDocumentMarkdownResources, resourcePath } from './documentSourceResources'
 
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT'
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')

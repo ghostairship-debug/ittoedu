@@ -40,7 +40,7 @@ export type ComponentEdit =
   | { type: 'authoring.set'; instanceId: string; path: string[]; value: JsonValue }
   | { type: 'style.set'; instanceId: string; path: string[]; value: JsonValue }
   | { type: 'frame.set'; instanceId: string; frame: ComponentFrame | null }
-  | { type: 'instance.patch'; instanceId: string; patch: { name?: string | null; visible?: boolean; locked?: boolean; viewportPinned?: boolean | null; playbackInitialVisibility?: 'inherit' | 'hidden'; visibility?: ComponentInstance['visibility'] | null } }
+  | { type: 'instance.patch'; instanceId: string; patch: { name?: string | null; visible?: boolean; locked?: boolean; viewportPinned?: boolean | null; playbackInitialVisibility?: 'inherit' | 'hidden'; visibility?: ComponentInstance['visibility'] | null; stateBindings?: ComponentInstance['stateBindings'] | null } }
   | { type: 'instance.definition.set'; instanceId: string; definitionId: string }
   | { type: 'instance.flowLayout.set'; instanceId: string; flowLayout: ComponentFlowBodyLayout | null }
   | { type: 'instance.flowPlacement.set'; instanceId: string; flowPlacement: ComponentFlowPlacement | null }

@@ -163,7 +163,7 @@ export function prepareCourseReferenceClone(project: CourseProjectV10, sourceSur
   const insertion = plan.edits.find(edit => edit.type === 'surface.insert')!
   if (insertion.type !== 'surface.insert') throw new Error('缺少复制页面')
   const instances = plan.edits.flatMap(edit => edit.type === 'instance.insert' ? edit.instances : [])
-  return { source, surface: insertion.surface, instances, ids: plan.ids, edits: plan.edits }
+  return { source, surface: insertion.surface, instances, ids: plan.ids, edits: plan.edits, readPaths: plan.readPaths }
 }
 export function replaceCourseRemixText(content: FlowTextContent, text: string): FlowTextContent {
   if (content.inlines.some(inline => inline.type !== 'text')) throw new Error('公式与文字混排请在原文选区中编辑')
@@ -241,5 +241,5 @@ export function planCourseStyleRemixEdits(project: CourseProjectV10, sourceSurfa
       parent[slot.dataPath.at(-1)!] = replacement
     }
   }
-  return { edits: clone.edits, createdSurfaceId: clone.surface.id, instanceIds: clone.ids }
+  return { edits: clone.edits, createdSurfaceId: clone.surface.id, instanceIds: clone.ids, readPaths: clone.readPaths }
 }

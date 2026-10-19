@@ -49,6 +49,80 @@
             "contain",
             "fill"
           ]
+        },
+        "paint": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "layers": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "style": {
+                        "type": "object",
+                        "properties": {
+                          "background-color": {
+                            "type": "string"
+                          },
+                          "background-image": {
+                            "type": "string"
+                          },
+                          "background-size": {
+                            "type": "string"
+                          },
+                          "background-position": {
+                            "type": "string"
+                          },
+                          "background-repeat": {
+                            "type": "string"
+                          },
+                          "background-origin": {
+                            "type": "string"
+                          },
+                          "background-clip": {
+                            "type": "string"
+                          },
+                          "background-attachment": {
+                            "type": "string"
+                          },
+                          "background-blend-mode": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "resourceBindings": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "additionalProperties": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    },
+                    "required": [
+                      "style",
+                      "resourceBindings"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "layers"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -1010,6 +1084,17 @@
             },
             "additionalProperties": false
           },
+          "stateBindings": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1
+            },
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
           "name": {
             "type": "string"
           },
@@ -1942,6 +2027,80 @@
                   "contain",
                   "fill"
                 ]
+              },
+              "paint": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "layers": {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "style": {
+                              "type": "object",
+                              "properties": {
+                                "background-color": {
+                                  "type": "string"
+                                },
+                                "background-image": {
+                                  "type": "string"
+                                },
+                                "background-size": {
+                                  "type": "string"
+                                },
+                                "background-position": {
+                                  "type": "string"
+                                },
+                                "background-repeat": {
+                                  "type": "string"
+                                },
+                                "background-origin": {
+                                  "type": "string"
+                                },
+                                "background-clip": {
+                                  "type": "string"
+                                },
+                                "background-attachment": {
+                                  "type": "string"
+                                },
+                                "background-blend-mode": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "resourceBindings": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "additionalProperties": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          },
+                          "required": [
+                            "style",
+                            "resourceBindings"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "layers"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "additionalProperties": false
@@ -2328,6 +2487,80 @@
                             "cover",
                             "contain",
                             "fill"
+                          ]
+                        },
+                        "paint": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "layers": {
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "style": {
+                                        "type": "object",
+                                        "properties": {
+                                          "background-color": {
+                                            "type": "string"
+                                          },
+                                          "background-image": {
+                                            "type": "string"
+                                          },
+                                          "background-size": {
+                                            "type": "string"
+                                          },
+                                          "background-position": {
+                                            "type": "string"
+                                          },
+                                          "background-repeat": {
+                                            "type": "string"
+                                          },
+                                          "background-origin": {
+                                            "type": "string"
+                                          },
+                                          "background-clip": {
+                                            "type": "string"
+                                          },
+                                          "background-attachment": {
+                                            "type": "string"
+                                          },
+                                          "background-blend-mode": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "resourceBindings": {
+                                        "type": "object",
+                                        "propertyNames": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "additionalProperties": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "style",
+                                      "resourceBindings"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                }
+                              },
+                              "required": [
+                                "layers"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
                           ]
                         }
                       },

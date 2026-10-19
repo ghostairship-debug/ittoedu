@@ -99,7 +99,7 @@ it('CA079 keys presentation entry by surface and state; CA137 dispatches crossed
   off(); late(); early(); world.dispose(); nav.dispose(); h.dispose()
 })
 
-it('CA025 traverses current surface descendants and counts the effective Web override; CA186 camera capture changes no fragment state', () => {
+it('CA025 traverses current surface descendants and counts the effective loaded Web runtime; CA186 camera capture changes no fragment state', () => {
   let project = fixture()
   project.surfaces[0] = { ...project.surfaces[0], kind: 'spatial', childIds: ['group'], spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [{ id: 'frame', title: 'one', targetInstanceId: 'web', pose: { x: 0, y: 0, zoom: 1 } }] } }
   project.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
@@ -107,11 +107,17 @@ it('CA025 traverses current surface descendants and counts the effective Web ove
   project.instances.group = { id: 'group', definitionId: 'group', data: {}, childIds: ['web'] }
   project.instances.web = { id: 'web', definitionId: 'web', data: { html: '<p class="fragment">one</p><p class="fragment">two</p>' }, implementationOverride: { kind: 'builtin', key: 'guoling.web' }, frame: { width: 100, height: 100, transform: [1, 0, 0, 1, 0, 0] } }
   const state = new Map<string, number>(), nav = new ComponentNavigationOwner({ project: () => project, surfaceId: () => 'A', select() {}, courseState: { get: key => state.get(key) as never, set: (key, value) => { state.set(key, value) } } })
+  let loadedWeb = true
+  const runtime = { read: (id: string) => id === 'web' && loadedWeb ? { status: 'ready' as const, generation: 1, document: 'web' as const, html: (project.instances.web.data as { html: string }).html } : { status: 'ready' as const }, prepare: async () => true }
+  nav.connectRuntime(runtime)
   expect(nav.read().progress?.stepCount).toBe(3)
+  loadedWeb = false
   project = { ...project, instances: { ...project.instances, web: { ...project.instances.web, implementationOverride: { kind: 'source', language: 'javascript', source: 'export default {}' } } } }
   expect(nav.read().progress?.stepCount).toBe(1)
   project = { ...project, instances: { ...project.instances, web: { ...project.instances.web, implementationOverride: { kind: 'builtin', key: 'guoling.web' } } } }
+  loadedWeb = true; state.clear()
   const capture = new ComponentNavigationOwner({ project: () => project, surfaceId: () => 'A', select() {}, capture: true, courseState: { get: key => state.get(key) as never, set: (key, value) => { state.set(key, value) } } })
+  capture.connectRuntime(runtime)
   const camera = createComponentSpatialCameraPort({ x: 0, y: 0, zoom: 1 }); capture.registerCamera('A', camera); camera.set({ x: 4, y: 5, zoom: 2 }); expect(state.size).toBe(0)
   camera.dispose(); nav.dispose(); capture.dispose()
 })
@@ -184,7 +190,7 @@ it('CA181 reveal recipes keep progress by instance, reset it consistently, and o
 it('CA074 Published consumes a selected formal path and CA076 navigation rebases the existing stable frame after structural edits', async () => {
   let project = fixture()
   const frame = (id: string, x: number) => ({ id, title: id, pose: { x, y: 0, zoom: 1 } })
-  project.surfaces[0] = { ...project.surfaces[0], kind: 'spatial', spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [frame('one', 1), frame('two', 2), frame('three', 3)], paths: [{ id: 'reverse', title: 'reverse', frameIds: ['two', 'one'] }] } }
+  project.surfaces[0] = { ...project.surfaces[0], kind: 'spatial', spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [frame('one', 1), frame('two', 2), frame('three', 3)], defaultPathId: 'reverse', paths: [{ id: 'reverse', title: 'reverse', frameIds: ['two', 'one'] }] } }
   const player = await mountPublishedCourseV3(published(project), root(), { keyboardNavigation: false })
   try { expect(player.camera('A')!.read().x).toBe(2); expect(await player.next()).toBe(true); expect(player.camera('A')!.read().x).toBe(1); expect(player.selectSpatialPath(null)).toBe(true); expect(await player.next()).toBe(true); expect(player.camera('A')!.read().x).toBe(1) }
   finally { await player.dispose() }

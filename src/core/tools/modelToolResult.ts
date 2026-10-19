@@ -8,6 +8,18 @@ import type { ComponentDefinition, ComponentEdit, ComponentImplementation } from
 const record = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value)
 
+/** Job receipts expose work and readable results; request accounting stays in the internal journal. */
+export function projectModelJobSnapshot(value: unknown): unknown {
+  if (!record(value)) return value
+  const projected: Record<string, unknown> = {}
+  for (const key of ['job', 'jobId', 'runId', 'requestDigest', 'status', 'terminal', 'stopped', 'executionKind', 'childRunId',
+    'candidateComplete', 'resumedFrom', 'summary', 'reason', 'failure', 'error', 'exitCode', 'artifacts', 'resources',
+    'goal', 'target', 'targetContext', 'role', 'nextCursor', 'read', 'source', 'outputNames', 'outputDiagnostics',
+    'locations', 'inputs', 'documentId', 'operation', 'retryAt'] as const)
+    if (Object.hasOwn(value, key)) projected[key] = value[key]
+  return projected
+}
+
 /** Present the same actual search sources in built-in and external tool history. */
 export function webSearchSources(name: string, result?: ToolResult): { title: string; url: string }[] | undefined {
   if (name !== 'web.search' || result?.kind !== 'read' || !record(result.data)
@@ -120,6 +132,30 @@ export function modelToolResult(toolName: string, result: ToolResult): ToolResul
     result = textResult
   }
   if (result.kind === 'document-operation') return { ...result, result: projectReceipt(result.result) }
+  if (/^(?:html|view)\.(?:observe|navigate|click|input)$/.test(toolName) && result.kind === 'read'
+    && record(result.data) && Object.hasOwn(result.data, 'fullObservation')) {
+    const { fullObservation: _full, ...data } = result.data
+    return { ...result, data }
+  }
+  if (result.kind === 'read' && record(result.data)) {
+    if (toolName === 'job.status' && result.data.detail === 'diagnostic') return result
+    if (['job.status', 'job.wait', 'job.cancel'].includes(toolName) && record(result.data.snapshot))
+      return { ...result, data: { kind: result.data.kind, jobId: result.data.jobId, status: result.data.status,
+        terminal: result.data.terminal, snapshot: projectModelJobSnapshot(result.data.snapshot) } }
+    if (['delegate.start', 'delegate.agent', 'delegate.resume', 'delegate.readonly', 'local.run'].includes(toolName))
+      return { ...result, data: projectModelJobSnapshot(result.data) }
+  }
+  if (toolName === 'project.apply' && result.kind === 'read' && record(result.data) && Array.isArray(result.data.operations)) {
+    return { ...result, data: { ...result.data,
+      operations: result.data.operations.map(operation => {
+        const item = modelToolResult(toolName, operation as ToolResult)
+        if (item.kind !== 'read' || !record(item.data)) return item
+        // All committed items share the top-level receipt; do not repeat its full change list per file.
+        const { receipt: _receipt, ...data } = item.data
+        return { ...item, data }
+      }),
+      ...(operationReceipt(result.data.receipt) ? { receipt: projectReceipt(result.data.receipt) } : {}) } }
+  }
   // Only this write tool wraps its host receipt in read.data. Explicit reads are authored content.
   if (toolName === 'project.apply' && result.kind === 'read' && contentApplyResult(result.data)) {
     return { ...result, data: { ...result.data, input: projectInput(result.data.input),
@@ -136,13 +172,13 @@ const revision = (value: unknown): value is number => typeof value === 'number' 
 type SuccessfulReceipt = Extract<DocumentOperationResult, { status: 'applied' | 'unchanged' }>
 
 /** Read only the named write tool's host envelope; authored reads are never execution facts. */
-export function contentApplyFact(name: string, result?: ToolResult): ContentApplyResult | null {
+export function contentApplyFact(name: string, result?: ToolResult): Omit<ContentApplyResult, 'input'> | null {
   if (name !== 'project.apply' || result?.kind !== 'read' || !record(result.data)) return null
   const data = result.data
   return ['committed', 'unchanged', 'not_committed', 'unknown'].includes(String(data.commit))
     && ['usable', 'partial', 'unusable', 'unverified'].includes(String(data.usability))
     && data.delivery === 'not_requested' && Array.isArray(data.diagnostics) && Array.isArray(data.insertedIds)
-    ? data as unknown as ContentApplyResult : null
+    ? data as unknown as Omit<ContentApplyResult, 'input'> : null
 }
 
 export function operationFact(name: string, result?: ToolResult): DocumentOperationResult | null {
@@ -195,7 +231,11 @@ export const currentExport = (fact: ExportReceipt | null): boolean => !!fact && 
 export function reconciledToolResult(name: string, previous: ToolResult | undefined, receipt: ToolResult): ToolResult {
   const apply = contentApplyFact(name, previous)
   if (!apply || previous?.kind !== 'read' || receipt.kind !== 'document-operation') return receipt
-  return { ...previous, data: { ...apply, receipt: receipt.result,
+  const data = record(previous.data) ? previous.data : {}
+  return { ...previous, data: { ...apply, ...(Array.isArray(data.operations) ? { operations: data.operations.map(operation => {
+    const item = operation as ToolResult
+    return contentApplyFact(name, item)?.commit === 'unknown' ? reconciledToolResult(name, item, receipt) : item
+  }) } : {}), receipt: receipt.result,
     commit: receipt.result.status === 'applied' ? 'committed' : receipt.result.status === 'unchanged' ? 'unchanged' : 'not_committed' } }
 }
 
@@ -208,6 +248,25 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
     return { status: 'stopped', message: result.message }
   if (result?.kind !== 'read' || !result.data || typeof result.data !== 'object') return null
   const data = result.data as Record<string, unknown>
+  // An explicit diagnostic read reports an existing job; it neither starts nor
+  // settles that underlying operation and is not a new failed execution attempt.
+  if (name === 'job.status' && data.detail === 'diagnostic') return null
+  if (['job.status', 'job.wait', 'job.cancel'].includes(name)) {
+    const snapshot = record(data.snapshot) ? data.snapshot : data
+    const status = data.status ?? snapshot.status
+    const failure = record(snapshot.failure) ? snapshot.failure : null
+    const reason = typeof snapshot.reason === 'string' ? snapshot.reason
+      : typeof failure?.message === 'string' ? failure.message : undefined
+    if (status === 'unknown' || failure?.outcome === 'unknown') return { status: 'unknown',
+      message: reason ?? '原作业结果未知；请查询原作业和日志，不要重新提交可能已执行的操作' }
+    if (['preparing', 'running', 'queued'].includes(String(status))) return { status: 'pending',
+      message: '原作业仍在执行；请等待同一作业并按需读取结果' }
+    if (['cancelled', 'stopped', 'unapplied'].includes(String(status)) || snapshot.stopped === true)
+      return { status: 'stopped', message: reason ?? '原作业已停止；保留原回执和候选，按需明确续接' }
+    if (['failed', 'unconfigured', 'not-configured', 'rejected'].includes(String(status)))
+      return { status: 'failed', message: reason ?? '原作业未完成；请读取原日志，修复后明确续接' }
+    return null
+  }
   if (['asset.save', 'asset.import', 'asset.delete'].includes(name)) {
     if (['saved', 'imported', 'deleted'].includes(String(data.status))) return { status: 'saved', message: '资产库修改已完成' }
     if (['rejected', 'failed', 'stopped'].includes(String(data.status))) return { status: 'failed', message: typeof data.reason === 'string' ? data.reason : '资产库修改未完成' }
@@ -267,6 +326,7 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
   }
   if (name === 'web.search' || name === 'web.open' || name === 'mcp.discover' || name === 'mcp.invoke'
     || name === 'media.start' || name === 'compute.run' || name === 'delegate.start' || name === 'local.run' || name === 'delegate.readonly'
+    || name === 'delegate.agent' || name === 'delegate.resume' || name === 'delegate.message'
     || name === 'image.search' || name === 'image.preview' || name === 'image.fetch' || name === 'asset.search'
     || name === 'asset.use' || name === 'asset.save') {
     const message = typeof data.reason === 'string' ? data.reason.slice(0, 240) : '外部能力未返回可用成果'
@@ -277,9 +337,12 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
       return { status: 'pending', message: '外部委派须等待并回读封存成果' }
     if ((name === 'local.run' || name === 'delegate.readonly') && (data.status === 'preparing' || data.status === 'running' || data.status === 'ready'))
       return { status: 'pending', message: name === 'local.run' ? '本地作业需等待终态并读取退出结果和所需成果' : '只读子任务需等待终态并回读结果' }
+    if ((name === 'delegate.agent' || name === 'delegate.resume') && (data.status === 'preparing' || data.status === 'running' || data.status === 'ready'))
+      return { status: 'pending', message: '原生子任务须等待真实终态并回读候选；主任务审阅和正式采用仍需完成' }
     if (data.status === 'not-configured' || data.status === 'rejected' || data.status === 'failed'
       || data.status === 'stopped' || data.status === 'unconfigured' || data.status === 'access-required' || data.status === 'needs-material-reader'
-      || (name === 'compute.run' || name === 'delegate.start' || name === 'local.run' || name === 'delegate.readonly') && (data.status === 'cancelled' || data.status === 'unapplied'))
+      || (name === 'compute.run' || name === 'delegate.start' || name === 'local.run' || name === 'delegate.readonly'
+        || name === 'delegate.agent' || name === 'delegate.resume') && (data.status === 'cancelled' || data.status === 'unapplied'))
       return { status: 'failed', message }
   }
   if (name === 'image.generate' || name === 'image.edit' || name === 'image.status') {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { documentSourceEdits, mergedDocumentSource, planDocumentSourceMerge } from '../../src/renderer/documentFiles/documentSourceMerge'
+import { documentSourceEdits, documentSourceReplacement, mergedDocumentSource, planDocumentSourceMerge } from '../../src/renderer/documentFiles/documentSourceMerge'
 
 describe('documentSourceMerge', () => {
   it.each([['', '新稿'], ['删除全部', ''], ['甲乙丙', '甲改乙丙增'], ['aaabaa', 'aabba'], ['😀甲乙', '😁甲新乙'], ['a\nb\nc', 'A\nb\nC']])('reconstructs source edits %s -> %s', (base, next) => {
@@ -40,5 +40,34 @@ describe('documentSourceMerge', () => {
       { from: 0, to: 160, text: 'c'.repeat(160) },
       { from: 160 + middle.length, to: 320 + middle.length, text: 'd'.repeat(160) },
     ])
+  })
+  it('retains ordinary Myers matches across many distant small edits', () => {
+    const section = 'ab'.repeat(6250), base = section.repeat(16), next = (`ac${section.slice(2)}`).repeat(16)
+    expect(documentSourceEdits(base, next)).toEqual(Array.from({ length: 16 }, (_, index) => ({
+      from: index * section.length + 1, to: index * section.length + 2, text: 'c',
+    })))
+  })
+  it('keeps independent targets after large leading edits and distant small edits in a long body', () => {
+    const section = 'ab'.repeat(6250), target = '|TARGET|', anchor = '|LONG_UNCHANGED_ANCHOR|'
+    const annotate = (body: string) => body.slice(0, section.length * 4 + 500) + anchor
+      + body.slice(section.length * 4 + 500, section.length * 8 + 500) + target + body.slice(section.length * 8 + 500)
+    const base = `${'A'.repeat(200)}|MIDDLE|${'B'.repeat(200)}${annotate(section.repeat(16))}`
+    const local = `${'C'.repeat(200)}|MIDDLE|${'D'.repeat(200)}${annotate((`ac${section.slice(2)}`).repeat(16))}`
+    const plan = planDocumentSourceMerge(base, local, base.replace('TARGET', 'TEACHER'))
+    expect(plan.conflicts).toEqual([])
+    expect(mergedDocumentSource(plan)).toBe(local.replace('TARGET', 'TEACHER'))
+  })
+  it('reconstructs a complex source with thousands of similar changed spans without recursive splitting', () => {
+    const base = '<div id="same">before</div>'.repeat(12000)
+    const next = '<div id="same">after!</div>'.repeat(12000)
+    let source = base
+    for (const edit of documentSourceEdits(base, next).reverse()) source = source.slice(0, edit.from) + edit.text + source.slice(edit.to)
+    expect(source).toBe(next)
+  })
+  it('keeps scalar Myers matches and compact receipts on complete emoji boundaries', () => {
+    expect(documentSourceEdits('😀a😀', 'a😀😀')).toEqual([
+      { from: 0, to: 2, text: '' }, { from: 5, to: 5, text: '😀' },
+    ])
+    expect(documentSourceReplacement('a😀b🈀c', 'a😃b🈁c')).toEqual({ from: 1, to: 6, text: '😃b🈁' })
   })
 })

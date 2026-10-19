@@ -1,9 +1,13 @@
 {
-  "description": "按本次运行与作业身份读取图片、受限计算或有限委派的当前状态；状态为事实观察，未表示成果已应用。",
+  "description": "按本次运行与作业身份读取图片、受限计算或委派的紧凑当前状态和成果引用；状态未表示成果已应用。仅当用户明确需要用量、缓存或请求诊断时传detail:diagnostic，按需读取同一作业owner的完整内部诊断；普通状态不携带usage。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
+      "detail": {
+        "const": "diagnostic",
+        "type": "string"
+      },
       "job": {
         "minLength": 1,
         "type": "string"

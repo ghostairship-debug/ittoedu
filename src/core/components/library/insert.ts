@@ -1,7 +1,7 @@
 import type { ComponentLibraryEntry } from '../../../shared/contracts/component-platform/library'
 import type { ComponentEdit, ComponentOperationBatch } from '../../../shared/contracts/component-platform/operations'
 import type { ComponentContainer, ComponentImplementation, ComponentInstance, CourseProjectV10, JsonValue } from '../../../shared/contracts/component-platform/project'
-import { componentDefinitionBuiltinKey, isComponentVisibleAtSurface } from '../../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, isComponentVisibleAtSurface, owningContainer } from '../../../shared/contracts/component-platform/project'
 import { captureComponentOperation, equalComponentValue } from '../../drivers/courseV10Operations'
 import { authoringAssetIds, componentAssetIds, rebindAuthoringAssets, rebindInteractionReferences, rebindProfessionalAssets, rebindWebAssets, sourceAssetIds, sourceModuleBindings } from './references'
 import type { LibraryDiagnostic, LibraryIdentityMap, LibraryInputValues, LibraryReferenceAdapter } from './types'
@@ -10,6 +10,7 @@ import { createProfessionalDocumentIdentityCopy } from './professionalCopy'
 import { extractComponentLibraryEntry } from './extract'
 import { componentInteractionDataSchema, createComponentInteractionCopyIdentities } from '../../../shared/componentInteractionData'
 import { remapComponentInputData } from '../../../components/input/authoring'
+import { componentBackgroundAssetIds, rebindComponentBackground } from '../../../shared/componentBackgroundPaint'
 
 export interface InsertLibraryOptions {
   container: ComponentContainer
@@ -44,7 +45,7 @@ export function prepareComponentLibraryInsertion(project: CourseProjectV10, entr
   if (options.rootIds) {
     const source: CourseProjectV10 = { schemaVersion: 10, id: entry.id, title: entry.title, revision: 0, definitions: entry.definitions,
       instances: entry.example.instances, assets: entry.assets, surfaces: entry.surfaces ?? [{ id: 'library', kind: 'slide', title: entry.title, childIds: entry.example.rootIds }],
-      global: entry.global ?? { underlay: [], overlay: [] } }
+      global: entry.global ?? { underlay: [], overlay: [] }, ...(entry.logic ? { logic: entry.logic } : {}) }
     entry = extractComponentLibraryEntry(source, entry.resources, { id: entry.id, title: entry.title, rootIds: [...options.rootIds], adapters: options.adapters }).entry
   }
   // Missing bytes remain unresolved in the new namespace instead of resolving to an unrelated destination asset.
@@ -61,17 +62,22 @@ export function prepareComponentLibraryInsertion(project: CourseProjectV10, entr
       for (const id of options.adapters?.[instance.definitionId]?.references(instance, definition).assetIds ?? []) assetIds.add(id)
     }
   }
-  if (!options.definitionsOnly) for (const surface of entry.surfaces ?? []) for (const state of surface.presentation?.states ?? []) {
-    for (const [id, override] of Object.entries(state.overrides)) {
-      const instance = entry.example.instances[id], definition = instance && entry.definitions[instance.definitionId]
-      if (!instance || !definition) continue
-      for (const assetId of authoringAssetIds(override.authoring)) assetIds.add(assetId)
-      if (override.data !== undefined) for (const assetId of componentAssetIds({ ...instance, data: override.data }, definition)) assetIds.add(assetId)
+  if (!options.definitionsOnly) for (const surface of entry.surfaces ?? []) {
+    componentBackgroundAssetIds(surface.background).forEach(id => assetIds.add(id))
+    for (const state of surface.presentation?.states ?? []) {
+      componentBackgroundAssetIds(state.background).forEach(id => assetIds.add(id))
+      for (const [id, override] of Object.entries(state.overrides)) {
+        const instance = entry.example.instances[id], definition = instance && entry.definitions[instance.definitionId]
+        if (!instance || !definition) continue
+        for (const assetId of authoringAssetIds(override.authoring)) assetIds.add(assetId)
+        if (override.data !== undefined) for (const assetId of componentAssetIds({ ...instance, data: override.data }, definition)) assetIds.add(assetId)
+      }
     }
   }
   const diagnostics: LibraryDiagnostic[] = [...assetIds].filter(id => !entry.assets[id] || !entry.resources.assets[id])
     .map(id => ({ code: 'missing-asset', message: `保留了待修复的素材引用：${id}` }))
-  const occupied = new Set([...Object.keys(project.instances), ...Object.keys(project.definitions), ...Object.keys(project.assets), ...project.surfaces.map(surface => surface.id)])
+  const occupied = new Set([...Object.keys(project.instances), ...Object.keys(project.definitions), ...Object.keys(project.assets), ...project.surfaces.map(surface => surface.id),
+    ...(project.logic?.courseState ?? []).map(state => state.key), ...(entry.logic?.courseState ?? []).map(state => state.key)])
   for (const implementation of [...Object.values(project.definitions).map(value => value.implementation),
     ...Object.values(project.instances).map(value => value.implementationOverride)]) {
     if (implementation?.kind === 'source' && implementation.workspace) occupied.add(implementation.workspace.ownerId)
@@ -118,8 +124,21 @@ export function prepareComponentLibraryInsertion(project: CourseProjectV10, entr
     collectRules(original.data)
     for (const surface of entry.surfaces ?? []) for (const state of surface.presentation?.states ?? []) if (state.overrides[original.id]?.data !== undefined) collectRules(state.overrides[original.id]!.data!)
   }
-  for (const declaration of entry.logic?.courseState ?? []) stateKeys.set(declaration.key,
+  // Managed inputs allocate their own scalar identities before other components consume the map.
+  for (const original of Object.values(entry.example.instances)) if (componentDefinitionBuiltinKey(entry.definitions[original.definitionId]) === 'guoling.input') {
+    const inputCopy = { fromInstanceId: original.id, toInstanceId: identities.instances.get(original.id)!, rules, stateKeys }
+    remapComponentInputData(original.data, inputCopy)
+    for (const surface of entry.surfaces ?? []) for (const state of surface.presentation?.states ?? []) if (state.overrides[original.id]?.data !== undefined)
+      remapComponentInputData(state.overrides[original.id]!.data!, inputCopy)
+  }
+  for (const declaration of entry.logic?.courseState ?? []) if (!stateKeys.has(declaration.key)) stateKeys.set(declaration.key,
     project.logic?.courseState.some(existing => existing.key === declaration.key) ? allocate('instance') : declaration.key)
+  for (const original of Object.values(entry.example.instances)) for (const key of Object.values(original.stateBindings ?? {})) {
+    if (stateKeys.has(key) || !project.logic?.courseState.some(existing => existing.key === key)) continue
+    stateKeys.set(key, allocate('instance'))
+    diagnostics.push({ code: 'state-binding-required', instanceId: original.id,
+      message: `显式状态“${key}”没有随来源提供声明，已保留未绑定引用，未连接目标工程同名状态。` })
+  }
   const implementation = (original: ComponentImplementation): ComponentImplementation => {
     if (original.kind === 'builtin') return structuredClone(original)
     if (original.workspace && !Object.hasOwn(entry.resources.components[original.workspace.ownerId] ?? {}, original.workspace.entry)) {
@@ -186,8 +205,15 @@ export function prepareComponentLibraryInsertion(project: CourseProjectV10, entr
   }
   const professionalCopy=createProfessionalDocumentIdentityCopy(identities.instances)
   for(const original of options.definitionsOnly ? [] : Object.values(entry.example.instances))professionalCopy(structuredClone(original.data),componentDefinitionBuiltinKey(entry.definitions[original.definitionId]),original.id,true)
+  let destinationOwner = options.container
+  while (destinationOwner.kind === 'instance') {
+    const parent = owningContainer(project, destinationOwner.instanceId)
+    if (!parent) break
+    destinationOwner = parent
+  }
   const copyInstance = (original: ComponentInstance): ComponentInstance => {
     let instance: ComponentInstance = { ...structuredClone(original), data: rebindData(original), id: identities.instances.get(original.id)!, definitionId: identities.definitions.get(original.definitionId)! }
+    if (original.stateBindings) instance.stateBindings = Object.fromEntries(Object.entries(original.stateBindings).map(([alias, key]) => [alias, stateKeys.get(key) ?? key]))
     if (!instance.definitionId) throw new Error(`库条目缺少定义：${original.definitionId}`)
     const key=componentDefinitionBuiltinKey(entry.definitions[original.definitionId])
     if(key)instance.data = rebindProfessionalAssets(instance.data, identities,key)
@@ -238,7 +264,9 @@ export function prepareComponentLibraryInsertion(project: CourseProjectV10, entr
     if (original.attachments) instance.attachments = original.attachments.map(attachment => ({
       instanceId: instanceTarget(attachment.instanceId),
       target: attachment.target.kind === 'text-range' ? { ...attachment.target, instanceId: instanceTarget(attachment.target.instanceId), rangeId: professionalCopy.identity(attachment.target.rangeId), dataPath: professionalCopy.path(attachment.target.dataPath) } : attachment.target.kind === 'instance' ? { kind: 'instance', instanceId: instanceTarget(attachment.target.instanceId) }
-        : attachment.target.kind === 'surface' ? { kind: 'surface', surfaceId: surfaceTarget(attachment.target.surfaceId) } : { kind: 'project' },
+        : attachment.target.kind === 'surface' ? (!entry.surfaces?.length && componentDefinitionBuiltinKey(entry.definitions[original.definitionId]) === 'guoling.interactions'
+          ? destinationOwner.kind === 'surface' ? { kind: 'surface', surfaceId: destinationOwner.surfaceId } : { kind: 'project' }
+          : { kind: 'surface', surfaceId: surfaceTarget(attachment.target.surfaceId) }) : { kind: 'project' },
     }))
     // Definition-specific source/data references remain under their real consumer's adapter.
     instance = options.adapters?.[original.definitionId]?.rebind(instance, identities) ?? instance
@@ -252,8 +280,8 @@ export function prepareComponentLibraryInsertion(project: CourseProjectV10, entr
     return mapped
   })
   if (!options.definitionsOnly && entry.surfaces?.length) {
-    const copyBackground = (background: typeof project.background) => background ? { ...background,
-      ...(background.assetId ? { assetId: identities.assets.get(background.assetId) ?? background.assetId } : {}) } : undefined
+    const copyBackground = (background: typeof project.background) => background
+      ? rebindComponentBackground(background, id => identities.assets.get(id) ?? id) : undefined
     const destinationSurfaceId = options.container.kind === 'surface' ? options.container.surfaceId : undefined
     let surfaceIndex = options.surfaceIndex ?? (destinationSurfaceId
       ? project.surfaces.findIndex(surface => surface.id === destinationSurfaceId) + 1 : project.surfaces.length)
@@ -300,21 +328,34 @@ export function prepareComponentLibraryInsertion(project: CourseProjectV10, entr
     }
     const extra = entry.example.rootIds.filter(id => !scopedRoots.has(id))
     insert({ kind: 'surface', surfaceId: surfaceTarget(entry.surfaces[0].id) }, entry.surfaces[0].childIds.length, extra)
-    if (entry.logic) {
-      const logic = structuredClone(project.logic ?? { courseState: [], navigationGuards: [] })
-      logic.courseState.push(...entry.logic.courseState.map(declaration => ({ ...declaration, key: stateKeys.get(declaration.key)! })))
-      for (const guard of entry.logic.navigationGuards) {
-        if (!guard.toSurfaceIds.every(id => identities.surfaces.has(id)) || guard.fromSurfaceIds?.some(id => !identities.surfaces.has(id))) {
-          diagnostics.push({ code: 'surface-binding-required', message: `导航条件“${guard.message}”包含未绑定页面，未将其指向目标工程同名页面。` }); continue
-        }
-        logic.navigationGuards.push({ ...guard, id: allocate('instance'), toSurfaceIds: guard.toSurfaceIds.map(surfaceTarget),
-          ...(guard.fromSurfaceIds ? { fromSurfaceIds: guard.fromSurfaceIds.map(surfaceTarget) } : {}),
-          conditions: guard.conditions.map(condition => ({ ...condition, key: stateKeys.get(condition.key) ?? condition.key })) })
-      }
-      if (entry.logic.network?.connectOrigins?.length) logic.network = { connectOrigins: [...new Set([...(logic.network?.connectOrigins ?? []), ...entry.logic.network.connectOrigins])] }
-      edits.push({ type: 'project.logic.set', logic })
+  } else if (!options.definitionsOnly) {
+    const globalRoots = new Set([...(entry.global?.underlay ?? []), ...(entry.global?.overlay ?? [])].map(instanceTarget))
+    const localRoots = rootIds.filter(id => !globalRoots.has(id))
+    let remaining = instances
+    if (localRoots.length || !globalRoots.size) {
+      edits.push({ type: 'instance.insert', container: structuredClone(options.container), index: options.index, instances: remaining, rootIds: localRoots })
+      remaining = []
     }
-  } else if (!options.definitionsOnly) edits.push({ type: 'instance.insert', container: structuredClone(options.container), index: options.index, instances, rootIds })
+    for (const plane of ['underlay', 'overlay'] as const) if (entry.global?.[plane].length) {
+      edits.push({ type: 'instance.insert', container: { kind: 'global', plane }, index: project.global[plane].length,
+        instances: remaining, rootIds: entry.global[plane].map(instanceTarget) })
+      remaining = []
+    }
+  }
+  if (!options.definitionsOnly && entry.logic) {
+    const logic = structuredClone(project.logic ?? { courseState: [], navigationGuards: [] })
+    logic.courseState.push(...entry.logic.courseState.map(declaration => ({ ...declaration, key: stateKeys.get(declaration.key)! })))
+    for (const guard of entry.logic.navigationGuards) {
+      if (!guard.toSurfaceIds.every(id => identities.surfaces.has(id)) || guard.fromSurfaceIds?.some(id => !identities.surfaces.has(id))) {
+        diagnostics.push({ code: 'surface-binding-required', message: `导航条件“${guard.message}”包含未绑定页面，未将其指向目标工程同名页面。` }); continue
+      }
+      logic.navigationGuards.push({ ...guard, id: allocate('instance'), toSurfaceIds: guard.toSurfaceIds.map(surfaceTarget),
+        ...(guard.fromSurfaceIds ? { fromSurfaceIds: guard.fromSurfaceIds.map(surfaceTarget) } : {}),
+        conditions: guard.conditions.map(condition => ({ ...condition, key: stateKeys.get(condition.key) ?? condition.key })) })
+    }
+    if (entry.logic.network?.connectOrigins?.length) logic.network = { connectOrigins: [...new Set([...(logic.network?.connectOrigins ?? []), ...entry.logic.network.connectOrigins])] }
+    edits.push({ type: 'project.logic.set', logic })
+  }
   return { command: captureComponentOperation(project, edits), rootIds, identities, diagnostics }
 }
 

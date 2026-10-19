@@ -1,12 +1,13 @@
 import type { ComponentLibraryEntry } from '../../../shared/contracts/component-platform/library'
 import type { ComponentDefinition, ComponentImplementation, ComponentInstance, CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
-import { componentAssetIds, interactionReferenceTargets, sourceModuleBindings,associatedInteractionRules, sourceResourceReferences } from './references'
-import { liveSourceOwners } from '../compilation/liveSourceReferences'
+import { createComponentReferenceCapture, interactionReferenceTargets, sourceModuleBindings, type ComponentReferenceCapture } from './references'
 import { componentDefinitionBuiltinKey } from '../../../shared/contracts/component-platform/project'
-import { componentInteractionDataSchema } from '../../../shared/componentInteractionData'
+import { associatedComponentInteractionRules, componentInteractionDataSchema } from '../../../shared/componentInteractionData'
 import type { LibraryDiagnostic, LibraryExtractResult, LibraryReferenceAdapter } from './types'
-import { resolveComponentBackground, resolveComponentPresentation, isComponentVisibleAtSurface } from '../../../shared/contracts/component-platform/project'
+import { resolveComponentBackground, resolveComponentPresentation, isComponentVisibleAtSurface, owningContainer } from '../../../shared/contracts/component-platform/project'
 import { courseThemeStyleText, courseThemeVariables } from '../../../shared/contracts/design-v1/theme'
+import { componentBackgroundAssetIds, mergeComponentBackground } from '../../../shared/componentBackgroundPaint'
+import { componentInputStateReferences } from '../../../components/input/authoring'
 
 export interface ExtractLibraryOptions {
   id: string
@@ -19,7 +20,8 @@ export interface ExtractLibraryOptions {
 }
 
 /** Reads an author snapshot. The library owns copies; no live instance or byte buffer is retained. */
-export function extractComponentLibraryEntry(project: CourseProjectV10, resources: ComponentLibraryEntry['resources'], options: ExtractLibraryOptions): LibraryExtractResult {
+export function extractComponentLibraryEntry(project: CourseProjectV10, resources: ComponentLibraryEntry['resources'], options: ExtractLibraryOptions,
+  references: ComponentReferenceCapture = createComponentReferenceCapture(project, resources)): LibraryExtractResult {
   const diagnostics: LibraryDiagnostic[] = []
   const instances: Record<string, ComponentInstance> = Object.create(null)
   const definitions: Record<string, ComponentDefinition> = Object.create(null)
@@ -28,17 +30,17 @@ export function extractComponentLibraryEntry(project: CourseProjectV10, resource
   const selectedSurfaces = options.surfaceIds?.length ? project.surfaces.filter(surface => options.surfaceIds!.includes(surface.id)) : []
   if (options.surfaceIds?.some(id => !selectedSurfaces.some(surface => surface.id === id))) throw new Error('提炼页面已不存在')
   if (options.kind === 'page' && selectedSurfaces.length !== 1) throw new Error('页面模板需要选择一个页面')
-  const surfaces = selectedSurfaces.map(surface => ({ ...structuredClone(surface), background: { mode: 'own' as const, ...resolveComponentBackground(project, surface) } }))
+  const surfaces = selectedSurfaces.map(surface => ({ ...structuredClone(surface), background: mergeComponentBackground(undefined, { mode: 'own', ...structuredClone(resolveComponentBackground(project, surface)) }) }))
   const selectedSurfaceIds = new Set(surfaces.map(surface => surface.id))
   const global = { underlay: [] as string[], overlay: [] as string[] }
   for (const plane of ['underlay', 'overlay'] as const) global[plane] = project.global[plane].filter(id =>
-    selectedSurfaces.some(surface => isComponentVisibleAtSurface(project.instances[id], surface.id)
+    componentDefinitionBuiltinKey(project.definitions[project.instances[id].definitionId]) !== 'guoling.interactions' && selectedSurfaces.some(surface => isComponentVisibleAtSurface(project.instances[id], surface.id)
       || surface.presentation?.states.some(state => isComponentVisibleAtSurface(resolveComponentPresentation(project, surface.id, state.id).instances[id], surface.id))))
   const implementation = (original: ComponentImplementation): ComponentImplementation => {
     if (original.kind !== 'source') return structuredClone(original)
-    const references = sourceResourceReferences(original, project, resources)
-    const resourceBindings = { ...Object.fromEntries(references.assetIds.map(id => [id, id])), ...original.resourceBindings }
-    if (references.dynamic) diagnostics.push({ code: 'dynamic-resource-scope-retained', message: '此源码的动态资源访问无法闭合，已保留当前可访问资源范围。' })
+    const sourceReferences = references.sourceResourceReferences(original)
+    const resourceBindings = { ...Object.fromEntries(sourceReferences.assetIds.map(id => [id, id])), ...original.resourceBindings }
+    if (sourceReferences.dynamic) diagnostics.push({ code: 'dynamic-resource-scope-retained', message: '此源码的动态资源访问无法闭合，已保留当前可访问资源范围。' })
     for (const id of Object.values(resourceBindings)) assetIds.add(id)
     if (original.workspace) {
       const { ownerId, entry } = original.workspace, files = resources.components[ownerId]
@@ -48,7 +50,7 @@ export function extractComponentLibraryEntry(project: CourseProjectV10, resource
     }
     const source = structuredClone(original)
     delete source.dependencies
-    const live = liveSourceOwners(project, original, resources).modules.get(original)
+    const live = references.sourceOwners(original).modules.get(original)
     source.moduleBindings = Object.fromEntries(Object.entries(sourceModuleBindings(original)).filter(([, id]) => !live || live.has(id)))
     source.resourceBindings = resourceBindings
     return source
@@ -74,7 +76,7 @@ export function extractComponentLibraryEntry(project: CourseProjectV10, resource
       if (!Object.hasOwn(project.definitions,dependency) || project.definitions[dependency].implementation.kind !== 'source') {diagnostics.push({code:'missing-source-dependency',message:`保留待修复的模块声明：${dependency}；实际导入由编译器诊断`});continue}
       definition(dependency)
     }
-    for (const assetId of componentAssetIds(original, project.definitions[original.definitionId],project,resources)) assetIds.add(assetId)
+    for (const assetId of references.componentAssetIds(original, project.definitions[original.definitionId])) assetIds.add(assetId)
     for (const assetId of options.adapters?.[original.definitionId]?.references(original, project.definitions[original.definitionId]).assetIds ?? []) assetIds.add(assetId)
     for (const childId of original.childIds ?? []) visit(childId)
     for (const attachment of original.attachments ?? []) visit(attachment.instanceId)
@@ -82,22 +84,41 @@ export function extractComponentLibraryEntry(project: CourseProjectV10, resource
   const requestedRoots = [...options.rootIds ?? [], ...surfaces.flatMap(surface => surface.childIds), ...global.underlay, ...global.overlay]
   requestedRoots.forEach(visit)
   const selected=new Set(Object.keys(instances))
-  for(const original of Object.values(project.instances)) {
-    if(selected.has(original.id) || componentDefinitionBuiltinKey(project.definitions[original.definitionId])!=='guoling.interactions')continue
-    const data=componentInteractionDataSchema.parse(original.data),rules=associatedInteractionRules(data.rules,selected)
-    if(!rules.length)continue
-    visit(original.id);instances[original.id].data={...data,rules} as unknown as ComponentInstance['data']
+  const familySnapshots = [associatedComponentInteractionRules(project, selected), ...selectedSurfaces.flatMap(surface => (surface.presentation?.states ?? [])
+    .map(state => associatedComponentInteractionRules(project, selected, new Set(), Object.fromEntries(Object.entries(state.overrides)
+      .flatMap(([id, override]) => override.data === undefined ? [] : [[id, override.data]])))))]
+  const externalIds = new Set(familySnapshots.flat().filter(family => !selected.has(family.instance.id)).map(family => family.instance.id))
+  for (const id of externalIds) {
+    visit(id)
+    instances[id].data = { rules: familySnapshots[0].find(family => family.instance.id === id)?.rules ?? [] } as unknown as ComponentInstance['data']
+    const family = familySnapshots.flat().find(family => family.instance.id === id)!
+    if (family.target.kind === 'project') {
+      let owner = owningContainer(project, id)
+      while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
+      const plane = owner?.kind === 'global' ? owner.plane : 'underlay'
+      if (!global[plane].includes(id)) global[plane].push(id)
+    }
+  }
+  let snapshot = 1
+  for (const surface of surfaces) for (const state of surface.presentation?.states ?? []) {
+    const families = familySnapshots[snapshot++]
+    for (const id of externalIds) {
+      const rules = families.find(family => family.instance.id === id)?.rules ?? []
+      const base = familySnapshots[0].find(family => family.instance.id === id)?.rules ?? []
+      if (state.overrides[id]?.data !== undefined || JSON.stringify(rules) !== JSON.stringify(base)) state.overrides[id] = { ...state.overrides[id],
+        data: { rules } as unknown as ComponentInstance['data'] }
+    }
   }
   if (!Object.keys(instances).length && !surfaces.length) throw new Error('请选择至少一个提炼对象或页面')
   const children = new Set(Object.values(instances).flatMap(instance => instance.childIds ?? []))
   const rootIds = [...new Set([...requestedRoots, ...Object.keys(instances)])].filter(id => !children.has(id))
   for (const surface of surfaces) {
-    if (surface.background?.assetId) assetIds.add(surface.background.assetId)
+    componentBackgroundAssetIds(surface.background).forEach(id => assetIds.add(id))
     for (const state of surface.presentation?.states ?? []) {
-      if (state.background?.assetId) assetIds.add(state.background.assetId)
+      componentBackgroundAssetIds(state.background).forEach(id => assetIds.add(id))
       const effective = resolveComponentPresentation(project, surface.id, state.id)
       for (const id of Object.keys(state.overrides)) if (instances[id]) {
-        for (const assetId of componentAssetIds(effective.instances[id], definitions[instances[id].definitionId], effective, resources)) assetIds.add(assetId)
+        for (const assetId of references.componentAssetIds(effective.instances[id], definitions[instances[id].definitionId], effective)) assetIds.add(assetId)
       }
     }
   }
@@ -138,10 +159,26 @@ export function extractComponentLibraryEntry(project: CourseProjectV10, resource
     })
   }
   for (const input of options.inputs ?? []) if (!instances[input.instanceId]) throw new Error(`输入角色不属于提炼对象：${input.instanceId}`)
+  const referencedStateKeys = new Set<string>()
+  for (const instance of Object.values(instances)) {
+    Object.values(instance.stateBindings ?? {}).forEach(key => referencedStateKeys.add(key))
+    const key = componentDefinitionBuiltinKey(definitions[instance.definitionId])
+    if (key === 'guoling.input') {
+      for (const reference of componentInputStateReferences(instance.data)) referencedStateKeys.add(reference.key)
+    } else if (key === 'guoling.interactions') for (const rule of componentInteractionDataSchema.parse(instance.data).rules) {
+      for (const condition of rule.conditions) if (condition.type === 'course-state.exists' || condition.type === 'course-state.compare') referencedStateKeys.add(condition.key)
+      for (const { action } of rule.actions) if (action.type === 'course-state.set') referencedStateKeys.add(action.key)
+    }
+  }
+  const declarations = project.logic?.courseState.filter(state => referencedStateKeys.has(state.key)) ?? []
+  const logic = surfaces.length ? project.logic && structuredClone(project.logic)
+    : declarations.length ? { courseState: structuredClone(declarations), navigationGuards: [] } : undefined
   return { entry: { schemaVersion: 1, id: options.id, title: options.title, definitions,
     example: { instances, rootIds }, assets, resources: { assets: bytes, components },
+    ...(!surfaces.length && (global.underlay.length || global.overlay.length) ? { global } : {}),
     ...(surfaces.length ? { kind: options.kind ?? (surfaces.length === 1 ? 'page' : 'structure'), surfaces, global,
       ...(project.theme ? { theme: structuredClone(project.theme) } : {}), ...(project.designTokens ? { designTokens: structuredClone(project.designTokens) } : {}),
-      ...(project.logic ? { logic: structuredClone(project.logic) } : {}) } : {}),
+    } : {}),
+    ...(logic ? { logic } : {}),
     ...(options.inputs ? { inputs: structuredClone(options.inputs) } : {}) }, diagnostics }
 }

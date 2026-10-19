@@ -476,7 +476,7 @@ it('uses registry effects for readonly delegation receipts instead of starting a
   const f = await fixture(), client = await f.connect('readonly-job-retry')
   vi.spyOn(f.host.tools, 'resolveRunTool').mockImplementation(async (_run, name) => describeTools([name])[0] ?? null)
   const execute = vi.spyOn(f.host.tools, 'execute').mockResolvedValue({ kind: 'read', data: { job: 'original-delegation-job', status: 'running' } })
-  const input = { goal: 'Read the supplied fixture', sources: ['notes.md'], budget: { maxOutputTokens: 1000, maxDurationMs: 30000 } }
+  const input = { goal: 'Read the supplied fixture', sources: ['notes.md'] }
   const first = await callTool(client, 'delegate.readonly', input, 'readonly-job')
   const again = await callTool(client, 'delegate.readonly', input, 'readonly-job')
   expect(first.isError).toBe(false)

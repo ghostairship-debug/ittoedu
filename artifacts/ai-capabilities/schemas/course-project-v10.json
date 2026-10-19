@@ -193,6 +193,80 @@
             "own"
           ],
           "type": "string"
+        },
+        "paint": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "layers": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "resourceBindings": {
+                        "additionalProperties": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "propertyNames": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "style": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "background-attachment": {
+                            "type": "string"
+                          },
+                          "background-blend-mode": {
+                            "type": "string"
+                          },
+                          "background-clip": {
+                            "type": "string"
+                          },
+                          "background-color": {
+                            "type": "string"
+                          },
+                          "background-image": {
+                            "type": "string"
+                          },
+                          "background-origin": {
+                            "type": "string"
+                          },
+                          "background-position": {
+                            "type": "string"
+                          },
+                          "background-repeat": {
+                            "type": "string"
+                          },
+                          "background-size": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "style",
+                      "resourceBindings"
+                    ],
+                    "type": "object"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "layers"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "type": "object"
@@ -1259,6 +1333,17 @@
             ],
             "type": "string"
           },
+          "stateBindings": {
+            "additionalProperties": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "propertyNames": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "object"
+          },
           "style": {
             "additionalProperties": {
               "$ref": "#/$defs/__schema0"
@@ -1835,6 +1920,80 @@
                   "own"
                 ],
                 "type": "string"
+              },
+              "paint": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "layers": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "resourceBindings": {
+                              "additionalProperties": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "propertyNames": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "type": "object"
+                            },
+                            "style": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "background-attachment": {
+                                  "type": "string"
+                                },
+                                "background-blend-mode": {
+                                  "type": "string"
+                                },
+                                "background-clip": {
+                                  "type": "string"
+                                },
+                                "background-color": {
+                                  "type": "string"
+                                },
+                                "background-image": {
+                                  "type": "string"
+                                },
+                                "background-origin": {
+                                  "type": "string"
+                                },
+                                "background-position": {
+                                  "type": "string"
+                                },
+                                "background-repeat": {
+                                  "type": "string"
+                                },
+                                "background-size": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "style",
+                            "resourceBindings"
+                          ],
+                          "type": "object"
+                        },
+                        "minItems": 1,
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "layers"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "type": "object"
@@ -1969,6 +2128,80 @@
                             "own"
                           ],
                           "type": "string"
+                        },
+                        "paint": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "layers": {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "resourceBindings": {
+                                        "additionalProperties": {
+                                          "minLength": 1,
+                                          "type": "string"
+                                        },
+                                        "propertyNames": {
+                                          "minLength": 1,
+                                          "type": "string"
+                                        },
+                                        "type": "object"
+                                      },
+                                      "style": {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "background-attachment": {
+                                            "type": "string"
+                                          },
+                                          "background-blend-mode": {
+                                            "type": "string"
+                                          },
+                                          "background-clip": {
+                                            "type": "string"
+                                          },
+                                          "background-color": {
+                                            "type": "string"
+                                          },
+                                          "background-image": {
+                                            "type": "string"
+                                          },
+                                          "background-origin": {
+                                            "type": "string"
+                                          },
+                                          "background-position": {
+                                            "type": "string"
+                                          },
+                                          "background-repeat": {
+                                            "type": "string"
+                                          },
+                                          "background-size": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "type": "object"
+                                      }
+                                    },
+                                    "required": [
+                                      "style",
+                                      "resourceBindings"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "minItems": 1,
+                                  "type": "array"
+                                }
+                              },
+                              "required": [
+                                "layers"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       },
                       "type": "object"

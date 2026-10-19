@@ -48,6 +48,23 @@ function api(timeline: ExecutionEvent[], extra: Partial<ExecutionDesktopAPI> = {
   return value
 }
 
+for (const permission of ['full', 'read-only'] as const) it(`sends with ${permission === 'full' ? 'the full default' : 'the user saved read-only choice'}`, async () => {
+  if (permission === 'read-only') localStorage.setItem('guoling.execution.permission.v1:workspace', permission)
+  const send = vi.fn<ExecutionDesktopAPI['send']>(async input => ({ conversation: structuredClone(conversation), submission: {
+    submissionId: input.submissionId, workspaceId: input.workspaceId, conversationId: input.conversationId, state: 'queued', mode: 'queue',
+    text: input.text, documents: [], attachments: [], permission: input.permission,
+    model: { provider: 'fixture-provider', model: 'fixture-model', accountId: 'account', billing: 'metered' }, createdAt: 1, updatedAt: 1,
+  } }))
+  render(<ExecutionAssistant root="C:/workspace" api={api([], { send })} settingsAPI={settingsAPI()}
+    captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(screen.getByRole('button', { name: '添加' })).toBeEnabled())
+  expect(await screen.findByRole('button', { name: `权限：${permission === 'full' ? '完全访问' : '只读'}` })).toBeInTheDocument()
+  fireEvent.change(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { target: { value: '修改当前作品的实验说明' } })
+  await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: '发送' }))
+  await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({ permission })))
+})
+
 it('S10-T07 shows the pending modification as an approval card and sends the chosen decision', async () => {
   expect(pendingApproval(foldExecutionEvents(emptyExecutionProjection('c1'), approvalEvents))).toMatchObject({ runId: 'run', callId: 'request:0' })
   const approve = vi.fn<NonNullable<ExecutionDesktopAPI['approve']>>(async () => ({ runId: 'run' }) as Awaited<ReturnType<NonNullable<ExecutionDesktopAPI['approve']>>>)
@@ -60,6 +77,21 @@ it('S10-T07 shows the pending modification as an approval card and sends the cho
   fireEvent.click(within(card).getByRole('button', { name: '本任务都允许' }))
   await waitFor(() => expect(approve).toHaveBeenCalledWith({ runId: 'run', callId: 'request:0', decision: 'allow-all' }))
   await screen.findByText('已提交决定，任务继续中…')
+})
+
+it('submits a delegated approval to its original child and labels allow-all with that child scope', async () => {
+  const timeline: ExecutionEvent[] = [
+    { ...approvalEvents[0]!, data: { status: 'running', phase: 'tool' } },
+    { ...approvalEvents[1]!, itemId: 'delegation:child:child-edit', data: { ...approvalEvents[1]!.data,
+      delegationRef: { runId: 'child', callId: 'child-edit', parentRunId: 'run', jobId: 'child-job' } } },
+  ]
+  const approve = vi.fn<NonNullable<ExecutionDesktopAPI['approve']>>(async () => ({ runId: 'child' }) as Awaited<ReturnType<NonNullable<ExecutionDesktopAPI['approve']>>>)
+  render(<ExecutionAssistant root="C:/workspace" api={api(timeline, { approve })} settingsAPI={settingsAPI()} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  const card = await screen.findByRole('region', { name: '修改请求' })
+  expect(card).toHaveTextContent('子任务请求修改')
+  expect(card).toHaveTextContent('你的决定只作用于这个子任务')
+  fireEvent.click(within(card).getByRole('button', { name: '本子任务都允许' }))
+  await waitFor(() => expect(approve).toHaveBeenCalledWith({ runId: 'child', callId: 'child-edit', decision: 'allow-all' }))
 })
 
 it('M07-T07 "+" offers attachments and references; referencing a missing selection keeps the draft and explains why', async () => {

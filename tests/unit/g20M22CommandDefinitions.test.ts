@@ -12,7 +12,7 @@ describe('M22 command definitions', () => {
       ['点击跳到：同名（第1页）', 'loc-1'], ['点击跳到：同名（第2页）', 'loc-2'],
     ])
     expect(new Set(commands.map(command => command.id)).size).toBe(commands.length)
-    expect(commands.filter(command => command.kind === 'font').length).toBeGreaterThan(0)
+    expect(commands.filter(command => command.kind === 'font').map(command => command.value)).toEqual(expect.arrayContaining(['Noto Sans SC', 'Microsoft YaHei', 'SimSun']))
   })
 
   it('keeps a unique destination name concise while numbering duplicate names by course order', () => {

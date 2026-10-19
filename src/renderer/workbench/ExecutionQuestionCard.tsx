@@ -31,7 +31,7 @@ export function ExecutionQuestionCard({ pending, onAnswer }: ExecutionQuestionCa
   const locked = busy || submitted || !onAnswer
   const note = other.trim()
   return <section className="execution-question" aria-label="AI 的提问">
-    <header><strong>{question.options.length ? 'AI 需要你的回答' : 'AI 需要你的文字回答'}</strong>
+    <header><strong>{pending.delegation ? '子任务需要你的回答' : question.options.length ? 'AI 需要你的回答' : 'AI 需要你的文字回答'}</strong>
       <small>{question.options.length ? question.multiple ? '可多选，也可独立提交文字' : '点选一项或直接填写文字'
         : '填写后提交，任务会继续'}</small></header>
     <p className="execution-question__text">{readableExecutionData(question.text)}</p>
@@ -53,7 +53,8 @@ export function ExecutionQuestionCard({ pending, onAnswer }: ExecutionQuestionCa
       <button type="submit" disabled={locked || !note}>提交文字回答</button>
     </form>
     <p className="execution-question__note" role={submitted ? 'status' : undefined}>{submitted ? '已提交回答，任务继续中…' : onAnswer
-      ? '回答后同一任务继续；输入框里的新消息会排在本任务之后。停止任务则不再回答。' : '当前环境不能提交回答。'}</p>
+      ? pending.delegation ? '回答将直接提交给这个子任务，并让它继续处理。'
+        : '回答后同一任务继续；输入框里的新消息会排在本任务之后。停止任务则不再回答。' : '当前环境不能提交回答。'}</p>
     {error && <p className="execution-question__error" role="alert">{error}</p>}
   </section>
 }

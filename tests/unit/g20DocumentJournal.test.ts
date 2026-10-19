@@ -1,11 +1,13 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
+import { deserialize, serialize } from 'node:v8'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createDocumentJournal, markdownReferences, readDocumentFileVersion, readDocumentMarkdownResources } from '../../src/main/workbench/documentJournal'
+import { createDocumentJournal, readDocumentFileVersion } from '../../src/main/workbench/documentJournal'
+import { markdownReferences, readDocumentMarkdownResources } from '../../src/main/workbench/documentSourceResources'
 import { DocumentSession } from '../../src/core/documents/DocumentSession'
 import { createMarkdownDriver } from '../../src/core/drivers/MarkdownDriver'
 import { parseDocumentMarkdown } from '../../src/shared/document/markdown'
@@ -30,7 +32,7 @@ const model = (source = '正文'): DocumentModel => ({ kind: 'markdown', source,
 const componentReference = '\n```cw-object-v1\n' + JSON.stringify({ kind: 'flow-block', block: { id: 'code', type: 'code', code: '' },
   resources: { assets: [], components: [{ packageId: 'demo', version: '1', source: { kind: 'relative', path: 'packages/demo' } }] } }) + '\n```\n'
 function state(documentId = 'document-a', sequence = 0): DurableDocumentState {
-  return { schemaVersion: 1, documentId, epoch: 'epoch-a', sequence, revision: sequence, savedRevision: null,
+  return { schemaVersion: 2, disposition: 'active', documentId, epoch: 'epoch-a', sequence, revision: sequence, savedRevision: null,
     binding: { kind: 'untitled', suggestedName: '未命名.md' }, model: model(), past: [], future: [], operations: [], stoppedRuns: [] }
 }
 const journalFile = (directory: string, id: string) => path.join(directory, `${createHash('sha256').update(id).digest('hex')}.journal`)
@@ -41,6 +43,73 @@ async function remember(journal: ReturnType<typeof createDocumentJournal>, docum
 }
 
 describe('G20 durable document journal', () => {
+  it('reads legacy active journals and upgrades the next Session write without changing document content', async () => {
+    const { directory, journal } = await fixture()
+    const current = state('legacy')
+    current.schemaVersion = 1
+    delete current.disposition
+    const payload = serialize(current), header = Buffer.alloc(48)
+    Buffer.from('G20JNL01').copy(header)
+    header.writeUInt32BE(payload.length, 8)
+    header.writeUInt32BE((~payload.length) >>> 0, 12)
+    createHash('sha256').update(payload).digest().copy(header, 16)
+    await fs.mkdir(directory, { recursive: true })
+    await fs.writeFile(journalFile(directory, current.documentId), Buffer.concat([header, payload, Buffer.from('G20DONE!')]))
+    expect(await journal.recover(current.documentId)).toEqual(current)
+    const restored = await DocumentSession.restore(current, 'new-epoch', createMarkdownDriver(), journal)
+    expect(restored.read().model).toEqual(current.model)
+    expect(await journal.recover(current.documentId)).toMatchObject({ schemaVersion: 2, disposition: 'active', sequence: 1, epoch: 'new-epoch' })
+  })
+
+  it.each(['closed', 'discarded'] as const)('keeps %s records out of recovery and binding reservations after restart', async disposition => {
+    const { directory, journal } = await fixture(), current = state(`terminal-${disposition}`)
+    await journal.append(current)
+    await journal.finalize!(current, disposition)
+    const restarted = createDocumentJournal({ directory })
+    expect(await restarted.recover(current.documentId)).toBeNull()
+    expect(await restarted.list()).toEqual([])
+    expect(await restarted.listBindings()).toEqual([])
+    expect(await restarted.inspect(current.documentId)).toMatchObject({ schemaVersion: 2, disposition, sequence: 1, revision: current.revision })
+    // The previous reader accepted schemaVersion 1 only. Both the terminal payload
+    // and its optional index now carry version 2 rather than looking active to it.
+    const filename = journalFile(directory, current.documentId), encoded = await fs.readFile(filename)
+    const firstSize = encoded.readUInt32BE(8), lastOffset = 48 + firstSize + 8
+    const terminal = deserialize(encoded.subarray(lastOffset + 48, lastOffset + 48 + encoded.readUInt32BE(lastOffset + 8))) as DurableDocumentState
+    expect(terminal.schemaVersion).not.toBe(1)
+    expect(JSON.parse(await fs.readFile(`${filename}.binding.json`, 'utf8')).version).toBe(2)
+    await expect(restarted.append({ ...current, sequence: 2 })).rejects.toMatchObject({ code: 'journal-sequence-conflict' })
+  })
+
+  it('persists discard before cleanup and never restores its draft if journal deletion fails', async () => {
+    const { directory, journal } = await fixture(), current = state('discard-cleanup-failure')
+    await journal.append(current)
+    const filename = journalFile(directory, current.documentId), remove = fs.rm.bind(fs)
+    vi.spyOn(fs, 'rm').mockImplementation(async (target, options) => {
+      if (String(target) === filename) throw Object.assign(new Error('journal is busy'), { code: 'EBUSY' })
+      return remove(target, options)
+    })
+    await expect(journal.discard(current.documentId)).rejects.toThrow('journal is busy')
+    const restarted = createDocumentJournal({ directory })
+    expect(await restarted.inspect(current.documentId)).toMatchObject({ disposition: 'discarded', sequence: 1 })
+    expect(await restarted.recover(current.documentId)).toBeNull()
+    expect(await restarted.listBindings()).toEqual([])
+    vi.restoreAllMocks()
+    await restarted.discard(current.documentId)
+    await expect(fs.stat(filename)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('does not delete an active journal when the terminal write fails', async () => {
+    const { directory, journal } = await fixture(), current = state('discard-ack-failure')
+    await journal.append(current)
+    const filename = journalFile(directory, current.documentId), open = fs.open.bind(fs)
+    vi.spyOn(fs, 'open').mockImplementation(async (target, flags, ...rest) => {
+      if (String(target) === filename && flags === 'a+') throw new Error('disk full')
+      return open(target, flags, ...rest)
+    })
+    await expect(journal.discard(current.documentId)).rejects.toThrow('disk full')
+    expect(await createDocumentJournal({ directory }).recover(current.documentId)).toMatchObject({ disposition: 'active', sequence: 0 })
+  })
+
   it('recovers resources, history and receipts atomically, discards only a torn tail and rejects complete corruption', async () => {
     const { directory, journal } = await fixture()
     const first = state()

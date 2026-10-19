@@ -108,6 +108,9 @@ export interface ComponentAuthorGeometryObservation {
 /** Ephemeral observations carry the persistent record needed to commit a first local edit. */
 export interface ComponentAuthorSpotInput {
   kind: 'text' | 'image'
+  /** Current computed CSS for the local text tools; never persisted as author data. */
+  textStyle?: Partial<Record<'font-family' | 'font-size' | 'color' | 'fill' | 'font-weight' | 'font-style'
+    | 'text-decoration-line' | 'background-color' | 'text-align' | 'line-height', string>>
   authorKey?: string
   scope?: ComponentAuthorScope
   binding?: ComponentAuthorBinding

@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { expect, it } from 'vitest'
-import { chromium } from '@playwright/test'
-import { captureFramePaintInRealm } from '../../src/main/workbench/observation/captureFramePaint'
+import { chromium, type Frame } from '@playwright/test'
+import type { WebFrameMain } from 'electron'
+import { captureFramePaintInRealm, waitForCaptureFramePaint } from '../../src/main/workbench/observation/captureFramePaint'
 
 it('capture paint waits visible opaque frames and skips hidden ancestors, including open shadow iframe trees', async () => {
   const browser = await chromium.launch({ headless: true })
@@ -47,5 +48,42 @@ it('capture paint waits visible opaque frames and skips hidden ancestors, includ
       if (value.text.includes('hidden')) { expect(value.width).toBeGreaterThan(0); expect(value.height).toBeGreaterThan(0); expect(value.paintCalls).toBe(0) }
       else expect(value.paintCalls).toBe(2)
     }
+  } finally { await browser.close() }
+}, 10_000)
+
+it('paints nested child surfaces before the containing frame takes its final paint turns', async () => {
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage()
+    await page.setContent('<iframe srcdoc="<p>Child surface</p>"></iframe>')
+    await page.waitForFunction(() => document.querySelector('iframe')?.contentDocument?.body.textContent?.includes('Child surface'))
+    const child = page.frames().find(frame => frame !== page.mainFrame())!
+    await child.setContent('<p>Child surface</p><iframe srcdoc="<p>Nested surface</p>"></iframe>')
+    await child.waitForFunction(() => document.querySelector('iframe')?.contentDocument?.body.textContent?.includes('Nested surface'))
+    const frames = page.frames()
+    for (const frame of frames) await frame.evaluate(() => {
+      const original = requestAnimationFrame.bind(window)
+      const state = window as Window & { paintTurns?: number; sampledUnpaintedChild?: boolean }
+      state.paintTurns = 0; state.sampledUnpaintedChild = false
+      window.requestAnimationFrame = callback => original(time => {
+        state.paintTurns!++
+        for (const child of document.querySelectorAll('iframe')) {
+          if ((child.contentWindow as typeof state).paintTurns! < 2) state.sampledUnpaintedChild = true
+        }
+        callback(time)
+      })
+    })
+    const adapters = new Map<Frame, WebFrameMain>()
+    for (const frame of frames) adapters.set(frame, {
+      detached: false,
+      executeJavaScript: (script: string) => frame.evaluate(script),
+      get parent() { return frame.parentFrame() ? adapters.get(frame.parentFrame()!) : null },
+    } as unknown as WebFrameMain)
+    const main = adapters.get(page.mainFrame())!
+    await waitForCaptureFramePaint(main, 'child-before-parent', [...adapters.values()])
+    for (const frame of frames) expect(await frame.evaluate(() => ({
+      turns: (window as Window & { paintTurns?: number }).paintTurns,
+      sampledUnpaintedChild: (window as Window & { sampledUnpaintedChild?: boolean }).sampledUnpaintedChild,
+    }))).toEqual({ turns: 2, sampledUnpaintedChild: false })
   } finally { await browser.close() }
 }, 10_000)

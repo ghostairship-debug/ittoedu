@@ -1,0 +1,49 @@
+{
+  "description": "内置任务执行引擎中读取本任务programmatic执行所保留的完整子调用回执。runId省略时用当前运行；给定时仅可读同任务续接来源。callId沿用实际回执引用，path从完整ToolResult根选择具体字段；字符串或数组可用offset/limit局部读取，省略可完整读取。字符串offset按UTF-16单位，数组按项目数。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "callId": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "limit": {
+        "exclusiveMinimum": 0,
+        "maximum": 9007199254740991,
+        "type": "integer"
+      },
+      "offset": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "path": {
+        "items": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            }
+          ]
+        },
+        "type": "array"
+      },
+      "runId": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "callId"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "name": "programmatic.read",
+  "version": 1
+}

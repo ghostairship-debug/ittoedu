@@ -38,30 +38,27 @@ async function engineFixture(provider:ModelProvider,source='OLD'){
  const input:ExecutionStart={conversationId:'conversation',taskId:randomUUID(),instruction:'完成两次局部修改',selection,advancementMode:'automatic',documents:[{documentId:session.documentId,epoch:snapshot.epoch,revision:snapshot.revision,writable:[{kind:'markdown-range',from:0,to:source.length}],selection:[{kind:'markdown-range',from:0,to:source.length}]}],contentOutput:{kind:'content',documentId:session.documentId,target:{kind:'markdown-range',from:0,to:source.length}}}
  return {engine,session,input,runs,events}
 }
-it('repair16 continues a premature goal exit once using receipts and never replays an already committed write',async()=>{
+it('repair16 presents remaining notes before the model continues without replaying an already committed write',async()=>{
  let turn=0
  const provider:ModelProvider={retrySafety:'pure-generation',async *stream(request){
   if(++turn===1){yield result(request,'先完成第一项',[{name:'text.replace',input:{content:'NEW'}},{name:'task.note',input:{remaining:['完成第二项局部修改']}}]);return}
-  if(turn===2){yield result(request,'第一项完成，第二项尚未处理');return}
-  if(turn===3){expect(JSON.stringify(request.messages)).toContain('最近工作笔记仍有剩余事项');yield result(request,'完成第二项',[{name:'text.replace',input:{content:'DONE'}},{name:'task.note',input:{remaining:[]}}]);return}
+  if(turn===2){const currentWork=JSON.parse(String(request.messages.at(-1)?.content).split('\n').at(-1)!).currentWork;expect(currentWork.workingNote.remaining).toEqual(['完成第二项局部修改']);yield result(request,'完成第二项',[{name:'text.replace',input:{content:'DONE'}},{name:'task.note',input:{remaining:[]}}]);return}
   yield result(request,'两项修改已应用')
  }}
  const h=await engineFixture(provider),start=await h.engine.start(h.input),end=await h.engine.wait(start.runId)
- expect(end.status).toBe('completed');expect(turn).toBe(4)
+ expect(end.status).toBe('completed');expect(turn).toBe(3)
  expect(h.session.read()).toMatchObject({revision:2,undoDepth:2,model:{source:'DONE'}})
  expect(end.tools.filter(t=>t.call.name==='text.replace')).toHaveLength(2)
  const page=await h.events.readPage({conversationId:'conversation',limit:1000});expect(page.events.find(e=>e.type==='run.end')?.data.label).toBe('本轮已结束')
 })
-it('repair16 rewording a note does not reset the single no-progress exit, while an explicit empty note can retire stale work',async()=>{
+it('repair16 an old remaining note does not gate a natural exit, while an explicit empty note can retire stale work',async()=>{
  let turn=0
  const provider:ModelProvider={retrySafety:'pure-generation',async *stream(request){
   if(++turn===1)yield result(request,'计划',[{name:'task.note',input:{remaining:['第二项修改']}}])
-  else if(turn===2)yield result(request,'阶段结果')
-  else if(turn===3)yield result(request,'更新表述',[{name:'task.note',input:{remaining:['继续第二项处理']}}])
-  else yield result(request,'本轮结束')
+  else {const currentWork=JSON.parse(String(request.messages.at(-1)?.content).split('\n').at(-1)!).currentWork;expect(currentWork.workingNote.remaining).toEqual(['第二项修改']);yield result(request,'阶段结果')}
  }}
  const h=await engineFixture(provider),start=await h.engine.start(h.input),end=await h.engine.wait(start.runId)
- expect(end.status).toBe('partial');expect(end.failure?.code).toBe('model-goal-no-progress');expect(turn).toBe(4);expect(h.session.read().revision).toBe(0)
+ expect(end.status).toBe('completed');expect(end.failure).toBeUndefined();expect(turn).toBe(2);expect(h.session.read().revision).toBe(0);expect(end.workingNote?.remaining).toEqual(['第二项修改'])
  let next=0
  provider.stream=async function*(request){if(++next===1)yield result(request,'这次只讨论阶段成果，旧待办不属于本次范围',[{name:'task.note',input:{remaining:[]}}]);else yield result(request,'阶段成果已说明')}
  const continued=await h.engine.start({...h.input,taskId:randomUUID(),instruction:'本次只说明阶段成果'}, {runId:end.runId,facts:'',sameTask:true})
@@ -176,25 +173,32 @@ it.each(['unknown-source', 'run:unknown-source:0'])('repair16 semantic continuat
  const sent=await h.service.operate({type:'send',...h.identity,submissionId:randomUUID(),expectedRevision:current.revision,text:'继续',documents:[]}) as {run:ExecutionRunRecord};const ended=await h.service.engine.wait(sent.run.runId)
  expect(ended.goalContinuationRunId).toBe(original.runId);expect(ended.status).toBe('partial');expect(ended.taskContinuedFrom).toBeUndefined();expect(ended.tools.find(t=>t.call.name==='file.write')?.result).toMatchObject({kind:'error',code:'unresolved-prior-tool'});expect(ended.remainingGoal).toEqual(['核实原写入结果']);await expect(import('node:fs/promises').then(fs=>fs.access(path.join(h.workspace,'unknown.txt')))).rejects.toMatchObject({code:'ENOENT'})
 })
-it('repair16 repeated paged reads of the same content and revision do not reset the no-progress reminder',async()=>{
+it('repair16 repeated paged reads preserve current facts and do not create a no-progress exit gate',async()=>{
  let turn=0,target=''
  const provider:ModelProvider={retrySafety:'pure-generation',async *stream(request){turn++
   if(turn===1){target=JSON.parse(String(request.messages.find(message=>String(message.content).startsWith('当前默认语义目标 target='))!.content).match(/target=("[^"]+")/)![1]!);yield result(request,'留下剩余事项',[{name:'task.note',input:{remaining:['完成第二项修改']}}]);return}
-  if(turn===2||turn===4||turn===6){yield result(request,'尚有待处理内容');return}
-  if(turn===3||turn===5){yield result(request,'回读当前内容',[{name:'read',input:{target,limit:1}}]);return}
+  if(turn===2||turn===3){yield result(request,'回读当前内容',[{name:'read',input:{target,limit:1}}]);return}
+  if(turn===4){const currentWork=JSON.parse(String(request.messages.at(-1)?.content).split('\n').at(-1)!).currentWork;expect(currentWork.workingNote.remaining).toEqual(['完成第二项修改']);yield result(request,'尚有待处理内容');return}
   throw new Error('重复原事实不应再发起模型请求')
  }}
  const h=await engineFixture(provider,'同一份长正文。'.repeat(100))
  const started=await h.engine.start(h.input),ended=await h.engine.wait(started.runId)
- expect(ended.status).toBe('partial');expect(ended.failure?.code).toBe('model-goal-no-progress');expect(turn).toBe(6);expect(h.session.read().revision).toBe(0)
+ expect(ended.status).toBe('completed');expect(ended.failure).toBeUndefined();expect(turn).toBe(4);expect(h.session.read().revision).toBe(0)
  const reads=ended.tools.filter(t=>t.call.name==='read');expect(reads).toHaveLength(2);expect(reads[0]?.result).toMatchObject({kind:'read',data:{offset:0,truncated:true}});expect(reads[1]?.result).toMatchObject({kind:'read',data:{offset:0,truncated:true}})
  expect((reads[0]?.result as {nextCursor?:string}).nextCursor).not.toBe((reads[1]?.result as {nextCursor?:string}).nextCursor)
 })
 it('repair18 explicit recovery freezes the accepted mode after a first-choice answer rather than rejecting the original unset mode',async()=>{
  let turn=0
- const h=await desktopFixture(async(_url,init)=>{const payload=JSON.parse(String(init?.body));if(++turn===1)return wire(payload,'选择推进方式',[{name:'ask_user',input:{purpose:'advancement-mode',question:'采用哪种推进方式？',options:[{label:'自动',value:'automatic'},{label:'逐步',value:'stepwise'}]}}]);if(turn===2)return new Response('',{status:401});expect(JSON.stringify(payload)).toContain('本次推进偏好：automatic');return wire(payload,'按已选方式继续完成')})
+ const h=await desktopFixture(async(_url,init)=>{const payload=JSON.parse(String(init?.body));if(++turn===1)return wire(payload,'选择推进方式',[{name:'ask_user',input:{purpose:'advancement-mode',question:'采用哪种推进方式？',options:[{label:'自动',value:'automatic'},{label:'逐步',value:'stepwise'}]}}]);if(turn===2)return new Response('',{status:401});const messages=payload.messages as Array<{role:string;content:unknown}>
+ const continuation=messages.find(message=>message.role==='system'&&typeof message.content==='string'&&message.content.startsWith('显式继续先前运行'))?.content
+ if(typeof continuation!=='string')throw new Error('The resumed request omitted confirmed continuation facts')
+ const facts=JSON.parse(continuation.slice(continuation.indexOf('{')))
+ expect(facts).toMatchObject({originalGoal:'新建短作品',completed:expect.arrayContaining([expect.objectContaining({name:'ask_user',result:{kind:'answer',question:'采用哪种推进方式？',selected:['自动']}})])})
+ expect(JSON.stringify(payload)).toContain('不要询问用户选择自动或逐步模式')
+ expect(JSON.stringify(payload)).not.toContain('先用 ask_user purpose=advancement-mode')
+ return wire(payload,'按已选方式继续完成')})
  const text='新建短作品',sent=await h.service.operate({type:'send',...h.identity,submissionId:randomUUID(),expectedRevision:h.current.revision,text,documents:[]}) as {run:ExecutionRunRecord}
- await vi.waitFor(async()=>expect((await h.service.engine.read(sent.run.runId))?.tools.some(t=>t.call.name==='ask_user'&&t.state==='executing')).toBe(true));const asking=(await h.service.engine.read(sent.run.runId))!,call=asking.tools.find(t=>t.call.name==='ask_user')!
+ await vi.waitFor(async()=>expect((await h.service.events.readPage({conversationId:h.current.conversationId,limit:1000})).events.some(event=>event.runId===sent.run.runId&&event.type==='tool'&&event.data.toolName==='ask_user'&&event.data.status==='waiting'&&event.data.question)).toBe(true));const asking=(await h.service.engine.read(sent.run.runId))!,call=asking.tools.find(t=>t.call.name==='ask_user')!
  await h.service.operate({type:'answer',runId:asking.runId,callId:call.callId,answer:{choices:[0]}});const interrupted=await h.service.engine.wait(asking.runId);expect(interrupted.status).toBe('failed');expect(interrupted.input.advancementMode).toBeUndefined()
  const current=await h.service.operate({type:'conversation',...h.identity}) as ConversationRecord;expect(current.advancementMode).toBe('automatic')
  const recovered=await h.service.operate({type:'send',...h.identity,submissionId:randomUUID(),expectedRevision:current.revision,text,documents:[],retryOfRunId:interrupted.runId,advancementMode:'automatic'}) as {run:ExecutionRunRecord};const completed=await h.service.engine.wait(recovered.run.runId)

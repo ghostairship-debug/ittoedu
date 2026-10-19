@@ -10,21 +10,23 @@ const decision = z.object({ text: line, reason: line.optional(),
   sourceRefs: z.array(z.string().min(1).max(180)).max(8).optional() }).strict()
 const noteSchema = z.object({ goal: z.string().max(MAX_GOAL_CHARS),
   userConstraints: z.array(line).max(16), decisions: z.array(decision).max(16),
-  remaining: z.array(line).max(24), openQuestions: z.array(line).max(12), risks: z.array(line).max(12) }).strict()
+  remaining: z.array(line).max(24), followUps: z.array(line).max(24).optional(),
+  openQuestions: z.array(line).max(12), risks: z.array(line).max(12) }).strict()
 
 /** Replaces only supplied model-owned sections. No goal, user constraint, permission or result field is accepted. */
 export const taskNoteInputSchema = z.object({
   /** A model-recognized continuation of a host-delivered history source; Engine validates and carries the note. */
   continuationRunId: z.string().min(1).max(512).describe('宿主已提供历史的 runId 或完整 sourceId（run:<runId>:<消息序号>）；软件解析来源身份，不需拆解编号。').optional(),
   decisions: z.array(decision).max(16).optional(),
-  remaining: z.array(line).max(24).optional(),
+  remaining: z.array(line).max(24).describe('达到用户当前要求的结果仍必需的未完成事项，包括已知严重运行、数据或核心功能错误。可用首版已达到当前要求时更新为 []；可选精修、额外验用和未要求的导出写入 followUps。').optional(),
+  followUps: z.array(line).max(24).describe('当前要求之外可选的后续改善，不阻止本次完成，也不作为完成证明。用户明确要求的终稿、导出或完整验用不能移到这里。').optional(),
   openQuestions: z.array(line).max(12).optional(),
   risks: z.array(line).max(12).optional(),
 }).strict()
 
 export const taskNoteTool: ModelToolDefinition = {
   name: 'task.note',
-  description: '更新本次任务的简短工作笔记：已作取舍、待办、待确认和风险。用户当前请求明确续作先前目标时，用 continuationRunId 指向宿主已提供的历史 runId 或完整 sourceId（run:<runId>:<消息序号>），不用自行拆解来源编号；宿主承接原目标和最近笔记，不扩大权限或重放操作。新讨论或只要求新阶段时不声明续作；显式 remaining=[] 保持为空。只写当前 run 检查点，不修改用户原话、冻结约束、权限、文档或真实回执。笔记中的“完成”不作为交付证明。sourceRefs 可省略；需要引用时使用 task:instruction 或已返回工具调用编号。',
+  description: '更新本次任务的简短工作笔记：已作取舍、必需待办、可选后续、待确认和风险。remaining 只记录达到用户当前要求仍必需的事项；followUps 记录可选精修、额外验用或未要求的导出，不触发继续执行。可用首版已达到当前要求时 remaining=[]，不把可选后续当作未完成；用户明确要求终稿、导出或完整验用时仍须完成。用户当前请求明确续作先前目标时，用 continuationRunId 指向宿主已提供的历史 runId 或完整 sourceId（run:<runId>:<消息序号>），不用自行拆解来源编号；宿主承接原目标和最近笔记，不扩大权限或重放操作。新讨论或只要求新阶段时不声明续作；显式 remaining=[] 保持为空。只写当前 run 检查点，不修改用户原话、冻结约束、权限、文档或真实回执。笔记中的“完成”不作为交付证明。sourceRefs 可省略；需要引用时使用 task:instruction 或已返回工具调用编号。',
   inputSchema: z.toJSONSchema(taskNoteInputSchema) as ModelToolDefinition['inputSchema'],
 }
 
@@ -89,6 +91,7 @@ export function prepareTaskNote(record: ExecutionRunRecord, raw: unknown, expect
   const note = checked({ ...prior,
     ...(sources ? { decisions: sources.decisions } : {}),
     ...(input.remaining !== undefined ? { remaining: input.remaining } : {}),
+    ...(input.followUps !== undefined ? { followUps: input.followUps } : {}),
     ...(input.openQuestions !== undefined ? { openQuestions: input.openQuestions } : {}),
     ...(input.risks !== undefined ? { risks: input.risks } : {}),
   })

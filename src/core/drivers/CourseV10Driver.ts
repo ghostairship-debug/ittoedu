@@ -1,5 +1,5 @@
 import type { DocumentCommand, DocumentDriver, DocumentModel } from '../../shared/workbench/document'
-import { applyComponentOperation, ComponentOperationConflict, describeComponentChanges, equalComponentValue } from './courseV10Operations'
+import { applyComponentOperation, beginComponentOperationPlanning, ComponentOperationConflict, describeComponentChanges, equalComponentValue } from './courseV10Operations'
 import { cloneDocumentResources } from './resources'
 import { validateComponentData } from '../components/validateComponentData'
 import { createCourseProjectV10Archive, openCourseProjectV10Archive, validateCourseProjectV10Archive, validateCourseProjectV10Resources } from './codecs/courseProjectV10Archive'
@@ -24,6 +24,20 @@ export class CourseV10Driver implements DocumentDriver {
     return this.applyValidated({ ...model, resources: cloneDocumentResources(model.resources) }, command)
   }
   applyValidated(model: DocumentModel, command: DocumentCommand): DocumentModel {
+    return this.applyCandidate(model, command, applyComponentOperation, true)
+  }
+  beginPlanningBatch(model: DocumentModel) {
+    this.validate(model)
+    course(model)
+    let current: DocumentModel = { ...model, project: structuredClone(model.project), resources: cloneDocumentResources(model.resources) }
+    const projectPlanning = beginComponentOperationPlanning(current.project)
+    return { apply: (command: DocumentCommand): DocumentModel => {
+      const next = this.applyCandidate(current, command, (_project, operation, resources) => projectPlanning.apply(operation, resources!), false)
+      current = next
+      return next
+    } }
+  }
+  private applyCandidate(model: DocumentModel, command: DocumentCommand, applyProject: typeof applyComponentOperation, validateCandidate: boolean): DocumentModel {
     course(model)
     if (command.type !== 'component-platform.apply') throw new TypeError('V10 只接受身份定位的组件操作')
     // Check the captured bytes before COW; a new sharing reference alone does
@@ -48,11 +62,13 @@ export class CourseV10Driver implements DocumentDriver {
       if (!equalComponentValue(model.resources.assets[edit.asset.id], edit.expectedBytes)) throw new ComponentOperationConflict(['@assetBytes', edit.asset.id], '素材字节已变化')
       Object.defineProperty(resources.assets, edit.asset.id, { value: Uint8Array.from(edit.bytes), enumerable: true, configurable: true, writable: true })
     }
-    const next: DocumentModel = { kind: 'course-v10', project: applyComponentOperation(model.project, command, model.resources), resources }
+    const next: DocumentModel = { kind: 'course-v10', project: applyProject(model.project, command, model.resources), resources }
     // applyComponentOperation already parses the candidate project. Only its resource
     // closure and professional data remain to be checked at this boundary.
-    validateCourseProjectV10Resources(next.project, next.resources)
-    validateComponentData(next.project)
+    if (validateCandidate) {
+      validateCourseProjectV10Resources(next.project, next.resources)
+      validateComponentData(next.project)
+    }
     return next
   }
   withRevision(model: DocumentModel, revision: number): DocumentModel {

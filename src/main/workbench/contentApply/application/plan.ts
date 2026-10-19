@@ -1,10 +1,11 @@
 import { captureComponentOperation, equalComponentValue, presentationComponentEdits } from '../../../../core/drivers/courseV10Operations'
 import { componentDataEdits } from '../../../../core/course/componentDataEdits'
-import { frameCorners, translateFrame } from '../../../../core/components/geometry'
+import { frameCorners, multiplyMatrices, translateFrame } from '../../../../core/components/geometry'
+import { contentPlacementRegion } from '../../../../core/contentApply/planning/placement'
 import { containerChildIds, owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentDefinition, type ComponentEdit, type ComponentFrame, type ComponentInstance, type CourseProjectV10, type JsonObject, type JsonValue } from '../../../../shared/contracts/component-platform'
 import type { ContentApplyDiagnostic, ContentApplyPlan, ContentChangeRequest, ContentObjectDraft } from './types'
 import { applyComponentStylePatch, cssStyleName, isOuterGeometryStyle } from '../../../../shared/componentStylePatch'
-import { WEB_DEFINITION } from '../../../../components/web/data'
+import { GROUP_DEFINITION } from './professionalGraphics'
 export { cssStyleName, isOuterGeometryStyle } from '../../../../shared/componentStylePatch'
 
 /** The outer frame remains the sole geometry owner. Internal Web CSS is handled by its component. */
@@ -39,6 +40,37 @@ function bounds(frame: ComponentFrame) {
     top: Math.min(...corners.map(point => point.y)), bottom: Math.max(...corners.map(point => point.y)) }
 }
 
+const boxText = (box: ReturnType<typeof bounds>) => `(${box.left},${box.top})–(${box.right},${box.bottom})`
+const intersects = (a: ReturnType<typeof bounds>, b: ReturnType<typeof bounds>) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+
+/** Explicit composition stays where authored, including intentional overlap. */
+function placeInRegion(project: CourseProjectV10, container: ComponentContainer, drafts: ContentObjectDraft[], region: ComponentFrame,
+  diagnostics: ContentApplyDiagnostic[], checkNeighbors: boolean): ContentObjectDraft[] {
+  const surface = container.kind === 'surface' ? project.surfaces.find(value => value.id === container.surfaceId) : undefined
+  const size = surface?.designSize ?? (container.kind === 'instance' ? project.instances[container.instanceId]?.frame : undefined)
+  const occupied = checkNeighbors ? containerChildIds(project, container).flatMap(id => {
+    const frame = project.instances[id]?.frame
+    return frame ? [{ id, box: bounds(frame) }] : []
+  }) : []
+  diagnostics.push({ level: 'info', code: 'content-placement-region',
+    message: `本次在局部视口 ${Math.ceil(region.width)}×${Math.ceil(region.height)} 准备，正式位置沿所选区域变换 [${region.transform.join(',')}]；采用后由对象 frame 持有，原对象未移动。` })
+  return drafts.map(draft => {
+    const local = draft.frame ?? { width: region.width, height: region.height, transform: [1, 0, 0, 1, 0, 0] as ComponentFrame['transform'] }
+    const measured = bounds(local)
+    if (measured.left < 0 || measured.top < 0 || measured.right > region.width || measured.bottom > region.height) diagnostics.push({
+      level: 'warning', code: 'content-region-overflow', repairable: true,
+      message: `内容实测边界 ${boxText(measured)} 超出所选局部视口 (0,0)–(${region.width},${region.height})；内容与源码已保留，可改源码或用 object.update 调整正式 frame。` })
+    const frame = { ...local, transform: [...multiplyMatrices(region.transform, local.transform)] as ComponentFrame['transform'] }
+    const placed = bounds(frame), neighbors = occupied.filter(value => intersects(placed, value.box))
+    if (neighbors.length) diagnostics.push({ level: 'warning', code: 'insertion-overlap', repairable: true,
+      message: `新内容边界 ${boxText(placed)} 与原对象 ${neighbors.map(value => `${value.id} ${boxText(value.box)}`).join('、')} 相交；已保留明确放置与原对象，可按构图保留重叠或修改正式 frame。` })
+    if (size && (placed.left < 0 || placed.top < 0 || placed.right > size.width || placed.bottom > size.height)) diagnostics.push({
+      level: 'warning', code: 'insertion-container-overflow', repairable: true,
+      message: `新内容边界 ${boxText(placed)} 超出父容器 (0,0)–(${size.width},${size.height})；内容与原对象保留，可修改正式 frame 或源码。` })
+    return { ...draft, frame }
+  })
+}
+
 /** Reading order owns the block position; a bounded local component keeps its intrinsic stage size. */
 function flowBodyDraft(draft: ContentObjectDraft, definitions: Readonly<Record<string, ComponentDefinition>>): ContentObjectDraft {
   const implementation = draft.implementationOverride ?? definitions[draft.definitionId]?.implementation
@@ -66,7 +98,8 @@ function placeNewRoots(project: CourseProjectV10, container: ComponentContainer,
     const candidates = xs.flatMap(left => ys.map(top => ({ left, top })))
       .sort((a, b) => Math.hypot(a.left - proposed.left, a.top - proposed.top) - Math.hypot(b.left - proposed.left, b.top - proposed.top))
     const position = candidates.find(candidate => clear(candidate.left, candidate.top))
-    if (!position) diagnostics.push({ level: 'warning', code: 'insertion-overlap', message: '当前容器没有可用空位；新对象保留输入位置，原对象未移动。', repairable: true })
+    if (!position) diagnostics.push({ level: 'warning', code: 'insertion-overlap',
+      message: `当前容器${size ? ` (0,0)–(${size.width},${size.height})` : ''}没有可用空位；新内容边界 ${boxText(proposed)} 保留输入位置，原对象未移动。可保留有意重叠，或用 object.update 调整正式 frame。`, repairable: true })
     const frame = position ? translateFrame(draft.frame, { x: position.left - proposed.left, y: position.top - proposed.top }) : draft.frame
     occupied.push(bounds(frame))
     return { ...draft, frame }
@@ -83,6 +116,8 @@ export interface PlanContentApplyInput {
   diagnostics?: ContentApplyDiagnostic[]
   unusable?: boolean
   unverified?: boolean
+  /** Measured page siblings already share one layout; do not repel them from each other. */
+  preserveLayout?: boolean
 }
 
 export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan {
@@ -109,7 +144,8 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
       if (request.intent === 'redo') children.forEach(instanceId => edits.push({ type: 'instance.remove', instanceId }))
     }
     const drafts = input.drafts ?? (request.source.kind === 'objects' ? request.source.objects : undefined)
-    if (!drafts?.length) throw new Error('插入或重做没有可应用对象')
+    if (!drafts || !drafts.length && !(request.target.kind === 'container' && request.target.container.kind === 'surface'
+      && (input.preserveLayout || edits.some(edit => edit.type === 'surface.background.set')))) throw new Error('插入或重做没有可应用对象')
     if (request.source.kind === 'objects') for (const definition of request.source.definitions ?? []) {
       const existing = project.definitions[definition.id]
       if (existing && !equalComponentValue(existing, definition)) throw new Error('新对象不能覆盖其他实例正在使用的定义')
@@ -132,8 +168,11 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
     const definitions = { ...project.definitions, ...(request.source.kind === 'objects'
       ? Object.fromEntries((request.source.definitions ?? []).map(definition => [definition.id, definition])) : {}) }
     for (const edit of edits) if (edit.type === 'definition.set') definitions[edit.definition.id] = edit.definition
-    const placed = request.intent === 'insert' ? placeNewRoots(project, container, drafts, diagnostics, definitions)
-      : flow ? drafts.map(draft => flowBodyDraft(draft, definitions)) : drafts
+    const region = contentPlacementRegion(request)
+    const placed = flow ? (region ? drafts.map(draft => draft.frame ? draft : { ...draft, frame: { ...region } }) : drafts)
+      .map(draft => flowBodyDraft(draft, definitions))
+      : region ? placeInRegion(project, container, drafts, region, diagnostics, request.intent === 'insert')
+        : request.intent === 'insert' && !input.preserveLayout ? placeNewRoots(project, container, drafts, diagnostics, definitions) : drafts
     if (request.intent === 'redo' && request.target.kind === 'instance') {
       const target = project.instances[request.target.instanceId]!
       const removed = new Set((target.childIds ?? []).flatMap(id => contentTargetIds(project, { target: { kind: 'instance', instanceId: id } })))
@@ -149,12 +188,12 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
       let root: ContentObjectDraft
       if (placed.length === 1) root = placed[0]!
       else {
-        let definitionId = WEB_DEFINITION.id
-        if (definitions[definitionId] && !equalComponentValue(definitions[definitionId], WEB_DEFINITION)) {
+        let definitionId = GROUP_DEFINITION.id
+        if (definitions[definitionId] && !equalComponentValue(definitions[definitionId], GROUP_DEFINITION)) {
           definitionId = input.createId()
         }
-        if (!definitions[definitionId]) edits.push({ type: 'definition.set', definition: { ...WEB_DEFINITION, id: definitionId } })
-        root = { definitionId, data: { html: '<div style="width:100%;height:100%"></div>' }, children: placed }
+        if (!definitions[definitionId]) edits.push({ type: 'definition.set', definition: { ...GROUP_DEFINITION, id: definitionId } })
+        root = { definitionId, data: {}, children: placed }
       }
       edits.push({ type: 'instance.definition.set', instanceId: target.id, definitionId: root.definitionId },
         { type: 'data.set', instanceId: target.id, path: [], value: structuredClone(root.data) },
@@ -166,7 +205,7 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
       if (childIds.length) edits.push({ type: 'instance.insert', container: { kind: 'instance', instanceId: target.id }, index: 0, instances, rootIds: childIds })
       insertedIds.unshift(target.id)
       // No frame edit: redo grants new internal content, not a move or resize of the selected object.
-    } else edits.push({ type: 'instance.insert', container, index, instances, rootIds: placed.map(allocate) })
+    } else if (placed.length) edits.push({ type: 'instance.insert', container, index, instances, rootIds: placed.map(allocate) })
   } else if (request.intent === 'style') {
     if (request.source.kind !== 'style') throw new Error('样式意图需要明确的样式字段')
     const style: JsonObject = {}

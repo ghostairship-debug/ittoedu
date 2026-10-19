@@ -4,6 +4,10 @@ import type { CourseTheme, CourseThemePackage, ProjectDesignTokens } from './typ
 /** Cascade layer for course-wide styles: a page's own unlayered styles always win. */
 export const COURSE_THEME_LAYER = 'guoling-theme'
 
+// Low-priority defaults also reach isolated HTML/Source documents. Authored cursors win.
+const controlCursorCss = ':where(button,[role="button"],input[type="button"],input[type="submit"],input[type="reset"],summary){cursor:pointer}'
+  + ':where(button:disabled,input:disabled,[role="button"][aria-disabled="true"]){cursor:default}'
+
 export function courseTokenVariableName(kind: 'font' | 'color', id: string): string {
   // Escape the escape marker too: literal underscores cannot collide with dots.
   return `--${kind}-${id.replace(/[^a-zA-Z0-9-]/g, character => `_${character.codePointAt(0)!.toString(16)}_`)}`
@@ -37,7 +41,7 @@ export function courseThemeStyleText(
   const variables = Object.entries(courseThemeVariables(course.designTokens))
     .map(([name, value]) => `${name}:${value};`).join('')
   const css = resolveCourseThemeCss(course.theme, resolveAsset)
-  return `@layer ${COURSE_THEME_LAYER}{:root{${variables}}\n${css}\n}`
+  return `@layer ${COURSE_THEME_LAYER}{:root{${variables}}\n${controlCursorCss}\n${css}\n}`
 }
 
 export function createCourseThemePackage(

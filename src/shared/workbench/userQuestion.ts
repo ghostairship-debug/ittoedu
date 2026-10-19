@@ -65,20 +65,20 @@ export function advancementModeForAnswer(question: UserQuestionView, answer: Use
 export const sameAnswer = (a: UserAnswer, b: UserAnswer) =>
   JSON.stringify([...a.choices].sort((x, y) => x - y)) === JSON.stringify([...b.choices].sort((x, y) => x - y)) && (a.other ?? '') === (b.other ?? '')
 
-export const USER_QUESTION_USAGE_GUIDANCE = `需要用户在明确方案中做决定且无法从用户原话和文档推断，或当前逐步推进偏好需要审阅关键产物时，调用 ${USER_QUESTION_TOOL} 并等待回答。选项可为零个、一个或多个，不为满足数量编造选项；所有问题的软件界面固定提供独立“其他想法”，无需模型另写这个选项。`
-  + '阶段确认前先提供当前产物供用户审阅，并在 currentDraft 中引用实际作品的 target；确认后读取用户眼前的当前稿，包含其人工修改，不要求先保存。普通问题不附 currentDraft。用户已明确选择跳过确认的自动模式或免去该确认时，不再追加确认。每次只问一个问题，不用于寒暄或重复确认已明确的输入要求，不自行增加阶段确认。'
+export const USER_QUESTION_USAGE_GUIDANCE = `需要用户在明确方案中做决定且无法从用户原话和文档推断，或用户明确要求先审阅当前产物时，调用 ${USER_QUESTION_TOOL} 并等待回答。选项可为零个、一个或多个，不为满足数量编造选项；所有问题的软件界面固定提供独立“其他想法”，无需模型另写这个选项。`
+  + '阶段确认前先提供当前产物供用户审阅，并在 currentDraft 中引用实际作品的 target；确认后读取用户眼前的当前稿，包含其人工修改，不要求先保存。普通问题不附 currentDraft。用户已明确免去该确认时，不再追加确认。每次只问一个问题，不用于寒暄或重复确认已明确的输入要求，不自行增加阶段确认。'
 
 export const userQuestionToolDefinition: ModelToolDefinition = {
   name: USER_QUESTION_TOOL,
   description: '向用户提一个需要其决定的问题。选项可为零个、一个或多个，所有问题都固定提供独立“其他想法”文字框；点击选项只提交选择，提交文字只提交文字，选项里不要再写“其他”。'
     + USER_QUESTION_USAGE_GUIDANCE
-    + '调用后任务会等待用户回答，工具结果只含用户实际的选择（selected）或文字（other）；随后按用户回答继续完成任务。首次模式选择用 purpose=advancement-mode，选项 value 为 automatic 或 stepwise，用户尚未选择或自由文字未明确模式时不替用户决定。',
+    + '调用后任务会等待用户回答，工具结果只含用户实际的选择（selected）或文字（other）；随后按用户回答继续完成任务。按任务与用户原话判断如何推进，不为开始创作或继续任务追加自动／逐步模式选择。',
   inputSchema: {
     type: 'object', additionalProperties: false, required: ['question', 'options'],
     properties: {
       question: { type: 'string', description: '一句话说明需要用户决定什么' },
       responseKind: { type: 'string', enum: ['choice', 'free-text', 'confirm'], description: '可选文案提示，不限制选项数量或文字回答' },
-      purpose: { type: 'string', enum: ['advancement-mode'], description: '仅首次选择或显式切换任务推进方式时使用' },
+      purpose: { type: 'string', enum: ['advancement-mode'], description: '仅承接用户已经明确要求的推进方式选择，不主动询问模式' },
       options: { type: 'array', minItems: 0, description: '真实方案；可为零个、一个或多个',
         items: { type: 'object', additionalProperties: false, required: ['label'], properties: {
           label: { type: 'string', description: '简短的选项名称' },

@@ -69,6 +69,8 @@ export interface ComponentInstance<Data = JsonValue> {
   playbackInitialVisibility?: 'inherit' | 'hidden'
   flowPlacement?: ComponentFlowPlacement
   flowLayout?: ComponentFlowBodyLayout
+  /** Explicit Source aliases for declared scalar course state; identities follow canonical rename/copy. */
+  stateBindings?: Record<string, string>
   data: Data
   authoring?: ComponentAuthoring
   style?: JsonObject
@@ -84,6 +86,20 @@ export interface ComponentBackground {
   color?: string
   assetId?: string | null
   fit?: 'cover' | 'contain' | 'fill'
+  /** Background-only paint, back to front. It owns no author instances or layout. */
+  paint?: ComponentBackgroundPaint | null
+}
+export type ComponentBackgroundProperty = 'background-color' | 'background-image' | 'background-size'
+  | 'background-position' | 'background-repeat' | 'background-origin' | 'background-clip'
+  | 'background-attachment' | 'background-blend-mode'
+export interface ComponentBackgroundPaint {
+  layers: { style: Partial<Record<ComponentBackgroundProperty, string>>; resourceBindings: Record<string, string> }[]
+}
+export interface ResolvedComponentBackground {
+  color: string
+  assetId: string | null
+  fit: 'cover' | 'contain' | 'fill'
+  paint?: ComponentBackgroundPaint
 }
 export interface ComponentFlowBodyLayout {
   width: 'content-width' | 'wide' | 'full-width'
@@ -214,14 +230,19 @@ export function isComponentVisibleAtSurface(instance: Pick<ComponentInstance, 'v
 }
 
 /** One effective paint rule for editors, Player and output. */
-export function resolveComponentBackground(project: Pick<CourseProjectV10, 'background'>, surface?: Pick<ComponentSurface, 'background'>, state?: Pick<ComponentPresentationState, 'background'>): { color: string; assetId: string | null; fit: 'cover' | 'contain' | 'fill' } {
+export function resolveComponentBackground(project: Pick<CourseProjectV10, 'background'>, surface?: Pick<ComponentSurface, 'background'>, state?: Pick<ComponentPresentationState, 'background'>): ResolvedComponentBackground {
   const base = project.background
   const selected = surface?.background?.mode === 'own' ? surface.background : base
-  const result = { color: selected?.color ?? '#ffffff', assetId: selected?.assetId ?? null, fit: selected?.fit ?? 'cover' as const }
+  const result: ResolvedComponentBackground = selected?.paint ? { color: '#ffffff', assetId: null, fit: 'cover', paint: selected.paint }
+    : { color: selected?.color ?? '#ffffff', assetId: selected?.assetId ?? null, fit: selected?.fit ?? 'cover' as const }
   const override = state?.background
   if (!override || override.mode === 'inherit') return result
-  return { color: override.color ?? result.color, assetId: override.assetId === undefined ? result.assetId : override.assetId,
-    fit: override.fit ?? result.fit }
+  if (override.paint) return { color: '#ffffff', assetId: null, fit: 'cover', paint: override.paint }
+  const replacesPaint = override.paint === null || ['color', 'assetId', 'fit'].some(key => Reflect.get(override, key) !== undefined)
+  if (result.paint && !replacesPaint) return result
+  const inherited = result.paint ? { color: '#ffffff', assetId: null, fit: 'cover' as const } : result
+  return { color: override.color ?? inherited.color, assetId: override.assetId === undefined ? inherited.assetId : override.assetId,
+    fit: override.fit ?? inherited.fit }
 }
 
 /** A disposable render/edit projection. It never becomes an authoring write source. */
@@ -238,9 +259,11 @@ export function resolveComponentPresentation(project: CourseProjectV10, surfaceI
     instances[id] = instance
   }
   const order = state.order?.filter(id => surface.childIds.includes(id))
+  const background = state.background && resolveComponentBackground(project, surface, state)
   const projectedSurface = { ...surface,
     ...(order ? { childIds: [...order, ...surface.childIds.filter(id => !order.includes(id))] } : {}),
-    ...(state.background ? { background: { mode: 'own' as const, ...resolveComponentBackground(project, surface, state) } } : {}),
+    ...(background ? { background: background.paint ? { mode: 'own' as const, paint: background.paint }
+      : { mode: 'own' as const, ...background } } : {}),
   }
   return { ...project, instances, surfaces: project.surfaces.map(value => value.id === surfaceId ? projectedSurface : value) }
 }

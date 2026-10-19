@@ -3,6 +3,7 @@ import type { ComponentEdit } from '../../shared/contracts/component-platform/op
 import type { CourseProjectV10, JsonValue } from '../../shared/contracts/component-platform/project'
 import { webAuthoringRecordSchema, webAuthoringRecordsSchema } from './data'
 import { equalComponentValue } from '../../core/drivers/courseV10Operations'
+import { anchorOwnedDocumentAuthoring } from './ownedDocumentIdentity'
 
 export function assertAuthorRecordBinding(previous: ComponentAuthorRecord | undefined, spot: ComponentAuthorField): void {
   if (previous && (previous.kind !== spot.kind || !equalComponentValue(previous.scope ?? {}, spot.scope ?? {})
@@ -17,8 +18,19 @@ export function prepareWebAuthoringRecordEdits(project: CourseProjectV10,
   if (!instance) throw new Error('原可编辑对象已不存在')
   if (!spot.authorKey || !spot.binding || spot.bindingStatus === 'unresolved' || spot.bindingStatus === 'source-required')
     throw new Error('此处对象尚未唯一绑定，修改内容已保留')
+  const authorKey = spot.authorKey
+  const documentPath = spot.scope?.['document:path']
+  let identityEdits: ComponentEdit[] = []
+  if (documentPath) {
+    const data = instance.data
+    if (!data || typeof data !== 'object' || Array.isArray(data) || typeof data.html !== 'string')
+      throw new Error('原子文档源码已不存在，作者修改已保留')
+    const anchored = anchorOwnedDocumentAuthoring(data.html, documentPath)
+    spot = { ...spot, scope: { ...spot.scope, 'document:path': anchored.documentPath } }
+    if (anchored.html !== data.html) identityEdits = [{ type: 'data.set', instanceId: instance.id, path: ['html'], value: anchored.html }]
+  }
   const records = webAuthoringRecordsSchema.parse(instance.authoring?.records ?? {})
-  const previous = records[spot.authorKey]
+  const previous = records[authorKey]
   // Re-preparation reads the current project; CAS alone cannot prove that a reused local key is still this object.
   assertAuthorRecordBinding(previous, spot)
   const property = spot.kind === 'text' ? 'text' : 'src'
@@ -31,15 +43,15 @@ export function prepareWebAuthoringRecordEdits(project: CourseProjectV10,
     ...(patch.style ? { style: { ...previous.overrides.style, ...patch.style } } : {}),
   } } : { kind: spot.kind, ...(spot.scope ? { scope: spot.scope } : {}), binding: spot.binding, overrides: patch })
   const set = (path: string[], value: unknown): ComponentEdit => ({ type: 'authoring.set', instanceId: instance.id, path, value: value as JsonValue })
-  if (!instance.authoring?.records) return [set(['records'], { [spot.authorKey]: record })]
-  if (!previous) return [set(['records', spot.authorKey], record)]
-  return Object.keys(patch).flatMap(key => {
+  if (!instance.authoring?.records) return [...identityEdits, set(['records'], { [authorKey]: record })]
+  if (!previous) return [...identityEdits, set(['records', authorKey], record)]
+  return [...identityEdits, ...Object.keys(patch).flatMap(key => {
     const name = key as keyof ComponentAuthorRecord['overrides'], value = record.overrides[name]
     if (value === undefined) return []
-    const path = ['records', spot.authorKey!, 'overrides', key]
+    const path = ['records', authorKey, 'overrides', key]
     if ((name === 'style' || name === 'geometry') && previous.overrides[name]) {
       return Object.entries(patch[name]!).map(([field, value]) => set([...path, field], value))
     }
     return [set(path, value)]
-  })
+  })]
 }

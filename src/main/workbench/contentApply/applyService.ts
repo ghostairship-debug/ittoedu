@@ -1,7 +1,7 @@
 import { componentDataEdits } from '../../../core/course/componentDataEdits'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { captureComponentOperation, equalComponentValue } from '../../../core/drivers/courseV10Operations'
+import { captureComponentOperation, componentValueAt, equalComponentValue } from '../../../core/drivers/courseV10Operations'
 import { assertCourseSurfaceRemoval, createCourseSurface } from '../../../core/course/courseSurfaceStructure'
 import type { InMemoryComponentCompilation } from '../../../core/components/compilation/InMemoryComponentCompilation'
 import { componentCompilationInput } from '../../../core/components/compilation/componentCompilationInput'
@@ -21,6 +21,8 @@ import { parse, type DefaultTreeAdapterTypes } from 'parse5'
 import { textComponentDataSchema } from '../../../components/text/data'
 import { readHtmlDocumentText, type DocumentHtmlNode } from '../../../shared/document/htmlText'
 import { adoptFormulas } from '../../../shared/document/html'
+import { courseThemeStyleText } from '../../../shared/contracts/design-v1/theme'
+import { contentPlacementRegion } from '../../../core/contentApply/planning/placement'
 
 export type { ContentApplyRequest, ContentApplyResult, ContentApplyPlan, ContentApplySessionPort } from './application/types'
 
@@ -153,9 +155,10 @@ export class ContentApplyService {
       request = { ...request, intent: 'insert' }
     }
     signal?.throwIfAborted()
-    const diagnostics: ContentApplyDiagnostic[] = []
+    const diagnostics: ContentApplyDiagnostic[] = [...request.diagnostics ?? []]
     const edits: ComponentEdit[] = []
-    let drafts: ContentObjectDraft[] | undefined, unverified = false, unusable = false
+    const measurementDependencies: string[][] = []
+    let drafts: ContentObjectDraft[] | undefined, unverified = false, unusable = false, preserveLayout = false
     if (request.source.kind === 'html') {
       // Resolve content before admitting its original or resources. An empty
       // projection cannot turn an asset-only batch into content success.
@@ -270,14 +273,45 @@ export class ContentApplyService {
         edits.push(...resources.edits)
         diagnostics.push(...resourceDiagnostics(prepared))
         const viewport = this.designViewport(project, request)
+        diagnostics.push({ level: 'info', code: 'content-design-viewport',
+          message: `本次按${contentPlacementRegion(request) ? '明确局部区域' : request.target.kind === 'instance' || request.target.container.kind === 'instance' ? '当前对象/容器' : '页面默认'}视口 ${viewport.width}×${viewport.height} 准备内容；采用回执提供实际对象 frame/viewport。` })
         let assembly: HtmlAssembly
         try {
-          assembly = Object.keys(records).length ? sourceProgramAssembly(viewport, { html: prepared.html,
+          if (Object.keys(records).length) assembly = sourceProgramAssembly(viewport, { html: prepared.html,
             ...(request.source.themeCss !== undefined ? { themeCss: request.source.themeCss } : {}) }, 'persistent-html-authoring')
-            : await this.options.measure({ html: prepared.html, viewport,
-            framing: htmlAssemblyFraming(request),
-            themeCss: request.source.themeCss, resourceSources: prepared.resourceSources,
-            resourceUrls: { ...this.options.resourceUrls?.(project, request), ...resources.urls }, signal })
+          else {
+            // Match the runtime's live course layer without turning its current
+            // rules into per-object source CSS. Only captured geometry owns this read.
+            const resourceUrls = { ...this.options.resourceUrls?.(project, request), ...resources.urls }
+            const assetBytes = this.options.session.resources?.()?.assets ?? {}
+            const themeBindings: Record<string, string> = {}
+            const themeReferences = new Map<string, string>()
+            let themeAssetSerial = 0
+            const themeDependencies: string[][] = [['theme'], ['designTokens']]
+            for (const { assetId } of Object.values(project.theme?.assets ?? {})) {
+              if (themeReferences.has(assetId)) continue
+              const asset = project.assets[assetId], bytes = assetBytes[assetId]
+              if (!asset) continue
+              let reference: string
+              do { reference = `cw-resource:theme-asset-${themeAssetSerial++}` }
+              while (Object.hasOwn(resourceUrls, reference) || Object.hasOwn(resourceUrls, reference.slice('cw-resource:'.length)) || Object.hasOwn(resources.bindings, reference))
+              themeReferences.set(assetId, reference)
+              themeBindings[reference] = assetId
+              const url = bytes ? `data:${asset.mimeType ?? 'application/octet-stream'};base64,${Buffer.from(bytes).toString('base64')}` : asset.remote?.url
+              if (url) resourceUrls[reference] = url
+              themeDependencies.push(['assets', assetId])
+            }
+            const courseThemeCss = courseThemeStyleText({ designTokens: project.designTokens ?? { fonts: [], colors: [] }, theme: project.theme }, id => themeReferences.get(id))
+            const themeHtml = prepareMeasurementDocument({ html: '', courseThemeCss, resourceUrls }).html
+            const themeSources = htmlResourceSources(extractHtmlResources({ html: themeHtml }).remoteReferences)
+            assembly = await this.options.measure({ html: prepared.html, viewport,
+              framing: htmlAssemblyFraming(request), courseThemeCss,
+              themeCss: request.source.themeCss, resourceSources: [...prepared.resourceSources, ...themeSources], resourceUrls, signal })
+            if (assembly.root.kind !== 'program' || assembly.diagnostics.some(item => item.code === 'html-program-shell-size')) {
+              Object.assign(resources.bindings, themeBindings)
+              measurementDependencies.push(...themeDependencies)
+            }
+          }
         } catch (error) {
           // A failed disposable measurement is not a verdict on the author's
           // source. The existing program carrier can retain and run it; its
@@ -291,12 +325,20 @@ export class ContentApplyService {
           } as ContentApplyDiagnostic])
         }
         diagnostics.push(...assembly.diagnostics)
+        const pageSurfaceId = request.target.kind === 'container' && request.target.container.kind === 'surface'
+          && ['insert', 'redo'].includes(request.intent) ? request.target.container.surfaceId : undefined
+        const pageSurface = pageSurfaceId ? project.surfaces.find(value => value.id === pageSurfaceId) : undefined
         const assembled = assemblyContentDraft(assembly, resources.bindings, {
           admittedResourceBindings: Object.fromEntries(Object.keys(resources.urls).map(reference => [reference, resources.bindings[reference]!])),
           modules: prepared.modules, createFormulaId: this.createId, definitions: project.definitions, flow: this.flowBodyTarget(project, request),
-          flowPage: request.intent === 'redo' && request.target.kind === 'container' && request.target.container.kind === 'surface',
+          flowPage: !contentPlacementRegion(request) && request.intent === 'redo' && request.target.kind === 'container' && request.target.container.kind === 'surface',
+          ...(pageSurface && pageSurface.kind !== 'flow' && !contentPlacementRegion(request) ? { page: {
+            ...(pageSurface.designSize ?? viewport),
+            adoptBackground: request.intent === 'redo' || pageSurface.childIds.length === 0 && !pageSurface.background && !project.background,
+          } } : {}),
         })
         drafts = assembled.drafts ?? [assembled.draft]
+        preserveLayout = assembled.pageLayout === true
         if (Object.keys(records).length) for (const draft of drafts) draft.authoring = { records }
         const persistSources = (draft: ContentObjectDraft): void => {
           const definition = assembled.definitions.find(value => value.id === draft.definitionId) ?? project.definitions[draft.definitionId]
@@ -314,6 +356,11 @@ export class ContentApplyService {
             const layout = surface.flow?.layout ?? { widthMode: 'fluid' as const, readingWidth: 860, wideContentWidth: 1100 }
             edits.push({ type: 'flow.set', surfaceId: surface.id, flow: { ...surface.flow,
               layout: { ...layout, paperBackgroundColor: assembled.flowBackgroundColor } } })
+          }
+        }
+        if (assembled.pageBackground && pageSurface) {
+          if (!equalComponentValue(pageSurface.background ?? null, assembled.pageBackground)) {
+            edits.push({ type: 'surface.background.set', surfaceId: pageSurface.id, background: assembled.pageBackground })
           }
         }
         edits.push(...assembled.definitions.map(definition => ({ type: 'definition.set' as const, definition })))
@@ -352,7 +399,12 @@ export class ContentApplyService {
     unverified ||= sourceImplementations.length > 0
     if (request.source.kind === 'objects') unverified ||= request.source.objects.some(draft => hasSourceProgram(draft, compilationProject.definitions))
     signal?.throwIfAborted()
-    const plan = planContentApply({ project: baseProject, request, createId: this.createId, drafts, edits, diagnostics, unusable, unverified })
+    const plan = planContentApply({ project: baseProject, request, createId: this.createId, drafts, edits, diagnostics, unusable, unverified, preserveLayout })
+    const expectedPaths = new Set(plan.command.expected.map(value => JSON.stringify(value.path)))
+    for (const path of measurementDependencies) if (!expectedPaths.has(JSON.stringify(path))) {
+      expectedPaths.add(JSON.stringify(path))
+      plan.command.expected.push({ path, ...structuredClone(componentValueAt(baseProject, path)) })
+    }
     plan.input = originalRequest
     // Bind the diagnosed source to the identities allocated by the existing
     // planner. A later read can verify its current bytes without another state.
@@ -495,6 +547,8 @@ export class ContentApplyService {
   }
 
   private designViewport(project: CourseProjectV10, request: ContentChangeRequest): { width: number; height: number } {
+    const region = contentPlacementRegion(request)
+    if (region) return { width: Math.ceil(region.width), height: Math.ceil(region.height) }
     if (request.viewport) return { width: Math.ceil(request.viewport.width), height: Math.ceil(request.viewport.height) }
     if (request.target.kind === 'instance') {
       const frame = project.instances[request.target.instanceId]?.frame

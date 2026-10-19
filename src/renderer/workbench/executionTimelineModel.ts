@@ -90,25 +90,30 @@ export function toolGroupSummary(items: readonly ExecutionItem[]): string {
     active ? `正在${active.data.label || active.data.toolName || '执行'}` : '', failed ? `${failed} 次调用有错误` : ''].filter(Boolean).join(' · ')
 }
 
-export interface PendingApproval { runId: string; callId: string; approval: ApprovalView }
+type DelegationReference = NonNullable<ExecutionItem['data']['delegationRef']>
+export interface PendingApproval { runId: string; callId: string; approval: ApprovalView; delegation?: DelegationReference }
 /** A built-in modification waiting for the user's approval in a run that has not ended. */
 export function pendingApproval(projection: ExecutionProjection): PendingApproval | null {
   const ends = executionTimelineIndex(projection).ends
   for (let index = projection.items.length - 1; index >= 0; index--) {
     const item = projection.items[index]!
     if (item.type === 'tool' && item.source === 'builtin' && item.data.approval && item.data.status === 'approval'
-      && !ends.has(item.runId)) return { runId: item.runId, callId: item.itemId, approval: item.data.approval }
+      && !ends.has(item.runId)) return { runId: item.data.delegationRef?.runId ?? item.runId,
+        callId: item.data.delegationRef?.callId ?? item.itemId, approval: item.data.approval,
+        ...(item.data.delegationRef ? { delegation: item.data.delegationRef } : {}) }
   }
   return null
 }
-export interface PendingQuestion { runId: string; callId: string; question: UserQuestionView }
+export interface PendingQuestion { runId: string; callId: string; question: UserQuestionView; delegation?: DelegationReference }
 /** The open ask_user question of a built-in run that has not ended. At most one per run; the latest wins. */
 export function pendingQuestion(projection: ExecutionProjection): PendingQuestion | null {
   const ends = executionTimelineIndex(projection).ends
   for (let index = projection.items.length - 1; index >= 0; index--) {
     const item = projection.items[index]!
     if (item.type === 'tool' && item.source === 'builtin' && item.data.toolName === USER_QUESTION_TOOL && item.data.question
-      && item.data.status === 'waiting' && !ends.has(item.runId)) return { runId: item.runId, callId: item.itemId, question: item.data.question }
+      && item.data.status === 'waiting' && !ends.has(item.runId)) return { runId: item.data.delegationRef?.runId ?? item.runId,
+        callId: item.data.delegationRef?.callId ?? item.itemId, question: item.data.question,
+        ...(item.data.delegationRef ? { delegation: item.data.delegationRef } : {}) }
   }
   return null
 }

@@ -7,6 +7,19 @@ export type TableCell = Omit<NativeTableCell,'text'> & ({text:string;content?:ne
 export type TableColumn = NativeTableColumn & {header?:FlowTextContent}
 export type TableRow = Omit<NativeTableRow,'cells'> & {cells:TableCell[]}
 export type TableData = Omit<NativeTableContent,'rows'|'columns'> & {rows:TableRow[];columns:TableColumn[];caption?:FlowTextContent;headerEnabled?:boolean}
+/** Plain author content; row, column and cell identities are assigned by the table owner. */
+export const tableContentInputSchema = z.object({
+  rows: z.array(z.array(z.string().max(20_000)).min(1).max(100)).min(1).max(1000),
+  headerRowCount: z.number().int().nonnegative().optional(),
+}).strict().superRefine((value, context) => {
+  const width = value.rows[0]?.length
+  value.rows.forEach((row, index) => {
+    if (row.length !== width) context.addIssue({ code: 'custom', path: ['rows', index], message: '表格每行的单元格数量必须相同' })
+  })
+  if (value.headerRowCount !== undefined && value.headerRowCount > value.rows.length)
+    context.addIssue({ code: 'custom', path: ['headerRowCount'], message: '表头行数不能超过总行数' })
+})
+export type TableContentInput = z.infer<typeof tableContentInputSchema>
 const native = tableNativeContentObjectSchema
 const cell = native.shape.rows.element.shape.cells.element
 const richCell = cell.omit({text:true}).extend({content:documentTextContentSchema}).strict()

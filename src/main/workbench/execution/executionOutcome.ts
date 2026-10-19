@@ -3,6 +3,7 @@ import type { ExecutionRunRecord, ExecutionToolRecord } from '../../../shared/wo
 import type { ToolResult } from '../../../shared/workbench/tools'
 import type { DocumentToolGateway } from '../../../core/tools/DocumentToolGateway'
 import { USER_QUESTION_TOOL } from '../../../shared/workbench/userQuestion'
+import { isViewObservationTool } from '../../../shared/workbench/viewObservation'
 import { agentFileMutationNames } from '../../../core/tools/AgentFileTools'
 import path from 'node:path'
 import { toolRegistration } from '../../../core/tools/ToolCatalog'
@@ -66,6 +67,32 @@ const unknownToolOutcome = (tool: ExecutionToolRecord) => tool.observationFailur
   || serviceToolOutcome(tool.call.name, tool.result)?.status === 'unknown'
   || tool.result?.kind === 'error' && /outcome-unknown/.test(tool.result.code)
 
+/** An uncaught host runtime failure is distinct from a rejected/correctable
+ * tool input. A later successful execution must recover this same operation. */
+function unrecoveredRuntimeFailure(record: ExecutionRunRecord, tool: ExecutionToolRecord, index: number): boolean {
+  if (tool.result?.kind !== 'error' || tool.result.code !== 'file-tool-runtime-failed') return false
+  return !record.tools.slice(index + 1).some(later => {
+    if (later.call.name !== tool.call.name || later.state !== 'returned' || failedTool(later)) return false
+    const before = tool.call.input as { path?: unknown; target?: unknown; choice?: unknown } | null
+    const after = later.call.input as { path?: unknown; target?: unknown; choice?: unknown } | null
+    if (tool.call.name === 'file.reconcile') {
+      const receipt = later.result?.kind === 'read' ? later.result.data as { status?: unknown; choice?: unknown } | null : null
+      if (before?.choice !== after?.choice || receipt?.status !== 'reconciled' || receipt.choice !== before?.choice) return false
+    }
+    if (tool.effectPaths?.length && later.effectPaths?.length)
+      return JSON.stringify(tool.effectPaths.map(pathKey).sort()) === JSON.stringify(later.effectPaths.map(pathKey).sort())
+    if (typeof before?.path === 'string' && typeof after?.path === 'string') return pathKey(before.path) === pathKey(after.path)
+    return typeof before?.target === 'string' && before.target === after?.target
+  })
+}
+
+/** A receipt-backed clue for the existing remaining-goal reminder, not a new
+ * permanent obligation. The author still judges which goal work is current. */
+export function unrecoveredReconcileRuntimeFailure(record: ExecutionRunRecord): ExecutionToolRecord | undefined {
+  return record.tools.findLast((tool, index) => tool.notInvokedReason !== 'steering' && tool.call.name === 'file.reconcile'
+    && unrecoveredRuntimeFailure(record, tool, index))
+}
+
 /** Main's current settlement view; never changes or replaces the original receipt. */
 export type SettledExecutionTool = ExecutionToolRecord & {
   currentContentVerification?: { sourceDocumentId: string;
@@ -88,13 +115,17 @@ export function currentContentRepaired(tool: SettledExecutionTool): boolean {
 type PendingJob = { kind: 'image' | 'compute' | 'delegation'; id: string; requiresArtifactRead?: boolean }
 const pendingJob = (tool: ExecutionToolRecord): PendingJob | null => {
   if (serviceToolOutcome(tool.call.name, tool.result)?.status !== 'pending' || tool.result?.kind !== 'read') return null
-  const data = tool.result.data as { job?: unknown }
+  const data = tool.result.data as { job?: unknown; jobId?: unknown; kind?: unknown }
+  if (['job.status', 'job.wait', 'job.cancel'].includes(tool.call.name)
+    && ['image', 'compute', 'delegation'].includes(String(data.kind)) && typeof (data.job ?? data.jobId) === 'string')
+    return { kind: data.kind as PendingJob['kind'], id: (data.job ?? data.jobId) as string, requiresArtifactRead: false }
+  const delegation = toolRegistration(tool.call.name)?.effect === 'delegation-job'
   // A status read is also a dated observation of this same job. Its pending
   // result must settle from later owner receipts, rather than remain current forever.
   return (tool.call.name === 'image.generate' || tool.call.name === 'image.edit' || tool.call.name === 'image.status'
-    || tool.call.name === 'compute.run' || ['delegate.start', 'local.run', 'delegate.readonly'].includes(tool.call.name))
+    || tool.call.name === 'compute.run' || delegation)
     && typeof data.job === 'string' ? { kind: tool.call.name === 'compute.run' ? 'compute'
-      : ['delegate.start', 'local.run', 'delegate.readonly'].includes(tool.call.name) ? 'delegation' : 'image', id: data.job,
+      : delegation ? 'delegation' : 'image', id: data.job,
       ...(tool.call.name === 'local.run' ? { requiresArtifactRead: !!(tool.call.input as { outputs?: string[] })?.outputs?.length } : {}) } : null
 }
 const terminalJobReceipt = (tool: ExecutionToolRecord, pending: PendingJob): boolean => {
@@ -155,7 +186,8 @@ function stable(value: unknown): unknown {
   return value
 }
 function sameObservedTarget(failed: ExecutionToolRecord, later: ExecutionToolRecord): boolean {
-  if ((failed.call.name !== 'view.observe' && failed.call.name !== 'html.observe') || failed.call.name !== later.call.name
+  if (!(isViewObservationTool(failed.call.name) ? isViewObservationTool(later.call.name)
+    : failed.call.name === 'html.observe' && later.call.name === 'html.observe')
     || later.state !== 'returned' || failedTool(later) || later.result?.kind !== 'read') return false
   const receipt = (tool: ExecutionToolRecord) => tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
     ? tool.result.data as { identity?: { documentId?: unknown; locationId?: unknown; stateId?: unknown }; image?: { resourceId?: unknown } } : null
@@ -184,7 +216,7 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
     if(tool.notInvokedReason==='steering')return false
     if(tool.state!=='returned'||unknownToolOutcome(tool))return true
     // Required visual verification remains unfinished until the same displayed state is observed successfully.
-    if(tool.observationFailure&&(tool.call.name==='view.observe'||tool.call.name==='html.observe')
+    if(tool.observationFailure&&(isViewObservationTool(tool.call.name)||tool.call.name==='html.observe')
       &&!optionalObservationFailure(tool)&&!record.tools.slice(index+1).some(later=>sameObservedTarget(tool,later)))return true
     const pending=pendingJob(tool)
     if(pending){
@@ -203,7 +235,7 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
 interface NewFileDeliveryFact { documentId: string; label: string; path?: string; revision: number | null; savedRevision: number | null }
 const pathKey = (value: string) => value.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase()
 function matchesSaveBinding(record: ExecutionRunRecord, saved: NonNullable<ReturnType<typeof saveFact>>, createdPath?: string): boolean {
-  const binding = record.documentBindings?.[saved.documentId]
+  const binding = record.documentBindings?.[deliveryDocumentId(record, saved.documentId)]
   if (binding) {
     if (typeof saved.epoch === 'string' && binding.epoch !== saved.epoch) return false
     // The persistence owner carries the proved save revision through a formal rename/Save As.
@@ -213,16 +245,17 @@ function matchesSaveBinding(record: ExecutionRunRecord, saved: NonNullable<Retur
   }
   return !createdPath || !saved.path || pathKey(createdPath) === pathKey(saved.path)
 }
-/** Only this run's receipts count: a created path is not evidence that subsequent edits reached that file. */
+/** Settlement receipts count; a created path alone does not prove subsequent edits reached that file. */
 export function newFileDeliveryFacts(record: ExecutionRunRecord): NewFileDeliveryFact[] {
   const facts = new Map<string, NewFileDeliveryFact>()
   for (const tool of record.tools) {
     const data = tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
       ? tool.result.data as Record<string, unknown> : null
     if (fileCreated(tool.call.name, tool.result) && typeof data?.documentId === 'string') {
-      const currentPath = record.documentBindings?.[data.documentId]?.path ?? (typeof data.path === 'string' ? data.path : undefined)
-      const label = currentPath ? currentPath.split(/[\\/]/).at(-1)! : data.documentId
-      if (!facts.has(data.documentId)) facts.set(data.documentId, { documentId: data.documentId,
+      const documentId = deliveryDocumentId(record, data.documentId)
+      const currentPath = record.documentBindings?.[documentId]?.path ?? (typeof data.path === 'string' ? data.path : undefined)
+      const label = currentPath ? currentPath.split(/[\\/]/).at(-1)! : documentId
+      if (!facts.has(documentId)) facts.set(documentId, { documentId,
         label: label.slice(0, 160), ...(currentPath ? { path: currentPath } : {}), revision: null, savedRevision: null })
     }
     const mutation = operationFact(tool.call.name, tool.result)
@@ -230,20 +263,22 @@ export function newFileDeliveryFacts(record: ExecutionRunRecord): NewFileDeliver
         ? data.documentResult as Record<string, unknown> : null)
     if (mutation?.status === 'applied' && typeof mutation.documentId === 'string'
       && typeof mutation.revision === 'number' && Number.isSafeInteger(mutation.revision)) {
-      const fact = facts.get(mutation.documentId)
+      const fact = facts.get(deliveryDocumentId(record, mutation.documentId))
       if (fact) fact.revision = mutation.revision
     }
     const saved = saveFact(tool.call.name, tool.result)
     if (saved) {
+      const documentId = deliveryDocumentId(record, saved.documentId)
       // A terminal delivery for an input document shares the created-file freshness check.
       // An ordinary earlier save never requires saving subsequent intentional editor changes.
-      if (tool.call.name === 'task.delivery' && !facts.has(saved.documentId) && trustedRunDocumentIds(record).includes(saved.documentId)
+      if (tool.call.name === 'task.delivery' && !facts.has(documentId)
+        && trustedRunDocumentIds(record).some(id => deliveryDocumentId(record, id) === documentId)
         && matchesSaveBinding(record, saved)) {
-        const path = record.documentBindings?.[saved.documentId]?.path ?? saved.path
-        facts.set(saved.documentId, { documentId: saved.documentId, label: (path?.split(/[\\/]/).at(-1) ?? saved.documentId).slice(0, 160),
+        const path = record.documentBindings?.[documentId]?.path ?? saved.path
+        facts.set(documentId, { documentId, label: (path?.split(/[\\/]/).at(-1) ?? documentId).slice(0, 160),
           ...(path ? { path } : {}), revision: saved.currentRevision, savedRevision: null })
       }
-      const fact = facts.get(saved.documentId)
+      const fact = facts.get(documentId)
       if (fact && matchesSaveBinding(record, saved, fact.path)) {
         fact.savedRevision = saved.savedRevision!
         if (saved.dirty) fact.revision = saved.currentRevision
@@ -278,22 +313,28 @@ export function hasUnresolvedToolFailure(record: ExecutionRunRecord): boolean {
 
 /** Current Session facts are an ephemeral settlement view, never model input or a grant. */
 export interface SettledExecutionRun extends ExecutionRunRecord {
+  /** Proved by the existing saved-V10 owner; only delivery settlement consumes these aliases. */
+  continuationDocumentIds?: ReadonlyMap<string, string>
   currentDocuments?: Record<string,{epoch:string;revision:number;dirty:boolean}>
 }
+function deliveryDocumentId(record: ExecutionRunRecord, documentId: string): string {
+  return (record as SettledExecutionRun).continuationDocumentIds?.get(documentId) ?? documentId
+}
 function currentRevision(record:ExecutionRunRecord,documentId:string,epoch?:string):number {
+  documentId = deliveryDocumentId(record, documentId)
   const current=(record as SettledExecutionRun).currentDocuments?.[documentId]
   if(current&&(!epoch||current.epoch===epoch))return current.revision
   return Math.max(0,...record.tools.flatMap(tool=>{
     const fact=committedFact(tool.call.name,tool.result)
-    const scopes=[...tool.effectTargets??[],...tool.writeScopes??[]].filter(scope=>scope.documentId===documentId&&scope.epoch)
-    return fact&&fact.documentId===documentId&&(!epoch||!scopes.length||scopes.some(scope=>scope.epoch===epoch))?[fact.revision]:[]
+    const scopes=[...tool.effectTargets??[],...tool.writeScopes??[]].filter(scope=>deliveryDocumentId(record,scope.documentId)===documentId&&scope.epoch)
+    return fact&&deliveryDocumentId(record,fact.documentId)===documentId&&(!epoch||!scopes.length||scopes.some(scope=>scope.epoch===epoch))?[fact.revision]:[]
   }))
 }
 function deliveryDocument(record:ExecutionRunRecord,tool:ExecutionToolRecord):string|undefined {
   const fact=saveFact(tool.call.name,tool.result)??exportFact(tool.call.name,tool.result)
-  if(fact)return fact.documentId
-  if(tool.effectTargets?.length===1)return tool.effectTargets[0]!.documentId
-  const documents=trustedRunDocumentIds(record)
+  if(fact)return deliveryDocumentId(record,fact.documentId)
+  if(tool.effectTargets?.length===1)return deliveryDocumentId(record,tool.effectTargets[0]!.documentId)
+  const documents=[...new Set(trustedRunDocumentIds(record).map(id=>deliveryDocumentId(record,id)))]
   return documents.length===1?documents[0]:undefined
 }
 function deliveryPath(record:ExecutionRunRecord,value:string):string {
@@ -337,7 +378,7 @@ function deliveryCompletionIssues(record:ExecutionRunRecord):ExecutionCompletion
   for(const [documentId,request] of requiredSaves){
     const input=deliveryInput(request)
     const target=typeof input?.destination==='string'?deliveryPath(record,input.destination):undefined
-    const actual=saves.slice().reverse().find(fact=>documentId!==undefined&&fact.documentId===documentId
+    const actual=saves.slice().reverse().find(fact=>documentId!==undefined&&deliveryDocumentId(record,fact.documentId)===documentId
       &&(!target||typeof fact.path==='string'&&deliveryPath(record,fact.path)===target))
     const current=documentId?(record as SettledExecutionRun).currentDocuments?.[documentId]:undefined
     if(actual&&currentSave(actual)&&matchesSaveBinding(record,actual)
@@ -366,7 +407,7 @@ function deliveryCompletionIssues(record:ExecutionRunRecord):ExecutionCompletion
     const target=typeof input?.destination==='string'?deliveryPath(record,input.destination):original?.path?deliveryPath(record,original.path):undefined
     const candidates=record.tools.flatMap(receipt=>{
       const fact=exportFact(receipt.call.name,receipt.result)
-      return fact&&fact.documentId===documentId&&fact.format===format
+      return fact&&deliveryDocumentId(record,fact.documentId)===documentId&&fact.format===format
         &&(!target||[fact.path,...fact.files?.map(file=>file.path)??[]].some(filename=>typeof filename==='string'&&deliveryPath(record,filename)===target))?[fact]:[]
     })
     const actual=candidates.at(-1),current=documentId?(record as SettledExecutionRun).currentDocuments?.[documentId]:undefined
@@ -406,8 +447,10 @@ export function executionExitDecision(record:ExecutionRunRecord):{
   status:'continue'|'partial'|'completed';remaining:ExecutionCompletionIssue[];continuable:ExecutionCompletionIssue[];warnings:ExecutionCompletionIssue[]
 }{
   const remaining=executionCompletionIssues(record),warnings=executionAuditWarnings(record)
-  const continuable=remaining.filter(issue=>issue.status==='pending'||issue.status==='unknown')
-  return {status:continuable.length?'continue':remaining.length?'partial':'completed',remaining,continuable,warnings}
+  // Known rejection, missing verification and unsaved output remain actionable
+  // facts. They cannot decide that the model has exhausted the user's goal.
+  const continuable=remaining
+  return {status:remaining.length?'continue':'completed',remaining,continuable,warnings}
 }
 
 /** A terminal generation failure requires explicit recovery after the Engine's policy is exhausted.
@@ -426,7 +469,7 @@ function completionJobObservation(tool: ExecutionToolRecord, pending: NonNullabl
     || tool.call.name === 'image.status' && pending.kind === 'image' ? data : null
 }
 const knownJobFailure = (tool: ExecutionToolRecord, data: NonNullable<ReturnType<typeof completionJobObservation>>) =>
-  (tool.call.name === 'image.status' || data.terminal === true) && ['failed', 'cancelled', 'stopped', 'unapplied'].includes(String(data.status))
+  (tool.call.name === 'image.status' || data.terminal === true) && ['failed', 'cancelled', 'stopped', 'unapplied', 'unconfigured'].includes(String(data.status))
     && data.failure?.outcome !== 'unknown' && data.snapshot?.failure?.outcome !== 'unknown'
 
 /** Ending the loop is distinct from proving complete delivery. These are derived
@@ -477,7 +520,8 @@ export function executionCompletionIssues(record: ExecutionRunRecord): Execution
     const receipt = record.tools.slice().reverse().find(tool => {
       const data = tool.result?.kind === 'read' ? tool.result.data as { documentResult?: Record<string, unknown> } | null : null
       const mutation = operationFact(tool.call.name, tool.result) ?? (fileMutations.has(tool.call.name) ? data?.documentResult : null)
-      return mutation?.status === 'applied' && mutation.documentId === fact.documentId && mutation.revision === fact.revision
+      return mutation?.status === 'applied' && typeof mutation.documentId === 'string'
+        && deliveryDocumentId(record, mutation.documentId) === fact.documentId && mutation.revision === fact.revision
     })
     issues.push({ name: 'project.save', status: 'unsaved', documentId: fact.documentId,
       ...(receipt ? { callId: receipt.callId, receiptCallId: receipt.callId, requestId: receipt.requestId } : {}),
@@ -528,7 +572,7 @@ export function runEndSummary(record: ExecutionRunRecord): string | undefined {
   const importedDocuments = new Set(record.tools.filter(tool => tool.call.name === 'course.importPptx'
     && fileCreated(tool.call.name, tool.result)).flatMap(tool => {
       const data = tool.result?.kind === 'read' ? tool.result.data as { documentId?: unknown } : undefined
-      return typeof data?.documentId === 'string' ? [data.documentId] : []
+      return typeof data?.documentId === 'string' ? [deliveryDocumentId(record, data.documentId)] : []
     }))
   const scaffolds = fileFacts.filter(fact => fact.revision === null && isNativeProjectFilename(fact.label) && !importedDocuments.has(fact.documentId))
   if (scaffolds.length) parts.push(`仅有创建回执、未见课件内容提交：${scaffolds.map(fact => fact.label).join('、')}`)

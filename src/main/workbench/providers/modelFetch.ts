@@ -1,4 +1,5 @@
 import { getGlobalDispatcher, type Dispatcher } from 'undici'
+import type { ModelTransportDiagnostic } from '../../../shared/workbench/modelProvider'
 
 export const MODEL_RESPONSE_IDLE_TIMEOUT_MS = 5 * 60_000
 export const IMAGE_RESPONSE_IDLE_TIMEOUT_MS = 15 * 60_000
@@ -33,4 +34,29 @@ export function responseIdleTimeoutCode(error: unknown): 'response-headers-idle'
   const code = outer?.code ?? inner?.code
   return code === 'UND_ERR_HEADERS_TIMEOUT' ? 'response-headers-idle'
     : code === 'UND_ERR_BODY_TIMEOUT' ? 'response-body-idle' : undefined
+}
+
+const transportClasses = new Set<ModelTransportDiagnostic['errorClass']>([
+  'TypeError', 'Error', 'AbortError', 'AggregateError', 'SocketError', 'ConnectTimeoutError', 'HeadersTimeoutError', 'BodyTimeoutError',
+])
+const transportCodes = new Set<NonNullable<ModelTransportDiagnostic['errorCode']>>([
+  'ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'EPIPE',
+  'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
+])
+export function transportDiagnostic(error: unknown, response: Response | undefined, httpStatus: number | undefined): ModelTransportDiagnostic {
+  const outer = error && typeof error === 'object' ? error as { name?: unknown; code?: unknown; cause?: unknown } : null
+  const name = typeof outer?.name === 'string' ? outer.name : ''
+  let cause: unknown = error, code: ModelTransportDiagnostic['errorCode']
+  for (let depth = 0; depth < 3; depth++) {
+    if (!cause || typeof cause !== 'object') break
+    const item = cause as { code?: unknown; cause?: unknown }
+    if (typeof item.code === 'string' && transportCodes.has(item.code as NonNullable<ModelTransportDiagnostic['errorCode']>)) {
+      code = item.code as NonNullable<ModelTransportDiagnostic['errorCode']>; break
+    }
+    cause = item.cause
+  }
+  return { phase: response ? 'body-read' : 'fetch-before-headers',
+    errorClass: transportClasses.has(name as ModelTransportDiagnostic['errorClass']) ? name as ModelTransportDiagnostic['errorClass'] : 'other',
+    ...(code ? { errorCode: code } : {}), httpResponseReceived: Boolean(response),
+    ...(httpStatus !== undefined ? { httpStatus } : {}) }
 }

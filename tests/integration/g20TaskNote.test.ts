@@ -57,12 +57,24 @@ describe('M27 run-attached WorkingNote', () => {
     const store = new ExecutionRunStore(directory), record = run()
     await store.save(record)
     expect((await store.read(record.runId))?.workingNote).toBeUndefined()
-    const prepared = prepareTaskNote(record, { remaining: ['保存并重开'], openQuestions: ['教师是否认可？'] }, record.version)
+    const prepared = prepareTaskNote(record, { remaining: ['保存并重开'], followUps: ['另做可选配色'], openQuestions: ['教师是否认可？'] }, record.version)
     record.workingNote = prepared.note
     record.version++
     await store.save(record)
     expect((await store.read(record.runId))?.workingNote).toMatchObject({ goal: record.input.instruction,
-      remaining: ['保存并重开'], openQuestions: ['教师是否认可？'] })
+      remaining: ['保存并重开'], followUps: ['另做可选配色'], openQuestions: ['教师是否认可？'] })
+  })
+
+  it('keeps optional follow-ups separate from required work through updates and explicit continuation', () => {
+    const record = run()
+    record.workingNote = prepareTaskNote(record, { remaining: ['修复核心交互'], followUps: ['导出另一格式'] }, record.version).note
+    const optionalOnly = prepareTaskNote(record, { followUps: ['额外检查所有分支'] }, record.version)
+    expect(optionalOnly.note).toMatchObject({ remaining: ['修复核心交互'], followUps: ['额外检查所有分支'] })
+    record.workingNote = prepareTaskNote(record, { remaining: [], followUps: ['进一步美化'] }, record.version).note
+    const continued = continuedWorkingNote(record, record.input)
+    expect(continued).toMatchObject({ remaining: [], followUps: ['进一步美化'] })
+    record.workingNote = continued
+    expect(prepareTaskNote(record, { followUps: [] }, record.version).note).toMatchObject({ remaining: [], followUps: [] })
   })
 
   it('keeps large original instructions in the frozen input and marks the note goal as abbreviated', () => {

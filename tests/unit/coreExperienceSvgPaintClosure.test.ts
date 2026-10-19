@@ -36,5 +36,5 @@ it('localizes a real conditional paint URL at its CSS consumer while retaining s
   expect(prepared.html).toContain('cw-resource:')
   expect(prepared.resources).toHaveLength(1)
   expect(prepared.html).toContain('shape.setAttribute("stroke",unknownPaint)')
-  expect(prepared.diagnostics).toEqual([expect.objectContaining({ code: 'unsupported-dynamic-url-sink', message: '无法静态解析 stroke 的资源内容' })])
+  expect(prepared.diagnostics).toEqual([expect.objectContaining({ code: 'unsupported-dynamic-url-sink', message: expect.stringContaining('未证明运行失败') })])
 })

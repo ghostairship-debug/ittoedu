@@ -7,8 +7,7 @@ import { previewComponentMotion } from '../interactions/componentMotionPreview'
 import { SceneAutomationEditor, InteractionEditor } from './InteractionEditor'
 import { CourseLogicAuthoringPanel } from './CourseLogicAuthoringPanel'
 import { courseLogicAuthoringView, commitCourseLogicAuthoringCommand } from '../course/courseLogicAuthoringCommands'
-import { TEACHER_CONTROLLER_DEFINITION, createTeacherControllerData, createTeacherControllerFrame } from '../../components/teacher-controller/data'
-import type { JsonValue } from '../../shared/contracts/component-platform'
+import { ensureCourseTeacherController } from '../media/commitCourseMediaAuthoring'
 import { componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform/project'
 import { removeComponentRule, moveComponentRule } from '../../shared/componentInteractionData'
 
@@ -49,20 +48,11 @@ export function AutomationTab() {
   const selectedNode = view.nodes.find(node => node.id === courseView.selectedInstanceId)
   const controller = Object.values(project.instances).find(instance => componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.navigation')
   const teacher = () => {
-    const captured = kernel.captureTarget(documentId), existing = Object.values(captured.project.instances).find(instance => componentDefinitionBuiltinKey(captured.project.definitions[instance.definitionId]) === 'guoling.navigation')
+    const captured = kernel.captureTarget(documentId)
+    const existing = Object.values(captured.project.instances).find(instance => componentDefinitionBuiltinKey(captured.project.definitions[instance.definitionId]) === 'guoling.navigation')
     if (existing) { kernel.selectInstances([existing.id], surfaceId, documentId); setActiveTab('properties'); return }
-    const id = crypto.randomUUID()
-    const designSize = captured.project.surfaces.find(surface => surface.id === surfaceId)?.designSize
-    const edits = [
-      ...(captured.project.definitions[TEACHER_CONTROLLER_DEFINITION.id] ? [] : [{ type: 'definition.set' as const, definition: TEACHER_CONTROLLER_DEFINITION }]),
-      { type: 'instance.insert' as const, container: { kind: 'global' as const, plane: 'overlay' as const }, index: captured.project.global.overlay.length,
-        rootIds: [id], instances: [{ id, definitionId: TEACHER_CONTROLLER_DEFINITION.id, name: '教师控制台', data: JSON.parse(JSON.stringify(createTeacherControllerData(designSize))) as JsonValue,
-          frame: createTeacherControllerFrame(designSize) }] },
-    ]
-    void kernel.editCaptured(kernel.capture(edits, captured)).then(() => {
-      if (kernel.readView().activeDocumentId === documentId && kernel.readView().surfaceId === surfaceId) {
-        kernel.selectInstances([id], surfaceId, documentId); setActiveTab('properties')
-      }
+    void ensureCourseTeacherController(kernel, captured, 'slide-authoring').then(result => {
+      if (kernel.readView().activeDocumentId === result.documentId && kernel.readView().surfaceId === result.surfaceId) setActiveTab('properties')
     }).catch(error => setError(String(error)))
   }
   const shared = {

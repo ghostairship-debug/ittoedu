@@ -57,6 +57,13 @@ export const behaviorAttachmentSchema = z.object({ instanceId: id, target: compo
 export const componentBackgroundSchema = z.object({
   mode: z.enum(['inherit', 'own']).optional(), color: z.string().optional(), assetId: id.nullable().optional(),
   fit: z.enum(['cover', 'contain', 'fill']).optional(),
+  paint: z.object({ layers: z.array(z.object({ style: z.object({
+    'background-color': z.string().optional(), 'background-image': z.string().optional(),
+    'background-size': z.string().optional(), 'background-position': z.string().optional(),
+    'background-repeat': z.string().optional(), 'background-origin': z.string().optional(),
+    'background-clip': z.string().optional(), 'background-attachment': z.string().optional(),
+    'background-blend-mode': z.string().optional(),
+  }).strict(), resourceBindings: ownRecordSchema(z.string().min(1), id) }).strict()).min(1) }).strict().nullable().optional(),
 }).strict()
 export const componentFlowBodyLayoutSchema = z.object({ width: z.enum(['content-width', 'wide', 'full-width']), wrap: z.enum(['none', 'left', 'right']).optional(), caption: documentTextContentSchema.optional() }).strict()
 export const componentFlowPlacementSchema = z.object({
@@ -86,8 +93,10 @@ export const courseProjectLogicSchema = z.object({
   network: z.object({ connectOrigins: z.array(z.string()).optional() }).strict().optional(),
 }).strict()
 export const componentVisibilitySchema = z.object({ mode: z.enum(['all', 'include', 'exclude']), surfaceIds: z.array(id) }).strict()
+export const componentStateBindingsSchema = ownRecordSchema(id, id)
 export const componentInstanceSchema = z.object({
   id, definitionId: id, data: jsonValueSchema, authoring: componentAuthoringSchema.optional(),
+  stateBindings: componentStateBindingsSchema.optional(),
   name: z.string().optional(), visible: z.boolean().optional(), locked: z.boolean().optional(), viewportPinned: z.boolean().optional(),
   visibility: componentVisibilitySchema.optional(),
   playbackInitialVisibility: z.enum(['inherit', 'hidden']).optional(), flowPlacement: componentFlowPlacementSchema.optional(), flowLayout: componentFlowBodyLayoutSchema.optional(),
@@ -235,7 +244,7 @@ export const componentOperationBatchSchema: z.ZodType<ComponentOperationBatch> =
     z.object({ type: z.literal('authoring.set'), instanceId: id, path: dataPath, value: jsonValueSchema }).strict(),
     z.object({ type: z.literal('style.set'), instanceId: id, path: dataPath, value: jsonValueSchema }).strict(),
     z.object({ type: z.literal('frame.set'), instanceId: id, frame: componentFrameSchema.nullable() }).strict(),
-    z.object({ type: z.literal('instance.patch'), instanceId: id, patch: z.object({ name: z.string().nullable().optional(), visible: z.boolean().optional(), locked: z.boolean().optional(), viewportPinned: z.boolean().nullable().optional(), playbackInitialVisibility: z.enum(['inherit', 'hidden']).optional(), visibility: componentVisibilitySchema.nullable().optional() }).strict() }).strict(),
+    z.object({ type: z.literal('instance.patch'), instanceId: id, patch: z.object({ name: z.string().nullable().optional(), visible: z.boolean().optional(), locked: z.boolean().optional(), viewportPinned: z.boolean().nullable().optional(), playbackInitialVisibility: z.enum(['inherit', 'hidden']).optional(), visibility: componentVisibilitySchema.nullable().optional(), stateBindings: componentStateBindingsSchema.nullable().optional() }).strict() }).strict(),
     z.object({ type: z.literal('instance.definition.set'), instanceId: id, definitionId: id }).strict(),
     z.object({ type: z.literal('instance.flowLayout.set'), instanceId: id, flowLayout: componentFlowBodyLayoutSchema.nullable() }).strict(),
     z.object({ type: z.literal('instance.flowPlacement.set'), instanceId: id, flowPlacement: componentFlowPlacementSchema.nullable() }).strict(),

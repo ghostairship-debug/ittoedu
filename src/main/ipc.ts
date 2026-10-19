@@ -74,7 +74,6 @@ import { operateMaterials } from './materialService'
 import { operateLessonDesktop } from './lessonDesktopService'
 import { operateLessonDocument } from './lessonDocumentDesktopService'
 import { operateLessonMaterial } from './lessonMaterialDesktopService'
-import { operateFlowDocumentRecovery } from './flowDocumentRecovery'
 import { operateDynamicAdmission } from './dynamicAdmission'
 import { operateLegacyPpt } from './pptImportService'
 import {
@@ -566,10 +565,6 @@ export function registerIpcHandlers(context: IpcContext): void {
     code: 'MEDIA_FILE_OPERATION_FAILED', title: '媒体文件操作未完成',
     message: '当前修改已保留。', suggestion: '请查看具体原因后重试。',
   }, async (_event, args) => operateMediaFiles(mediaFilesRequestSchema.parse(requireSingleArgument(args))))
-  registerSafeHandler(IPC_CHANNELS.flowDocumentRecovery, context, {
-    code: 'FLOW_DOCUMENT_RECOVERY_FAILED', title: '正文恢复稿未保存',
-    message: '无法保存或读取 Flow 源文恢复稿。', suggestion: '请保留编辑窗口，检查磁盘后重试。',
-  }, async (_event, args) => operateFlowDocumentRecovery(requireSingleArgument(args)))
   registerSafeHandler(IPC_CHANNELS.lessonMaterial, context, {
     code: 'LESSON_MATERIAL_FAILED', title: '材料操作未完成',
     message: '无法读取或保存课例材料。', suggestion: '请检查材料文件和课例目录。',

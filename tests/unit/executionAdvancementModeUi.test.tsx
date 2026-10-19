@@ -21,7 +21,7 @@ function fixture(options: { advancementMode?: ExecutionAdvancementMode; run?: 'r
     runIndex: { builtinRunIds: options.run ? ['run'] : [], externalRunIds: [], externalPortIds: [] }, inputDraft: options.draft ?? '', inputAttachments: [],
     frozenContextRefs: [], revision: 1, createdAt: 1, updatedAt: 1, ...(options.advancementMode ? { advancementMode: options.advancementMode } : {}) }
   let run: ExecutionRunRecord | null = options.run ? { schemaVersion: 1, runId: 'run', version: 1,
-    input: { conversationId: conversation.conversationId, taskId: 'original', instruction: '原任务', selection, documents: [] },
+    input: { conversationId: conversation.conversationId, taskId: 'original', instruction: '原任务', selection, documents: [], ...(options.advancementMode ? { advancementMode: options.advancementMode } : {}) },
     status: options.run, createdAt: 1, updatedAt: 1, messages: [], initialMessageCount: 0, tools: [],
     requests: options.run === 'failed' ? [{ requestId: 'request', state: 'failed',
       failure: { kind: 'protocol', code: 'provider-unknown-sse', message: 'fixture failure', outcome: 'rejected' } }] : [],
@@ -78,58 +78,56 @@ function fixture(options: { advancementMode?: ExecutionAdvancementMode; run?: 'r
     } }
 }
 
-it('keeps an unknown initial preference unknown and sends no fabricated automatic choice', async () => {
+it('offers no advancement selector and sends without an invented mode', async () => {
   const f = fixture({ draft: '开始创作' }); f.view()
-  await waitFor(() => expect(screen.getByRole('combobox', { name: '推进方式' })).toBeEnabled())
-  expect(screen.getByRole('combobox', { name: '推进方式' })).toHaveValue('')
+  await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled())
+  expect(screen.queryByRole('combobox', { name: '推进方式' })).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '发送' }))
   await waitFor(() => expect(f.api.send).toHaveBeenCalledTimes(1))
   expect(vi.mocked(f.api.send).mock.calls[0][0].advancementMode).toBeUndefined()
   expect(f.api.setAdvancementMode).not.toHaveBeenCalled()
 })
 
-it('changes the preference through metadata while keeping an unsent draft, and displays accepted steering rather than changing the original freeze', async () => {
-  const f = fixture({ run: 'running', draft: '已存草稿' }); f.view()
-  await screen.findByLabelText('当前任务推进方式')
-  const composer = screen.getByRole('textbox', { name: '给果铃AI发消息' })
-  fireEvent.change(composer, { target: { value: '正在输入的新草稿' } })
-  fireEvent.change(screen.getByRole('combobox', { name: '推进方式' }), { target: { value: 'automatic' } })
-  await waitFor(() => expect(screen.getByLabelText('当前任务推进方式')).toHaveTextContent('自动推进'))
-  expect(composer).toHaveValue('正在输入的新草稿')
-  expect(f.readConversation().revision).toBe(1)
-  expect(f.readConversation().inputDraft).toBe('已存草稿')
-  expect(f.api.draft).not.toHaveBeenCalled()
-  expect(f.readRun()!.input.advancementMode).toBeUndefined()
-  expect(f.api.send).not.toHaveBeenCalled()
-  fireEvent.click(screen.getByRole('button', { name: '加入队列' }))
+it('does not send a legacy conversation mode and preserves explicit confirmation instructions in the user text', async () => {
+  const text = '先给我看策划，等我确认后再继续'
+  const f = fixture({ advancementMode: 'stepwise', draft: text }); f.view()
+  await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled())
+  expect(screen.queryByRole('combobox', { name: '推进方式' })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '发送' }))
   await waitFor(() => expect(f.api.send).toHaveBeenCalledTimes(1))
-  expect(vi.mocked(f.api.send).mock.calls[0][0]).toMatchObject({ mode: 'queue', text: '正在输入的新草稿', advancementMode: 'automatic' })
+  expect(vi.mocked(f.api.send).mock.calls[0][0]).toMatchObject({ mode: 'queue', text })
+  expect(vi.mocked(f.api.send).mock.calls[0][0].advancementMode).toBeUndefined()
+  expect(f.readConversation().advancementMode).toBe('stepwise')
+  expect(f.api.setAdvancementMode).not.toHaveBeenCalled()
 })
 
-it('refreshes a same-revision model-accepted preference and uses it for adjustments', async () => {
+it('keeps an unsent draft through a running mode event and adjusts using the actual user text', async () => {
   const f = fixture({ advancementMode: 'automatic', run: 'running', draft: '补充要求' }); f.view()
   await screen.findByRole('button', { name: '调整当前任务' })
+  const composer = screen.getByRole('textbox', { name: '给果铃AI发消息' })
+  fireEvent.change(composer, { target: { value: '先让我确认当前图示' } })
   await act(async () => f.changeFromModel('stepwise'))
-  await waitFor(() => expect(screen.getByRole('combobox', { name: '推进方式' })).toHaveValue('stepwise'))
-  expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('补充要求')
-  expect(f.readConversation().revision).toBe(1)
+  expect(composer).toHaveValue('先让我确认当前图示')
+  expect(f.api.draft).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: '调整当前任务' }))
   await waitFor(() => expect(f.api.send).toHaveBeenCalledTimes(1))
-  expect(vi.mocked(f.api.send).mock.calls[0][0]).toMatchObject({ mode: 'adjust', text: '补充要求', advancementMode: 'stepwise', documents: [], attachments: [] })
+  expect(vi.mocked(f.api.send).mock.calls[0][0]).toMatchObject({ mode: 'adjust', text: '先让我确认当前图示', documents: [], attachments: [] })
+  expect(vi.mocked(f.api.send).mock.calls[0][0].advancementMode).toBeUndefined()
+  expect(f.api.setAdvancementMode).not.toHaveBeenCalled()
 })
 
-it('continues a failed task with the latest preference even when its original submission had no mode', async () => {
-  const f = fixture({ run: 'failed' }); f.view()
+it('continues a failed task without copying its old selector value', async () => {
+  const f = fixture({ advancementMode: 'stepwise', run: 'failed' }); f.view()
   await screen.findByRole('button', { name: '连接恢复后继续此任务' })
-  fireEvent.change(screen.getByRole('combobox', { name: '推进方式' }), { target: { value: 'stepwise' } })
-  await waitFor(() => expect(screen.getByRole('combobox', { name: '推进方式' })).toHaveValue('stepwise'))
   fireEvent.click(screen.getByRole('button', { name: '连接恢复后继续此任务' }))
   await waitFor(() => expect(f.api.send).toHaveBeenCalledTimes(1))
-  expect(vi.mocked(f.api.send).mock.calls[0][0]).toMatchObject({ retryOfRunId: 'run', text: '原任务', advancementMode: 'stepwise' })
+  expect(vi.mocked(f.api.send).mock.calls[0][0]).toMatchObject({ retryOfRunId: 'run', text: '原任务' })
+  expect(vi.mocked(f.api.send).mock.calls[0][0].advancementMode).toBeUndefined()
+  expect(f.readRun()?.input.advancementMode).toBe('stepwise')
 })
 
-it('keeps a newly selected mode and unsent draft when an older workspace file-notification read arrives later', async () => {
-  const f = fixture({ draft: '已存草稿' })
+it('keeps an unsent draft when an older workspace file-notification read arrives later', async () => {
+  const f = fixture({ advancementMode: 'stepwise', draft: '已存草稿' })
   const oldSnapshot = await f.api.workspace('C:/mode-ui')
   let resolve!: (value: typeof oldSnapshot) => void
   const oldRead = new Promise<typeof oldSnapshot>(done => { resolve = done })
@@ -139,15 +137,13 @@ it('keeps a newly selected mode and unsent draft when an older workspace file-no
   window.desktopAPI = { ...previous, onWorkspaceFilesChanged: listener => { changed = () => listener({ workspaceId: 'workspace' }); return () => {} } }
   try {
     f.view()
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '推进方式' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled())
     const composer = screen.getByRole('textbox', { name: '给果铃AI发消息' })
     fireEvent.change(composer, { target: { value: '还未保存的新草稿' } })
     act(() => changed())
     await waitFor(() => expect(f.api.workspace).toHaveBeenCalledTimes(3))
-    fireEvent.change(screen.getByRole('combobox', { name: '推进方式' }), { target: { value: 'stepwise' } })
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '推进方式' })).toHaveValue('stepwise'))
     await act(async () => resolve(oldSnapshot))
-    expect(screen.getByRole('combobox', { name: '推进方式' })).toHaveValue('stepwise')
+    expect(screen.queryByRole('combobox', { name: '推进方式' })).not.toBeInTheDocument()
     expect(composer).toHaveValue('还未保存的新草稿')
     expect(f.api.draft).not.toHaveBeenCalled()
     expect(f.api.send).not.toHaveBeenCalled()

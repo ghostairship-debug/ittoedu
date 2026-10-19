@@ -169,12 +169,12 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
   useEffect(() => host.retain(), [host])
   useEffect(() => {
     const root = wrapper.current, content = playbackContent.current
-    // Author workspaces already expose CourseNavigationControls; standalone preview needs its own host row.
+    // Author workspaces expose CourseNavigationControls; only older projects need the standalone fallback.
     if (!player || !root || !content) return
-    const chrome = mountPlaybackNavigationChrome(root, navigation, { content, active: () => callbacks.current.active !== false,
+    const chrome = mountPlaybackNavigationChrome(root, navigation, { content, playback: model.project.playback, active: () => callbacks.current.active !== false,
       report: message => callbacks.current.report(message) })
     return () => chrome.destroy()
-  }, [player, navigation])
+  }, [player, navigation, model.project.playback])
   useEffect(() => {
     const root = wrapper.current
     if (!root) return
@@ -250,8 +250,10 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     if (props.active === false) { navigation.cancel(); setPlaying(false) }
   }, [props.active, navigation, setPlaying])
   const resetPlayback = useCallback(async (playing?: boolean) => {
-    if (!await navigation.replayCurrentSurface()) throw new Error('当前页未能返回初始状态')
+    const resetSurfaceId = navigation.readLocation()
     world.setPlaying(playing ?? false)
+    if (!await navigation.replayCurrentSurface()) throw new Error('当前页未能返回初始状态')
+    if (resetSurfaceId) await world.resetSurfacePrograms(resetSurfaceId)
     navigation.changed()
   }, [world, navigation])
   const selectedInstanceIds = props.selectedInstanceIds ?? (selectedInstanceId ? [selectedInstanceId] : [])

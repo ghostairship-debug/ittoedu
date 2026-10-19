@@ -1,5 +1,5 @@
 import type { DocumentFilePort, DocumentFileRef, DocumentFileVersion, OpenDocumentResult } from '../../shared/document/ports'
-import type { DocumentFileObservation, DocumentHostAPI } from '../../shared/workbench/desktop'
+import type { AuthoringRecoveryClaim, DocumentFileObservation, DocumentHostAPI, SourceConflictRecovery } from '../../shared/workbench/desktop'
 import { isSourceDocumentModel, type DocumentSnapshot } from '../../shared/workbench/document'
 import { TextDriver } from '../../core/drivers/TextDriver'
 import { markdownRefPath, markdownSnapshotDocument } from '../../shared/workbench/markdownFileAdapter'
@@ -11,6 +11,11 @@ import { fileResourceMime } from '../../shared/document/fileResourceMime'
 
 type PendingAttachment = { relativePath: string; bytes: Uint8Array }
 type SourceCandidate = { revision: number; localSource: string; source?: string }
+type SourceConflictCandidate = { value: SourceConflictRecovery; records: AuthoringRecoveryClaim[] }
+const conflictBaseline = (plan: DocumentSourceMerge) => JSON.stringify(plan.conflicts.map(({ resolution: _resolution, ...hunk }) => hunk))
+const sameConflictInput = (left: SourceConflictRecovery, right: SourceConflictRecovery) => left.source === right.source
+  && left.diskVersion === right.diskVersion && left.conflictBaseline === right.conflictBaseline
+  && left.hunks.length === right.hunks.length && left.hunks.every((hunk, index) => hunk.id === right.hunks[index]!.id && hunk.text === right.hunks[index]!.text)
 let sessionEpoch = Date.now()
 export interface RecoverableDocumentFilePort extends DocumentFilePort {
   /** Required by the production editor. Missing host is an error, never a local writer fallback. */
@@ -25,6 +30,7 @@ export interface DocumentFileSessionState {
   error: string | null; conflict: OpenDocumentResult | 'deleted' | null; recovery: boolean
   conflictHunks: DocumentConflictHunk[]
   conflictDrafts: Record<string, string>
+  retainedSourceConflicts: SourceConflictRecovery[]
 }
 export function mergeDocumentSources(base: string, local: string, remote: string): string | null {
   const plan = planDocumentSourceMerge(base, local, remote)
@@ -53,7 +59,7 @@ function rebaseHistorySource(base: string, local: string, confirmed: string): st
 /** View adapter only: canonical source, resources, receipt and History live in main. */
 export class DocumentFileSession {
   readonly epoch = ++sessionEpoch
-  private state: DocumentFileSessionState = { source: '', disk: null, dirty: false, saving: false, composing: false, autoSave: false, error: null, conflict: null, recovery: false, conflictHunks: [], conflictDrafts: {} }
+  private state: DocumentFileSessionState = { source: '', disk: null, dirty: false, saving: false, composing: false, autoSave: false, error: null, conflict: null, recovery: false, conflictHunks: [], conflictDrafts: {}, retainedSourceConflicts: [] }
   private projection?: DocumentProjection
   private stopProjection?: () => void
   private timer?: ReturnType<typeof setTimeout>
@@ -80,6 +86,7 @@ export class DocumentFileSession {
   private localSource = ''
   private conflictCandidate: SourceCandidate | null = null
   private conflictDraftTail: Promise<void> = Promise.resolve()
+  private sourceConflictCandidates: SourceConflictCandidate[] = []
   private deferredObservation?: DocumentFileObservation
   private saveCapture?: { documentId: string; epoch: string; revision: number; source: string }
   private hostSaving = false
@@ -139,11 +146,21 @@ export class DocumentFileSession {
     this.initialized = true
     this.update({ recovery: Boolean(recovery) })
     const auxiliary = await documents.readAuthoringDrafts(snapshot.documentId)
-    if (auxiliary?.sourceConflict) this.update({ conflictDrafts: Object.fromEntries(auxiliary.sourceConflict.hunks.map(hunk => [hunk.id, hunk.text])), recovery: true })
+    if (this.disposed) return
+    for (const value of auxiliary?.sourceConflicts ?? (auxiliary?.sourceConflict ? [auxiliary.sourceConflict] : [])) {
+      const records = auxiliary?.recoveryRecords?.filter(record => record.kind === 'sourceConflict' && 'hunks' in record.value
+        && record.value.documentId === value.documentId && record.value.epoch === value.epoch && sameConflictInput(record.value, value))
+        .map(({ id, digest }) => ({ id, digest })) ?? []
+      const existing = this.sourceConflictCandidates.find(candidate => sameConflictInput(candidate.value, value))
+      if (existing) existing.records.push(...records)
+      else this.sourceConflictCandidates.push({ value, records })
+    }
+    this.showRetainedSourceConflicts()
     if (snapshot.binding.kind === 'untitled') return
     const observation = await documents.observeFile(snapshot.documentId)
     this.diskSource = observation.baseSource ?? (snapshot.binding.kind === 'file' && observation.version === snapshot.binding.version && observation.model && isSourceDocumentModel(observation.model) ? observation.model.source : undefined)
     await this.observe(observation)
+    await this.restoreConflictDrafts()
     this.poll()
   }
   private poll() {
@@ -441,6 +458,34 @@ export class DocumentFileSession {
     this.update({ conflict: disk, conflictHunks: plan.conflicts, source: mergedDocumentSource(plan), dirty: true })
     return plan
   }
+  private showRetainedSourceConflicts() {
+    this.update({ retainedSourceConflicts: this.sourceConflictCandidates.map(candidate => candidate.value),
+      ...(this.sourceConflictCandidates.length ? { error: '手动合并恢复稿尚未匹配当前源文、磁盘版本及冲突基线，原文已保留，请比较后继续。' } : {}) })
+  }
+  private async restoreConflictDrafts(): Promise<void> {
+    const current = this.committedDocument, plan = this.conflictPlan
+    if (!current || !plan || !this.observation || !this.sourceConflictCandidates.length) return
+    const eligible = this.sourceConflictCandidates.filter(({ value }) => value.source === this.state.source
+      && value.diskVersion === this.observation!.version && value.conflictBaseline === conflictBaseline(plan)
+      && value.hunks.every(hunk => plan.conflicts.some(currentHunk => currentHunk.id === hunk.id && currentHunk.resolution === null)))
+    if (eligible.length !== 1) {
+      if (eligible.length > 1) this.update({ error: '同一冲突有多份不同的手动合并恢复稿，原文均已保留，请比较后继续。' })
+      return
+    }
+    const adopted = eligible[0]!
+    if (Object.entries(this.state.conflictDrafts).some(([id, text]) => !adopted.value.hunks.some(hunk => hunk.id === id && hunk.text === text))) {
+      this.update({ error: '当前已有不同的手动合并输入，恢复原文已保留，请比较后继续。' }); return
+    }
+    this.update({ conflictDrafts: Object.fromEntries(adopted.value.hunks.map(hunk => [hunk.id, hunk.text])), recovery: true })
+    // Claim durably copies the selected raw into the current owner before consuming its old owner.
+    // Publish remapped input afterwards so the exact claim identity remains available until that ACK.
+    if (this.disposed || this.committedDocument?.epoch !== current.epoch) return
+    if (adopted.records.length) await this.documents.claimAuthoringDrafts?.(current.documentId, current.epoch, adopted.records)
+    this.sourceConflictCandidates = this.sourceConflictCandidates.filter(candidate => candidate !== adopted)
+    await this.persistConflictDrafts()
+    this.showRetainedSourceConflicts()
+    if (!this.sourceConflictCandidates.length) this.update({ error: null })
+  }
   private async observe(observation: DocumentFileObservation, generation = this.watchGeneration) {
     if (this.disposed || this.closeSuspended || this.savingAs || generation !== this.watchGeneration || !this.projection) return
     const current = this.projection.read().committed!
@@ -471,6 +516,7 @@ export class DocumentFileSession {
       return
     }
     const plan = this.showMerge(candidate, observation)
+    await this.restoreConflictDrafts()
     if (!plan.conflicts.length && !this.state.composing) { await this.reconcile('local', { ...candidate, source: mergedDocumentSource(plan) }, observation, generation); this.schedule() }
   }
   private async reconcile(choice: 'disk' | 'local', candidate: SourceCandidate, observation = this.observation, generation?: number): Promise<boolean> {
@@ -543,10 +589,13 @@ export class DocumentFileSession {
     const current = this.committedDocument
     if (!current) return Promise.resolve()
     const drafts = Object.entries(this.state.conflictDrafts).map(([id, text]) => ({ id, text }))
-    const input = { advanced: [], properties: [], ...(drafts.length ? { sourceConflict: {
-      documentId: current.documentId, epoch: current.epoch, source: this.state.source, diskVersion: this.observation?.version ?? null, hunks: drafts,
-    } } : {}) }
-    const write = this.conflictDraftTail.then(() => this.documents.writeAuthoringDrafts(current.documentId, input))
+    const source = this.state.source, observation = this.observation
+    const baseline = this.diskSource !== undefined && observation?.model && isSourceDocumentModel(observation.model)
+      ? conflictBaseline(planDocumentSourceMerge(this.diskSource, source, observation.model.source)) : undefined
+    const input = { retainedRecords: this.sourceConflictCandidates.flatMap(candidate => candidate.records),
+      sourceConflicts: drafts.length ? [{ documentId: current.documentId, epoch: current.epoch, source,
+      diskVersion: observation?.version ?? null, ...(baseline === undefined ? {} : { conflictBaseline: baseline }), hunks: drafts }] : [] }
+    const write = this.conflictDraftTail.then(() => this.documents.writeAuthoringDrafts(current.documentId, input, current.epoch))
     this.conflictDraftTail = write.catch(() => undefined)
     return write
   }

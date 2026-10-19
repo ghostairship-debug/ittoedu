@@ -137,7 +137,6 @@ export interface DesktopAPI {
   mediaFiles?(input: import('./workbench/mediaFiles').MediaFilesRequest): Promise<import('./workbench/mediaFiles').MediaFileSnapshot>
   onWorkspaceFilesChanged?(listener: (event: import('./workbench/workspaceFiles').WorkspaceFilesChange) => void): () => void
   documents?: import('./workbench/desktop').DocumentHostAPI
-  flowDocumentRecovery?: import('./flowDocumentRecovery').FlowDocumentRecoveryAPI
   lessonMaterials?: import('./lessonMaterialDesktop').LessonMaterialDesktopAPI
   lessonFiles?: import('./lessonDocumentDesktop').LessonDocumentDesktopAPI
   lesson?(input: import('./lessonDesktopContract').LessonDesktopRequest): Promise<import('./lessonDesktopContract').LessonDesktopResult>
@@ -252,7 +251,6 @@ export const IPC_CHANNELS = {
   workspaceFilesChanged: 'workspace-files:changed',
   documents: 'documents:operate',
   documentEvent: 'documents:event',
-  flowDocumentRecovery: 'flow-document-recovery:operate',
   lessonMaterial: 'lesson-material:operate',
   lessonDocument: 'lesson-document:operate',
   lesson: 'lesson:operate',

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { ownRecordSchema } from '../ownRecordSchema'
+import { flowDocumentRecoverySchema } from '../flowDocumentRecovery'
 import { componentOperationBatchSchema, courseProjectV10Schema, jsonValueSchema } from '../contracts/component-platform/schema'
 import type { DocumentEvent, DocumentModel, DocumentOperation, DocumentOperationResult, DocumentSnapshot } from './document'
 
@@ -27,11 +28,24 @@ export type AdvancedDraftRecovery = z.infer<typeof advancedDraftRecoverySchema>
 export const propertyDraftRecoverySchema = z.object({ bindingKey: z.string().min(1), label: z.string(),
   kind: z.enum(['text', 'number', 'range', 'chart', 'structured']), raw: z.string(), baseline: z.string().optional(), composing: z.boolean() }).strict()
 export type PropertyDraftRecovery = z.infer<typeof propertyDraftRecoverySchema>
+export const sourceConflictRecoverySchema = z.object({ documentId: id, epoch: id, source: z.string(), diskVersion: z.string().nullable(),
+  conflictBaseline: z.string().optional(), hunks: z.array(z.object({ id: z.string(), text: z.string() }).strict()) }).strict()
+export type SourceConflictRecovery = z.infer<typeof sourceConflictRecoverySchema>
+const authoringRecoveryValueSchema = z.union([advancedDraftRecoverySchema, propertyDraftRecoverySchema, sourceConflictRecoverySchema, flowDocumentRecoverySchema])
+export const authoringRecoveryClaimSchema = z.object({ id: id, digest: id }).strict()
+export type AuthoringRecoveryClaim = z.infer<typeof authoringRecoveryClaimSchema>
+export const authoringRecoveryRecordSchema = authoringRecoveryClaimSchema.extend({ ownerDocumentId: id,
+  kind: z.enum(['advanced', 'properties', 'sourceConflict', 'flow']), value: authoringRecoveryValueSchema }).strict()
+export type AuthoringRecoveryRecord = z.infer<typeof authoringRecoveryRecordSchema>
 export const authoringDraftRecoverySchema = z.object({ advanced: z.array(advancedDraftRecoverySchema), properties: z.array(propertyDraftRecoverySchema),
-  sourceConflict: z.object({ documentId: id, epoch: id, source: z.string(), diskVersion: z.string().nullable(),
-    hunks: z.array(z.object({ id: z.string(), text: z.string() }).strict()) }).strict().optional(),
+  sourceConflict: sourceConflictRecoverySchema.optional(), sourceConflicts: z.array(sourceConflictRecoverySchema).optional(),
+  flow: z.array(flowDocumentRecoverySchema).optional(), recoveryRecords: z.array(authoringRecoveryRecordSchema).optional(),
 }).strict()
 export type AuthoringDraftRecovery = z.infer<typeof authoringDraftRecoverySchema>
+export const authoringDraftWriteSchema = authoringDraftRecoverySchema.omit({ recoveryRecords: true }).partial().extend({
+  flowSurfaceId: id.optional(), retainedRecords: z.array(authoringRecoveryClaimSchema).optional(),
+})
+export type AuthoringDraftWrite = z.infer<typeof authoringDraftWriteSchema>
 const bytes = z.custom<Uint8Array>(value => value instanceof Uint8Array)
 const resources = z.object({ assets: ownRecordSchema(z.string(), bytes), components: ownRecordSchema(z.string(), ownRecordSchema(z.string(), bytes)) }).strict()
 const model = z.discriminatedUnion('kind', [
@@ -66,7 +80,8 @@ export const documentHostRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('reveal'), documentId: id }).strict(),
   z.object({ type: z.literal('rename'), documentId: id, epoch: id, name: z.string().trim().min(1).max(200).refine(value => !/[\\/:*?"<>|]/.test(value) && value !== '.' && value !== '..') }).strict(),
   z.object({ type: z.literal('read-authoring-drafts'), documentId: id }).strict(),
-  z.object({ type: z.literal('write-authoring-drafts'), documentId: id, drafts: authoringDraftRecoverySchema }).strict(),
+  z.object({ type: z.literal('write-authoring-drafts'), documentId: id, epoch: id.optional(), drafts: authoringDraftWriteSchema }).strict(),
+  z.object({ type: z.literal('claim-authoring-drafts'), documentId: id, epoch: id, records: z.array(authoringRecoveryClaimSchema) }).strict(),
   z.object({ type: z.literal('clear-authoring-drafts'), documentId: id }).strict(),
   z.object({ type: z.literal('dispatch'), operation }).strict(),
   z.object({ type: z.literal('lookup'), documentId: id, operationId: id }).strict(),
@@ -91,7 +106,8 @@ export interface DocumentHostAPI {
   rename?(documentId: string, epoch: string, name: string): Promise<DocumentSnapshot>
   reveal?(documentId: string): Promise<void>
   readAuthoringDrafts(documentId: string): Promise<AuthoringDraftRecovery | null>
-  writeAuthoringDrafts(documentId: string, drafts: AuthoringDraftRecovery): Promise<void>
+  writeAuthoringDrafts(documentId: string, drafts: AuthoringDraftWrite, epoch?: string): Promise<void>
+  claimAuthoringDrafts?(documentId: string, epoch: string, records: AuthoringRecoveryClaim[]): Promise<void>
   clearAuthoringDrafts(documentId: string): Promise<void>
   dispatch(operation: DocumentOperation): Promise<DocumentOperationResult>
   lookup(documentId: string, operationId: string): Promise<DocumentOperationResult | null>

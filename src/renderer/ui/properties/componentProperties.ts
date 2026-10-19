@@ -21,7 +21,7 @@ const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as
 export function propertiesEffectiveBackground(project: CourseProjectV10, surface?: ComponentSurface, state?: ComponentPresentationState) {
   const paint = resolveComponentBackground(project, surface, state)
   const sourceOwner = state?.background && state.background.mode !== 'inherit'
-    && ['color', 'assetId', 'fit'].some(field => Reflect.get(state.background!, field) !== undefined) ? 'slide-state' as const
+    && ['color', 'assetId', 'fit', 'paint'].some(field => Reflect.get(state.background!, field) !== undefined) ? 'slide-state' as const
     : surface?.background?.mode === 'own' ? surface.kind === 'slide' ? 'slide-surface' as const
       : surface.kind === 'flow' ? 'flow-surface' as const : 'spatial-surface' as const : 'course' as const
   return { ...paint, sourceOwner }
@@ -168,6 +168,15 @@ export function componentPropertiesEdits(instance: ComponentInstance, definition
     if (style) {
       const { overflow, ...appearance } = style
       edits.push(...leafEdits(instance.id, appearance, ['appearance']))
+      // Whole-object formatting also replaces the same explicit inline field.
+      // Other range formatting, links, formulas and identities stay untouched.
+      const data = textComponentDataSchema.parse(instance.data)
+      data.content.inlines.forEach((inline, index) => {
+        for (const [field, value] of Object.entries(appearance)) {
+          if (value !== undefined && Object.hasOwn(inline.style ?? {}, field))
+            edits.push(...leafEdits(instance.id, value, ['content', 'inlines', String(index), 'style', field]))
+        }
+      })
       if (overflow) edits.push({ type: 'data.set', instanceId: instance.id, path: ['sizing', 'mode'],
         value: overflow === 'auto-height' ? 'grow-height' : overflow === 'shrink' ? 'shrink-text' : 'fixed' })
       if (overflow === 'fixed') edits.push({ type: 'data.set', instanceId: instance.id, path: ['sizing', 'overflow'], value: 'clip' })

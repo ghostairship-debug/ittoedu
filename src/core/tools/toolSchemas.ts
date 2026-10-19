@@ -11,8 +11,15 @@ import { courseProjectLogicSchema } from '../../shared/contracts/component-platf
 import { courseProjectAudioSettingsSchema, courseProjectSoundDefinitionSchema } from '../../shared/contracts/media-v1/schema'
 import { RECIPE_CATALOG } from '../course/courseRecipeEdits'
 import { shapeDataSchema } from '../../components/shape/data'
+import { tableContentInputSchema } from '../../components/table/data'
 
 const semanticId = z.string().min(1)
+const clickInteractionInputSchema = z.object({
+  action: z.enum(['audio-play', 'location-go', 'scene.next', 'scene.previous']), value: semanticId.optional(),
+}).strict().superRefine((value, context) => {
+  if ((value.action === 'audio-play' || value.action === 'location-go') && !value.value)
+    context.addIssue({ code: 'custom', path: ['value'], message: '播放声音或跳转指定页面需要目标引用' })
+})
 const professionalAppearanceInputSchema = z.record(z.string(), jsonValueSchema)
 export const textFormatInputSchema = z.object({ target: semanticId, style: documentTextStyleSchema }).strict()
 export const objectLayoutInputSchema = z.object({ targets: z.array(semanticId).min(1), intent: z.discriminatedUnion('kind', [
@@ -28,13 +35,21 @@ export const courseProductivityInputSchema = z.object({ target: semanticId, requ
     property: z.enum(['text', 'fill', 'stroke', 'background', 'all']) }).strict(),
 ]) }).strict()
 export const surfaceRemixInputSchema = z.object({ target: semanticId, replacements: z.record(z.string(), z.string()) }).strict()
-export const objectInsertInputSchema = z.object({ target: semanticId, kind: z.enum(['text', 'formula', 'shape', 'table', 'chart', 'input']),
+const objectInsertOptionsSchema = z.object({ kind: z.enum(['text', 'formula', 'shape', 'table', 'chart', 'input']),
+  click: clickInteractionInputSchema.optional().describe('同次绑定正式点击规则；location-go 的 value 使用已观察目的页面句柄或路径；scene.next/scene.previous无需value，audio-play 使用已配置声音。'),
   text: z.string().optional(), shapeType: shapeDataSchema.shape.shapeType.optional(), chartType: z.enum(['bar', 'line', 'area', 'pie', 'donut']).optional(),
+  table: tableContentInputSchema.optional().describe('表格的完整可见文字矩阵 {rows:[[...]],headerRowCount?}；软件分配行列/单元格身份，仅 kind=table 使用。'),
   appearance: professionalAppearanceInputSchema.optional().describe('可选初始专业外观，和 object.update 的 appearance 同义；只覆盖提供字段，省略时保留人工插入默认。文字/公式支持 fontSize、color、bold、lineHeight、shadows 等；图形、表格、图表使用其公开专业 style 字段，图形使用 fillColor、borderColor 等实际字段。input 当前不支持 appearance。'),
   x: z.number().finite().optional(), y: z.number().finite().optional(), width: z.number().positive().optional(), height: z.number().positive().optional(),
   center: z.object({ x: z.number().finite(), y: z.number().finite() }).strict().optional(), index: z.number().int().nonnegative().optional(),
   destination: z.enum(['document', 'paper']).optional(),
 }).strict()
+export const objectInsertInputSchema = z.union([
+  objectInsertOptionsSchema.extend({ target: semanticId }).strict(),
+  objectInsertOptionsSchema.extend({ project: semanticId.optional(), path: semanticId }).strict(),
+]).superRefine((value, context) => {
+  if (value.table && value.kind !== 'table') context.addIssue({ code: 'custom', path: ['table'], message: 'table 内容仅用于插入表格' })
+})
 const tableShape = tableNativeContentObjectSchema.shape
 const tableEditSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('cell-text'), cellId: semanticId, text: z.string() }).strict(),
@@ -87,7 +102,7 @@ export const interactionUpdateInputSchema = z.object({ target: semanticId, chang
   z.object({ kind: z.enum(['add', 'reveal']), rule: ruleDraftSchema }).strict(),
   z.object({ kind: z.literal('update'), ruleId: semanticId, rule: ruleDraftSchema }).strict(),
   z.object({ kind: z.enum(['remove', 'duplicate']), ruleId: semanticId }).strict(),
-  z.object({ kind: z.literal('click'), action: z.enum(['audio-play', 'location-go']), value: semanticId }).strict(),
+  clickInteractionInputSchema.safeExtend({ kind: z.literal('click') }).strict(),
 ]) }).strict()
 const guardSchema = courseProjectLogicSchema.shape.navigationGuards.element
 export const courseLogicInputSchema = z.object({ target: semanticId, change: z.discriminatedUnion('kind', [
@@ -154,6 +169,7 @@ export const objectUpdatePropertiesInputSchema = z.object({
   visible: z.boolean().optional(), locked: z.boolean().optional(), label: z.string().min(1).optional(),
   viewportPinned: z.boolean().optional().describe('全局对象是否固定在视口中；不授予教师导航权限'),
   playbackInitialVisibility: z.enum(['inherit', 'hidden']).optional(),
+  stateBindings: z.record(z.string().min(1), z.string().min(1).nullable()).nullable().optional().describe('显式状态别名，值为已声明的 courseState.key。仅合并提供的别名，单个 null 删除该别名，整体 null 清除；Source 增强用 bindings.get/set/observe(alias)消费。普通同课复制继续共享，已有托管输入键复制映射时同步重绑；任意 JS 字符串不改写。'),
   appearance: professionalAppearanceInputSchema.optional().describe('目标真实专业外观的局部参数；文字可用 fontFamily、fontSize、color、shadows、lineHeight 等。shadows 是对象数组，每项使用 x、y、blur、color。表格、图表与图形使用其公开专业样式。只应用提供字段，不改变正文、位置或省略参数；实际适用键与类型由目标领域数据验证。复制已观察对象的外观优先 appearanceFrom；显式 appearance 字段覆盖来源同名字段。不支持项明确反馈，文字范围格式使用 text.format。'),
   appearanceFrom: z.object({
     target: semanticId.describe('已观察来源整对象的只读句柄；软件按该来源当前捕获内容读取外观。'),

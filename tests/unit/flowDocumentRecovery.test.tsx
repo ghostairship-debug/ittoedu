@@ -3,13 +3,14 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { useFlowDocumentRecovery } from '@/renderer/app/useFlowDocumentRecovery'
-import { flowDocumentDraftSaveBlock, serializeFlowDocumentRecovery, type FlowDocumentDraft, type FlowDocumentRecoveryPort, type FlowDocumentRecoveryRecord, type FlowDocumentRecoveryTarget } from '@/renderer/authoring/flowDocumentDraft'
+import { createFlowDocumentRecoveryPort, flowDocumentDraftSaveBlock, serializeFlowDocumentRecovery, type FlowDocumentDraft, type FlowDocumentRecoveryCandidate, type FlowDocumentRecoveryPort, type FlowDocumentRecoveryRecord, type FlowDocumentRecoveryTarget } from '@/renderer/authoring/flowDocumentDraft'
+import type { DocumentHostAPI } from '@/shared/workbench/desktop'
 
-const target = { projectId: 'project', surfaceId: 'flow', projectPath: null, revision: 3, epoch: 1 }
+const target = { documentId: 'document', projectId: 'project', surfaceId: 'flow', projectPath: null, revision: 3, epoch: 1 }
 const draft: FlowDocumentDraft = { surfaceId: 'flow', revision: 3, source: '$unfinished', diagnostics: [{ message: '公式未闭合', offset: 0, endOffset: 11, line: 1, column: 1 }], composing: false }
 function storage(initial?: FlowDocumentRecoveryRecord) {
   let record = initial ?? null
-  const port: FlowDocumentRecoveryPort = { read: vi.fn(async identity => { flowDocumentRecoveryTargetSchema.parse(identity); return record }), write: vi.fn(async value => { record = flowDocumentRecoverySchema.parse(value) }), clear: vi.fn(async identity => { flowDocumentRecoveryTargetSchema.parse(identity); record = null }) }
+  const port: FlowDocumentRecoveryPort = { read: vi.fn(async identity => { flowDocumentRecoveryTargetSchema.parse(identity); return record ? [{ ...record, recovery: { id: 'record', digest: 'digest' } }] : [] }), claim: vi.fn(async () => undefined), write: vi.fn(async value => { record = flowDocumentRecoverySchema.parse(value) }), clear: vi.fn(async identity => { flowDocumentRecoveryTargetSchema.parse(identity); record = null }) }
   return { port, get record() { return record } }
 }
 function deferred<T>() {
@@ -22,7 +23,7 @@ function deferred<T>() {
 describe('Flow document app-local recovery', () => {
   it('restores once through StrictMode cleanup and remount', async () => {
     const disk = storage(serializeFlowDocumentRecovery(target, draft))
-    const restored = vi.fn(), error = vi.fn()
+    const restored = vi.fn(() => true), error = vi.fn()
     const hook = renderHook(() => useFlowDocumentRecovery({ target, draft: null, port: disk.port, onRestore: restored, onError: error }), { wrapper: StrictMode })
     await act(async () => { await hook.result.current.flush() })
     expect(restored).toHaveBeenCalledExactlyOnceWith(draft)
@@ -39,7 +40,7 @@ describe('Flow document app-local recovery', () => {
   })
   it('writes invalid source independently, restores on remount, and clears only after application', async () => {
     const disk = storage()
-    const restored = vi.fn(), error = vi.fn()
+    const restored = vi.fn(() => true), error = vi.fn()
     const first = renderHook(() => useFlowDocumentRecovery({ target, draft, port: disk.port, onRestore: restored, onError: error }))
     await act(async () => { expect(await first.result.current.flush()).toBe(true) })
     expect(disk.record?.source).toBe('$unfinished')
@@ -56,7 +57,7 @@ describe('Flow document app-local recovery', () => {
   })
   it('retains another revision and never restores it over the current body', async () => {
     const disk = storage(serializeFlowDocumentRecovery(target, { ...draft, revision: 2 }))
-    const restored = vi.fn(), error = vi.fn()
+    const restored = vi.fn(() => true), error = vi.fn()
     const hook = renderHook(() => useFlowDocumentRecovery({ target, draft: null, port: disk.port, onRestore: restored, onError: error }))
     await waitFor(() => expect(error).toHaveBeenCalled())
     expect(restored).not.toHaveBeenCalled()
@@ -66,7 +67,7 @@ describe('Flow document app-local recovery', () => {
     expect(await hook.result.current.flush()).toBe(true)
   })
   it('pauses writes during discard and keeps the raw input when close is cancelled', async () => {
-    const disk = storage(), restored = vi.fn(), error = vi.fn()
+    const disk = storage(), restored = vi.fn(() => true), error = vi.fn()
     const hook = renderHook(({ value }: { value: FlowDocumentDraft }) => useFlowDocumentRecovery({ target, draft: value, port: disk.port, onRestore: restored, onError: error }), { initialProps: { value: draft } })
     await act(async () => { await hook.result.current.flush() })
     act(() => hook.result.current.suspendForClose([target.epoch]))
@@ -80,11 +81,12 @@ describe('Flow document app-local recovery', () => {
   it('drops a stale queued recovery write after the target session changes', async () => {
     const write = deferred<void>()
     const port: FlowDocumentRecoveryPort = {
-      read: vi.fn(async () => null),
+      read: vi.fn(async () => []),
       write: vi.fn(() => write.promise),
       clear: vi.fn(async () => undefined),
+      claim: vi.fn(async () => undefined),
     }
-    const restored = vi.fn(), error = vi.fn()
+    const restored = vi.fn(() => true), error = vi.fn()
     const initial: { input: { target: FlowDocumentRecoveryTarget; draft: FlowDocumentDraft | null } } = { input: { target, draft } }
     const hook = renderHook(({ input }: { input: { target: FlowDocumentRecoveryTarget; draft: FlowDocumentDraft | null } }) => (
       useFlowDocumentRecovery({ target: input.target, draft: input.draft, port, onRestore: restored, onError: error })
@@ -97,11 +99,12 @@ describe('Flow document app-local recovery', () => {
   })
   it('reports a failed recovery write for the current target', async () => {
     const port: FlowDocumentRecoveryPort = {
-      read: vi.fn(async () => null),
+      read: vi.fn(async () => []),
       write: vi.fn(async () => { throw new Error('磁盘不可写') }),
       clear: vi.fn(async () => undefined),
+      claim: vi.fn(async () => undefined),
     }
-    const restored = vi.fn(), error = vi.fn()
+    const restored = vi.fn(() => true), error = vi.fn()
     const hook = renderHook(() => useFlowDocumentRecovery({ target, draft, port, onRestore: restored, onError: error }))
     await act(async () => { expect(await hook.result.current.flush()).toBe(false) })
     expect(error).toHaveBeenCalledWith('磁盘不可写')
@@ -109,11 +112,12 @@ describe('Flow document app-local recovery', () => {
   })
   it('creates a fresh recovery fence when a reopened Flow returns to the same authoring epoch', async () => {
     const port: FlowDocumentRecoveryPort = {
-      read: vi.fn(async () => null),
+      read: vi.fn(async () => []),
       write: vi.fn(async () => undefined),
       clear: vi.fn(async () => undefined),
+      claim: vi.fn(async () => undefined),
     }
-    const restored = vi.fn(), error = vi.fn()
+    const restored = vi.fn(() => true), error = vi.fn()
     const initial: { input: { target: FlowDocumentRecoveryTarget | null; draft: FlowDocumentDraft | null } } = { input: { target, draft } }
     const hook = renderHook(({ input }: { input: { target: FlowDocumentRecoveryTarget | null; draft: FlowDocumentDraft | null } }) => (
       useFlowDocumentRecovery({ target: input.target, draft: input.draft, port, onRestore: restored, onError: error })
@@ -130,11 +134,12 @@ describe('Flow document app-local recovery', () => {
   })
   it('keeps one recovery fence while the active Flow revision changes', async () => {
     const port: FlowDocumentRecoveryPort = {
-      read: vi.fn(async () => null),
+      read: vi.fn(async () => []),
       write: vi.fn(async () => undefined),
       clear: vi.fn(async () => undefined),
+      claim: vi.fn(async () => undefined),
     }
-    const restored = vi.fn(), error = vi.fn()
+    const restored = vi.fn(() => true), error = vi.fn()
     const hook = renderHook(({ input }: { input: { target: typeof target; draft: FlowDocumentDraft } }) => (
       useFlowDocumentRecovery({ target: input.target, draft: input.draft, port, onRestore: restored, onError: error })
     ), { initialProps: { input: { target, draft } } })
@@ -145,5 +150,111 @@ describe('Flow document app-local recovery', () => {
     expect(writeEpochs).toHaveLength(2)
     expect(writeEpochs[0]).toBe(writeEpochs[1])
     expect(error).not.toHaveBeenCalled()
+  })
+  it('claims only the candidate actually accepted by the provider', async () => {
+    const selected = { ...serializeFlowDocumentRecovery(target, draft), recovery: { id: 'selected', digest: 'selected-digest' } }
+    const previous = { ...selected, revision: 2, source: 'older source', recovery: { id: 'previous', digest: 'previous-digest' } }
+    const disk = storage(), restored = vi.fn(() => true), error = vi.fn()
+    disk.port.read = vi.fn(async () => [previous, selected])
+    const hook = renderHook(() => useFlowDocumentRecovery({ target, draft: null, port: disk.port, onRestore: restored, onError: error }))
+    await act(async () => { await hook.result.current.flush() })
+    expect(restored).toHaveBeenCalledExactlyOnceWith(draft)
+    expect(disk.port.claim).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ documentId: target.documentId, documentEpoch: target.epoch }), selected)
+    expect(hook.result.current.retained).toEqual([previous])
+  })
+  it('keeps distinct matching raw candidates and never chooses the newest implicitly', async () => {
+    const first = { ...serializeFlowDocumentRecovery(target, draft), recovery: { id: 'first', digest: 'first-digest' } }
+    const second = { ...first, source: 'a different unfinished source', recovery: { id: 'second', digest: 'second-digest' } }
+    const disk = storage(), restored = vi.fn(() => true), error = vi.fn()
+    disk.port.read = vi.fn(async () => [first, second])
+    const hook = renderHook(() => useFlowDocumentRecovery({ target, draft: null, port: disk.port, onRestore: restored, onError: error }))
+    await act(async () => { expect(await hook.result.current.flush()).toBe(true) })
+    expect(restored).not.toHaveBeenCalled()
+    expect(disk.port.claim).not.toHaveBeenCalled()
+    expect(hook.result.current.retained).toEqual([first, second])
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('多份不同正文原稿'))
+  })
+  it('does not consume a candidate rejected by the current input callback', async () => {
+    const disk = storage(serializeFlowDocumentRecovery(target, draft)), restored = vi.fn(() => false), error = vi.fn()
+    const hook = renderHook(() => useFlowDocumentRecovery({ target, draft: null, port: disk.port, onRestore: restored, onError: error }))
+    await act(async () => { await hook.result.current.flush() })
+    expect(restored).toHaveBeenCalledExactlyOnceWith(draft)
+    expect(disk.port.claim).not.toHaveBeenCalled()
+    expect(hook.result.current.retained).toHaveLength(1)
+  })
+  it('adopts only the raw source already held by the remounted input', async () => {
+    const held = { ...serializeFlowDocumentRecovery(target, draft), recovery: { id: 'held', digest: 'held-digest' } }
+    const other = { ...held, source: 'different old raw', recovery: { id: 'other', digest: 'other-digest' } }
+    const disk = storage(), restored = vi.fn(() => false), error = vi.fn()
+    disk.port.read = vi.fn(async () => [held, other])
+    const hook = renderHook(() => useFlowDocumentRecovery({ target, draft, port: disk.port, onRestore: restored, onError: error }))
+    await act(async () => { await hook.result.current.flush() })
+    expect(restored).not.toHaveBeenCalled()
+    expect(disk.port.claim).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ documentId: target.documentId, documentEpoch: target.epoch }), held)
+    expect(hook.result.current.retained).toEqual([other])
+  })
+  it('ignores a late read after this provider has left the target', async () => {
+    const pending = deferred<FlowDocumentRecoveryCandidate[]>()
+    const disk = storage(), restored = vi.fn(() => true), error = vi.fn()
+    disk.port.read = vi.fn(() => pending.promise)
+    const hook = renderHook(({ current }: { current: FlowDocumentRecoveryTarget | null }) => useFlowDocumentRecovery({ target: current, draft: null, port: disk.port, onRestore: restored, onError: error }), { initialProps: { current: target as FlowDocumentRecoveryTarget | null } })
+    await waitFor(() => expect(disk.port.read).toHaveBeenCalledOnce())
+    hook.rerender({ current: null })
+    pending.resolve([{ ...serializeFlowDocumentRecovery(target, draft), recovery: { id: 'late', digest: 'late-digest' } }])
+    await act(async () => { await hook.result.current.flush() })
+    expect(restored).not.toHaveBeenCalled()
+    expect(disk.port.claim).not.toHaveBeenCalled()
+  })
+  it('preserves a queued draft in its original open document after navigation', async () => {
+    const pending = deferred<FlowDocumentRecoveryCandidate[]>()
+    const disk = storage(), restored = vi.fn(() => true), error = vi.fn()
+    disk.port.read = vi.fn(() => pending.promise)
+    const hook = renderHook(({ current }: { current: FlowDocumentRecoveryTarget | null }) => useFlowDocumentRecovery({ target: current, draft: current ? draft : null, port: disk.port, onRestore: restored, onError: error }), { initialProps: { current: target as FlowDocumentRecoveryTarget | null } })
+    await waitFor(() => expect(disk.port.read).toHaveBeenCalledOnce())
+    hook.rerender({ current: null })
+    pending.resolve([])
+    await act(async () => { await hook.result.current.flush() })
+    expect(disk.port.write).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ documentId: 'document', source: draft.source }), expect.objectContaining({ documentId: 'document', documentEpoch: 1 }))
+    expect(restored).not.toHaveBeenCalled()
+  })
+  it('accepts only the original already held by a background surface before flushing it', async () => {
+    const held = { ...serializeFlowDocumentRecovery(target, draft), recovery: { id: 'held', digest: 'held-digest' } }
+    const other = { ...held, source: 'unaccepted background raw', recovery: { id: 'other', digest: 'other-digest' } }
+    const disk = storage(), restored = vi.fn(() => false), error = vi.fn()
+    disk.port.read = vi.fn(async () => [held, other])
+    const hook = renderHook(() => useFlowDocumentRecovery({ target: null, draft: null, port: disk.port, onRestore: restored, onError: error }))
+    await act(async () => { expect(await hook.result.current.flushAll([{ target, draft }])).toBe(true) })
+    expect(disk.port.read).toHaveBeenCalledOnce()
+    expect(disk.port.claim).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ documentId: target.documentId, documentEpoch: target.epoch }), held)
+    expect(disk.port.write).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ documentId: target.documentId, source: draft.source }), expect.objectContaining({ documentId: target.documentId, documentEpoch: target.epoch }))
+    expect(restored).not.toHaveBeenCalled()
+  })
+  it('keeps the stable document and provider generation through Save As', async () => {
+    const disk = storage(), restored = vi.fn(() => true), error = vi.fn()
+    const hook = renderHook(({ current }: { current: FlowDocumentRecoveryTarget }) => useFlowDocumentRecovery({ target: current, draft, port: disk.port, onRestore: restored, onError: error }), { initialProps: { current: target as FlowDocumentRecoveryTarget } })
+    await act(async () => { await hook.result.current.flush() })
+    hook.rerender({ current: { ...target, projectPath: 'D:/saved-as.glx' } })
+    await act(async () => { await hook.result.current.flush() })
+    const records = (disk.port.write as ReturnType<typeof vi.fn>).mock.calls.map(([record]) => record as FlowDocumentRecoveryRecord)
+    expect(records.map(record => record.documentId)).toEqual(['document', 'document'])
+    expect(records[0]?.epoch).toBe(records[1]?.epoch)
+    expect(records[1]?.projectPath).toBe('D:/saved-as.glx')
+    expect(disk.port.read).toHaveBeenCalledOnce()
+  })
+  it('adapts Flow IO to stable host slices and exact selected record claims', async () => {
+    const raw = serializeFlowDocumentRecovery({ ...target, documentId: 'old-owner' }, draft)
+    const readAuthoringDrafts = vi.fn(async () => ({ advanced: [], properties: [], flow: [raw], recoveryRecords: [{ id: 'raw-id', digest: 'raw-digest', ownerDocumentId: 'old-owner', kind: 'flow', value: raw }] }))
+    const writeAuthoringDrafts = vi.fn(async () => undefined), claimAuthoringDrafts = vi.fn(async () => undefined)
+    const port = createFlowDocumentRecoveryPort({ readAuthoringDrafts, writeAuthoringDrafts, claimAuthoringDrafts } as unknown as DocumentHostAPI)
+    const identity = { ...target, epoch: 'provider-generation', documentEpoch: 'document-epoch' }
+    const [candidate] = await port.read(identity)
+    expect(claimAuthoringDrafts).not.toHaveBeenCalled()
+    expect(readAuthoringDrafts).toHaveBeenCalledWith('document')
+    await port.claim(identity, candidate!)
+    expect(claimAuthoringDrafts).toHaveBeenCalledExactlyOnceWith('document', 'document-epoch', [{ id: 'raw-id', digest: 'raw-digest' }])
+    await port.write(serializeFlowDocumentRecovery(identity, draft), identity)
+    expect(writeAuthoringDrafts).toHaveBeenLastCalledWith('document', { flow: [expect.objectContaining({ epoch: 'provider-generation', documentEpoch: 'document-epoch' })], flowSurfaceId: 'flow' }, 'document-epoch')
+    await port.clear(identity)
+    expect(writeAuthoringDrafts).toHaveBeenLastCalledWith('document', { flow: [], flowSurfaceId: 'flow' }, 'document-epoch')
   })
 })

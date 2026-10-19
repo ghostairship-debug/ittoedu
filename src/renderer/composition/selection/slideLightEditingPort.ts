@@ -1,6 +1,7 @@
 import type { EditorStoreKernel } from '../../store/editorStoreKernel'
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
 import { resolveComponentBackground, type ComponentAsset, type JsonObject } from '../../../shared/contracts/component-platform/project'
+import { mergeComponentBackground } from '../../../shared/componentBackgroundPaint'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import { componentIsLocked, componentParentMatrix } from '../crossSurfaceCommands'
 import { frameCorners, translateFrame, transformVector, invertMatrix } from '../../../core/components/geometry'
@@ -75,7 +76,7 @@ export function createSlideLightEditingPort(owner: SlideLightEditingOwner) {
     if (available.kind === 'audio-import') await placeAudio(target)
     else if (available.kind === 'scene-background') {
       if(owner.setBackground) await owner.setBackground(target,String(available.value))
-      else { const surface=target.project.surfaces.find(value=>value.id===target.surfaceId)!; await commit(target,[{type:'surface.background.set',surfaceId:surface.id,background:{...surface.background,mode:'own',color:String(available.value)}}]) }
+      else { const surface=target.project.surfaces.find(value=>value.id===target.surfaceId)!; await commit(target,[{type:'surface.background.set',surfaceId:surface.id,background:mergeComponentBackground(surface.background,{mode:'own',color:String(available.value)})}]) }
     }
   }
   const runObject = async (target: SlideLightObjectTarget, command: SlideLightCommand) => {
@@ -85,7 +86,7 @@ export function createSlideLightEditingPort(owner: SlideLightEditingOwner) {
     const id = target.instanceId, value = available.value, item = target.editingProject.instances[id]
     switch (available.kind) {
       case 'opacity': return commit(target, [{ type: 'style.set', instanceId: id, path: ['opacity'], value: Number(value) }])
-      case 'font': return commit(target, [{ type: 'data.set', instanceId: id, path: ['appearance','fontFamily'], value: String(value) }])
+      case 'font': return commit(target, componentPropertiesEdits(item, target.editingProject.definitions[item.definitionId], { style: { fontFamily: String(value) } }))
       case 'line-spacing': return commit(target, componentPropertiesEdits(item, target.editingProject.definitions[item.definitionId], { style: { lineSpacing: Number(value) } }))
       case 'page-align': {
         const surface = target.editingProject.surfaces.find(value => value.id === target.surfaceId)

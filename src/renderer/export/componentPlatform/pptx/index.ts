@@ -170,7 +170,16 @@ export async function buildComponentPptx(input: ComponentPptxInput, options: Bui
     const slide = pptx.addSlide()
     const background = resolveComponentBackground(current, surface)
     slide.background = { color: pptxColor(background.color, 'FFFFFF') }
-    if (background.assetId) {
+    if (background.paint) {
+      try {
+        const image = await options.captureBackground?.({ input, surface })
+        if (!image?.startsWith('data:image/')) throw new Error('复杂背景缺少独立的实际背景捕获；正文继续保留原生输出。')
+        slide.addImage({ data: image, x: contain[4] / 96, y: contain[5] / 96,
+          w: size.width * scale / 96, h: size.height * scale / 96, objectName: `${surface.id}:background` })
+        report({ severity: 'warning', code: 'background-static-capture', surfaceId: surface.id,
+          message: '复杂 CSS 背景已单独捕获为静态背景图；正文继续逐对象原生输出，背景声明和资源保留在工程。' })
+      } catch (error) { report({ severity: 'error', code: 'background-capture-missing', surfaceId: surface.id, message: error instanceof Error ? error.message : String(error) }) }
+    } else if (background.assetId) {
       try {
         const url = await options.resolveAsset?.(background.assetId, input) ?? (input.schemaVersion === 3 ? input.assets[background.assetId]?.url : undefined)
         if (!url) throw new Error(`背景资源 ${background.assetId} 缺少实际字节`)

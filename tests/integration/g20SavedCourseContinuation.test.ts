@@ -131,9 +131,13 @@ it('continues the original frozen task after cold reopen changes only the automa
     conversationId: f.send.conversationId }) as ConversationRecord
   const draft = await cold.service.operate({ type: 'draft', workspaceId: f.send.workspaceId, conversationId: f.send.conversationId,
     expectedRevision: current.revision, text: f.send.text, attachments: f.send.attachments, documents: [currentReference] }) as ConversationRecord
-  const retried = await cold.service.operate({ ...f.send, submissionId: randomUUID(), expectedRevision: draft.revision,
-    retryOfRunId: f.failed.runId }) as ExecutionSendResult
+  const retryInput = { ...f.send, permission: undefined, submissionId: randomUUID(), expectedRevision: draft.revision,
+    retryOfRunId: f.failed.runId }
+  const retried = await cold.service.operate(retryInput) as ExecutionSendResult
   const completed = await cold.service.engine.wait(retried.run!.runId)
+  const repeated = await cold.service.operate(retryInput) as ExecutionSendResult
+  expect(repeated.submission.submissionId).toBe(retried.submission.submissionId)
+  expect(repeated.run?.runId).toBe(retried.run?.runId)
   expect(completed.status, JSON.stringify(completed.failure)).toBe('completed')
   expect(completed.input.documents).toEqual([{ documentId: reopened.documentId, epoch: reopened.epoch,
     revision: reopened.revision, writable: f.reference.writable, selection: f.reference.selection }])

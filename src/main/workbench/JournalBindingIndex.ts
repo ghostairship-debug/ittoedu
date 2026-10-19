@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import type { DocumentBinding, DocumentKind, DurableDocumentState } from '../../shared/workbench/document'
+import type { DocumentBinding, DocumentDisposition, DocumentKind, DurableDocumentState } from '../../shared/workbench/document'
 
 export interface JournalBindingMetadata {
   documentId: string; sequence: number; epoch: string; revision: number; savedRevision: number | null
   kind: DocumentKind; binding: DocumentBinding; offset: number; identity: string
+  disposition: DocumentDisposition
   /** Reservation only when the underlying journal is unreadable; never a recovery snapshot. */
   unavailable?: boolean
 }
@@ -30,8 +31,11 @@ export class JournalBindingIndex {
       const indexFile = `${filename}.binding.json`
       if ((await fs.stat(indexFile)).size > 256 * 1024) return null
       const envelope = JSON.parse(await fs.readFile(indexFile, 'utf8'))
-      if (envelope.version !== 1 || typeof envelope.body !== 'string' || hash(envelope.body) !== envelope.digest) return null
+      if (![1, 2].includes(envelope.version) || typeof envelope.body !== 'string' || hash(envelope.body) !== envelope.digest) return null
       const entry = JSON.parse(envelope.body) as JournalBindingMetadata
+      if (envelope.version === 1 && entry.disposition !== undefined
+        || envelope.version === 2 && !['active', 'closed', 'discarded'].includes(entry.disposition)) return null
+      entry.disposition ??= 'active'
       if ((!allowStale && entry.identity !== identity) || typeof entry.documentId !== 'string'
         || path.basename(filename) !== `${hash(entry.documentId)}.journal`
         || !Number.isSafeInteger(entry.offset) || entry.offset < 0
@@ -51,12 +55,12 @@ export class JournalBindingIndex {
     if (!identity) { this.memory.delete(filename); return }
     const entry: JournalBindingMetadata = { documentId: state.documentId, sequence: state.sequence,
       epoch: state.epoch, revision: state.revision, savedRevision: state.savedRevision,
-      kind: state.model.kind, binding: structuredClone(state.binding), offset, identity }
+      kind: state.model.kind, binding: structuredClone(state.binding), offset, identity, disposition: state.disposition ?? 'active' }
     this.memory.set(filename, entry)
     const body = JSON.stringify(entry), temporary = `${filename}.binding-${randomUUID()}.tmp`
     try {
       const file = await fs.open(temporary, 'wx')
-      try { await file.writeFile(JSON.stringify({ version: 1, body, digest: hash(body) })); await file.sync() }
+      try { await file.writeFile(JSON.stringify({ version: 2, body, digest: hash(body) })); await file.sync() }
       finally { await file.close() }
       if (await journalIdentity(filename) !== identity) { this.memory.delete(filename); return }
       await fs.rename(temporary, `${filename}.binding.json`)

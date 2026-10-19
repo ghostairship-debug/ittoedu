@@ -31,7 +31,7 @@ function componentElementFields(project: CourseProjectV10, instanceId: string, s
   const effectiveStyle = effective.instances[instanceId].style
   if (effectiveStyle && Object.keys(effectiveStyle).length) add(effectiveStyle, ['style'])
   if (instance.flowLayout) add(instance.flowLayout, ['flowLayout'])
-  for (const key of ['name', 'frame', 'implementationOverride', 'childIds', 'visibility', 'flowPlacement'] as const) {
+  for (const key of ['name', 'frame', 'implementationOverride', 'childIds', 'visibility', 'flowPlacement', 'stateBindings'] as const) {
     const value = state && key === 'frame' ? state.overrides[instanceId]?.frame : instance[key]
     if (value !== undefined) fields[JSON.stringify([key])] = structuredClone(value)
   }
@@ -145,6 +145,7 @@ export function restoreComponentElementEdits(project: CourseProjectV10, instance
       }
     }
     else if (root === 'visibility') edits.push({ type: 'instance.patch', instanceId, patch: { visibility: value === undefined ? null : value as NonNullable<typeof instance.visibility> } })
+    else if (root === 'stateBindings') edits.push({ type: 'instance.patch', instanceId, patch: { stateBindings: value === undefined ? null : value as NonNullable<typeof instance.stateBindings> } })
     else if (root === 'attachments') edits.push({ type: 'attachments.set', instanceId, attachments: value as NonNullable<typeof instance.attachments> })
     else if (root === 'name') edits.push({ type: 'instance.patch', instanceId, patch: { name: value === undefined ? null : String(value) } })
     else if (root === 'viewportPinned') edits.push({ type: 'instance.patch', instanceId, patch: { viewportPinned: value === undefined ? null : value as boolean } })

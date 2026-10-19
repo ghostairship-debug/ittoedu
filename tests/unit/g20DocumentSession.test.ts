@@ -235,6 +235,43 @@ describe('G20 S02/S03 authoritative document session', () => {
     expect(registry.list()).toHaveLength(1)
     await registry.close(a.documentId, { discardDirty: true })
     expect(registry.list()).toHaveLength(0)
+    expect(persistence.states.at(-1)).toMatchObject({ schemaVersion: 2, disposition: 'discarded', revision: 1 })
+    const reopened = await registry.open(binding, async () => md('disk'))
+    expect(reopened.documentId).not.toBe(a.documentId)
+    expect(reopened.read()).toMatchObject({ undoDepth: 0, model: { source: 'disk' } })
+  })
+
+  it('keeps the Session and registry live until terminal persistence acknowledges close', async () => {
+    const persistence = memoryPersistence()
+    let next = 0, fail = true, closed = 0
+    const registry = new DocumentRegistry({ persistence: persistence.port, drivers: [createMarkdownDriver()], createId: () => `close-${++next}`, bindingKey: binding => binding.path })
+    const session = await registry.open({ kind: 'file', path: 'close.md', bindingVersion: 1, version: 'disk' }, async () => md('disk'))
+    persistence.port.finalize = async (state, disposition) => {
+      expect(registry.has(session.documentId)).toBe(true)
+      expect(closed).toBe(0)
+      if (fail) throw new Error('terminal write failed')
+      await persistence.port.append({ ...state, schemaVersion: 2, disposition, sequence: state.sequence + 1 })
+    }
+    session.subscribe(event => { if (event.type === 'closed') closed++ })
+    await expect(registry.close(session.documentId)).rejects.toThrow('terminal write failed')
+    expect(registry.get(session.documentId)).toBe(session)
+    expect(await session.execute(operation(session, 'after-failed-close', 'still editable'))).toMatchObject({ status: 'applied' })
+    fail = false
+    await registry.close(session.documentId, { discardDirty: true })
+    expect(closed).toBe(1)
+    expect(persistence.states.at(-1)).toMatchObject({ disposition: 'discarded', revision: 1 })
+  })
+
+  it('ends a clean revision as closed and rejects terminal states as restore inputs', async () => {
+    const persistence = memoryPersistence()
+    const session = await DocumentSession.create({ documentId: 'clean-close', epoch: 'initial', model: md('saved'),
+      binding: { kind: 'untitled', suggestedName: 'saved.md' }, saved: true }, createMarkdownDriver(), persistence.port)
+    await session.close()
+    const terminal = persistence.states.at(-1)!
+    expect(terminal).toMatchObject({ schemaVersion: 2, disposition: 'closed', sequence: 1, revision: 0, savedRevision: 0 })
+    await session.stopRun('stopped-after-close')
+    expect(persistence.states.at(-1)).toEqual(terminal)
+    await expect(DocumentSession.restore(terminal, 'restart', createMarkdownDriver(), persistence.port)).rejects.toThrow('终态')
   })
 
   it('S02 close barrier cannot discard an edit committed while a clean document is closing', async () => {

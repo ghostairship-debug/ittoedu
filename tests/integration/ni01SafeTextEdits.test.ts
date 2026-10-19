@@ -291,6 +291,7 @@ it('applies public source.from through the real authorized closure and current s
     const handle = await gateway.issueTarget('source-from', h.session.documentId, h.target)
     const apply = (from: string) => gateway.execute('source-from', randomUUID(), { name: 'object.update', input: { target: handle,
       properties: { implementation: { kind: 'source', from } } } })
+    await fs.rm(entry); await fs.rm(helper)
     expect(await apply('entry.js')).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     const model = h.model(), implementation = model.project.instances.a.implementationOverride
     if (implementation?.kind !== 'source' || !implementation.workspace) throw new Error('Expected admitted source workspace')
@@ -309,6 +310,34 @@ it('applies public source.from through the real authorized closure and current s
     if (!path.resolve(scratch).startsWith(`${scratchBase}${path.sep}`)) throw new Error('Unexpected temporary source root')
     await fs.rm(scratch, { recursive: true, force: true })
   }
+})
+
+it('adopts a delegated source group through public source.from and preserves repair diagnostics', async () => {
+  const h = await fixture('text', [], 0, 0, 'object')
+  const files: Record<string, string> = { 'entry.js': 'import { value } from "./helper.js"; export { value }', 'helper.js': 'export const value = 17' }
+  const gateway = new DocumentToolGateway(h.registry, [h.driver], randomUUID, {
+    services: { jobs: { status: async () => ({ kind: 'delegation', terminal: true, snapshot: { status: 'ready', stopped: false,
+      artifacts: Object.keys(files).map(name => ({ name, digest: name, byteLength: files[name].length })) } }) as never,
+      wait: async () => { throw new Error('unused') }, logs: async () => null, cancel: async () => { throw new Error('unused') } },
+    delegation: { availability: () => ({ ready: true, reason: '' }), startManaged: async () => { throw new Error('unused') },
+      readArtifact: async (_run, _job, name) => ({ artifact: { name, digest: name, byteLength: files[name].length }, bytes: new TextEncoder().encode(files[name]) }),
+      cancel: async () => { throw new Error('unused') }, cancelRun: async () => {} } },
+    componentContent: { apply: async () => { throw new Error('must use canonical source writer') },
+      source: async () => { throw new Error('artifact group must not be treated as a disk path') },
+      prepareSource: async (input, file, intent) => { input.diagnostics = [{ level: 'warning', code: 'source-repairable', message: '保留可修源码', reference: 'entry.js' }]
+        return prepareComponentProjectFileSource(input, file, intent) } },
+  })
+  await gateway.beginRun({ runId: 'group', actor: 'agent', documents: [{ documentId: h.session.documentId, writable: [h.target] }],
+    fileAccess: { workspaceRoot: path.resolve('.'), permission: 'full' } })
+  const target = await gateway.issueTarget('group', h.session.documentId, h.target)
+  expect(await gateway.execute('group', randomUUID(), { name: 'object.update', input: { target,
+    properties: { implementation: { kind: 'source', from: 'delegate-job@entry.js' } } } }))
+    .toMatchObject({ kind: 'document-operation', result: { status: 'applied' }, advisories: [{ code: 'html-import-warning', message: 'source-repairable: 保留可修源码 (entry.js)' }] })
+  const implementation = h.model().project.instances.a.implementationOverride
+  if (implementation?.kind !== 'source' || !implementation.workspace) throw new Error('Expected source workspace')
+  const admitted = h.model().resources.components[implementation.workspace.ownerId]
+  expect(new TextDecoder().decode(admitted['helper.js'])).toBe(files['helper.js'])
+  expect(h.session.read().undoDepth).toBe(1)
 })
 
 it('captures the editor table caption before its visible cells and never rewrites the unselected cell suffix', async () => {

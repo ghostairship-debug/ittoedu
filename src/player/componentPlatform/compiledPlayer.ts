@@ -1,5 +1,5 @@
 import {allDocumentTextSlots,inlineComponentIds,documentInlineChildIds} from '../../shared/document/textInteraction'
-import {measuredFragmentRootCss} from '../../components/web/measuredFragmentBox'
+import {isMeasuredWebFragmentBox,measuredFragmentRootCss} from '../../components/web/measuredFragmentBox'
 import {restorePublishedWebMarkup} from '../../core/publish/componentPlatform/compactWebStyles'
 import type {CompiledCoursePlayback} from '../../core/publish/componentPlatform/compiledContract'
 import {compiledViewSignature,compiledProgramSignature} from '../../core/publish/componentPlatform/compiledContract'
@@ -10,6 +10,7 @@ import {ComponentNavigationOwner} from '../../renderer/components/ComponentNavig
 import {createCompiledContentEnvironment} from './compiledContentEnvironment'
 import {PlaybackViewSession,createPlaybackContent} from '../playbackViewSession'
 import {resolveComponentOuterPresentation} from '../../shared/componentPresentation'
+import {applyComponentBackgroundPaint} from '../../shared/componentBackgroundPaint'
 import {applyComponentPaintStyle} from '../components/componentPlacementStyle'
 import {createComponentSpatialCameraPort,componentSpatialCameraMatrix,type ComponentSpatialCameraPort} from '../surfaces/spatial/componentSpatialAdapter'
 import {bindSpatialInput} from './spatialInput'
@@ -27,6 +28,7 @@ import {createDomAuthoring} from '../../components/web/authoringDom'
 import {DomTextOverrides} from '../lightEdit/domTextOverrides'
 import type {WebRuntimeData} from '../../components/web/moduleGraph'
 import {createPlaybackNavigationContent,mountPlaybackNavigationChrome} from './playbackNavigationChrome'
+import {componentFragmentStateKey,createComponentFragmentProjection} from './fragments'
 
 interface SurfaceView {root:HTMLElement;host:HTMLElement;content:HTMLElement;view:PlaybackViewSession;camera?:ComponentSpatialCameraPort;off:()=>void;toc?:ReturnType<typeof mountComponentFlowToc>}
 type Factory=(globals:Record<string,unknown>)=>Record<string,any>|Promise<Record<string,any>>
@@ -92,10 +94,15 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
   return{refresh,dispose(){author.dispose();pageText?.destroy()}}
  }
  const nativeSnapshots=():SandboxRuntimeSnapshots=>({state:()=>world.stateSnapshot(),targets:profile=>world.targetSnapshots(profile),teacherController:teacher,authorHtml:sourceAuthorHtml,themeCss:()=>world.themeCss(),resources:()=>({...assetUrls,...world.resourceUrls()}),connectOrigins:()=>original.logic?.network?.connectOrigins??[]})
+ const connectFragments=(context:import('../../shared/contracts/component-platform').ComponentRuntimeContext,root:HTMLElement)=>{
+  const key=componentFragmentStateKey(context.instance.id),projection=createComponentFragmentProjection(root,()=>context.scope.state.get(key),()=>context.layout?.read().mode==='flow-content')
+  context.scope.cleanup(context.scope.state.subscribe(key,projection.apply));context.scope.cleanup(projection.dispose)
+  if(context.layout)context.scope.cleanup(context.layout.subscribe(projection.apply))
+ }
  world=new ComponentRuntimeWorld(`compiled:${artifact.id}`,{mode:'play',authoring:false,readInstanceData:instance=>{const program=webEntry(instance)?.program;if(program?.nativeData)return nativeInstance(instance).data;const source=program?.semanticData;return source?{...currentWebData(source.data,instance),html:replaceAssets(restorePublishedWebMarkup(source.data.html,source.declarations,dom),instance),css:source.data.css&&replaceAssets(source.data.css,instance)} as any:instance.data},fixedViewport:instance=>webEntry(instance)?.program.fixedViewport,teacherController:teacher,studentNavigation:navigation,builtins,report,fontFaceCss:options.fontFaceCss,resolveAssetUrl:id=>assetUrls[id],
   resolveSource:async(implementation,signal)=>{
    const key=implementation.source??'',factory=sourceFactories.get(key)
-   if(factory)return{implementation:{mount:async context=>{
+   if(factory){let webDocument=false;return{isWebDocument:()=>webDocument,implementation:{mount:async context=>{
     const env=createCompiledContentEnvironment(context,{html:'',css:[world.courseThemeCss(),replaceAssets(artifact.sourceStyles[key]??'',context.instance)].join('\n')});context.scope.cleanup(env.dispose)
     try{
      const pending=factory(env.globals)
@@ -108,12 +115,14 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
      if(!module||!context.scope.isActive())return{update(){},dispose(){}}
      const source=module.default??module
      if(typeof source.mount!=='function')throw new Error('局部程序没有 Component API5 mount')
+     webDocument=source.document==='web'
      const mounting=Promise.resolve(source.mount({...context,root:context.root?env.root:undefined})) as Promise<MountedComponent>
      const [mounted]=await Promise.all([waitForSourceValue(mounting,context.scope.signal,async value=>{try{await value.dispose()}catch(error){report(`组件 ${context.instance.id} 退役清理失败：${String(error)}`)}}),env.initialize([])])
      // Early values remain Host-owned, including its API5 validation and the
      // original mounted receiver. Only an aborted wait returns the empty lease.
      if(context.scope.signal.aborted&&mounted===undefined)return{update(){},dispose(){}}
      if(!mounted||typeof mounted.update!=='function'||typeof mounted.dispose!=='function')return mounted as MountedComponent
+     if(webDocument&&context.root)connectFragments(context,env.root)
      let current=context.instance
      const author=context.root?authorContent(env.root,()=>current,sourceAuthorHtml(current)!==undefined,env.root.parentElement??env.root):undefined
      if(author){context.scope.cleanup(author.dispose);context.scope.cleanup(context.scope.events.subscribe('__runtime.resources',author.refresh))}
@@ -122,20 +131,21 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
       suspend:mounted.suspend?()=>mounted.suspend!():undefined,resume:mounted.resume?()=>mounted.resume!():undefined,
       dispose:async()=>{author?.dispose();await mounted.dispose()}}
     }catch(error){env.dispose();throw error}
-   }}}
+   }}}}
    const source=artifact.nativeSources?.[implementation.source??'']
    if(!source)throw new Error('此局部程序尚未成功编译；原源码保留在作者工程，详见交付诊断')
    return preparePublishedNativeComponent({format:'esm',code:source.code,css:replaceAssets(source.css),diagnostics:[]},signal,{...nativeSnapshots(),resourceBindings:implementation.resourceBindings,webInstance:value=>hasWebContentData(value.data)?resolveWebResourceBindings(value,id=>world.contentAssetUrl(id)??assetUrls[id],report,implementation.resourceBindings):value})
   },
   resolveBuiltin:async(_key,signal,instance)=>{
    if(webEntry(instance)?.program.nativeData)return preparePublishedNativeComponent({format:'esm',code:webContentRealmSource(),css:'',diagnostics:[]},signal,{...nativeSnapshots(),builtinKey:_key,instance:nativeInstance,nativeDocument:true})
-   return{implementation:{mount:async context=>{
+   return{isWebDocument:()=>true,implementation:{mount:async context=>{
    const entry=webFactories.get(instance.id)?.find(value=>value.signature===compiledProgramSignature(context.instance))
    if(!entry)throw new Error('该状态的 Web 程序未编译；原件保留在作者工程')
    let current=context.instance
    const projected=resolveWebResourceBindings({...current,data:{...currentWebData(entry.program.semanticData!.data,current),html:replaceDeliveryAssets(restorePublishedWebMarkup(entry.program.html,entry.program.declarations,dom)),css:replaceDeliveryAssets(entry.program.css)} as any},id=>world.contentAssetUrl(id)??assetUrls[id],report).data as unknown as WebRuntimeData
-   const env=createCompiledContentEnvironment(context,{html:projected.html,css:[world.courseThemeCss(),replaceDeliveryAssets(entry.program.css)].join('\n'),cssResourceBindings:webBindings(current)});if(entry.program.fragment&&context.instance.frame){const element=[...env.root.children].find(node=>!['style','script','template'].includes(node.localName));if(element){element.setAttribute('data-guoling-measured-root','');const normalizer=dom.createElement('style');normalizer.textContent=measuredFragmentRootCss('[data-guoling-measured-root]',context.layout?.read().mode==='flow-content');env.root.prepend(normalizer)}}context.scope.cleanup(env.dispose);await env.initialize(entry.factories,{classicPrograms:entry.classicPrograms,handlerFactories:entry.handlerFactories})
+   const env=createCompiledContentEnvironment(context,{html:projected.html,css:[world.courseThemeCss(),replaceDeliveryAssets(entry.program.css)].join('\n'),cssResourceBindings:webBindings(current)});if(isMeasuredWebFragmentBox(context.instance,entry.program.fragment?'fragment':'document',undefined,{implementation:{kind:'builtin',key:_key}})){const element=[...env.root.children].find(node=>!['style','script','template'].includes(node.localName));if(element){element.setAttribute('data-guoling-measured-root','');const normalizer=dom.createElement('style');normalizer.textContent=measuredFragmentRootCss('[data-guoling-measured-root]',context.layout?.read().mode==='flow-content');env.root.prepend(normalizer)}}context.scope.cleanup(env.dispose);await env.initialize(entry.factories,{classicPrograms:entry.classicPrograms,handlerFactories:entry.handlerFactories})
    const author=authorContent(env.root,()=>current,true,env.root.parentElement??env.root);context.scope.cleanup(author.dispose)
+   connectFragments(context,env.root)
    const offResources=context.scope.events.subscribe('__runtime.resources',author.refresh)
    return{update(next){current=next;author.refresh()},dispose(){offResources();author.dispose();env.dispose()}}
   }}}
@@ -173,7 +183,7 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
   project=resolveComponentPresentation(original,surfaceId,stateId)
   for(const [id,view]of views){view.root.hidden=id!==surfaceId;view.root.style.display=id===surfaceId?'':'none'}
   const surface=project.surfaces.find(value=>value.id===surfaceId)
-  const background=resolveComponentBackground(project,surface),url=background.assetId&&assetUrls[background.assetId];Object.assign(shell.style,{backgroundColor:background.color,backgroundImage:url?`url(${JSON.stringify(url)})`:'none',backgroundSize:background.fit==='fill'?'100% 100%':background.fit,backgroundPosition:'center',backgroundRepeat:'no-repeat'})
+  applyComponentBackgroundPaint(shell,resolveComponentBackground(project,surface),id=>assetUrls[id])
   const currentInline=new Set(Object.values(project.instances).flatMap(owner=>allDocumentTextSlots(owner.data).flatMap(slot=>inlineComponentIds(slot.content)).concat(documentInlineChildIds(original,owner.id).filter(id=>!project.instances[id]?.frame&&!project.instances[id]?.flowPlacement)).filter(id=>owner.childIds?.includes(id))))
   for(const [id,node]of targets){if(currentInline.has(id)){node.style.display='none';continue}node.style.display='';if(previousInline.has(id)){world.bind(id,roots.get(id)!);world.bindTarget(id,node)}const instance=project.instances[id];if(!instance)continue;let owner=owningContainer(project,id);while(owner?.kind==='instance')owner=owningContainer(project,owner.instanceId);if(owner?.kind==='surface'&&owner.surfaceId!==surfaceId)continue
    const content=roots.get(id)!,stage=node.querySelector<HTMLElement>(':scope > [data-compiled-stage]')!,children=stage.querySelector<HTMLElement>(':scope > [data-compiled-children]')!,flow=node.dataset.compiledPlacement==='flow'
@@ -182,7 +192,7 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
    if(presentation.section&&sectionStates.get(id)!==presentation.section.collapsedByDefault){sectionStates.set(id,presentation.section.collapsedByDefault);(stage as HTMLDetailsElement).open=presentation.section.open}
    const variants=artifact.staticViews[id],signature=variants&&compiledViewSignature(instance);if(variants&&signature&&staticSignatures.get(id)!==signature){const markup=variants.find(value=>value.signature===signature)?.html;if(markup!==undefined){for(const child of [...content.childNodes])if(!(child instanceof browser.HTMLElement&&child.dataset.componentInstanceId))child.remove();const template=dom.createElement('template');template.innerHTML=replaceAssets(markup);content.prepend(template.content);staticSignatures.set(id,signature);changedTextRanges.push(id)}}
   }
-  if(surface?.kind==='flow'){const paper=views.get(surface.id)?.content.querySelector<HTMLElement>('[data-compiled-flow-paper]'),background=resolveFlowPaperBackground(project,surface),url=background.assetId&&assetUrls[background.assetId];if(paper)Object.assign(paper.style,{width:flowPaperMaxWidth(surface.flow?.layout??{readingWidth:860,wideContentWidth:1100}),backgroundColor:background.color,backgroundImage:url?`url(${JSON.stringify(url)})`:'none',backgroundSize:background.fit==='fill'?'100% 100%':background.fit,backgroundPosition:'center',backgroundRepeat:'no-repeat'})}
+  if(surface?.kind==='flow'){const paper=views.get(surface.id)?.content.querySelector<HTMLElement>('[data-compiled-flow-paper]');if(paper){paper.style.width=flowPaperMaxWidth(surface.flow?.layout??{readingWidth:860,wideContentWidth:1100});applyComponentBackgroundPaint(paper,resolveFlowPaperBackground(project,surface),id=>assetUrls[id])}}
   // State.order changes display order, while ordinary updates leave it intact.
   // Only move changed layers, parking native roots through the shared World.
   const orderedLayers=new Map<HTMLElement,HTMLElement[]>()
@@ -194,7 +204,7 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
  }
  ready=update();await ready
  await navigation.initializeSpatialPlayback(controller.signal)
- const pointerChrome=mountPlaybackNavigationChrome(hostRoot,navigation,{content:root,report})
+ const pointerChrome=mountPlaybackNavigationChrome(hostRoot,navigation,{content:root,playback:artifact.course.playback,report})
  const navigationTasks=navigation.createKeyTasks(),keys=options.keyboardNavigation===false?undefined:attachComponentPlatformNavigationKeys({root,navigation:navigationTasks,keyboardNavigation:artifact.course.playback?.keyboardNavigation??true,presenter:artifact.course.playback?.presenter??{enabled:true,strategy:'scene-navigation',additionalBindings:[]},onAuthoredCommand:command=>world.dispatchPresenterCommand(command),onError:error=>report(String(error))})
  const observer=typeof browser.ResizeObserver==='function'?new browser.ResizeObserver(relayout):undefined;observer?.observe(root);root.addEventListener('load',relayout,true);root.addEventListener('toggle',relayout,true);void dom.fonts?.ready.then(relayout)
  const offPlacement=teacher.subscribePlacement?.(paintGlobals),offNavigation=teacher.subscribe(paintGlobals)

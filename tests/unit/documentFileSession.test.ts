@@ -31,6 +31,94 @@ async function observeNow(f: Awaited<ReturnType<typeof fixture>>) {
   await (f.session as unknown as { observe(observation: typeof observed): Promise<void> }).observe(observed)
 }
 
+async function conflictRecoveryFixture() {
+  const f = await fixture('A\nkeep\nC')
+  f.session.edit('A local\nkeep\nC local'); await f.session.drain()
+  await fs.writeFile(f.filename, 'A remote\nkeep\nC remote'); await observeNow(f)
+  const hunk = f.session.getSnapshot().conflictHunks[0]!
+  f.session.setConflictDraft(hunk.id, 'teacher manual input')
+  expect(await f.session.preserveDraft()).toBe(true)
+  const recovery = await f.documents.readAuthoringDrafts(f.session.documentId!)
+  const record = recovery!.sourceConflicts![0]!
+  f.session.dispose()
+  return { ...f, recovery: recovery!, record, hunk }
+}
+
+describe('Source conflict raw recovery', () => {
+  it('restores matching source, disk and hunk baseline and claims only after durable possession', async () => {
+    const f = await conflictRecoveryFixture()
+    const claim = vi.spyOn(f.documents, 'claimAuthoringDrafts')
+    const write = vi.spyOn(f.documents, 'writeAuthoringDrafts')
+    const view = new DocumentFileSession(f.ref, f.port); views.push(view); await view.open()
+    expect(view.getSnapshot().conflictDrafts).toEqual({ [f.hunk.id]: 'teacher manual input' })
+    expect(view.getSnapshot().retainedSourceConflicts).toEqual([])
+    expect(claim).toHaveBeenCalledWith(view.documentId, view.committedDocument!.epoch,
+      f.recovery.recoveryRecords!.filter(record => record.kind === 'sourceConflict').map(({ id, digest }) => ({ id, digest })))
+    expect(write).toHaveBeenCalledWith(view.documentId, { retainedRecords: [], sourceConflicts: [expect.objectContaining({ conflictBaseline: f.record.conflictBaseline })] }, view.committedDocument!.epoch)
+    expect(claim.mock.invocationCallOrder[0]).toBeLessThan(write.mock.invocationCallOrder[0]!)
+    expect(view.committedDocument!.model).toMatchObject({ source: f.record.source })
+  })
+
+  it('cold restores matching raw into the new epoch and clears the claimed original when that input is removed', async () => {
+    const f = await conflictRecoveryFixture(), restarted = createMarkdownTestHost(f.journal)
+    const claim = vi.spyOn(restarted.documents, 'claimAuthoringDrafts')
+    const view = new DocumentFileSession(f.ref, { ...f.port, documents: restarted.documents }); views.push(view); await view.open()
+    expect(view.committedDocument!.epoch).not.toBe(f.record.epoch)
+    expect(view.getSnapshot().conflictDrafts).toEqual({ [f.hunk.id]: 'teacher manual input' })
+    expect(claim).toHaveBeenCalledOnce()
+    const owned = await restarted.documents.readAuthoringDrafts(view.documentId!)
+    expect(owned!.sourceConflicts).toHaveLength(1)
+    expect(owned!.sourceConflicts![0]!.epoch).toBe(view.committedDocument!.epoch)
+    view.removeConflictDraft(f.hunk.id); expect(await view.preserveDraft()).toBe(true)
+    expect(await restarted.documents.readAuthoringDrafts(view.documentId!)).toBeNull()
+  })
+
+  it.each(['source', 'diskVersion', 'conflictBaseline', 'legacy'] as const)('retains %s mismatch without restoring offset IDs or claiming it', async field => {
+    const f = await conflictRecoveryFixture()
+    const record = { ...f.record }
+    if (field === 'legacy') delete record.conflictBaseline
+    else record[field] = `${record[field]} changed`
+    vi.spyOn(f.documents, 'readAuthoringDrafts').mockResolvedValue({ advanced: [], properties: [], sourceConflicts: [record],
+      recoveryRecords: [{ id: 'original-id', digest: 'original-digest', ownerDocumentId: record.documentId, kind: 'sourceConflict', value: record }] })
+    const claim = vi.spyOn(f.documents, 'claimAuthoringDrafts')
+    const view = new DocumentFileSession(f.ref, f.port); views.push(view); await view.open()
+    expect(view.getSnapshot().conflictHunks.some(hunk => hunk.id === f.hunk.id)).toBe(true)
+    expect(view.getSnapshot().conflictDrafts).toEqual({})
+    expect(view.getSnapshot().retainedSourceConflicts).toEqual([record])
+    expect(view.getSnapshot().error).toContain('冲突基线')
+    expect(claim).not.toHaveBeenCalled()
+    view.setConflictDraft(f.hunk.id, 'new current input'); expect(await view.preserveDraft()).toBe(true)
+    expect(view.getSnapshot().retainedSourceConflicts).toEqual([record])
+  })
+
+  it('keeps distinct matching candidates visible without silently selecting the last input', async () => {
+    const f = await conflictRecoveryFixture()
+    const other = { ...f.record, hunks: f.record.hunks.map(hunk => ({ ...hunk, text: 'different original input' })) }
+    vi.spyOn(f.documents, 'readAuthoringDrafts').mockResolvedValue({ advanced: [], properties: [], sourceConflicts: [f.record, other] })
+    const claim = vi.spyOn(f.documents, 'claimAuthoringDrafts')
+    const view = new DocumentFileSession(f.ref, f.port); views.push(view); await view.open()
+    expect(view.getSnapshot().conflictDrafts).toEqual({})
+    expect(view.getSnapshot().retainedSourceConflicts).toEqual([f.record, other])
+    expect(view.getSnapshot().error).toContain('多份不同')
+    expect(claim).not.toHaveBeenCalled()
+  })
+
+  it('retains same-epoch rejected raw durably when a remounted editor writes a new hunk draft', async () => {
+    const f = await conflictRecoveryFixture()
+    await fs.writeFile(f.filename, 'A other remote\nkeep\nC other remote')
+    const view = new DocumentFileSession(f.ref, f.port); views.push(view); await view.open()
+    expect(view.committedDocument!.epoch).toBe(f.record.epoch)
+    expect(view.getSnapshot().conflictDrafts).toEqual({})
+    expect(view.getSnapshot().retainedSourceConflicts).toEqual([f.record])
+    view.setConflictDraft(view.getSnapshot().conflictHunks[0]!.id, 'new same-epoch input')
+    expect(await view.preserveDraft()).toBe(true)
+    const retained = await f.documents.readAuthoringDrafts(view.documentId!)
+    expect(retained!.sourceConflicts!.flatMap(candidate => candidate.hunks.map(hunk => hunk.text)))
+      .toEqual(expect.arrayContaining(['teacher manual input', 'new same-epoch input']))
+    expect(retained!.recoveryRecords!.some(candidate => candidate.id === f.recovery.recoveryRecords![0]!.id)).toBe(true)
+  })
+})
+
 describe('Markdown projection on the main document owner', () => {
   it('keeps the save ACK source as merge base when a later disk version arrives before observation', async () => {
     const f = await fixture('A base\nB base\nC base')

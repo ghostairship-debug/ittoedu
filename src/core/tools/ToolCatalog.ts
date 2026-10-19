@@ -6,10 +6,12 @@ import { htmlActionToolRegistrations } from './HtmlActionTools'
 import { pptxImportRegistration } from './CourseImportTools'
 import { workbenchServiceToolCatalog } from './WorkbenchServiceTools'
 import { agentFileRegistrations } from './AgentFileTools'
+import { programmaticToolRegistrations } from './ProgrammaticTools'
 import { skillReadTool, skillListTool } from './SkillTools'
 import { projectFileRegistrations } from './ProjectFileTools'
 import { documentDeliveryTools } from './DocumentDeliveryTools'
 import { viewObserveTool } from './ViewObserveTools'
+import { viewActionToolRegistrations } from './ViewActionTools'
 import bundledSkills from '../../shared/generated/bundledSkills.json'
 import { nativeContentInputSchemaByType } from '../../shared/contracts/native-v1/schema'
 import { z } from 'zod'
@@ -17,7 +19,7 @@ import type { ModelToolCall, ToolDefinition, ToolResult } from '../../shared/wor
 import { textFormatInputSchema, objectUpdateInputSchema, objectConvertInputSchema, courseConfigureInputSchema, surfaceConfigureInputSchema, objectStructureInputSchema, objectPlaceInputSchema, objectAuthorInputSchema, interactionUpdateInputSchema, courseLogicInputSchema, courseMediaInputSchema, surfaceRecipeInputSchema, courseProductivityInputSchema, surfaceRemixInputSchema, objectInsertInputSchema, objectLayoutInputSchema, teacherEnsureInputSchema } from './toolSchemas'
 import { coursePresentationInputSchema } from './coursePresentationEdits'
 import { componentFrameSchema } from '../../shared/contracts/component-platform/schema'
-import { handleToolTarget, hasRunDocument, hasRunWrite, projectToolTarget, registeredEffectNames,
+import { handleToolTarget, hasRunDocument, hasRunWrite, hasRunDelivery, projectToolTarget, registeredEffectNames,
   toolRegistrationFor, type ResolvedToolTarget, type RunToolScope, type ToolFamily, type ToolSupportContext, type ToolTargetResolver } from './ToolRegistration'
 export { toolFamilies } from './ToolRegistration'
 export type { RunToolScope, ToolFamily } from './ToolRegistration'
@@ -103,7 +105,7 @@ export const canonicalMutationTools = [
     inputSchema: objectAuthorInputSchema, manual: { label: '专业内容编辑', group: 'edit', targetKinds: ['course-instance'] } },
   { capability: 'write', effect: 'document-edit', family: 'layout', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'object.author', input }) }),
-  registerCanonical({ name: 'interaction.update', description: '编辑页面或全局互动规则：add/update/remove/duplicate；reveal 同时设置依次出现的初始隐藏。节点、页面和命名状态引用可使用已观察句柄；规则和动作新身份由软件生成，更新引用使用已观察 ruleId/动作id。click 可在对象上设置播放声音或跳转页面。命名状态须使用该状态的页面句柄。',
+  registerCanonical({ name: 'interaction.update', description: '编辑页面或全局互动规则：add/update/remove/duplicate；reveal 同时设置依次出现的初始隐藏。节点、页面和命名状态引用可使用已观察句柄；规则和动作新身份由软件生成，更新引用使用已观察 ruleId/动作id。click 可在对象上设置播放声音、跳转已观察页面路径/句柄，或scene.next/scene.previous相对导航（无需value）。命名状态须使用该状态的页面句柄。',
     inputSchema: interactionUpdateInputSchema, manual: { label: '互动与动画', group: 'edit', targetKinds: ['document', 'course-surface', 'course-instance'] } },
   { capability: 'write', effect: 'document-edit', family: 'interaction', supports: context => hasRunWrite(context, ['document', 'course-surface', 'course-instance'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'interaction.update', input }) }),
@@ -131,9 +133,10 @@ export const canonicalMutationTools = [
     inputSchema: surfaceRemixInputSchema, manual: { label: '参考页面改写', group: 'edit', targetKinds: ['course-surface'] } },
   { capability: 'write', effect: 'document-edit', family: 'content', supports: context => hasRunWrite(context, ['document'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'surface.remix', input }) }),
-  registerCanonical({ name: 'object.insert', description: '在已观察页面或容器内插入文字、公式、图形、表格、图表或填空。提供类型、正文及所需位置尺寸，可用 appearance 同次设置文字/公式/图形/表格/图表的初始专业外观，语义同 object.update；省略时保留人工插入默认，input 当前不支持 appearance。软件准备容器、专业数据和身份，正式事务可撤销。Flow destination=document 为正文，paper 为纸张浮层。',
+  registerCanonical({ name: 'object.insert', description: '向已观察页面或容器的目标句柄插入文字、公式、图形、表格、图表或填空；也可提供 project.list/read 返回的已观察页面 path（project可选），target也接受该页面路径。提供类型、正文及所需位置尺寸，可用 appearance 同次设置文字/公式/图形/表格/图表的初始专业外观，语义同 object.update；省略时保留人工插入默认，input 当前不支持 appearance。可用 click:{action,value} 同次绑定正式点击规则；location-go 的 value 沿用已观察目的页句柄或路径，scene.next/scene.previous无需value，audio-play 沿用声音引用，无需先取新对象句柄再设置。软件准备容器、专业数据和身份，并续接本任务已回执的同一目标，无需每个对象重新遍历页面。正式事务可撤销。Flow destination=document 为正文，paper 为纸张浮层。',
     inputSchema: objectInsertInputSchema, manual: { label: '插入专业元素', group: 'edit', targetKinds: ['course-surface', 'course-instance'] } },
-  { capability: 'write', effect: 'document-edit', exposure: 'direct', family: 'content', supports: context => hasRunWrite(context, ['course-surface', 'course-instance'], 'course-v10'), targets: handleToolTarget,
+  { capability: 'write', effect: 'document-edit', exposure: 'direct', family: 'content', supports: context => hasRunWrite(context, ['course-surface', 'course-instance'], 'course-v10'),
+    targets: (input, resolver) => 'target' in input ? handleToolTarget(input, resolver) ?? projectToolTarget({ path: input.target }, resolver) : projectToolTarget(input, resolver),
     handler: (context, input) => context.mutate({ name: 'object.insert', input }) }),
   registerCanonical({ name: 'object.layout', description: '对同页同展示状态的已观察对象做对齐或等距分布。targets 使用对象句柄；软件复用人工世界坐标、父级逆变换与锁定规则，不需计算每个 frame，一次事务可撤销。',
     inputSchema: objectLayoutInputSchema, manual: { label: '对齐与分布', group: 'edit', targetKinds: ['course-instance'] } },
@@ -154,8 +157,8 @@ export const mutationCallSchema = z.discriminatedUnion('name', mutationSchemas)
 export type MutationCall = z.infer<typeof mutationCallSchema>
 export const batchMutationCallSchema = mutationCallSchema
 export type BatchMutationCall = z.infer<typeof batchMutationCallSchema>
-const batchInputSchema = z.object({ operations: z.array(batchMutationCallSchema).min(1) }).strict()
-const batchDescription = '同文档两项及以上普通编辑可放进 batch，一次校验提交与撤销；单项正文请直接调用 text.replace，才能逐步显示生成内容。'
+export const batchInputSchema = z.object({ operations: z.array(batchMutationCallSchema).min(1) }).strict()
+const batchDescription = '同一文档多项普通编辑可用 batch；课件已确定的跨页布局和对象插入成批提交，软件维护身份并一次校验提交与撤销。operations使用当前各工具的实际输入和已观察目标，目标沿本任务ACK续用，不逐对象重新遍历。单项正文直接调用 text.replace 可逐步显示生成内容。'
 const batchEndDescription = '跨文档须分别调用。'
 
 /** A run projects its batch from the same canonical mutation parsers. */
@@ -208,38 +211,20 @@ export const toolFamilyDescriptions: Record<ToolFamily, string> = {
   external: '公开网页搜索与读取、已授权外部 MCP 工具和资源；配置及调用权限以真实回执为准',
 }
 /** Describe only capabilities actually allowed by this run's frozen grant. */
-export function describeToolFamily(family: ToolFamily, allowedNames: readonly string[], scopes: readonly RunToolScope[] = []): string {
-  const has = (name: string) => allowedNames.includes(name)
-  const wide = scopes.some(scope => scope.kind === 'course-v10' && (scope.wholeDocumentWritable || scope.writableTargetKinds.includes('course-surface')))
-  const parts = [toolFamilyDescriptions[family]]
-  if (family === 'content') {
-    parts.push('专业文字、连续正文、公式、表格和图表保持正式数据与人工可编辑语义。图表可把分类、系列和数值共同呈现，正文适合阅读顺序；修改范围以冻结目标为准，不能凭工具名称覆盖范围外内容。')
-    if (has('object.insert')) parts.push('可以把独立文字、图示与专业对象分别放入授权页面，真正耦合的局部模拟或程序保共同源码；软件准备身份和资源，模型决定内容、反馈及合理粒度。具体类型和数据格式在采用时加载。')
-    if (has('asset.use')) parts.push('可复用实际库中的内容及实现，是否已存在所需条目以目录为准；不要把库入口当成所有创意都有预置。')
-    if (has('object.author')) parts.push('正式正文的已选范围可以附可点击注释，选区或光标可以承载行内填空；正文与专业数据仍可人工或AI局部修改，软件维护范围和引用，不把文字换成一张交互截图。')
-  }
-  if (family === 'layout' && has('object.update')) {
-    parts.push('object.update 改专业数据、视觉样式与frame位置尺寸。Slide和Spatial保自由几何／编组／顺序，Flow正文按阅读顺序自排版；普通局部修改不重排整页。实例可沿现源码或参数深改，保正式数据与人工frame，复杂程序不必为每个内部能力增人工面板。')
-    if (wide && has('surface.configure')) parts.push('授权表面可配置背景与布局。全局底层和前景对象分离，背景可以是图、形或局部程序，并按应用／排除范围使用；装饰不抢前景输入，联动用正式事件或共享状态，不能扫描范围外私有DOM。')
-  }
-  if (family === 'navigation') {
-    if (wide && has('presentation.update')) parts.push('场景状态表达作者设计的同场景阶段、分支或选择跳转，可以覆盖对象、顺序和背景并承载动态内容；不是另建一页，也不必枚举每个连续数值。Spatial表达真实空间关系、世界和镜头路径；镜头、页面和状态的实际目标由软件维护。')
-    if (has('presentation.update') || has('course.logic')) parts.push('导航、状态与内容动作按实际授权目标配置，正式播放复用唯一导航owner；例如比较结果后进入对应分支，而非只换按钮颜色。局部权限不能据此增删其他页面或全课规则。')
-    if (has('teacher.ensure')) parts.push('完整教师控制台是按需能力，新作品可用正式键盘、普通按钮／标签或局部程序形成用途合适的路径；现有或人工添加控制台保留。')
-  }
-  if (family === 'interaction' && has('interaction.update')) parts.push('选择、输入、揭示与反馈、状态变化、组件事件和参数可形成有意义操作，按当前专业组件目录复用核心行为、修改文案与画面。连续变量、模拟和游戏适合局部Runtime；复杂动画可用源码／算法／关键帧，普通页过渡可复用快照。仅按钮可点或程序在运行不证明内容结果正确，不宣称尚未交付的具体预置。')
-  if (family === 'media') parts.push('图片、音视频和局部素材按内容选择。真实原作／事件用实际来源，生成与参考图编辑用于合适的创作，不冒充证据；服务是否已配置、支持实际参数和成功均以宿主事实及回执为准，生成候选、应用、保存分别报告。')
-  if (family === 'build') parts.push('交付基于正式当前工程；HTML／ZIP与GLX保存是不同结果。工具成功、已应用、已保存、冷重开及离线运行是不同证据，不把传输结束称作整项用户目标完成。')
-  parts.push('具体schema、API与组件源码按所选表达通过现tools.load或实际目录取得；概览不授予额外权限，也不要求每件作品使用全部能力。')
-  return parts.join(' ')
+export function describeToolFamily(family: ToolFamily, allowedNames: readonly string[], _scopes: readonly RunToolScope[] = []): string {
+  const names = allowedNames.filter(name => toolRegistration(name)?.family === family)
+  return `${toolFamilyDescriptions[family]}。可用工具：${names.join('、')}。具体参数见已加载的工具定义，所需正文、Source与共享API可直接按实际路径读取。`
 }
 export function familyOfTool(name: string): ToolFamily | null { return toolRegistration(name)?.family ?? null }
-export function visibleRunToolNames(allowed: readonly string[], loadedFamilies: ReadonlySet<ToolFamily>): string[] {
+export type InitialToolProfile = 'general' | 'text' | 'content-edit'
+export function visibleRunToolNames(allowed: readonly string[], loadedFamilies: ReadonlySet<ToolFamily>, profile: InitialToolProfile = 'general', loadedNames: ReadonlySet<string> = new Set()): string[] {
+  const core = new Set(['read', 'inspect', 'listChildren', 'text.replace', 'text.format', 'batch', 'file.save',
+    ...(profile === 'content-edit' ? ['project.read', 'project.apply'] : [])])
   const direct = allowed.filter(name => {
     if (name === 'batch') return false
     const registration = toolRegistration(name)
-    return !!registration && (!registration.family || 'exposure' in registration && registration.exposure === 'direct'
-      || loadedFamilies.has(registration.family))
+    return !!registration && (loadedNames.has(name) || registration.family && loadedFamilies.has(registration.family)
+      || (profile === 'general' ? !registration.family || 'exposure' in registration && registration.exposure === 'direct' : core.has(name)))
   })
   const canBatch = allowed.includes('batch') && mutationNamesIn(direct).length > 0
   return allowed.filter(name => direct.includes(name) || name === 'batch' && canBatch)
@@ -248,7 +233,7 @@ const page = { target, state: z.string().min(1).nullable().optional().describe('
 const readableKinds: ToolDefinition['manual']['targetKinds'] = ['document', 'markdown-range', 'html-author-field', 'course-instance', 'text-selection', 'course-surface', 'course-asset']
 /** These callbacks bind the existing Gateway readers, service owners and single batch transaction. */
 export interface GatewayToolHandlers {
-  readTarget(name: 'read' | 'inspect' | 'listChildren', input: { target: string; state?: string | null; cursor?: string; limit?: number }): Promise<ToolResult>
+  readTarget(name: 'read' | 'inspect' | 'listChildren', input: { target: string; detail?: 'semantic' | 'object'; state?: string | null; cursor?: string; limit?: number }): Promise<ToolResult>
   readRecipes(): Promise<ToolResult>
   inspectRemix(input: { target: string }): Promise<ToolResult>
   readSkill(input: unknown): Promise<ToolResult>
@@ -265,10 +250,10 @@ export const gatewayToolRegistrations = [
   registerGateway({ name: 'surface.remix.inspect', description: '读取参考页可替换的正文槽位、原文及局部问题。后续 surface.remix 使用返回的槽位引用，不需提供对象身份或字段路径。', inputSchema: z.object({ target }).strict(), manual: { label: '读取参考页槽位', group: 'read', targetKinds: ['course-surface'] } },
     { capability: 'read', effect: null, family: 'content', supports: context => hasRunDocument(context, 'course-v10'), targets: handleToolTarget,
       handler: (context, input) => context.inspectRemix(input) }),
-  registerGateway({ name: 'read', description: '分页读取目标文字或属性；返回 data.target 是当前内容的新短句柄，后续编辑应使用它。nextCursor 续读仍配原调用的 target；外部修改目标时明确冲突。', inputSchema: z.object(page).strict(), manual: { label: '读取', group: 'read', targetKinds: readableKinds } },
+  registerGateway({ name: 'read', description: '直接读取已知目标的语义正文，省略detail不附工程目录或源码；detail=object显式读取完整目标属性。返回 data.target 对应本次读取的当前基线。nextCursor 续读仍配原调用的 target。本任务已回执的修改由软件续接既有目标，目标未改变、未冲突时不需为每次操作重读或刷新句柄；外部修改仍明确冲突。', inputSchema: z.object({ ...page, detail: z.enum(['semantic', 'object']).optional() }).strict(), manual: { label: '读取', group: 'read', targetKinds: readableKinds } },
     { capability: 'read', effect: null, supports: context => hasRunDocument(context), targets: handleToolTarget,
       handler: (context, input) => context.readTarget('read', input) }),
-  registerGateway({ name: 'inspect', description: '读取目标类型、可用操作及小范围摘要；返回 data.target 是当前内容的新短句柄，后续编辑应使用它；外部修改目标时明确冲突。', inputSchema: z.object({ target, state: page.state }).strict(), manual: { label: '检查目标', group: 'read', targetKinds: readableKinds } },
+  registerGateway({ name: 'inspect', description: '读取目标类型、可用操作及小范围摘要；返回 data.target 对应本次读取的当前基线。本任务已回执的修改由软件续接既有目标，目标未改变、未冲突时不需逐对象重新遍历或刷新句柄；外部修改仍明确冲突。', inputSchema: z.object({ target, state: page.state }).strict(), manual: { label: '检查目标', group: 'read', targetKinds: readableKinds } },
     { capability: 'read', effect: null, supports: context => hasRunDocument(context), targets: handleToolTarget,
       handler: (context, input) => context.readTarget('inspect', input) }),
   registerGateway({ name: 'listChildren', description: '分页列出文档、表面或组件的直接子项，并取得短句柄；写权限仍按冻结目标逐项判定。', inputSchema: z.object(page).strict(), manual: { label: '列出子项', group: 'read', targetKinds: ['document', 'course-surface', 'course-instance'] } },
@@ -281,8 +266,8 @@ export const gatewayToolRegistrations = [
   registerGateway(viewObserveTool, { capability: 'read', effect: null, supports: context => context.observations !== false && hasRunDocument(context, 'course-v10'),
     targets: (input, resolver) => 'target' in input ? handleToolTarget(input, resolver) : projectToolTarget(input, resolver), handler: (context, input) => context.observe(input) }),
   ...documentDeliveryTools.map(tool => registerGateway(tool, {
-    capability: 'save', effect: tool.name === 'file.save' ? 'document-save' : 'document-export', family: tool.name === 'document.export' ? 'build' : null,
-    supports: context => context.deliveries !== false && (tool.name === 'document.export' ? hasRunWrite(context, [], 'course-v10') : hasRunWrite(context)),
+    capability: 'save', effect: tool.name === 'file.save' ? 'document-save' : 'document-export', exposure: 'direct', family: tool.name === 'document.export' ? 'build' : null,
+    supports: context => context.deliveries !== false && hasRunDelivery(context, tool.name === 'document.export' ? 'course-v10' : undefined),
     targets: handleToolTarget, handler: (context, input) => context.deliverDocument(tool.name, input),
   })),
   registerGateway({ name: 'batch', description: batchDescription + batchEndDescription, inputSchema: batchInputSchema, manual: { label: '批量修改', group: 'edit', targetKinds: ['markdown-range', 'html-author-field', 'course-instance', 'text-selection'] } },
@@ -292,8 +277,8 @@ export const gatewayToolRegistrations = [
 export function gatewayToolRegistration(name: string) { return gatewayToolRegistrations.find(tool => tool.name === name) }
 /** One item owns each current tool's parser, support, effects, targets and actual owner handler. */
 export const toolCatalog = [...hostToolCatalog, ...workbenchServiceToolCatalog, ...projectFileRegistrations, ...gatewayToolRegistrations, ...canonicalMutationTools,
-  ...officeToolRegistrations, ...materialToolRegistrations, ...htmlActionToolRegistrations, hostArtifactSaveRegistration, pptxImportRegistration]
-export const toolRegistrations = [...toolCatalog, ...agentFileRegistrations]
+  ...officeToolRegistrations, ...materialToolRegistrations, ...htmlActionToolRegistrations, ...viewActionToolRegistrations, hostArtifactSaveRegistration, pptxImportRegistration]
+export const toolRegistrations = [...toolCatalog, ...agentFileRegistrations, ...programmaticToolRegistrations]
 export function toolRegistration(name: string) { return toolRegistrations.find(tool => tool.name === name) }
 /** Model and MCP schemas are projected from the actual canonical parsers. */
 function describeInput(inputSchema: z.ZodType): Record<string, unknown> {

@@ -88,7 +88,7 @@ export class DocumentFileCoordinator {
 
   readonly aroundMutation: WorkspaceAroundMutation = async (action, perform) => {
     const result = await this.coordinateMutation(action, perform)
-    if (result.status !== 'success' || action.kind !== 'rename' && action.kind !== 'move') return result
+    if (result.status !== 'success' || action.kind !== 'rename' && action.kind !== 'move' && action.kind !== 'trash') return result
     try {
       for (const listener of this.relocationListeners) await listener(action)
       if (action.sources[0]) await fs.rm(this.filename(action.operationId, action.sources[0].resolvedPath), { force: true })
@@ -151,7 +151,6 @@ export class DocumentFileCoordinator {
             ...(entry.after.kind === 'untitled' ? { savedRevision: null } : {}) })
         }
       }
-      if (!choices.includes('unknown') && action.kind === 'trash') await fs.rm(filename, { force: true })
       return result
     })
   }
@@ -209,7 +208,7 @@ export class DocumentFileCoordinator {
         }
       })
       if (pending.size) throw new Error('文件位置尚未确认，已保留相关路径与恢复稿；其他文件可继续使用')
-      if (intent.action && (intent.kind === 'rename' || intent.kind === 'move') && choices.some(choice => choice.physical === 'after')) {
+      if (intent.action && choices.some(choice => choice.physical === 'after')) {
         for (const listener of this.relocationListeners) await listener(intent.action)
       }
       await fs.rm(filename, { force: true }); this.unresolved.delete(filename)

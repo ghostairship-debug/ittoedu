@@ -70,7 +70,7 @@ it('keeps savedRevision separate from a later currentRevision and leaves dirty t
     const before = await host.internalAPI.read(documentId)
     await host.internalAPI.dispatch({ documentId, epoch: before.epoch, operationId: 'human-later', baseRevision: before.revision,
       actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: '# later\n' } } })
-    return { snapshot: await host.internalAPI.read(documentId), savedRevision: saved.savedRevision }
+    return { snapshot: await host.internalAPI.read(documentId), savedRevision: saved.savedRevision, warnings: saved.warnings }
   })
   const result = await service.save({ runId: 'race', operationId: 'save-3', requestDigest: 'd3',
     documentId: document.documentId, epoch: document.epoch, baseRevision: document.revision })

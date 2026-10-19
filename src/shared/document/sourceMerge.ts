@@ -14,28 +14,42 @@ export interface DocumentSourceMerge { base: string; edits: SourceEdit[]; confli
 
 export interface SequenceEdit<T> { from: number; to: number; text: T[] }
 
-/** Bounded Myers diff; reuse an exact unchanged span found by the search to split large edits. */
-export function sequenceSourceEdits<T>(baseCharacters: readonly T[], nextCharacters: readonly T[]): SequenceEdit<T>[] {
-  if (baseCharacters === nextCharacters) return []
-  // Recursive splits share the original arrays instead of copying unchanged content at every anchor.
-  const visit = (baseStart: number, baseEnd: number, nextStart: number, nextEnd: number): SequenceEdit<T>[] => {
+interface IndexedSequence<T> { length: number; at(index: number): T }
+export interface SequenceRangeEdit { from: number; to: number; nextFrom: number; nextTo: number }
+
+/** Keep exact Myers matches for ordinary edits; unresolved complex spans remain lossless replacements. */
+function sequenceRangeEdits<T>(base: IndexedSequence<T>, next: IndexedSequence<T>): SequenceRangeEdit[] {
+  const edits: SequenceRangeEdit[] = []
+  const pending = [{ baseStart: 0, baseEnd: base.length, nextStart: 0, nextEnd: next.length }]
+  // Preserve the first Myers search exactly. Only after distance 512 is exhausted do we
+  // bound frontier expansion during anchor refinement. Unchanged text does not consume
+  // that allowance: a long unchanged body must not hide independent small edits.
+  // This limits precision for complex changes, never the accepted content or source size.
+  let work = Infinity
+  while (pending.length) {
+    const { baseStart, baseEnd, nextStart, nextEnd } = pending.pop()!
     const baseLength = baseEnd - baseStart, nextLength = nextEnd - nextStart
     const trace: Map<number, number>[] = [], frontier = new Map<number, number>([[1, 0]])
     const maximum = Math.min(baseLength + nextLength, 512)
     let anchor: { from: number; nextFrom: number; length: number } | undefined
-    for (let distance = 0; distance <= maximum; distance++) {
+    let solved = false
+    search: for (let distance = 0; distance <= maximum; distance++) {
       trace.push(new Map(frontier))
       for (let diagonal = -distance; diagonal <= distance; diagonal += 2) {
+        if (--work < 0) break search
         let x = diagonal === -distance || (diagonal !== distance && (frontier.get(diagonal - 1) ?? -1) < (frontier.get(diagonal + 1) ?? -1))
           ? frontier.get(diagonal + 1) ?? 0 : (frontier.get(diagonal - 1) ?? 0) + 1
         let y = x - diagonal
         const startX = x, startY = y
-        while (x < baseLength && y < nextLength && baseCharacters[baseStart + x] === nextCharacters[nextStart + y]) { x++; y++ }
+        while (x < baseLength && y < nextLength) {
+          if (base.at(baseStart + x) !== next.at(nextStart + y)) break
+          x++; y++
+        }
         if (x - startX > (anchor?.length ?? 1) && startX > 0 && startY > 0
           && x < baseLength && y < nextLength) anchor = { from: startX, nextFrom: startY, length: x - startX }
         frontier.set(diagonal, x)
         if (x < baseLength || y < nextLength) continue
-        const reversed: ({ kind: 'same'; length: number } | { kind: 'insert' | 'delete'; text: T })[] = []
+        const reversed: { kind: 'same' | 'insert' | 'delete'; length: number }[] = []
         for (let d = distance; d >= 0; d--) {
           const previous = trace[d]!, k = x - y
           const previousK = k === -d || (k !== d && (previous.get(k - 1) ?? -1) < (previous.get(k + 1) ?? -1)) ? k + 1 : k - 1
@@ -43,46 +57,94 @@ export function sequenceSourceEdits<T>(baseCharacters: readonly T[], nextCharact
           const length = Math.min(x - previousX, y - previousY)
           if (length > 0) { reversed.push({ kind: 'same', length }); x -= length; y -= length }
           if (d === 0) break
-          if (x === previousX) { reversed.push({ kind: 'insert', text: nextCharacters[nextStart + y - 1]! }); y-- }
-          else { reversed.push({ kind: 'delete', text: baseCharacters[baseStart + x - 1]! }); x-- }
+          if (x === previousX) { reversed.push({ kind: 'insert', length: 1 }); y-- }
+          else { reversed.push({ kind: 'delete', length: 1 }); x-- }
         }
-        const edits: SequenceEdit<T>[] = []
-        let offset = 0, pending: SequenceEdit<T> | undefined
+        let offset = baseStart, nextOffset = nextStart, edit: SequenceRangeEdit | undefined
         for (const operation of reversed.reverse()) {
-          if (operation.kind === 'same') { if (pending) { edits.push(pending); pending = undefined }; offset += operation.length }
+          if (operation.kind === 'same') {
+            if (edit) { edits.push(edit); edit = undefined }
+            offset += operation.length; nextOffset += operation.length
+          }
           else {
-            pending ??= { from: offset, to: offset, text: [] }
-            if (operation.kind === 'delete') { offset++; pending.to = offset }
-            else pending.text.push(operation.text)
+            edit ??= { from: offset, to: offset, nextFrom: nextOffset, nextTo: nextOffset }
+            if (operation.kind === 'delete') { offset++; edit.to = offset }
+            else { nextOffset++; edit.nextTo = nextOffset }
           }
         }
-        if (pending) edits.push(pending)
-        return edits
+        if (edit) edits.push(edit)
+        solved = true
+        break search
       }
     }
+    if (solved) continue
+    if (work === Infinity) work = 2 * 512 * 512
     if (anchor) {
       const end = anchor.from + anchor.length, nextSpanEnd = anchor.nextFrom + anchor.length
-      // The exhausted search is no longer needed while its two subranges are visited.
-      trace.length = 0; frontier.clear()
-      return [
-        ...visit(baseStart, baseStart + anchor.from, nextStart, nextStart + anchor.nextFrom),
-        ...visit(baseStart + end, baseEnd, nextStart + nextSpanEnd, nextEnd).map(edit => ({ ...edit, from: edit.from + end, to: edit.to + end })),
-      ]
+      // LIFO visits the left range first, preserving the old matching order without recursion.
+      pending.push({ baseStart: baseStart + end, baseEnd, nextStart: nextStart + nextSpanEnd, nextEnd },
+        { baseStart, baseEnd: baseStart + anchor.from, nextStart, nextEnd: nextStart + anchor.nextFrom })
+      continue
     }
     let from = 0, to = baseLength, finish = nextLength
-    while (from < to && from < finish && baseCharacters[baseStart + from] === nextCharacters[nextStart + from]) from++
-    while (to > from && finish > from && baseCharacters[baseStart + to - 1] === nextCharacters[nextStart + finish - 1]) { to--; finish-- }
-    return from === to && from === finish ? [] : [{ from, to, text: nextCharacters.slice(nextStart + from, nextStart + finish) }]
+    while (from < to && from < finish && base.at(baseStart + from) === next.at(nextStart + from)) from++
+    while (to > from && finish > from && base.at(baseStart + to - 1) === next.at(nextStart + finish - 1)) { to--; finish-- }
+    if (from !== to || from !== finish) edits.push({ from: baseStart + from, to: baseStart + to, nextFrom: nextStart + from, nextTo: nextStart + finish })
   }
-  return visit(0, baseCharacters.length, 0, nextCharacters.length)
+  return edits
+}
+
+/** Bounded Myers diff; exact unchanged anchors keep independently edited spans separate. */
+export function sequenceSourceEditRanges<T>(base: ArrayLike<T>, next: ArrayLike<T>): SequenceRangeEdit[] {
+  if (base === next) return []
+  return sequenceRangeEdits({ length: base.length, at: index => base[index]! }, { length: next.length, at: index => next[index]! })
+}
+
+export function sequenceSourceEdits<T>(baseCharacters: readonly T[], nextCharacters: readonly T[]): SequenceEdit<T>[] {
+  return sequenceSourceEditRanges(baseCharacters, nextCharacters)
+    .map(edit => ({ from: edit.from, to: edit.to, text: nextCharacters.slice(edit.nextFrom, edit.nextTo) }))
+}
+
+function splitsSurrogate(source: string, offset: number) {
+  return offset > 0 && source.charCodeAt(offset - 1) >= 0xD800 && source.charCodeAt(offset - 1) <= 0xDBFF
+    && source.charCodeAt(offset) >= 0xDC00 && source.charCodeAt(offset) <= 0xDFFF
+}
+
+/** A receipt needs reversible source bytes, not a fine diff. It must not be used as range-mapping facts. */
+export function documentSourceReplacement(base: string, next: string): SourceEdit | undefined {
+  if (base === next) return
+  let from = 0, to = base.length, finish = next.length
+  while (from < to && from < finish && base[from] === next[from]) from++
+  if (splitsSurrogate(base, from) || splitsSurrogate(next, from)) from--
+  while (to > from && finish > from && base[to - 1] === next[finish - 1]) { to--; finish-- }
+  if (splitsSurrogate(base, to) || splitsSurrogate(next, finish)) { to++; finish++ }
+  return { from, to, text: next.slice(from, finish) }
+}
+
+/** Sparse surrogate positions avoid allocating one array entry for every source character. */
+function scalarSequence(source: string): IndexedSequence<number> & { offset(index: number): number } {
+  const pairs: number[] = []
+  for (let offset = 0; offset < source.length; offset++) {
+    const code = source.charCodeAt(offset)
+    if (code >= 0xD800 && code <= 0xDBFF && splitsSurrogate(source, offset + 1)) {
+      pairs.push(offset - pairs.length); offset++
+    }
+  }
+  const offset = (index: number) => {
+    let from = 0, to = pairs.length
+    while (from < to) { const middle = (from + to) >>> 1; if (pairs[middle]! < index) from = middle + 1; else to = middle }
+    return index + from
+  }
+  return { length: source.length - pairs.length, offset, at: pairs.length
+    ? index => source.codePointAt(offset(index))! : index => source.charCodeAt(index) }
 }
 
 /** Diff Unicode scalars, returning UTF-16 offsets used by source editors. */
 export function documentSourceEdits(base: string, next: string): SourceEdit[] {
   if (base === next) return []
-  const characters = Array.from(base), offsets = [0]
-  for (const character of characters) offsets.push(offsets.at(-1)! + character.length)
-  return sequenceSourceEdits(characters, Array.from(next)).map(edit => ({ from: offsets[edit.from]!, to: offsets[edit.to]!, text: edit.text.join('') }))
+  const before = scalarSequence(base), after = scalarSequence(next)
+  return sequenceRangeEdits(before, after).map(edit => ({ from: before.offset(edit.from), to: before.offset(edit.to),
+    text: next.slice(after.offset(edit.nextFrom), after.offset(edit.nextTo)) }))
 }
 
 function overlaps(a: SourceEdit, b: SourceEdit) {

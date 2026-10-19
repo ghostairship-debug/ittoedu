@@ -14,8 +14,7 @@ import type { HostToolServices } from '../../../../src/core/tools/HostToolServic
 it('looks up a durable original image after its ACK is lost and document detached without another generation or renewed resource authority', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'T09-image-lost-ack-'))
   try {
-    const discardFlowRecovery = vi.fn(async () => undefined)
-    const host = new DocumentHostService(path.join(directory, 'documents'), {}, { discardFlowRecovery })
+    const host = new DocumentHostService(path.join(directory, 'documents'))
     const opened = await host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('Original image owner'),
       resources: { assets: {}, components: {} } }, 'image-owner.glx')
     const original = await host.internalAPI.read(opened.documentId)
@@ -51,8 +50,7 @@ it('looks up a durable original image after its ACK is lost and document detache
     expect(await host.internalAPI.read(opened.documentId)).toEqual(original)
     await host.tools.stopRunDocument(grant.runId, opened.documentId)
     await host.operate({ type: 'close', documentId: opened.documentId, discardDirty: true })
-    expect(discardFlowRecovery).toHaveBeenCalledWith({ projectId: original.model.kind === 'course-v10' ? original.model.project.id : '',
-      projectPath: null, epoch: original.epoch })
+    expect(host.registry.has(opened.documentId)).toBe(false)
     await host.tools.stop(grant.runId)
     const lookup = await host.tools.lookup(grant.runId, 'original-call', call)
     expect(lookup, JSON.stringify(lookup)).toMatchObject({ kind: 'read', data: { job: originalJob, documentId: opened.documentId, status: 'ready',

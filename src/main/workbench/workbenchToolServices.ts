@@ -1,18 +1,17 @@
 import path from 'node:path'
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import { resolveRendererEntryUrl } from '../rendererEntry'
 import type { BrowserWindow } from 'electron'
 import type { HostToolServices } from '../../core/tools/HostToolServices'
 import { artifactDeliverySource } from '../../core/tools/HostArtifactTools'
 import type { ToolRunGrant } from '../../shared/workbench/tools'
-import { isSourceDocumentModel } from '../../shared/workbench/document'
 import type { AgentFileContext } from '../../core/tools/AgentFileTools'
 import { AgentFileOutcomeUnknown } from '../../core/tools/AgentFileTools'
 import { materialListSchema } from '../../core/tools/MaterialTools'
 import { dispatchMaterialTool, readMaterialImageSource } from './execution/MaterialReadTools'
 import { attachmentsDesktopService } from './attachments/attachmentsDesktopService'
-import type { ExportBuildReply, ExportBuildProgress, PreparedTaskSource } from '../../shared/workbench/toolPorts'
+import type { ExportBuildReply, ExportBuildProgress } from '../../shared/workbench/toolPorts'
 import type { ModelConnectionSnapshot } from '../../shared/workbench/modelProvider'
 import { IPC_CHANNELS } from '../../shared/ipcTypes'
 import { documentHost } from './documentHost'
@@ -22,6 +21,7 @@ import bundledSkills from '../../shared/generated/bundledSkills.json'
 import { createProjectFileServices } from './projectFiles/projectFileServices'
 import { ViewObservationService } from './observation/ViewObservationService'
 import { ViewObservationDesktopService } from './observation/ViewObservationDesktopService'
+import type { PublishedActionPreviewPort } from './observation/HtmlActionService'
 import { ObservationImageStore } from './observation/ObservationImageStore'
 import { DocumentDeliveryService } from './delivery/DocumentDeliveryService'
 import { ExecutionRunStore } from './execution/ExecutionRunStore'
@@ -42,6 +42,8 @@ import { BrowserActionApprovals, type BrowserActionApproval, type BrowserTaskAct
 import { MediaCapabilityService } from './media/MediaCapabilityService'
 import { DelegationJobService } from './delegation/DelegationJobService'
 import { ReadonlyTaskRunner } from './delegation/ReadonlyTaskRunner'
+import { NativeTaskRunner, type NativeExecutionEnginePort } from './delegation/NativeTaskRunner'
+import { freezeTaskInputs, freezeComputeInputs } from './delegation/freezeTaskInputs'
 import { OpenAIChatProvider } from './providers/OpenAIChatProvider'
 import { ChatGPTResponsesProvider, OpenAIResponsesProvider } from './providers/ChatGPTResponsesProvider'
 import { AnthropicMessagesProvider } from './providers/AnthropicMessagesProvider'
@@ -71,9 +73,19 @@ let exportPort: DocumentExportPort | undefined
 let exportOwnerId: number | undefined
 let headlessExportWorker: HeadlessDocumentExportWorker | undefined
 let htmlActionServices: ReturnType<typeof createHtmlActionServices> | undefined
+let publishedViewService: ViewObservationDesktopService | undefined
 let htmlActionOptions: Parameters<typeof createHtmlActionServices>[0] | undefined
 let pptxImportProducer: PptxCourseImportProducer | undefined
 let computeBackend: PyodideComputeBackend | undefined
+let nativeExecutionEngine: NativeExecutionEnginePort | undefined
+let delegationService: DelegationJobService | undefined
+/** User controls and model tools share the existing job lifecycle. */
+export function workbenchDelegationService(): DelegationJobService {
+  if (!delegationService) throw new Error('子任务服务尚未安装')
+  return delegationService
+}
+/** Composition injects the same Engine used for the parent conversation. */
+export function setWorkbenchNativeExecution(engine: NativeExecutionEnginePort): void { nativeExecutionEngine = engine }
 export function setWorkbenchHtmlPreview(live: HtmlPreviewService): void {
   if (!htmlActionOptions) throw new Error('HTML 页面操作服务尚未安装')
   htmlActionOptions.live = live
@@ -82,7 +94,10 @@ export function workbenchHtmlActions() {
   if (!htmlActionServices) throw new Error('HTML 页面操作服务尚未安装')
   return htmlActionServices.actions
 }
-export function releaseWorkbenchHtmlDocument(documentId: string): void { htmlActionServices?.preview.releaseDocument(documentId) }
+export function releaseWorkbenchHtmlDocument(documentId: string): void {
+  htmlActionServices?.preview.releaseDocument(documentId)
+  publishedViewService?.releaseDocument(documentId)
+}
 export function acceptWorkbenchExportBuildReply(reply: ExportBuildReply, senderId: number): boolean {
   return exportPort?.accept(reply, senderId) ?? false
 }
@@ -95,6 +110,7 @@ export function disposeWorkbenchExportPort(): void {
 export function disposeHeadlessWorkbenchWorkers(): void {
   headlessExportWorker?.dispose(); headlessExportWorker = undefined
   htmlActionServices?.dispose(); htmlActionServices = undefined; htmlActionOptions = undefined
+  publishedViewService?.dispose(); publishedViewService = undefined
   pptxImportProducer?.dispose(); pptxImportProducer = undefined
   computeBackend?.dispose(); computeBackend = undefined
 }
@@ -168,8 +184,26 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   if (installed) return
   const host = documentHost(), directory = path.join(app.getPath('userData'), 'workbench-v2')
   htmlActionOptions = { readDocument: documentId => host.registry.get(documentId).drain(),
+    taskTargetContext: runId => delegationService?.targetContextForRun(runId) ?? Promise.resolve(null),
     agentBundlePath: path.join(app.getAppPath(), 'dist-renderer', 'html-preview-agent.iife.js') }
-  htmlActionServices = createHtmlActionServices(htmlActionOptions)
+  const observationImages = new ObservationImageStore()
+  const publishedOwner = () => {
+    if (!publishedViewService) {
+      const entry = context.getRendererEntryUrl()
+      if (!entry) throw new Error('当前没有可用的页面观察入口')
+      publishedViewService = new ViewObservationDesktopService({ rendererEntryUrl: entry, compilation: host.compilation,
+        snapshot: documentId => host.registry.get(documentId).drain() })
+    }
+    return publishedViewService
+  }
+  const published: PublishedActionPreviewPort = {
+    contextForTarget: input => publishedOwner().contextForTarget(input),
+    currentContext: input => publishedOwner().currentContext(input),
+    readState: input => publishedOwner().readState(input),
+    releaseContext: input => publishedViewService?.releaseContext(input),
+    releaseRun: runId => publishedViewService?.releaseRun(runId),
+  }
+  htmlActionServices = createHtmlActionServices(htmlActionOptions, { images: observationImages, published })
   if (context.headless) {
     const entry = context.getRendererEntryUrl()
     if (!entry) throw new Error('后台导出资源入口不可用')
@@ -200,7 +234,9 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   const parentRuns = new ExecutionRunStore(path.join(directory, 'runs'))
   const delegation = new DelegationJobService({ directory: path.join(directory, 'delegation', 'jobs'),
     copyRootBase: path.join(directory, 'delegation', 'copies'), readonlyRunner: new ReadonlyTaskRunner({ provider: readonlyProvider,
-      parentSelection: async runId => (await parentRuns.read(runId))?.input.selection ?? null }) })
+      parentSelection: async runId => (await parentRuns.read(runId))?.input.selection ?? null }),
+    nativeRunner: new NativeTaskRunner({ engine: () => nativeExecutionEngine }) })
+  delegationService = delegation
   // The installed Codex CLI rejected both real command and patch writes. An operator must
   // verify an actual authorized copy write before enabling product-paid delegation.
   const delegationWriteVerified = process.env.GUOLING_CODEX_DELEGATION_WRITE_VERIFIED === '1'
@@ -226,9 +262,10 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     } })
   // Speech/video/music have no verified provider adapter in the current connection set.
   const media = new MediaCapabilityService()
-  const observationImages = new ObservationImageStore()
   const observations = new ViewObservationService({
     snapshot: documentId => host.registry.get(documentId).drain(),
+    observeInteractive: ({ runId, identity, snapshot, projectId, signal }) =>
+      htmlActionServices!.actions.observePublished(runId, { identity: { ...identity, projectId }, snapshot, signal }),
     captureIsolated: input => {
       const entry = context.getRendererEntryUrl()
       if (!entry) throw new Error('当前没有可用的画面观察入口')
@@ -367,46 +404,36 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       },
     },
     mediaFiles: { read: async (runId, source) => mediaFileInput(await host.agentFiles.readAuthorizedFile(fileContext(runId), source)) },
-    taskInputs: { freeze: async (runId, sources) => {
-      const inputs: PreparedTaskSource[] = []
-      for (const source of sources) {
-        fileContext(runId).assertActive?.()
-        if (materialIds.get(runId)?.has(source)) {
+    taskInputs: { freeze: async (runId, sources, options = {}) => freezeTaskInputs(sources, {
+      assertActive: () => fileContext(runId).assertActive?.(),
+      isMaterial: source => materialIds.get(runId)?.has(source) === true,
+      material: async (source, signal, modelRepresentation = true) => {
           const attachments = (await attachmentsDesktopService()).attachments
           const ids = materialIds.get(runId)!
-          const read = await dispatchMaterialTool(attachments, ids, 'material.read', {
-            attachmentId: source, representation: 'text', maxChars: 64000 }, deliverySignals.get(runId)?.signal)
-          if ('admittedSourceIds' in read) for (const id of read.admittedSourceIds ?? []) ids.add(id)
-          const snapshot = await attachments.readSnapshot(source)
-          // The readonly worker receives actual prepared ranges and their omissions, never a fabricated full source.
-          const bytes = new TextEncoder().encode(JSON.stringify(read.data))
-          inputs.push({ source, name: path.basename(snapshot.name) + '.txt', mimeType: 'text/plain', bytes,
-            version: createHash('sha256').update(bytes).digest('hex') })
-        } else {
-          const file = await host.agentFiles.readAuthorizedFile(fileContext(runId), source)
-          // FileService retains path authority; the existing input owner drains an opened source before capture.
-          // A dirty source is task input, never an implicit save or a second draft.
-          const opened = await host.readOpenedSource(file.path)
-          inputs.push(opened && isSourceDocumentModel(opened.model)
-            ? { source, name: file.name, mimeType: 'text/plain', bytes: new TextEncoder().encode(opened.model.source),
-              version: `document:${opened.documentId}:${opened.epoch}:${opened.revision}` }
-            : { source, name: file.name, mimeType: 'application/octet-stream', bytes: file.bytes, version: file.version })
-        }
-        fileContext(runId).assertActive?.()
-      }
-      return inputs
-    } },
-    computeInputs: { freeze: async (runId, sources) => {
-      const inputs = await Promise.all(sources.map(async source => {
-        fileContext(runId).assertActive?.()
-        if (!materialIds.get(runId)?.has(source)) return host.agentFiles.readAuthorizedFile(fileContext(runId), source)
-        const original = await (await attachmentsDesktopService()).attachments.readOriginal(source)
-        fileContext(runId).assertActive?.()
-        return { name: original.snapshot.name, bytes: original.bytes }
-      }))
-      if (new Set(inputs.map(input => input.name)).size !== inputs.length) throw new Error('计算输入文件重名；请先选择不同文件名')
-      return inputs.map(({ name, bytes }) => ({ name, bytes }))
-    } },
+          const original = await attachments.readOriginal(source)
+          if (!modelRepresentation) return { name: original.snapshot.name, mimeType: original.snapshot.mediaType,
+            bytes: original.bytes, version: original.snapshot.digest }
+          let representation: string
+          try {
+            const read = await dispatchMaterialTool(attachments, ids, 'material.read', {
+              attachmentId: source, representation: 'text', maxChars: 64000 }, signal ?? deliverySignals.get(runId)?.signal)
+            if ('admittedSourceIds' in read) for (const id of read.admittedSourceIds ?? []) ids.add(id)
+            representation = JSON.stringify(read.data)
+          } catch (error) {
+            signal?.throwIfAborted()
+            // Extraction is a model view; unavailable text must not discard the original.
+            representation = JSON.stringify({ source, name: original.snapshot.name, mediaType: original.snapshot.mediaType,
+              byteLength: original.bytes.byteLength, textUnavailable: error instanceof Error ? error.message : String(error) })
+          }
+          return { name: original.snapshot.name, mimeType: original.snapshot.mediaType, bytes: original.bytes,
+            version: original.snapshot.digest, representation }
+      },
+      authorize: source => host.agentFiles.authorizeTaskInput(fileContext(runId), source),
+      opened: filename => host.readOpenedTaskInput(filename),
+      disk: source => host.agentFiles.readAuthorizedFile(fileContext(runId), source),
+    }, options) },
+    computeInputs: { freeze: (runId, sources) => freezeComputeInputs(sources,
+      (selected, options) => services.taskInputs!.freeze(runId, selected, options), deliverySignals.get(runId)?.signal) },
     materials: {
       admit: async (runId, sourceIds) => {
         const ids = materialIds.get(runId)
@@ -444,6 +471,20 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     deliveries,
     observations: {
       stopRun: runId => observations.stopRun(runId),
+      actionIdentity: runId => {
+        try { return htmlActionServices?.actions.publishedIdentity(runId) ?? null }
+        catch { return null }
+      },
+      click: input => {
+        const signal = deliverySignals.get(input.runId)?.signal
+        if (!signal || signal.aborted) throw new Error('观察任务已停止')
+        return htmlActionServices!.actions.clickPublished(input.runId, { operationId: input.operationId, handle: input.handle })
+      },
+      input: input => {
+        const signal = deliverySignals.get(input.runId)?.signal
+        if (!signal || signal.aborted) throw new Error('观察任务已停止')
+        return htmlActionServices!.actions.inputPublished(input.runId, { operationId: input.operationId, handle: input.handle, value: input.value })
+      },
       observe: input => {
         const signal = deliverySignals.get(input.runId)?.signal
         if (!signal || signal.aborted) throw new Error('观察任务已停止')
@@ -466,6 +507,9 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       authorizeLocal: input => delegation.authorizeLocal(input),
       startLocal: input => delegation.startLocal(input),
       startReadonly: input => delegation.startReadonly(input),
+      startNative: input => delegation.startNative(input),
+      resumeNative: input => delegation.resumeNative(input),
+      message: (runId, jobId, submissionId, text) => delegation.message(runId, jobId, submissionId, text),
       readArtifact: (runId, jobId, name) => delegation.readArtifact(runId, jobId, name),
       cancel: (runId, jobId) => delegation.cancel(runId, jobId),
       cancelRun: runId => delegation.cancelRun(runId),
@@ -536,7 +580,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       await host.artifactDeliveries.stopRun(runId)
       await Promise.allSettled([web.stopRun(runId), mcp.stopRun(runId), media.stopRun(runId), delegation.cancelRun(runId), ...(compute ? [compute.cancelRun(runId)] : [])])
     },
-    images: { selection: (runId, _documentId, operation) => roles.selection(runId, operation),
+    images: { describe: runId => roles.describe(runId),
+      selection: (runId, _documentId, operation) => roles.selection(runId, operation),
       run: (request, options) => images.start(request, options), read: id => images.read(id),
       stop: id => images.stop(id), readResource: id => images.readResource(id),
       registerWorkspaceResource: (scope, image, source) => images.registerWorkspaceResource(scope, image, source),

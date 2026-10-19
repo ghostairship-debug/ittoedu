@@ -18,8 +18,11 @@ describe('G20 tool catalog and target mapping', () => {
       const variants = tool.schema.oneOf ?? tool.schema.anyOf
       if (Array.isArray(variants)) {
         for (const variant of variants) {
-          expect(variant.type).toBe('object')
-          expect(variant.additionalProperties).toBe(false)
+          const resolved = typeof variant.$ref === 'string' && variant.$ref.startsWith('#/$defs/')
+            ? (tool.schema.$defs as Record<string, Record<string, unknown>>)[variant.$ref.slice('#/$defs/'.length)] : variant
+          expect(resolved, tool.name).toBeDefined()
+          expect(resolved.type, tool.name).toBe('object')
+          expect(resolved.additionalProperties, tool.name).toBe(false)
         }
       } else expect(tool.schema.additionalProperties).toBe(false)
       expect(tool.manual.label.length).toBeGreaterThan(0)

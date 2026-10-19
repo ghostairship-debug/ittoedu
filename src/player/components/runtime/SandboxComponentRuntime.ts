@@ -9,7 +9,7 @@ import { teacherControllerActionSchema, type TeacherControllerAction, type Teach
 import { htmlPreviewTargetReportSchema } from '../../../shared/workbench/htmlPreview'
 import type { locateHtmlSourceTarget } from '../../../shared/html/htmlSourceLocator'
 import type { ComponentMotionContext, ComponentMotionOutcome, ComponentMotionProgram, ComponentMotionTask, MotionFrame, MotionKeyframe, MotionTiming } from '../../../shared/contracts/component-platform/motion'
-import { componentFragmentStateKey } from '../../componentPlatform/fragments'
+import { componentFragmentStateKey, createComponentFragmentProjection } from '../../componentPlatform/fragments'
 import type { ComponentBootstrapInput, ComponentBootstrapLease } from '../../../shared/ipcTypes'
 import { interactionActionSchema, interactionTriggerSchema } from '../../../shared/contracts/interaction-v1/schema'
 import { htmlDocumentKind } from '../../../shared/html/documentKind'
@@ -18,6 +18,8 @@ import { authoredDocumentBootstrap, authoredDocumentProgramsSource } from '../..
 import { webRuntimeTargetProfile, type RuntimeTargetProfile, type WebRuntimeData } from '../../../components/web/moduleGraph'
 import { refreshWebResourceReferences } from '../../../components/web/resources'
 import { createDomAuthoring } from '../../../components/web/authoringDom'
+import { installOwnedDocumentAuthoring } from '../../../components/web/ownedDocumentAuthoring'
+import { ownedDocumentExecutionSource } from '../../../components/web/ownedDocumentIdentity'
 import { domTextOverrideRealmSource, type DomTextOverrideController } from '../../lightEdit/domTextOverrides'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import { invertMatrix, transformPoint } from '../../../core/components/geometry'
@@ -35,10 +37,70 @@ export interface SandboxRuntimeHostAdapter {
   locateTarget?: typeof locateHtmlSourceTarget
   authorHitEvent?: string
 }
-interface ComponentAuthorHitRequest { point: { x: number; y: number }; resolve(authorKey: string | null): void }
+interface ComponentAuthorHitResult { authorKey: string | null; painted: boolean }
+interface ComponentAuthorHitRequest { point: { x: number; y: number }; resolve(result: ComponentAuthorHitResult): void }
+
+/** The browser identifies the leaf; transparent document/carrier boxes do not paint by themselves. */
+export function componentAuthorPaintAtPoint(root: Element, x: number, y: number): boolean {
+  const doc = root.ownerDocument, win = doc.defaultView
+  const top = doc.elementsFromPoint(x, y)[0]
+  if (!win || !top || !root.contains(top)) return false
+  const chain: Element[] = []
+  for (let element: Element | null = top; element && root.contains(element); element = element.parentElement) chain.push(element)
+  const styles = chain.map(element => win.getComputedStyle(element))
+  if (styles[0]?.visibility === 'hidden' || styles[0]?.visibility === 'collapse'
+    || styles.some(style => style.display === 'none' || style.opacity !== '' && Number(style.opacity) === 0)) return false
+  const colorPaints = (value: string) => value !== '' && value !== 'none' && value !== 'transparent' && !/^rgba\([^)]*,\s*0(?:\.0+)?\s*\)$/.test(value)
+  for (let index = 0; index < chain.length; index++) {
+    const element = chain[index]!, style = styles[index]!
+    if (style.backgroundImage && style.backgroundImage !== 'none' || colorPaints(style.backgroundColor)) return true
+    if (style.boxShadow && style.boxShadow !== 'none') return true
+    // Effects and generated paint do not have a reliable empty box here.
+    // Keep them blocking rather than inventing geometry for unknown CSS.
+    if (['filter', 'backdrop-filter', 'mask-image', 'border-image-source'].some(name => {
+      const value = style.getPropertyValue(name); return value !== '' && value !== 'none'
+    })) return true
+    for (const pseudo of ['::before', '::after']) {
+      const value = win.getComputedStyle(element, pseudo).content
+      if (value && value !== 'none' && value !== 'normal') return true
+    }
+    const rect = element.getBoundingClientRect()
+    const sx = element instanceof win.HTMLElement && element.offsetWidth ? rect.width / element.offsetWidth : 1
+    const sy = element instanceof win.HTMLElement && element.offsetHeight ? rect.height / element.offsetHeight : 1
+    if (['top', 'right', 'bottom', 'left'].some(side => {
+      const width = Number.parseFloat(style.getPropertyValue(`border-${side}-width`)) || 0
+      if (!width || /^(none|hidden)$/.test(style.getPropertyValue(`border-${side}-style`)) || !colorPaints(style.getPropertyValue(`border-${side}-color`))) return false
+      return side === 'top' ? y < rect.top + width * sy : side === 'bottom' ? y > rect.bottom - width * sy
+        : side === 'left' ? x < rect.left + width * sx : x > rect.right - width * sx
+    })) return true
+    // SVG containers and defs have no fill of their own. Browser hit-testing
+    // already honours fill/stroke/pointer-events for the actual graphic leaf.
+    if (element === top && element.namespaceURI === 'http://www.w3.org/2000/svg'
+      && !['svg', 'g', 'defs', 'symbol', 'a', 'switch'].includes(element.localName)) {
+      if (!['rect', 'circle', 'ellipse', 'line', 'path', 'polygon', 'polyline', 'text', 'tspan', 'textPath'].includes(element.localName)) return true
+      if (element.localName !== 'line' && colorPaints(style.fill) && Number(style.fillOpacity || '1') > 0
+        || colorPaints(style.stroke) && Number(style.strokeOpacity || '1') > 0 && Number.parseFloat(style.strokeWidth || '1') > 0) return true
+    }
+    if (element === top && /^(img|video|canvas|iframe|object|embed|input|button|select|textarea)$/.test(element.localName)) return true
+    for (const node of element.namespaceURI === 'http://www.w3.org/2000/svg' ? [] : element.childNodes) {
+      if (node.nodeType !== 3 || !node.textContent?.trim()) continue
+      const range = doc.createRange(); range.selectNodeContents(node)
+      if ([...range.getClientRects()].some(box => x >= box.left && x <= box.right && y >= box.top && y <= box.bottom)) return true
+    }
+  }
+  // Pointer-transparent descendants can still paint; their foreground pixels
+  // cannot be inferred from the carrier hit. Leave this uncertain case blocked.
+  if ([...top.querySelectorAll('*')].some(element => {
+    if (element.closest('defs,script,style,template')) return false
+    const style = win.getComputedStyle(element)
+    return style.pointerEvents === 'none' && style.display !== 'none' && style.visibility !== 'hidden'
+      && (style.opacity === '' || Number(style.opacity) !== 0)
+  })) return true
+  return false
+}
 
 /** Serialized trusted bridge only. Author code arrives through its dedicated port. */
-function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences; authoring: typeof createDomAuthoring; textOverrides(roots: readonly Node[], rules: readonly LightEditTextOverride[]): DomTextOverrideController }, authoredDocument?: { release(): void; transportFragment?: boolean; setActivity?(value: { active: boolean; visible: boolean; playing: boolean }): void; onDiagnostic?(listener: (message: string) => void): () => void }) {
+function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences; fragments: typeof createComponentFragmentProjection; authoring: typeof createDomAuthoring; paintAt: typeof componentAuthorPaintAtPoint; ownedAuthoring: typeof installOwnedDocumentAuthoring; textOverrides(roots: readonly Node[], rules: readonly LightEditTextOverride[]): DomTextOverrideController }, authoredDocument?: { release(): void; transportFragment?: boolean; setActivity?(value: { active: boolean; visible: boolean; playing: boolean }): void; onDiagnostic?(listener: (message: string) => void): () => void }) {
   // This fixed loader is created only inside the content realm. Keeping import's
   // syntax in its string prevents Vite from inserting a parent lexical helper.
   const importModule = new Function('url', 'return import(url)') as (url: string) => Promise<Record<string, any>>
@@ -72,13 +134,19 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
     if (!value || typeof value !== 'object' || Array.isArray(value)) return
     const next = value as { active: boolean; visible: boolean; playing: boolean }
     if (typeof next.active !== 'boolean' || typeof next.visible !== 'boolean' || typeof next.playing !== 'boolean') return
+    const becameVisible = next.visible && activity?.visible !== true
     activity = { active: next.active, visible: next.visible, playing: next.playing }
     if (authoredDocument) authoredDocument.setActivity?.(activitySnapshot()!)
     else window.dispatchEvent(new CustomEvent('__runtime.activity', { detail: activitySnapshot() }))
+    ownedAuthoring?.update()
     void applyMountedActivity()
+    if (becameVisible) refreshSourcePaint?.()
   }
   let updateResourceCss: (value: unknown) => void = () => {}
   let states: Record<string, JsonValue> = {}, targets: RuntimeTargetSnapshot[] = []
+  const snapshotValue = <Value,>(value: Value): Value => value !== null && typeof value === 'object' ? structuredClone(value) : value
+  let stateWriteSequence = 0
+  const pendingStateWrites = new Map<string, { writeId: number; stateNotified: boolean; eventNotified: boolean }>()
   let resourceUrls: Record<string, string> = {}
   let resourceBindings: Readonly<Record<string, string>> = {}
   let webContent = false
@@ -90,9 +158,25 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
   let layoutInput: ComponentLayoutInput | undefined
   let sourceViewport: { left: number; top: number; right: number; bottom: number; width: number; height: number } | undefined
   let fragmentThemeCanvas = false
+  let measuredTransportScope: HTMLElement | undefined
+  let measuredPaintOrigin = { left: 0, top: 0 }
+  let measuredPaintStyle: HTMLStyleElement | undefined
   const layoutListeners = new Set<(layout: ComponentLayoutInput) => void>()
   let refreshSourcePaint: (() => void) | undefined
   const applyFragmentLayout = () => {
+    if (measuredTransportScope) {
+      const layout = layoutInput ?? { mode: 'free-frame', inlineSize: instance.frame!.width, blockSize: instance.frame!.height }
+      // The parser document is only transport for this software-normalized scope.
+      // Preserve its formal layout while the iframe includes glyph ink on every side.
+      if (!measuredPaintStyle) { measuredPaintStyle = document.createElement('style'); document.head.append(measuredPaintStyle) }
+      measuredPaintStyle.textContent = 'html,body{overflow:hidden!important}'
+      measuredTransportScope.style.setProperty('width', `${layout.inlineSize}px`, 'important')
+      measuredTransportScope.style.setProperty('height', layout.mode === 'flow-content' ? 'auto' : `${layout.blockSize}px`, 'important')
+      measuredTransportScope.style.setProperty('position', 'relative', 'important')
+      measuredTransportScope.style.setProperty('left', `${-measuredPaintOrigin.left}px`, 'important')
+      measuredTransportScope.style.setProperty('top', `${-measuredPaintOrigin.top}px`, 'important')
+      return
+    }
     if (!fragmentDefaults || authoredDocument && !authoredDocument.transportFragment) return
     fragmentDefaults.textContent = sourceViewport
       ? `html,body{width:100%;height:100%;margin:0;overflow:hidden}#component-root{position:absolute!important;left:${-sourceViewport.left}px!important;top:${-sourceViewport.top}px!important;width:${sourceViewport.width}px!important;height:${layoutInput?.mode === 'flow-content' ? 'auto' : `${sourceViewport.height}px`}!important;margin:0}`
@@ -162,6 +246,8 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
   let interaction: { surfaceId: string | null; stateId: string | null } | undefined
   let originalHtml: string | undefined, observeHtml = false, collectHtml = () => {}
   let contentAuthoring: ReturnType<typeof createDomAuthoring> | undefined
+  let ownedAuthoring: ReturnType<typeof installOwnedDocumentAuthoring> | undefined
+  let mountedHtml: string | undefined
   let sourcePageText: DomTextOverrideController | undefined, refreshSourceText = () => {}
   let teacher: { snapshot: TeacherControllerSnapshot; allowed: Record<string, boolean>; viewport?: { left: number; top: number; right: number; bottom: number } } | undefined, teacherSequence = 0
   const teacherListeners = new Set<() => void>(), teacherPending = new Map<number, { resolve(value: boolean): void; reject(error: Error): void }>()
@@ -207,7 +293,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
     if (!active) return
     active = false; controller.abort()
     for (const cleanup of cleanups) { try { cleanup() } catch {} }
-    cleanups.clear(); listeners.clear(); layoutListeners.clear()
+    cleanups.clear(); listeners.clear(); layoutListeners.clear(); pendingStateWrites.clear()
     for (const pending of teacherPending.values()) pending.reject(new Error('导航作用域已取消'))
     teacherPending.clear(); teacherListeners.clear()
     for (const task of [...motionTasks.values()]) task.settle({ status: 'cancelled' })
@@ -330,14 +416,15 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
         resourceBindings = message.resourceBindings as Record<string, string> ?? {}
         layoutInput = message.layout as ComponentLayoutInput | undefined
         sourceViewport = message.sourceViewport as typeof sourceViewport
-        applyFragmentLayout()
         instance = message.instance as ComponentInstance
+        applyFragmentLayout()
         webContent = ['guoling.web', 'guoling.html-program'].includes(String(message.builtinKey))
         fragmentThemeCanvas = Boolean(message.visual && message.documentKind === 'fragment' && message.builtinKey === 'guoling.web' && instance.frame)
         writeCourseTheme(message.themeCss)
         originalHtml = typeof message.authorHtml === 'string' ? message.authorHtml : undefined
         observeHtml = message.htmlAuthoring === true
         generation = message.generation as number
+        pendingStateWrites.clear()
         states = message.state as Record<string, JsonValue>; targets = message.targets as RuntimeTargetSnapshot[]
         controller = new AbortController(); active = true
         setActivity(message.activity)
@@ -356,9 +443,13 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
               emit: (name: string, value: JsonValue) => send({ type: 'target.emit', reference, name, value }),
               ...(reference.kind === 'instance' ? { motion: motion(reference), presentation: presentation(reference) } : {}) } : null
           },
-          state: { get: (name: string) => states[name], set: (name: string, value: JsonValue) => {
+          state: { get: (name: string) => snapshotValue(states[name]), set: (name: string, value: JsonValue) => {
             if (!active) return
-            states[name] = value; send({ type: 'state.set', name, value })
+            const writeId = ++stateWriteSequence
+            const previous = pendingStateWrites.get(name)
+            pendingStateWrites.set(name, { writeId, stateNotified: previous?.stateNotified ?? false, eventNotified: previous?.eventNotified ?? false })
+            const submitted = snapshotValue(value)
+            states[name] = submitted; send({ type: 'state.set', name, value: submitted, writeId })
           }, subscribe: (name: string, listener: (value: unknown) => void) => subscribe('state', name, listener) },
           events: { emit: (name: string, value: JsonValue) => send({ type: 'event.emit', name, value }),
             subscribe: (name: string, listener: (value: unknown) => void) => subscribe('event', name, listener) },
@@ -379,7 +470,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
               && [...document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]')].some(frame => frame.contentWindow === event.source)) clicked()
           }
           window.addEventListener('message', ownedClick); cleanups.add(() => window.removeEventListener('message', ownedClick))
-          const doubleClicked = (event: MouseEvent) => send({ type: 'authoring.double-click', x: event.clientX, y: event.clientY,
+          const doubleClicked = (event: MouseEvent) => send({ type: 'authoring.double-click', x: event.clientX + measuredPaintOrigin.left, y: event.clientY + measuredPaintOrigin.top,
             authorKey: hitAuthor(event.clientX, event.clientY) })
           root.addEventListener('dblclick', doubleClicked, true); cleanups.add(() => root.removeEventListener('dblclick', doubleClicked, true))
         }
@@ -401,7 +492,8 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
           const top = document.elementsFromPoint(x, y)[0]
           if (!root || !top || !root.contains(top)) return undefined
           const observed = contentAuthoring?.hit(x, y)
-          const origin = documentRoot ? { x: 0, y: 0 } : root.getBoundingClientRect()
+          const rootOrigin = documentRoot ? { x: 0, y: 0 } : root.getBoundingClientRect()
+          const origin = { x: rootOrigin.x - measuredPaintOrigin.left, y: rootOrigin.y - measuredPaintOrigin.top }
           const px = x - origin.x, py = y - origin.y
           for (const spot of [...explicitAuthorSpots.values()].reverse()) {
             const [a, b, c, d, e, f] = spot.localBounds.transform, determinant = a * d - b * c
@@ -457,14 +549,25 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
           media: message.media === true ? media : undefined, interactions: interaction ? interactions : undefined }
         updateResourceCss = value => { runtimeContext.resourceCss = value }
         mounted = await implementation.mount(runtimeContext) as typeof mounted
+        mountedHtml = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && typeof instance.data.html === 'string' ? instance.data.html : undefined
         if (!active) { await mounted?.dispose(); mounted = undefined; return }
+        // The workbench fragment carrier creates author DOM during mount; the
+        // native transport already has it. Select the normalized scope only now.
+        measuredTransportScope = message.measuredWebFragment === true && message.visual
+          && fragmentBox.isMeasured(instance, 'fragment', undefined, { implementation: { kind: 'builtin', key: String(message.builtinKey) } })
+          ? root?.querySelector<HTMLElement>('[data-guoling-source-scope],[data-guoling-measured-root]') ?? undefined : undefined
+        applyFragmentLayout()
         mountedRunning = true
         await applyMountedActivity()
         if (!mounted || typeof mounted.update !== 'function' || typeof mounted.dispose !== 'function') throw new Error('mount 必须返回 update/dispose 生命周期')
         if (sourceViewport && root) {
           let queued = false, previous = ''
           const measurePaint = () => {
-            if (!active || !sourceViewport) return
+            if (!active || !sourceViewport || !root.isConnected || activity?.visible === false) return
+            // A hidden surface can temporarily have no layout; that is not empty author content.
+            if (innerWidth <= 0 || innerHeight <= 0 || sourceViewport.right <= sourceViewport.left
+              || sourceViewport.bottom <= sourceViewport.top || sourceViewport.width <= 0
+              || (root.offsetWidth <= 0 && getComputedStyle(root).display !== 'none')) return
             const rects: DOMRect[] = []
             for (const element of document.body.querySelectorAll<HTMLElement>('*')) {
               if (['style', 'script', 'template'].includes(element.localName)) continue
@@ -503,8 +606,20 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
         // Content application is always active, including Published/read-only
         // consumers. Editor target observation below is a separate concern.
         if (root) {
+          ownedAuthoring = fragmentBox.ownedAuthoring(`__guoling_parser_${nonce.replace(/-/g, '_')}`, '', fragmentBox.authoring, {
+            records: () => instance.authoring?.records ?? {}, resources: () => resourceUrls, bindings: currentBindings,
+            activity: () => authoredDocument ? undefined : activitySnapshot(),
+            observe: observeHtml, onChange: () => collectHtml(),
+            report: (authorKey, status) => {
+              if (status === 'unresolved') scope.events.emit('component.diagnostic', { instanceId: instance.id, authorKey,
+                message: '内部作者对象当前无法唯一重绑定；原内容与作者修改已保留，尚未应用' })
+            },
+            onDoubleClick: point => send({ type: 'authoring.double-click', ...point,
+              x: point.x + measuredPaintOrigin.left, y: point.y + measuredPaintOrigin.top }),
+          })
+          cleanups.add(() => { ownedAuthoring?.dispose(); ownedAuthoring = undefined })
           contentAuthoring = fragmentBox.authoring(documentRoot ? document.documentElement : root, {
-            records: () => instance.authoring?.records ?? {},
+            records: () => Object.fromEntries(Object.entries(instance.authoring?.records ?? {}).filter(([, record]) => !record.scope?.['document:path'])),
             originalText: node => (sourcePageText ?? (window as Window & { __cwPageTextOverrides?: DomTextOverrideController }).__cwPageTextOverrides)?.originalText(node),
             claimText: (node, text) => (sourcePageText ?? (window as Window & { __cwPageTextOverrides?: DomTextOverrideController }).__cwPageTextOverrides)?.setLocalText(node, text),
             resolveResource: reference => resourceUrls[currentBindings()[reference] ?? reference] ?? reference,
@@ -517,28 +632,14 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
           })
           cleanups.add(() => { contentAuthoring?.dispose(); contentAuthoring = undefined })
         }
-        if (root && observeHtml) {
-          const fragmentKey = String(message.fragmentStateKey), hiddenStyles = new WeakMap<HTMLElement, { property: 'display' | 'visibility'; value: string; priority: string }>()
-          const applyFragments = () => {
-            const progress = states[fragmentKey], fragments = [...root.querySelectorAll<HTMLElement>('.fragment')]
-            const count = typeof progress === 'number' ? progress : fragments.length
-            fragments.forEach((element, index) => {
-              let previous = hiddenStyles.get(element)
-              const property = layoutInput?.mode === 'flow-content' ? 'display' : 'visibility', hidden = property === 'display' ? 'none' : 'hidden'
-              if (previous && previous.property !== property) {
-                if (previous.value) element.style.setProperty(previous.property, previous.value, previous.priority)
-                else element.style.removeProperty(previous.property)
-                hiddenStyles.delete(element); previous = undefined
-              }
-              if (index < count) {
-                if (previous) { if (previous.value) element.style.setProperty(property, previous.value, previous.priority); else element.style.removeProperty(property); hiddenStyles.delete(element) }
-              } else if (element.style.getPropertyValue(property) !== hidden || element.style.getPropertyPriority(property) !== 'important') {
-                hiddenStyles.set(element, { property, value: element.style.getPropertyValue(property), priority: element.style.getPropertyPriority(property) })
-                element.style.setProperty(property, hidden, 'important')
-              }
-            })
-          }
-          subscribe('state', fragmentKey, applyFragments)
+        if (root && webContent) {
+          const fragmentKey = String(message.fragmentStateKey)
+          const fragments = fragmentBox.fragments(root, () => states[fragmentKey], () => layoutInput?.mode === 'flow-content')
+          subscribe('state', fragmentKey, fragments.apply)
+          layoutListeners.add(fragments.apply)
+          cleanups.add(() => { layoutListeners.delete(fragments.apply); fragments.dispose() })
+        }
+        if (root && (observeHtml || measuredTransportScope)) {
           const handles = new WeakMap<Node, string>(); let sequence = 0, queued = false
           const pathFor = (element: Element) => {
             const path: { name: string; index: number }[] = []
@@ -555,16 +656,27 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
             }
             return null
           }
+          const measuredTransportExtent = () => {
+            if (!measuredTransportScope || !instance.frame) return null
+            const extent = fragmentBox.extent(measuredTransportScope, layoutInput ? { width: layoutInput.inlineSize,
+              height: layoutInput.mode === 'flow-content' ? 0 : layoutInput.blockSize } : instance.frame, layoutInput?.mode, true)
+            if (extent.left !== measuredPaintOrigin.left || extent.top !== measuredPaintOrigin.top) {
+              measuredPaintOrigin = { left: extent.left ?? 0, top: extent.top ?? 0 }
+              applyFragmentLayout()
+            }
+            return extent
+          }
           collectHtml = () => {
             if (!active) return
-            applyFragments()
+            if (!observeHtml) { send({ type: 'authoring.observe', reports: [], contentExtent: measuredTransportExtent() }); return }
             const source = originalHtml === undefined ? undefined : new DOMParser().parseFromString(originalHtml, 'text/html')
             const projected = new DOMParser().parseFromString(String(originalHtml !== undefined && instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data.html ?? '' : ''), 'text/html')
             const reports: unknown[] = []
             const reported = new Set<Node>()
             const pageText = sourcePageText ?? (window as Window & { __cwPageTextOverrides?: { samples(): readonly { node: Text; raw: string }[] } }).__cwPageTextOverrides
             const originalText = new Map(pageText?.samples().map(sample => [sample.node, sample.raw]) ?? [])
-            const origin = documentRoot ? { x: 0, y: 0 } : root.getBoundingClientRect()
+            const rootOrigin = documentRoot ? { x: 0, y: 0 } : root.getBoundingClientRect()
+            const origin = { x: rootOrigin.x - measuredPaintOrigin.left, y: rootOrigin.y - measuredPaintOrigin.top }
             const walk = (live: Element, original: Element, bound: Element) => {
               if (live.localName !== original.localName && live !== root || original.localName !== bound.localName) return
               if (live !== root && ['id', 'data-cw-author-key'].some(name => bound.hasAttribute(name) && live.getAttribute(name) !== bound.getAttribute(name))) return
@@ -595,12 +707,16 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
             }
             if (source) walk(root, source.body, projected.body)
             for (const observed of contentAuthoring?.scan() ?? []) {
-              const { node, authorKey, record, initialValue, geometry, bindingStatus } = observed
+              const { node, authorKey, record, initialValue, geometry: observedGeometry, bindingStatus, textStyle } = observed
+              const geometry = observedGeometry && measuredTransportScope ? { ...observedGeometry, parentToInstance: [
+                observedGeometry.parentToInstance[0], observedGeometry.parentToInstance[1], observedGeometry.parentToInstance[2], observedGeometry.parentToInstance[3],
+                observedGeometry.parentToInstance[4] + measuredPaintOrigin.left, observedGeometry.parentToInstance[5] + measuredPaintOrigin.top,
+              ] as typeof observedGeometry.parentToInstance } : observedGeometry
               // Once an object has a formal override that is its effective
               // owner, even if it also happens to have a static source span.
               if (reported.has(node) && instance.authoring?.records?.[authorKey]?.overrides[record.kind === 'text' ? 'text' : 'src'] === undefined) {
                 const report = reports.find(report => (report as { handle: string }).handle === handles.get(node)) as Record<string, unknown> | undefined
-                if (report) { report.authoring = { authorKey, record }; report.bindingStatus = bindingStatus; if (geometry) report.geometry = geometry }
+                if (report) { report.authoring = { authorKey, record }; report.bindingStatus = bindingStatus; if (geometry) report.geometry = geometry; if (textStyle) report.textStyle = textStyle }
                 continue
               }
               const element = node.nodeType === Node.TEXT_NODE ? node.parentElement! : node as HTMLImageElement
@@ -613,15 +729,23 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
               }
               reports.push({ handle, kind: record.kind, domPath: pathFor(element), sectionOrder: sectionOrder(element), rawText: initialValue,
                 attributeName: record.kind === 'image' ? 'src' : null, scriptCreated: !reported.has(node),
-                authoring: { authorKey, record }, bindingStatus, ...(geometry ? { geometry } : {}), rect: { x: rect.x - origin.x, y: rect.y - origin.y, width: rect.width, height: rect.height } })
+                authoring: { authorKey, record }, bindingStatus, ...(geometry ? { geometry } : {}), ...(textStyle ? { textStyle } : {}), rect: { x: rect.x - origin.x, y: rect.y - origin.y, width: rect.width, height: rect.height } })
             }
+            for (const report of ownedAuthoring?.reports() ?? []) reports.push({ ...report,
+              rect: { ...report.rect, x: report.rect.x - origin.x, y: report.rect.y - origin.y },
+              ...(report.geometry ? { geometry: { ...report.geometry, parentToInstance: [
+                ...report.geometry.parentToInstance.slice(0, 4), report.geometry.parentToInstance[4] - origin.x,
+                report.geometry.parentToInstance[5] - origin.y,
+              ] } } : {}) })
             const sourceElement = source?.body.firstElementChild as HTMLElement | SVGElement | null
             const liveElement = root.firstElementChild as HTMLElement | SVGElement | null
             const sourceStyle = sourceElement?.style ? Object.fromEntries(Array.from({ length: sourceElement.style.length }, (_unused, index) => {
               const key = sourceElement.style.item(index)
               return [key, sourceElement.style.getPropertyValue(key)]
             })) : undefined
-            const contentExtent = webContent && liveElement && sourceStyle && instance.frame
+            const contentExtent = measuredTransportScope && instance.frame
+              ? measuredTransportExtent()
+              : webContent && liveElement && sourceStyle && instance.frame
               && fragmentBox.isMeasured(instance, documentRoot ? 'document' : 'fragment', sourceStyle,
                 typeof message.builtinKey === 'string' ? { implementation: { kind: 'builtin', key: message.builtinKey } } : undefined)
               && liveElement.style.margin === '0px' && liveElement.style.boxSizing === 'border-box'
@@ -646,7 +770,10 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
           collectHtml()
         }
       } else if (message.type === 'authoring.hit-test') {
-        send({ type: 'authoring.hit-result', requestId: message.requestId, authorKey: hitAuthor(Number(message.x), Number(message.y)) ?? null })
+        const x = Number(message.x) - measuredPaintOrigin.left, y = Number(message.y) - measuredPaintOrigin.top
+        const authorKey = await ownedAuthoring?.hit(x, y) ?? hitAuthor(x, y)
+        send({ type: 'authoring.hit-result', requestId: message.requestId, authorKey: authorKey ?? null,
+          painted: Boolean(authorKey) || fragmentBox.paintAt(document.documentElement, x, y) })
       } else if (message.type === 'update') {
         if (!active) return
         writeCourseTheme(message.themeCss)
@@ -655,17 +782,24 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
         updateResourceCss(message.resourceCss)
         originalHtml = typeof message.authorHtml === 'string' ? message.authorHtml : undefined
         targets = message.targets as RuntimeTargetSnapshot[]
-        states = message.state as Record<string, JsonValue>
+        const nextStates = message.state as Record<string, JsonValue>
+        for (const name of pendingStateWrites.keys()) nextStates[name] = states[name]
+        states = nextStates
         interaction = message.interaction as typeof interaction
-        await mounted?.update(instance)
+        const renderInstance = message.preserveHtml === true && mountedHtml !== undefined && instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data)
+          ? { ...instance, data: { ...instance.data, html: mountedHtml } } : instance
+        await mounted?.update(renderInstance)
+        if (message.preserveHtml !== true) mountedHtml = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && typeof instance.data.html === 'string' ? instance.data.html : undefined
         refreshSourceText()
         refreshCurrentResources()
         contentAuthoring?.refresh()
+        ownedAuthoring?.update()
         collectHtml()
       } else if (message.type === 'authoring.preview') {
         if (!active || message.generation !== generation) return
         const geometry = message.geometry as ComponentAuthorGeometry | null
         if (typeof message.authorKey === 'string') contentAuthoring?.previewGeometry(message.authorKey, geometry)
+        if (typeof message.authorKey === 'string') ownedAuthoring?.preview(message.authorKey, geometry)
         else if (typeof message.spotId === 'number') authorPreviewCallbacks.get(message.spotId)?.previewGeometry(geometry)
         if (geometry === null) collectHtml()
         return
@@ -689,6 +823,23 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
         refreshSourcePaint?.()
         if (teacher) teacher.viewport = { left: 0, top: 0, right: sourceViewport!.right - sourceViewport!.left, bottom: sourceViewport!.bottom - sourceViewport!.top }
         return
+      } else if (message.type === 'state.applied') {
+        if (!active || message.generation !== generation || typeof message.name !== 'string') return
+        const pending = pendingStateWrites.get(message.name)
+        if (!pending || pending.writeId !== message.writeId) return
+        // Older host echoes cannot undo a newer local write. Only its own ACK
+        // settles the optimistic value, including a host-rejected/normalized set.
+        pendingStateWrites.delete(message.name)
+        const corrected = !Object.is(states[message.name], message.value)
+        states[message.name] = snapshotValue(message.value as JsonValue)
+        // An unchanged set still needs an ACK, but must not manufacture a state
+        // change. Each channel only replays its own suppressed notification: a
+        // state listener may have set the same value before its event mirror.
+        if (pending.stateNotified || corrected)
+          for (const listener of listeners.get(`state:${message.name}`) ?? []) listener(snapshotValue(message.value))
+        if (pending.eventNotified || corrected)
+          for (const listener of listeners.get('event:__runtime.state') ?? []) listener({ name: message.name, value: snapshotValue(message.value) })
+        return
       } else if (message.type === 'notification') {
         if (!active) return
         const kind = message.kind as string, name = message.name as string
@@ -698,16 +849,23 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
           resourceUrls = message.value as Record<string, string> ?? {}
           refreshCurrentResources()
           contentAuthoring?.refresh()
+          ownedAuthoring?.update()
           for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]')) frame.contentWindow?.postMessage({
             type: 'guoling.resources.refresh', token: `__guoling_parser_${nonce.replace(/-/g, '_')}`, resources: resourceUrls,
           }, '*')
         }
         if (kind === 'event' && name === '__runtime.state') {
           const update = message.value as { name: string; value: JsonValue }
-          if (typeof update?.name === 'string') states[update.name] = update.value
+          const pending = typeof update?.name === 'string' ? pendingStateWrites.get(update.name) : undefined
+          if (pending) { pending.eventNotified = true; return }
+          if (typeof update?.name === 'string') states[update.name] = snapshotValue(update.value)
         }
-        if (kind === 'state') states[name] = message.value as JsonValue
-        for (const listener of listeners.get(`${kind}:${name}`) ?? []) listener(message.value)
+        if (kind === 'state') {
+          const pending = pendingStateWrites.get(name)
+          if (pending) { pending.stateNotified = true; return }
+          states[name] = snapshotValue(message.value as JsonValue)
+        }
+        for (const listener of listeners.get(`${kind}:${name}`) ?? []) listener(snapshotValue(message.value))
         return
       } else if (message.type === 'targets.snapshot') {
         if (active && Array.isArray(message.targets)) targets = message.targets as RuntimeTargetSnapshot[]
@@ -786,8 +944,9 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
   // parent's CSP or Blob storage key. Standalone HTML owns this inline document.
   // The author module still arrives over a dedicated port and is loaded by the child.
   const bridge = (programs?: import('../../../components/web/authoredDocumentBootstrap').AuthoredDocumentPrograms) =>
-    `(function(){${programs ? `const authored=${authoredDocumentProgramsSource(programs)};` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),refreshResources:(${refreshWebResourceReferences.toString()}),authoring:(${createDomAuthoring.toString()}),textOverrides:(roots,rules)=>{${domTextOverrideRealmSource()}return createPageTextOverrides(roots,rules)}}${programs ? ',authored' : ''})})()`
+    `(function(){${programs ? `const authored=${authoredDocumentProgramsSource(programs)};` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),fragments:(${createComponentFragmentProjection.toString()}),refreshResources:(${refreshWebResourceReferences.toString()}),authoring:(${createDomAuthoring.toString()}),paintAt:(${componentAuthorPaintAtPoint.toString()}),ownedAuthoring:(${installOwnedDocumentAuthoring.toString()}),textOverrides:(roots,rules)=>{${domTextOverrideRealmSource()}return createPageTextOverrides(roots,rules)}}${programs ? ',authored' : ''})})()`
   let runtimeBuiltinKey = snapshots.builtinKey, sourceWebDocument = false
+  const pendingDocumentKeys: Record<string, string> = {}
   const readAuthorHtml = (instance: ComponentInstance | undefined): string | undefined => {
     if (!instance) return undefined
     // A professional Source may retain the Web HTML field without inheriting
@@ -806,7 +965,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
     if (!['guoling.web', 'guoling.html-program'].includes(runtimeBuiltinKey ?? '')
       || !data || typeof data.html !== 'string' || htmlDocumentKind(data.html) === 'document' || snapshots.nativeDocument) return projected
     return { ...projected, data: { ...data, html: authoredDocumentBootstrap(data, {
-      nonce, instanceId: instance.id, nestedOnly: true, resources: snapshots.resources?.() ?? {},
+      nonce, instanceId: instance.id, nestedOnly: true, pendingDocumentKeys, resources: snapshots.resources?.() ?? {},
       bridge: authoredDocumentProgramsSource,
     }) } }
   }
@@ -835,7 +994,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
   const authorSpots = new Map<number, () => void>()
   const observedSpots = new Map<string, { signature: string; off(): void }>()
   const authorPreviews = new Set<string>()
-  const authorHits = new Map<number, (key: string | null) => void>()
+  const authorHits = new Map<number, (result: ComponentAuthorHitResult) => void>()
   let authorHitSequence = 0
   const authorHit = (event: Event) => {
     const request = (event as CustomEvent<ComponentAuthorHitRequest>).detail
@@ -921,7 +1080,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
     observedSpots.clear()
     authorPreviews.clear()
     authorRoot?.removeEventListener(authorHitEvent, authorHit)
-    for (const resolve of authorHits.values()) resolve(null)
+    for (const resolve of authorHits.values()) resolve({ authorKey: null, painted: true })
     authorHits.clear()
     for (const value of remoteMotions.values()) { value.task.cancel(); value.finish() }
     remoteMotions.clear()
@@ -967,8 +1126,10 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
     if (!scope?.isActive() || message?.generation !== scope.generation) return
     if (message.type === 'source.paint' && sourceViewport) {
       const bounds = message.bounds
-      iframe.style.clipPath = bounds && ['left', 'top', 'right', 'bottom'].every(key => Number.isFinite(bounds[key]))
-        ? `polygon(${bounds.left}px ${bounds.top}px,${bounds.right}px ${bounds.top}px,${bounds.right}px ${bounds.bottom}px,${bounds.left}px ${bounds.bottom}px)` : 'polygon(0 0,0 0,0 0)'
+      if (bounds === null) iframe.style.clipPath = 'polygon(0 0,0 0,0 0)'
+      else if (bounds && ['left', 'top', 'right', 'bottom'].every(key => Number.isFinite(bounds[key]))
+        && bounds.right > bounds.left && bounds.bottom > bounds.top)
+        iframe.style.clipPath = `polygon(${bounds.left}px ${bounds.top}px,${bounds.right}px ${bounds.top}px,${bounds.right}px ${bounds.bottom}px,${bounds.left}px ${bounds.bottom}px)`
       return
     }
     if (message.type === 'interaction.trigger.reply') {
@@ -1052,7 +1213,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
     if (message.type === 'authoring.hit-result') {
       const resolve = authorHits.get(message.requestId)
       authorHits.delete(message.requestId)
-      resolve?.(typeof message.authorKey === 'string' ? message.authorKey : null)
+      resolve?.({ authorKey: typeof message.authorKey === 'string' ? message.authorKey : null, painted: message.painted !== false })
       return
     }
     if (message.type === 'authoring.double-click' && authoring && authorRoot?.isConnected
@@ -1147,6 +1308,9 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
       if (!sourceViewport) {
         iframe.style.width = extent && Number.isFinite(extent.width) && extent.width > 0 ? `${extent.width}px` : '100%'
         iframe.style.height = extent && Number.isFinite(extent.height) && extent.height > 0 ? `${extent.height}px` : '100%'
+        if (extent && Number.isFinite(extent.left) && Number.isFinite(extent.top)) {
+          iframe.style.position = 'relative'; iframe.style.left = `${extent.left}px`; iframe.style.top = `${extent.top}px`
+        }
       }
       if (!snapshots.htmlAuthoring || !authoring || !Array.isArray(message.reports)) return
       const html = readAuthorHtml(authorInstance)
@@ -1162,6 +1326,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
         const source = stored === undefined && resolved?.status === 'editable' && resolved.locator.valueSpan ? resolved.locator.valueSpan : undefined
         if (!source && (!observed || !record || record.kind !== kind || record.binding?.kind !== 'dom')) continue
         const input: ComponentAuthorSpotInput = { kind, initialValue: rawText,
+          ...(parsed.data.textStyle ? { textStyle: parsed.data.textStyle } : {}),
           ...(observed && record ? { authorKey: observed.authorKey, scope: record.scope, binding: record.binding, bindingStatus: parsed.data.bindingStatus ?? 'bound' as const } : {}),
           ...(parsed.data.geometry ? { geometry: parsed.data.geometry } : {}),
           ...(source ? { sourceRegion: { kind: 'data' as const, path: ['html'], ...source, encoding: kind === 'text' ? 'html-text' as const : 'html-attribute' as const } }
@@ -1238,7 +1403,12 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
     }
     const value = jsonValueSchema.safeParse(message.value)
     if (message.type === 'event.emit' && typeof message.name === 'string' && value.success) scope.events.emit(message.name, value.data)
-    else if (message.type === 'state.set' && typeof message.name === 'string' && value.success) scope.state.set(message.name, value.data)
+    else if (message.type === 'state.set' && typeof message.name === 'string' && value.success) {
+      const currentScope = scope
+      currentScope.state.set(message.name, value.data)
+      if (!disposed && currentScope.isActive()) port.postMessage({ type: 'state.applied', generation: currentScope.generation,
+        name: message.name, writeId: message.writeId, value: currentScope.state.get(message.name) })
+    }
     else if (message.type === 'target.emit' && typeof message.name === 'string' && value.success) {
       const reference = componentTargetSchema.safeParse(message.reference)
       if (reference.success) scope.target(reference.data)?.emit(message.name, value.data)
@@ -1320,7 +1490,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
         const nativeData = projected.data as WebRuntimeData
         const parserData = transportFragment ? { ...nativeData, html: `<!doctype html><html><head><style id="component-defaults">html,body{width:100%;height:100%;margin:0}</style></head><body>${nativeData.html}</body></html>` } : nativeData
         const html = documentKind === 'document' && context.root
-          ? authoredDocumentBootstrap(parserData, { nonce, instanceId: context.instance.id, bridge, resources, themeCss: snapshots.themeCss?.(), transportFragment, resourceCss: typeof data?.css === 'string' ? data.css : undefined })
+          ? authoredDocumentBootstrap(parserData, { nonce, instanceId: context.instance.id, bridge, resources, pendingDocumentKeys, themeCss: snapshots.themeCss?.(), transportFragment, resourceCss: typeof data?.css === 'string' ? data.css : undefined })
           : `<!doctype html><meta charset="utf-8">${faces ? `<style data-component-bundled-faces>${faces.replace(/<\/style/gi, '<\\/style')}</style>` : ''}<style id="component-defaults">html,body,#component-root{width:100%;height:100%;margin:0}</style><div id="component-root"></div><script>${bridge().replace(/<\/script/gi, '<\\/script')}</script>`
         lease = bootstrapApi ? await bootstrapApi.createComponentBootstrap!({ leaseId, html, connectOrigins: [...(snapshots.connectOrigins?.() ?? [])],
           resourceSources: hasWebContentData(data) && Array.isArray(data?.resourceSources) ? data.resourceSources as unknown as ComponentBootstrapInput['resourceSources'] : undefined,
@@ -1350,7 +1520,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
           authorHtml = readAuthorHtml(context.instance)
           if (signal.aborted || !scope.isActive()) throw new Error('组件挂载已取消')
           if (documentKind === 'document' && context.root) await request('document', { html: authoredDocumentBootstrap(projected.data as WebRuntimeData, {
-            nonce, instanceId: context.instance.id, resources, resourceCss: typeof data.css === 'string' ? data.css : undefined,
+            nonce, instanceId: context.instance.id, resources, pendingDocumentKeys, resourceCss: typeof data.css === 'string' ? data.css : undefined,
             themeCss: `${prepared.fontFaceCss ?? ''}\n${splitInstalledBundledFontFaceCss(snapshots.themeCss?.() ?? '').theme}`,
             bridge: programs => `window[${JSON.stringify(`__guoling_adopt_${nonce.replace(/-/g, '_')}`)}](${authoredDocumentProgramsSource(programs)})`,
           }) })
@@ -1372,9 +1542,16 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
           layout: layoutPort?.read(),
           sourceViewport,
           fragmentStateKey: componentFragmentStateKey(context.instance.id), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), resourceBindings: snapshots.resourceBindings,
-          authorHtml, documentKind, builtinKey: runtimeBuiltinKey, resourceCss: typeof data?.css === 'string' ? data.css : undefined })
+          authorHtml, documentKind, builtinKey: runtimeBuiltinKey,
+          measuredWebFragment: snapshots.builtinKey === 'guoling.web' && authorDocumentKind === 'fragment',
+          resourceCss: typeof data?.css === 'string' ? data.css : undefined })
         if (!scope.isActive()) throw new Error('组件挂载已取消')
-        return { update: async instance => { authorInstance = instance; const projected = await projectInstance(instance); return request('update', { instance: projected, state: snapshots.state(), targets: targetsFor(projected), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), interaction: interactionSnapshot(),
+        return { update: async instance => {
+          const previousData = authorInstance?.data, nextData = instance.data
+          const preserveHtml = (sourceWebDocument || ['guoling.web', 'guoling.html-program'].includes(runtimeBuiltinKey ?? ''))
+            && hasWebContentData(previousData) && hasWebContentData(nextData)
+            && ownedDocumentExecutionSource(previousData.html) === ownedDocumentExecutionSource(nextData.html)
+          authorInstance = instance; const projected = await projectInstance(instance); return request('update', { instance: projected, preserveHtml, state: snapshots.state(), targets: targetsFor(projected), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), interaction: interactionSnapshot(),
             resourceCss: instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && typeof instance.data.css === 'string' ? instance.data.css : undefined,
             authorHtml: readAuthorHtml(instance) }).then(() => undefined) },
           updatePlacement: frame => {

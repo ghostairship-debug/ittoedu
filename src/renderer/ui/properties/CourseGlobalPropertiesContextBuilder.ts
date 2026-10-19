@@ -1,5 +1,6 @@
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
 import { owningContainer } from '../../../shared/contracts/component-platform/project'
+import { mergeComponentBackground } from '../../../shared/componentBackgroundPaint'
 import { propertiesEffectiveBackground } from './componentProperties'
 import { readTeacherControllerConfig } from '../../../shared/teacherControllerConfig'
 import { projectDesignTokensSchema } from '../../../shared/contracts/design-v1/schema'
@@ -54,7 +55,7 @@ export function buildCourseGlobalPropertiesOwner(input: {
       clearPresentationOverride: native?.commands.clearPresentationOverride ?? (() => {}), text: native?.commands.text ?? { beginEdit() {}, commitEdit() {}, cancelEdit() {}, updateDraft() {}, toggleStyle() {} },
       updateCourseBackground: value => run(() => { const target = liveTarget(); submit(courseSettingsEdits(target.project, { background: {
         ...(value.backgroundColor === undefined ? {} : { color: value.backgroundColor }), ...(value.backgroundAssetId === undefined ? {} : { assetId: value.backgroundAssetId }) } }), target) }),
-      previewCourseBackground: value => run(() => input.preview(value.backgroundColor == null ? null : [{ type: 'project.background.set', background: { ...project.background, color: value.backgroundColor } }], 'project')),
+      previewCourseBackground: value => run(() => input.preview(value.backgroundColor == null ? null : [{ type: 'project.background.set', background: mergeComponentBackground(project.background, { color: value.backgroundColor }) }], 'project')),
       resizeSlideCanvas: (designSize, options = {}) => run(() => {
         const captured = liveTarget(), target = { ...captured, activeStateId: null, editingProject: captured.project }
         if (!target.surfaceId) return

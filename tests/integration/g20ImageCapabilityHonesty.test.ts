@@ -82,4 +82,40 @@ it('refuses image-role parameters that the Images adapter would otherwise ignore
   await roles.beginRun('run')
   expect(() => roles.selection('run', 'generate')).toThrow('不支持的额外模型参数')
   expect(roles.selection('run', 'edit')).toMatchObject({ imageModel: 'chosen-image', connection: { id: 'chosen-connection', billing: { kind: 'subscription' } } })
+  expect(roles.describe('run')).toEqual({
+    generate: { status: 'unavailable', reason: expect.stringContaining('不支持的额外模型参数') }, edit: { status: 'configured' },
+  })
+})
+
+it('discloses each frozen image role without re-reading changed settings or exposing its connection', async () => {
+  let generateConfigured = false
+  const snapshot = vi.fn(async (role: ExecutionSelectionSnapshot['role']): Promise<ExecutionSelectionSnapshot> => {
+    if (role === 'imageGenerate' && !generateConfigured) throw new Error('credential is unavailable')
+    return { role, profileRevision: 1, profileUpdatedAt: '', connection, model: 'chosen-image', parameters: {} }
+  })
+  const roles = frozenImageRoles(snapshot)
+  expect(roles.describe('not-started')).toBeUndefined()
+  await roles.beginRun('run')
+  const before = roles.describe('run')!
+  expect(before).toEqual({ generate: { status: 'unavailable', reason: expect.stringContaining('图片连接尚未接通') },
+    edit: { status: 'configured' } })
+  expect(() => roles.selection('run', 'generate')).toThrow(before.generate.status === 'unavailable' ? before.generate.reason : '')
+  generateConfigured = true
+  expect(roles.describe('run')).toEqual(before)
+  expect(snapshot).toHaveBeenCalledTimes(2)
+  expect(JSON.stringify(before)).not.toMatch(/credentialRef|chosen-account|chosen-connection|chosen-credential/)
+  // Descriptions are a projection; callers cannot mutate the frozen route or later disclosures.
+  if (before.generate.status === 'unavailable') before.generate.reason = 'changed by caller'
+  expect(roles.describe('run')?.generate).toEqual({ status: 'unavailable', reason: expect.stringContaining('图片连接尚未接通') })
+  await roles.beginRun('next-run')
+  expect(roles.describe('next-run')).toEqual({ generate: { status: 'configured' }, edit: { status: 'configured' } })
+})
+
+it('discloses a locally unsupported image route before any image operation is requested', async () => {
+  const roles = frozenImageRoles(async role => ({ role, profileRevision: 1, profileUpdatedAt: '',
+    connection: role === 'imageEdit' ? { ...connection, protocol: 'openai-chat' } : connection,
+    model: 'chosen-image', parameters: {} }) as ExecutionSelectionSnapshot)
+  await roles.beginRun('run')
+  expect(roles.describe('run')).toEqual({ generate: { status: 'configured' },
+    edit: { status: 'unavailable', reason: expect.stringContaining('已启用 OpenAI Images API') } })
 })

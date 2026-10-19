@@ -11,12 +11,22 @@ export async function presentNavigationTransition(
   commit: () => Promise<boolean>, signal: AbortSignal,
 ): Promise<boolean> {
   if (signal.aborted) return false
+  if (transition.effect === 'none' || transition.durationMs === 0) return commit()
   const document = root.ownerDocument as TransitionDocument
-  if (!document.startViewTransition) throw new Error('当前浏览器不能运行页面快照转场；请使用支持 View Transitions 的浏览器。页面尚未切换。')
-  if (document.defaultView?.matchMedia('(prefers-reduced-motion: reduce)').matches) return commit()
-  const outgoing = transition.outgoing ?? { keyframes: [{ opacity: 1 }, { opacity: 0 }] }
-  const incoming = transition.incoming ?? { keyframes: [{ opacity: 0 }, { opacity: 1 }] }
-  const timing = (value: typeof outgoing) => ({ duration: 300, ...value.timing, fill: 'both' as const })
+  if (!document.startViewTransition || document.defaultView?.matchMedia('(prefers-reduced-motion: reduce)').matches) return commit()
+  const direction = transition.direction ?? 'left', horizontal = direction === 'left' || direction === 'right'
+  const distance = direction === 'left' || direction === 'up' ? -8 : 8
+  const shift = (value: number) => `translate${horizontal ? 'X' : 'Y'}(${value}%)`
+  const preset = transition.effect === 'slide' ? {
+    outgoing: [{ transform: shift(0), opacity: 1 }, { transform: shift(distance), opacity: 0 }],
+    incoming: [{ transform: shift(-distance), opacity: 0 }, { transform: shift(0), opacity: 1 }],
+  } : transition.effect === 'zoom' ? {
+    outgoing: [{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(1.04)', opacity: 0 }],
+    incoming: [{ transform: 'scale(.96)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }],
+  } : { outgoing: [{ opacity: 1 }, { opacity: 0 }], incoming: [{ opacity: 0 }, { opacity: 1 }] }
+  const outgoing: NonNullable<ComponentNavigationTransition['outgoing']> = transition.outgoing ?? { keyframes: preset.outgoing }
+  const incoming: NonNullable<ComponentNavigationTransition['incoming']> = transition.incoming ?? { keyframes: preset.incoming }
+  const timing = (value: typeof outgoing) => ({ duration: transition.durationMs ?? (transition.effect ? 240 : 300), easing: transition.easing ?? (transition.effect ? 'ease-out' : 'linear'), ...value.timing, fill: 'both' as const })
   // Parse submitted keyframes/easing before committing a destination.
   for (const track of [outgoing, incoming]) new KeyframeEffect(null, track.keyframes.map(frame => ({ ...frame })), timing(track))
   active.get(document)?.()

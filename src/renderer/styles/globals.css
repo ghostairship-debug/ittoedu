@@ -73,6 +73,7 @@ select {
 
 button {
   color: inherit;
+  cursor: pointer;
 }
 
 button:focus-visible,

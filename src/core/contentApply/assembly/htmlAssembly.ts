@@ -37,6 +37,13 @@ export interface HtmlDesignCapture {
   contentBounds?: { x: number; y: number; width: number; height: number }
   /** Known viewport-dependent CSS in this measured shell, not a source execution verdict. */
   viewportDependent?: boolean
+  /** Passive fixed-stage candidate. The measurement owner confirms it at the proposed carrier viewport. */
+  programRoot?: { sourcePath: readonly number[]; x: number; y: number; width: number; height: number;
+    /** A fixed absolute root can hand its baseline translation to the formal frame. */
+    localPlacement?: true;
+    media?: { query: string; matches: boolean }[] }
+  /** A declared local stage whose rectangle stays stable at its proposed carrier viewport. */
+  fixedProgramSize?: { width: number; height: number }
   body: number
   pageStyle: Record<string, string>
   /** Font faces and keyframes needed by retained internal content, without page layout rules. */
@@ -99,7 +106,6 @@ export interface HtmlAssembly {
   source: { html: string; themeCss?: string }
 }
 
-const INLINE = new Set(['a', 'abbr', 'b', 'bdi', 'bdo', 'br', 'cite', 'code', 'del', 'dfn', 'em', 'i', 'ins', 'kbd', 'mark', 'q', 'ruby', 'rp', 'rt', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'time', 'u', 'var', 'wbr'])
 const NON_CONTENT = new Set(['base', 'head', 'link', 'meta', 'script', 'style', 'template', 'title'])
 const SEMANTIC_GROUP = new Set(['article', 'aside', 'figure', 'fieldset', 'footer', 'header', 'main', 'nav', 'section', 'ul', 'ol', 'li'])
 const POSITION_STYLE = /^(?:position|inset(?:-.+)?|top|right|bottom|left|(?:min-|max-)?(?:width|height|inline-size|block-size)|margin(?:-.+)?|transform(?:-.+)?|translate|rotate|scale|zoom|z-index|float|clear|order|flex(?:-.+)?|grid(?:-.+)?|align-self|justify-self)$/
@@ -141,11 +147,38 @@ function hasStackingContext(element: MeasuredHtmlElement): boolean {
     || /(?:^|,\s*)(?:transform|opacity|filter|perspective)(?:\s*,|$)/.test(style['will-change'] ?? '')
 }
 
-function sourceProgramReason(element: MeasuredHtmlElement): string | undefined {
-  if (['iframe', 'canvas', 'object', 'embed'].includes(element.tagName)) return element.tagName
-  if (Object.keys(element.attributes).some(name => /^on[a-z]/i.test(name))) return 'event-handler'
-  if (Object.entries(element.attributes).some(([name, value]) => /^(?:href|src|action|formaction)$/.test(name) && /^javascript:/i.test(value.trim().replace(/[\t\r\n]/g, '')))) return 'event-handler'
-  return undefined
+/** Shared decomposition decision; self-contained so the passive browser worker can use it too. */
+export function measuredHtmlKind(elements: readonly MeasuredHtmlElement[], index: number, retainedScope = false): { kind: HtmlAssemblyObject['kind'] | 'decoration'; programReason?: string } {
+  const inlineTags = new Set(['a', 'abbr', 'b', 'bdi', 'bdo', 'br', 'cite', 'code', 'del', 'dfn', 'em', 'i', 'ins', 'kbd', 'mark', 'q', 'ruby', 'rp', 'rt', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'time', 'u', 'var', 'wbr'])
+  const nonContent = new Set(['base', 'head', 'link', 'meta', 'script', 'style', 'template', 'title'])
+  const programReason = (value: MeasuredHtmlElement): string | undefined => {
+    if (['iframe', 'canvas', 'object', 'embed'].includes(value.tagName)) return value.tagName
+    if (Object.keys(value.attributes).some(name => /^on[a-z]/i.test(name))
+      || Object.entries(value.attributes).some(([name, text]) => /^(?:href|src|action|formaction)$/.test(name) && /^javascript:/i.test(text.trim().replace(/[\t\r\n]/g, '')))) return 'event-handler'
+    return undefined
+  }
+  const textOf = (at: number): string => elements[at]!.children.map(child => child.kind === 'element'
+    ? nonContent.has(elements[child.index]!.tagName) ? '' : textOf(child.index) : child.kind === 'text' ? child.text : '').join('')
+  const inline = (at: number): boolean => {
+    const value = elements[at]!
+    return inlineTags.has(value.tagName) && !programReason(value) && !['absolute', 'fixed'].includes(value.style.position ?? '')
+      && ['transform', 'rotate', 'scale'].every(name => !value.style[name] || value.style[name] === 'none')
+      && value.children.every(child => child.kind !== 'element' || inline(child.index))
+  }
+  const value = elements[index]!, reason = programReason(value)
+  if (reason) return { kind: 'program', programReason: reason }
+  if (retainedScope) {
+    const containsProgram = (at: number): boolean => Boolean(programReason(elements[at]!))
+      || elements[at]!.children.some(child => child.kind === 'element' && containsProgram(child.index))
+    return containsProgram(index) ? { kind: 'program', programReason: 'embedded-program-context' } : { kind: 'web' }
+  }
+  if (['img', 'picture'].includes(value.tagName)) return { kind: 'image' }
+  if (value.tagName === 'svg') return { kind: 'svg' }
+  if (['table', 'video', 'audio', 'input', 'select', 'textarea', 'button', 'details'].includes(value.tagName)) return { kind: 'web' }
+  const children = value.children.filter((child): child is Extract<MeasuredHtmlChild, { kind: 'element' }> => child.kind === 'element' && !nonContent.has(elements[child.index]!.tagName))
+  if (textOf(index).trim() && children.every(child => inline(child.index))) return { kind: 'text' }
+  if (value.children.some(child => child.kind === 'text' && child.text.trim())) return { kind: 'web' }
+  return { kind: children.length ? 'group' : 'decoration' }
 }
 
 /** Converts only a completed capture. No DOM mutation or formal identity allocation occurs here. */
@@ -156,7 +189,7 @@ export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAss
   if (documentScope) {
     diagnostics.push({ level: 'info', code: 'html-semantic-source-scope', message: `关联的 ${documentScope.reason} 保留本次完整输入，后代不再拆分。`, sourcePath: [] })
     return { viewport: { ...capture.viewport }, source, diagnostics, flowCoupled: true,
-      root: { kind: 'web', label: '关联内容', sourcePath: [], frame: { ...capture.viewport, transform: IDENTITY_MATRIX },
+      root: { kind: measuredHtmlKind(capture.elements, capture.body, true).kind === 'program' ? 'program' : 'web', label: '关联内容', sourcePath: [], frame: { ...capture.viewport, transform: IDENTITY_MATRIX },
         style: {}, pseudoElements: {}, retainedSource: { html: source.html, reason: documentScope.reason }, children: [], decorations: [], sourceRegions: [] } }
   }
   const element = (index: number) => capture.elements[index]!
@@ -171,30 +204,7 @@ export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAss
       style: outer ? htmlObjectStyle(value.style) : { ...value.style }, pseudoElements: value.pseudoElements,
       children: value.children.map(child => child.kind === 'element' ? contentOf(child.index) : { ...child }) }
   }
-  const inline = (index: number): boolean => {
-    const value = element(index)
-    return INLINE.has(value.tagName) && !sourceProgramReason(value)
-      && !['absolute', 'fixed'].includes(value.style.position ?? '')
-      && (!value.style.transform || value.style.transform === 'none')
-      && (!value.style.rotate || value.style.rotate === 'none')
-      && (!value.style.scale || value.style.scale === 'none')
-      && value.children.every(child => child.kind !== 'element' || inline(child.index))
-  }
-  const kindOf = (index: number): HtmlAssemblyObject['kind'] | 'decoration' => {
-    const value = element(index)
-    if (sourceScopes.has(index)) return 'web'
-    if (sourceProgramReason(value)) return 'program'
-    if (['img', 'picture'].includes(value.tagName)) return 'image'
-    if (value.tagName === 'svg') return 'svg'
-    if (['table', 'video', 'audio', 'input', 'select', 'textarea', 'button', 'details'].includes(value.tagName)) return 'web'
-    const children = value.children.filter((child): child is Extract<MeasuredHtmlChild, { kind: 'element' }> => child.kind === 'element' && !NON_CONTENT.has(element(child.index).tagName))
-    const ownText = value.children.some(child => child.kind === 'text' && child.text.trim())
-    if (textOf(index).trim() && children.every(child => inline(child.index))) return 'text'
-    // Mixed anonymous text and block children need their internal browser layout.
-    if (ownText) return 'web'
-    if (!children.length) return 'decoration'
-    return 'group'
-  }
+  const kindOf = (index: number) => measuredHtmlKind(capture.elements, index, sourceScopes.has(index)).kind
   const bounds = framing === 'content' ? capture.contentBounds : undefined
   const rootFrame: AffineFrame = bounds && bounds.width > 0 && bounds.height > 0
     ? { width: bounds.width, height: bounds.height, transform: [1, 0, 0, 1, bounds.x, bounds.y] }
@@ -259,7 +269,7 @@ export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAss
         object.kind = 'program'; object.program = { html: value.sourceHtml, reason: 'singular-transform' }
         diagnostics.push({ level: 'info', code: 'html-source-region', message: '零尺度编组保留为源码区域。', sourcePath: value.sourcePath })
       } else value.children.forEach(child => { if (child.kind === 'element') append(child.index, object, value.frame!.transform) })
-    } else if (kind === 'program') object.program = { html: value.sourceHtml, reason: sourceProgramReason(value)! }
+    } else if (kind === 'program') object.program = { html: value.sourceHtml, reason: measuredHtmlKind(capture.elements, index).programReason! }
     else object.content = contentOf(index, true)
   }
   element(capture.body).children.forEach(child => { if (child.kind === 'element') append(child.index, root, root.frame.transform) })
@@ -286,14 +296,29 @@ export function sourceProgramAssembly(viewport: HtmlAssembly['viewport'], source
   const bounds = shell?.contentBounds
   const measurable = reason === 'anonymous-body-content' && bounds && bounds.width > 0 && bounds.height > 0
     && bounds.x >= 0 && bounds.y >= 0 && !shell?.viewportDependent
-  // Source still owns its internal CSS coordinates. Keep their zero origin and
-  // positive leading space; shifting the root to bounds.x/y would count it twice.
-  const size = measurable ? { width: bounds.x + bounds.width, height: bounds.y + bounds.height } : viewport
+  // Unlocalized source still owns its zero origin and positive leading space.
+  // Only a confirmed absolute root transfers that external baseline to frame;
+  // the application adapter offsets its document shell without rewriting root CSS.
+  const size = shell?.fixedProgramSize ?? (measurable ? { width: bounds.x + bounds.width, height: bounds.y + bounds.height } : viewport)
+  const localRoot = shell?.fixedProgramSize && shell.programRoot?.localPlacement ? shell.programRoot : undefined
   const messages = [...diagnostics, { level: 'info' as const, code: 'html-source-program', message: `含 ${reason} 的耦合内容保留完整源码。` }]
-  if (shell) messages.push(measurable
+  if (shell) messages.push(shell.fixedProgramSize
+    ? { level: 'info', code: 'html-program-shell-size', message: localRoot
+      ? '局部程序按实测区域自动装配；页面位置交给正式 frame，原源码坐标与后续程序运动保留。'
+      : '局部程序沿用已声明并实测的固定内容区域；完整源码和内部坐标保留。' }
+    : measurable
     ? { level: 'info', code: 'html-program-shell-size', message: '静态匿名正文按已测内容占位；原始文本和排版源码已保留。' }
     : { level: 'info', code: 'html-program-shell-viewport', message: '程序使用已分配设计视口；禁脚本初态不能代表其动态边界，完整源码已保留。' })
   return { viewport: { ...viewport }, source, diagnostics: messages,
-    root: { kind: 'program', label: '源程序', sourcePath: [], frame: { ...size, transform: IDENTITY_MATRIX },
+    root: { kind: 'program', label: '源程序', sourcePath: localRoot?.sourcePath ?? [],
+      frame: localRoot ? { width: localRoot.width, height: localRoot.height, transform: [1, 0, 0, 1, localRoot.x, localRoot.y] } : { ...size, transform: IDENTITY_MATRIX },
       style: {}, pseudoElements: {}, program: { html: source.html, reason }, children: [], decorations: [], sourceRegions: [] } }
+}
+
+/** Shrinking a carrier must not change a centered, constrained or media-query-dependent root. */
+export function confirmProgramRootSize(capture: HtmlDesignCapture, measured: { x: number; y: number; width: number; height: number; mediaMatches?: boolean[] } | undefined): void {
+  const original = capture.programRoot
+  if (original && measured && (['x', 'y', 'width', 'height'] as const).every(key => Math.abs(original[key] - measured[key]) < 0.1)
+    && (original.media ?? []).every((query, index) => measured.mediaMatches?.[index] === query.matches))
+    capture.fixedProgramSize = { width: original.width + (original.localPlacement ? 0 : original.x), height: original.height + (original.localPlacement ? 0 : original.y) }
 }

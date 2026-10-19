@@ -47,7 +47,8 @@ export class OAuthDesktopService {
       await new Promise<void>((resolve, reject) => {
         const failed = (error: Error) => reject(error)
         server.once('error', failed)
-        server.listen(this.options.callbackPort ?? 1455, host, () => { server.removeListener('error', failed); resolve() })
+        // Preserve the registered localhost redirect without depending on IPv6 DNS ordering.
+        server.listen(this.options.callbackPort ?? 1455, '127.0.0.1', () => { server.removeListener('error', failed); resolve() })
       }).catch(() => { throw new ExecutionSettingsError('oauth-callback-port-in-use', '登录回调端口不可用，可能正被其他登录使用。请结束该登录后重试。') })
       server.on('error', () => { if (session?.status.status === 'pending') void this.cancel(session.status.loginId) })
       const address = server.address()

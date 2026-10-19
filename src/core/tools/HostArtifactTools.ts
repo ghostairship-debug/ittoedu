@@ -21,13 +21,15 @@ export function artifactDeliverySource(source: HostArtifactResolvedSource): { so
 /** Encoding belongs to the result owner; callers copy a returned source unchanged. */
 export const computeArtifactSource = (job: string, name: string): string => `${job}@${encodeURIComponent(name)}`
 export const delegationArtifactSource = (job: string, name: string): string => `${job}@${encodeURIComponent(name)}`
+export function resolveJobArtifactSource(source: string): { kind: 'compute' | 'delegation'; job: string; name: string } | null {
+  const match = /^((compute|delegate)-[^@\s]+)@(.+)$/.exec(source)
+  return match ? { kind: match[2] === 'compute' ? 'compute' : 'delegation', job: match[1]!, name: decodeURIComponent(match[3]!) } : null
+}
 export function resolveArtifactSource(input: HostArtifactSaveInput): HostArtifactResolvedSource {
   const image = parseGeneratedImageReference(input.source)
   if (image) return { kind: 'image', job: image.jobId, resourceId: image.resourceId, destination: input.destination }
-  const compute = /^(compute-[^@\s]+)@(.+)$/.exec(input.source)
-  if (compute) return { kind: 'compute', job: compute[1]!, name: decodeURIComponent(compute[2]!), destination: input.destination }
-  const delegated = /^(delegate-[^@\s]+)@(.+)$/.exec(input.source)
-  if (delegated) return { kind: 'delegation', job: delegated[1]!, name: decodeURIComponent(delegated[2]!), destination: input.destination }
+  const job = resolveJobArtifactSource(input.source)
+  if (job) return { ...job, destination: input.destination }
   if (/^workspace-image:[a-f0-9]{64}:image_[a-f0-9]{64}$/.test(input.source))
     return { kind: 'image-resource', resource: input.source, destination: input.destination }
   // Gateway-issued image resources are checked against the current run/document/epoch by their reader.

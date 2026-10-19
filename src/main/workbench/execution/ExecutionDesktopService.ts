@@ -9,7 +9,7 @@ import type { ExecutionEvent, ExecutionEventInput } from '../../../shared/workbe
 import type { EditEvent } from '../../../shared/workbench/editSession'
 import type { ModelChatMessage, ModelSelection } from '../../../shared/workbench/modelProvider'
 import type { InputContext } from '../../../shared/workbench/attachments'
-import { executionAdvancementMode, type ExecutionRunRecord, type ExecutionStart } from '../../../shared/workbench/execution'
+import { type ExecutionRunRecord, type ExecutionStart } from '../../../shared/workbench/execution'
 import { conversationHistoryIndex } from './ConversationHistoryIndex'
 import { PayloadCompiler } from '../../../core/execution/PayloadCompiler'
 import { AttachmentError, AttachmentService, type AttachmentLiveConversation } from '../attachments/AttachmentService'
@@ -20,6 +20,7 @@ import { ExecutionEngine, trustedRunDocumentIds } from './ExecutionEngine'
 import { VisualAnalysisService } from './VisualAnalysisService'
 import { ExecutionRunStore } from './ExecutionRunStore'
 import { captureMainTiming, ExecutionEventStore, type ExecutionTimingMark, type ExecutionTimingStage } from './ExecutionEventStore'
+import { ExecutionDelegationProjection } from './ExecutionDelegationProjection'
 import { ExecutionSubmissionStore, type StoredExecutionSubmission } from './ExecutionSubmissionStore'
 import { EditSessionService } from './EditSessionService'
 import { OpenAIChatProvider } from '../providers/OpenAIChatProvider'
@@ -27,7 +28,7 @@ import { ChatGPTResponsesProvider, OpenAIResponsesProvider } from '../providers/
 import { AnthropicMessagesProvider } from '../providers/AnthropicMessagesProvider'
 import { routeModelProviders, serializeModelPayload } from '../providers/ModelProviderRouter'
 import { DesktopOperationError } from '../../errors'
-import { DEFAULT_PERMISSION_MODE } from '../../../shared/workbench/executionPermission'
+import { DEFAULT_PERMISSION_MODE, recordedPermissionMode } from '../../../shared/workbench/executionPermission'
 import { executionInputError } from './executionInputErrors'
 import { ExecutionChangeReviewService } from '../review/ExecutionChangeReviewService'
 import type { HostArtifactDeliveryService } from './HostArtifactDeliveryService'
@@ -42,6 +43,12 @@ import { matchesSavedDocument } from './savedDocumentBinding'
 import { isSourceDocumentModel } from '../../../shared/workbench/document'
 import type { ElementChangeView, ElementRevertResult } from '../../../shared/workbench/executionDesktop'
 import { snapshotSelectedLessonMaterials } from './MaterialReadTools'
+import type { DelegationJobService, DelegationJobSnapshot } from '../delegation/DelegationJobService'
+import type { ExecutionDelegationChildIdentity, ExecutionDelegationChildView } from '../../../shared/workbench/delegation'
+import { emptyExecutionProjection } from '../../../shared/workbench/executionEvents'
+import { modelToolResult } from '../../../core/tools/modelToolResult'
+import { taskTargetDeclaration } from '../../../shared/workbench/taskTargetContext'
+import { componentFrameSchema } from '../../../shared/contracts/component-platform'
 
 export interface ExecutionDesktopServiceOptions {
   directory: string
@@ -51,6 +58,8 @@ export interface ExecutionDesktopServiceOptions {
   /** A separate transport can be supplied by deterministic real-host fixtures. Production uses fetch. */
   fetch?: typeof fetch
   attachments?: AttachmentService
+  /** Same durable job owner; injectable for deterministic desktop behavior checks. */
+  delegation?: DelegationJobService
 }
 function conversationAttachmentIds(record: ConversationRecord): string[] {
   return [...new Set([...record.attachmentIds, ...record.inputAttachments.map(reference => reference.attachmentId),
@@ -117,6 +126,7 @@ export class ExecutionDesktopService {
   private shutdownPromise?: Promise<void>
   private readonly elementChanges = new Map<string, ElementChangeTracker>()
   private eventSink?: (event: ExecutionEvent) => void
+  private readonly delegationProjection: ExecutionDelegationProjection
   private editSink?: (event: EditEvent) => void
   private externalRevoker?: (input: { workspaceId: string; conversationId: string; portIds: string[] }) => Promise<void>
   private imageRetention?: {
@@ -131,7 +141,14 @@ export class ExecutionDesktopService {
     this.conversations = new ConversationStore({ directory: path.join(options.directory, 'conversations') })
     this.runs = new ExecutionRunStore(path.join(options.directory, 'runs'))
     this.events = new ExecutionEventStore({ directory: path.join(options.directory, 'events') })
+    this.delegationProjection = new ExecutionDelegationProjection({ readRun: runId => this.engine.read(runId),
+      append: event => this.events.append(event), onError: error => {
+        void diagnosticLog.append({ source: 'main', message: '子任务等待事项显示失败', details: {
+          error: error instanceof Error ? error.message : String(error),
+        } })
+      } })
     this.events.subscribe(event => {
+      this.delegationProjection.enqueue(event)
       // Display follows the existing ordered event owner without blocking an external business receipt.
       if (event.type === 'document.save' && (event.data.saveStatus === 'saved' || event.data.saveStatus === 'failed'))
         this.timing(event.conversationId, event.taskId, `${event.eventId}:save-fact`, 'save.fact-observed', {
@@ -204,6 +221,8 @@ export class ExecutionDesktopService {
       do {
         while (this.queues.size) await Promise.allSettled([...this.queues.values()])
         await this.engine.settleDocumentBindings()
+        await this.events.flushPending()
+        await this.delegationProjection.flush()
         await this.events.flushPending()
         // A stored terminal event can publish the ordinary final conversation write.
       } while (this.queues.size)
@@ -325,6 +344,59 @@ export class ExecutionDesktopService {
     const record = await this.conversations.readConversation({ workspaceId, conversationId })
     if (!record) throw new DesktopOperationError('conversation-deleted', '会话已不存在', '原会话已删除或无法找到。', '请选择现有会话或新建会话；文件与已应用的修改没有删除。')
     return record
+  }
+  private async delegationOwner(): Promise<DelegationJobService> {
+    return this.options.delegation ?? (await import('../workbenchToolServices.js')).workbenchDelegationService()
+  }
+  private delegationView(job: DelegationJobSnapshot): ExecutionDelegationChildView {
+    const target = taskTargetDeclaration(job.targetContext) ?? job.target
+    const context = job.targetContext !== null && typeof job.targetContext === 'object'
+      ? job.targetContext as { frame?: unknown; regionStatus?: unknown } : undefined
+    const frame = context?.regionStatus === 'current-object' ? componentFrameSchema.safeParse(context.frame) : undefined
+    return { parentRunId: job.runId, jobId: job.jobId, ...(job.childRunId ? { childRunId: job.childRunId } : {}),
+      goal: job.goal ?? '原生子任务', status: job.status, terminal: job.terminal, stopped: job.stopped,
+      ...(target ? { target } : {}), ...(frame?.success ? { frame: frame.data } : {}),
+      ...(job.targetContext !== undefined ? { targetContext: job.targetContext } : {}),
+      ...(job.role ? { role: job.role } : {}), ...(job.reason ? { reason: job.reason } : {}),
+      ...(job.summary ? { summary: job.summary } : {}), artifacts: job.artifacts.map(({ name, byteLength }) => ({ name, byteLength })) }
+  }
+  /** Walking host-owned lineage grants inspection/control of this tree, never document authority. */
+  private async delegationSource(input: ExecutionDelegationChildIdentity) {
+    const conversation = await this.required(input.workspaceId, input.conversationId)
+    const visited = new Set<string>()
+    let parentId = input.parentRunId
+    while (!conversation.runIndex.builtinRunIds.includes(parentId)) {
+      if (visited.has(parentId)) throw refused('子任务关系无法核实')
+      visited.add(parentId)
+      const parent = await this.engine.read(parentId)
+      if (!parent?.delegatedBy) throw refused('子任务不属于当前会话')
+      parentId = parent.delegatedBy.runId
+    }
+    const parent = await this.engine.read(input.parentRunId)
+    if (!parent) throw refused('父任务记录不存在')
+    const owner = await this.delegationOwner(), job = await owner.status(input.parentRunId, input.jobId)
+    if (job.executionKind !== 'native') throw refused('该作业不是原生子任务')
+    const child = job.childRunId ? await this.engine.read(job.childRunId) : null
+    if (child && (child.delegatedBy?.runId !== input.parentRunId || child.delegatedBy.jobId !== input.jobId))
+      throw refused('子任务运行关系与作业回执不一致')
+    return { owner, job, child, parent }
+  }
+  private async delegationChildren(input: { workspaceId: string; conversationId: string }): Promise<ExecutionDelegationChildView[]> {
+    const conversation = await this.required(input.workspaceId, input.conversationId), owner = await this.delegationOwner()
+    const visited = new Set<string>(), result: ExecutionDelegationChildView[] = []
+    let parents = [...conversation.runIndex.builtinRunIds]
+    while (parents.length) {
+      parents = parents.filter(runId => !visited.has(runId))
+      for (const runId of parents) visited.add(runId)
+      const jobs = await Promise.all((await owner.listNative(parents)).map(async job => {
+        const child = job.childRunId ? await this.engine.read(job.childRunId) : null
+        return child && !['queued', 'running', 'stopping'].includes(child.status) && !job.terminal
+          ? owner.settleNativeChild(job.runId, job.jobId) : job
+      }))
+      result.push(...jobs.map(job => this.delegationView(job)))
+      parents = jobs.flatMap(job => job.childRunId ? [job.childRunId] : [])
+    }
+    return result
   }
   private async changeReviewSource(input: { workspaceId: string; conversationId: string; runId: string }): Promise<{ run: ExecutionRunRecord; workspaceRoot: string }> {
     const run = await this.engine.read(input.runId)
@@ -560,13 +632,13 @@ export class ExecutionDesktopService {
     }
     const now = Date.now(), attachmentIds = [...new Set(attachments.map(reference => reference.attachmentId))]
     return { schemaVersion: 1, submissionId: input.submissionId, workspaceId: input.workspaceId, conversationId: input.conversationId,
-      state: 'queued', mode: input.mode ?? 'queue', text: input.text, advancementMode: input.advancementMode ?? current.advancementMode, documents: structuredClone(input.documents), attachments: structuredClone(attachments), permission,
+      state: 'queued', mode: input.mode ?? 'queue', text: input.text, advancementMode: input.advancementMode, documents: structuredClone(input.documents), attachments: structuredClone(attachments), permission,
       ...(input.contentOutput ? { contentOutput: structuredClone(input.contentOutput) } : {}),
       ...(input.materials ? { materials: structuredClone(input.materials) } : {}),
       ...(input.webAuthorization ? { webAuthorization: structuredClone(input.webAuthorization) } : {}),
       model: { provider: selection.connection.provider, model: selection.model, accountId: selection.connection.accountId, billing: selection.connection.billing.kind },
       createdAt: now, updatedAt: now, digest, attachmentIds,
-      start: { conversationId: current.conversationId, taskId: input.submissionId, instruction: input.text, advancementMode: input.advancementMode ?? current.advancementMode, selection, documents,
+      start: { conversationId: current.conversationId, taskId: input.submissionId, instruction: input.text, advancementMode: input.advancementMode, selection, documents,
         ...(compressionSelection ? { compressionSelection } : {}), ...(compressionUnavailableReason ? { compressionUnavailableReason } : {}),
         ...(contentOutput ? { contentOutput: structuredClone(contentOutput) } : {}),
         ...(input.materials ? { materials: structuredClone(input.materials) } : {}),
@@ -610,7 +682,7 @@ export class ExecutionDesktopService {
     record = await this.submissions.update(record.submissionId, { state: 'starting', continuation, updatedAt: Date.now(), failure: undefined })
     try {
       await this.recordElementBaseline(record)
-      const run = await this.engine.start(record.start, continuation, prepared => this.bindRun(record, prepared).then(() => undefined))
+      const run = await this.engine.start({ ...record.start, permission: recordedPermissionMode(record.start.permission) }, continuation, prepared => this.bindRun(record, prepared).then(() => undefined))
       return (await this.submissions.read(record.submissionId)) ?? { ...record, state: 'accepted', runId: run.runId }
     } catch (error) {
       const checkpoint = (await this.runs.list()).find(run => run.input.taskId === record.submissionId)
@@ -720,7 +792,9 @@ export class ExecutionDesktopService {
       await this.options.documents.settleSaveObservations()
       await this.engine.settleDocumentBindings()
     }
-    const digest = this.digest(input), existing = await this.submissions.read(input.submissionId)
+    const existing = await this.submissions.read(input.submissionId)
+    let digest = this.digest(existing && input.permission === undefined
+      ? { ...input, permission: recordedPermissionMode(existing.permission) } : input)
     if (existing) {
       if (existing.digest !== digest || existing.workspaceId !== input.workspaceId || existing.conversationId !== input.conversationId) throw executionInputError('submission-conflict')
       if (existing.steeringRunId && existing.state === 'starting') {
@@ -742,8 +816,10 @@ export class ExecutionDesktopService {
         || JSON.stringify(input.materials ?? null) !== JSON.stringify(source.start.materials ?? null)
         || JSON.stringify(input.webAuthorization ?? null) !== JSON.stringify(source.start.webAuthorization ?? null)
         || JSON.stringify(input.attachments ?? []) !== JSON.stringify(source.attachments)
-        || (input.permission ?? DEFAULT_PERMISSION_MODE) !== (source.permission ?? DEFAULT_PERMISSION_MODE))
+        || (input.permission ?? recordedPermissionMode(source.permission)) !== recordedPermissionMode(source.permission))
         throw refused('继续运行必须使用原任务冻结的文字、目标和附件')
+      input = { ...input, permission: recordedPermissionMode(source.permission) }
+      digest = this.digest(input)
       const child = (await this.submissions.list()).find(record => record.retryOfRunId === previous!.runId
         && (record.state !== 'failed' || Boolean(record.runId)))
       if (child) return this.submissionResult(child)
@@ -775,8 +851,8 @@ export class ExecutionDesktopService {
       }
       record = await this.prepareSubmission(preparedInput, current, digest, previous?.input.inputContext?.context)
       if (previous) {
-        // Mode is a switchable preference, not part of the original document/material grant.
-        record.advancementMode = input.advancementMode ?? current.advancementMode ?? executionAdvancementMode(previous)
+        // A previous selector value is historical metadata; only an explicit current input supplies it.
+        record.advancementMode = input.advancementMode
         record.start.advancementMode = record.advancementMode
         // The public submission remains the user's original frozen payload so
         // lost ACK confirmation computes the same digest with the same ID.
@@ -822,7 +898,7 @@ export class ExecutionDesktopService {
   private async steerSubmission(input: ExecutionSendInput, current: ConversationRecord, digest: string, original: ExecutionRunRecord): Promise<ExecutionSendResult> {
     if (!input.text.trim()) throw refused('调整当前任务需要补充文字')
     if (input.attachments?.length || input.materials || input.webAuthorization
-      || input.permission !== undefined && input.permission !== (original.input.permission ?? DEFAULT_PERMISSION_MODE))
+      || input.permission !== undefined && input.permission !== recordedPermissionMode(original.input.permission))
       throw refused('当前调整沿用原任务的材料、权限与范围；新增材料或权限请加入队列作为新任务。')
     const now = Date.now(), documents: ExecutionDocumentReference[] = original.input.documents.map(document => executionDocumentReferenceSchema.parse({
       documentId: document.documentId, epoch: document.epoch!, revision: document.revision!, writable: [...document.writable],
@@ -1165,6 +1241,39 @@ export class ExecutionDesktopService {
           }
         }
         case 'run': return await this.engine.read(input.runId)
+        case 'delegation-children': return await this.delegationChildren(input)
+        case 'delegation-child': {
+          const { owner, job, child } = await this.delegationSource(input)
+          // Engine's terminal event precedes candidate sealing. Read the same owner settlement before showing controls.
+          const settled = child && !['queued', 'running', 'stopping'].includes(child.status) && !job.terminal
+            ? await owner.settleNativeChild(input.parentRunId, input.jobId) : job
+          const projection = child ? await this.events.snapshot(child.input.conversationId) : emptyExecutionProjection('pending-child')
+          return { view: this.delegationView(settled), run: child ? { ...child, requests: [],
+            tools: child.tools.map(tool => ({ ...tool, ...(tool.result ? { result: modelToolResult(tool.call.name, tool.result) } : {}) })) } : null,
+          projection: { ...projection, items: projection.items.filter(item => item.type !== 'usage') } }
+        }
+        case 'delegation-artifact': {
+          const { owner } = await this.delegationSource(input)
+          const { artifact, bytes } = await owner.readArtifact(input.parentRunId, input.jobId, input.name)
+          let text: string | null = null
+          try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch { /* Binary candidates retain their original bytes. */ }
+          return { name: artifact.name, byteLength: artifact.byteLength, text }
+        }
+        case 'delegation-stop': {
+          const { owner } = await this.delegationSource(input)
+          return this.delegationView(await owner.cancel(input.parentRunId, input.jobId))
+        }
+        case 'delegation-message': {
+          const { owner } = await this.delegationSource(input)
+          return this.delegationView(await owner.messageFromUser(input.parentRunId, input.jobId, input.submissionId, input.text))
+        }
+        case 'delegation-resume': {
+          const { owner, parent } = await this.delegationSource(input)
+          const permission = recordedPermissionMode(parent.input.permission)
+          if (permission !== 'workspace' && permission !== 'full') throw refused('原任务未授权独立候选写入')
+          return this.delegationView(await owner.resumeFromUser({ runId: input.parentRunId, jobId: input.jobId,
+            submissionId: input.submissionId, text: input.text, permission }))
+        }
         case 'change-review': {
           const { run } = await this.changeReviewSource(input)
           return await this.changeReview.inspect(run, { offset: input.offset, limit: input.limit })
@@ -1173,7 +1282,7 @@ export class ExecutionDesktopService {
           const { run, workspaceRoot } = await this.changeReviewSource(input)
           if (!['completed', 'partial', 'failed', 'stopped'].includes(run.status))
             throw refused('任务仍在运行，请先等待结束或停止后再回退')
-          return this.changeReview.rollback(run, input.entryId, { workspaceRoot, permission: DEFAULT_PERMISSION_MODE })
+          return this.changeReview.rollback(run, input.entryId, { workspaceRoot, permission: recordedPermissionMode(run.input.permission) })
         })
         case 'checkpoint': return (await this.checkpointSource(input)).checkpoint
         case 'fork-checkpoint': return await this.serial(input.conversationId, async () => {
@@ -1214,7 +1323,9 @@ export function executionDesktopService(): Promise<ExecutionDesktopService> {
     const managedRoot = path.join(directory, 'space')
     await fs.mkdir(managedRoot, { recursive: true })
     await authorizeWorkspaceFilesRoot(managedRoot)
-    return new ExecutionDesktopService({ directory, documents: documentHost(), settings: await executionSettingsStore(),
+    const service = new ExecutionDesktopService({ directory, documents: documentHost(), settings: await executionSettingsStore(),
       attachments: (await attachmentsDesktopService()).attachments, authorizeWorkspaceRoot: root => operateWorkspaceFiles({ type: 'root', directory: root }) })
+    ;(await import('../workbenchToolServices.js')).setWorkbenchNativeExecution(service.engine)
+    return service
   })().catch(error => { singleton = undefined; throw error })
 }

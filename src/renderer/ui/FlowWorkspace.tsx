@@ -26,6 +26,7 @@ import { flowParagraphAnchorAt, flowParagraphAnchoredFrame } from '../../shared/
 import { createFlowViewportGeometry } from '../../shared/flowViewportGeometry'
 import { isViewportComponent, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, createTeacherControllerHudGeometry, teacherControllerReferenceSize, type TeacherControllerHudGeometry } from '../../shared/teacherControllerViewportGeometry'
 import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, flowPaperMaxWidth, resolveFlowPaperBackground } from '../../shared/flowBodyPresentation'
+import { ComponentBackgroundPaint } from '../components/ComponentBackgroundPaint'
 import { resolveComponentOuterPresentation } from '../../shared/componentPresentation'
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../document'
 import { prepareDocumentSelection, prepareDocumentTextEdit, requestDocumentSelection, type DocumentSelectionAdapter } from '../document/documentSelectionCommands'
@@ -214,7 +215,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
         ...(operation.preparedResourceBatches ?? (operation.preparedResources === undefined ? [] : [operation.preparedResources]))])]
       const planned = prepareFlowDocumentResourceTransaction(target, surfaceId, next.content.blocks, resources, operation.rangeProjection)
       assertFlowStructureEditsAllowed(target.editingProject, planned.edits, true)
-      if (planned.edits.length) await bridge.editCaptured(bridge.capture(planned.edits, planned.target), operation.historyGroup)
+      if (planned.edits.length) await bridge.editCaptured(bridge.capture(planned.edits, planned.target, planned.readPaths), operation.historyGroup)
       releaseFlowPreparedResources(planned.prepared)
       preparedResources.current = preparedResources.current.filter(value => !planned.prepared.includes(value))
       setError(null); setDraft(null, target.documentId); return true
@@ -593,9 +594,8 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
         onPointerDownCapture={event => { paperPointer.current = { x: event.clientX, y: event.clientY } }}
         onClick={event => { if (!readOnly && event.target === event.currentTarget) editor.current?.focusEndParagraph() }}
         onDragOver={event => { if (onDropWorkspaceMedia && event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }}
-        onDrop={drop} style={{ position: 'relative', width: flowPaperMaxWidth(layout), maxWidth: flowPaperMaxWidth(layout), containerType: 'inline-size', minHeight: readOnly ? '100%' : paperMinimumHeight || '200%', margin: '0 auto', padding: FLOW_BODY_PAPER_PADDING, backgroundColor: background.color,
-          backgroundImage: background.assetId && assetUrls[background.assetId] ? `url("${assetUrls[background.assetId]}")` : undefined,
-          backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit, backgroundPosition: 'center', backgroundRepeat: 'no-repeat', color: '#1f2937' }}>
+        onDrop={drop} style={{ position: 'relative', isolation: 'isolate', width: flowPaperMaxWidth(layout), maxWidth: flowPaperMaxWidth(layout), containerType: 'inline-size', minHeight: readOnly ? '100%' : paperMinimumHeight || '200%', margin: '0 auto', padding: FLOW_BODY_PAPER_PADDING, color: '#1f2937' }}>
+        <ComponentBackgroundPaint background={background} resolveAsset={id => assetUrls[id]} />
         <style>{FLOW_BODY_CSS}</style>
         <div style={{ position:'relative',zIndex:2 }}><SharedDocumentEditor key={`${documentId}/${surfaceId}`} ref={editor} cardDocumentId={documentId ?? undefined} document={document} revision={String(project.revision)} readOnly={readOnly}
           objectRevision={JSON.stringify(Object.values(project.instances).map(instance=>[instance.id,instance.definitionId,

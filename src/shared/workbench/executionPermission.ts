@@ -4,7 +4,9 @@ import { z } from 'zod'
 export const executionPermissionModes = ['full', 'workspace', 'ask', 'read-only'] as const
 export const executionPermissionModeSchema = z.enum(executionPermissionModes)
 export type ExecutionPermissionMode = z.infer<typeof executionPermissionModeSchema>
-export const DEFAULT_PERMISSION_MODE: ExecutionPermissionMode = 'workspace'
+export const DEFAULT_PERMISSION_MODE: ExecutionPermissionMode = 'full'
+/** Missing permission in an already accepted legacy run keeps its original workspace authority. */
+export const recordedPermissionMode = (permission?: ExecutionPermissionMode): ExecutionPermissionMode => permission ?? 'workspace'
 export const permissionLabels: Record<ExecutionPermissionMode, string> = {
   full: '完全访问', workspace: '完全访问（工作空间）', ask: '修改前询问', 'read-only': '只读',
 }

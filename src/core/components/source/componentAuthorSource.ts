@@ -2,6 +2,7 @@ import type { ComponentDefinition, ComponentEdit, ComponentImplementation, Cours
 import type { DocumentResources } from '../../../shared/workbench/document'
 import { getBuiltinComponentSource } from './builtinSources'
 import { componentSourceAuthoringEdits, type ComponentSourceEditTarget } from './sourceAuthoringEdits'
+import { componentEnhancementRuntimeSource, componentEnhancementWrapperSource } from './componentEnhancement'
 
 type Source = Extract<ComponentImplementation, { kind: 'source' }>
 export interface ComponentAuthorSource {
@@ -9,6 +10,26 @@ export interface ComponentAuthorSource {
   /** Read-only preparation. These definitions enter the project only with an actual edit. */
   definitions: ComponentDefinition[]
 }
+
+/** Author-facing facts from ComponentRuntimeContext/Scope and TeacherControllerPort. */
+export const componentAuthorSourceRuntimeNote = [
+  'API5：DOM 和监听在 mount(context) 内建立；context.root 是当前组件的可选 HTMLElement，context.instance 是当前实例。',
+  '共享运行状态使用 context.scope.state：get(name) 返回 JSON 值或 undefined，set(name, value) 写 JSON 值，subscribe(name, listener) 返回退订函数并自动随挂载清理。相同名称在同一运行会话的组件/页面间共享；这是运行态，不写作者工程或保存文件。subscribe 不回放当前值，首次显示另读 get(name)。',
+  '导航使用可选的 const tc = context.teacherController：tc.read().scenes 返回实际 {id,name,targets?}，tc.read().locationId 是当前页；用实际 scene.id 执行 await tc.execute({type:"scene.go",sceneId:scene.id}, context.scope.signal)，也支持 {type:"scene.next"}/{type:"scene.previous"}。tc.canExecute(action) 返回当前能否执行；tc.subscribe(listener) 返回退订函数并自动随挂载清理。',
+  '给当前实例追加业务行为时，用 project.apply {path:主Source路径,intent:"enhance",content:业务模块}，或 from 提供普通 JS/TS 文件及相对依赖。软件在原实现挂载后执行增强，接力 update/dispose，保留 frame、HTML/专业数据与其他实例；回执 enhancementPath 指向实际业务模块，继续编辑它即可。共享定义和依赖仍用 content 深改。',
+  '增强模块导出 default 函数或 enhance(context)。context 提供原 API5 端口及 listen(type,selector,handler) 的根节点委托监听、observe(key,paint) 的首次读取和订阅；重绘后继续使用这些受管监听/显示，更新时先清理增强再执行原 update 并重新接入。可返回清理函数或含 dispose() 的对象，异步 dispose 会等待。scope.cleanup 用于计时器、Observer 和外部资源。',
+  '显式连接由 object.update.properties.stateBindings 提供 alias→已声明的 courseState.key；增强用 bindings.get/set/observe(alias)，observe 同时首显与订阅。软件维护这些声明引用的改名与复制映射，不改写业务 JS 字符串。scope.state 的普通 JSON 业务仍可直接使用。',
+  'scope.state/events.subscribe 和 tc.subscribe 已自动随挂载清理，无需重复登记；state.subscribe 不回放当前值，直接使用时首显另读 get。scope.signal 随该次挂载结束而取消，scope.isActive() 表示挂载仍存活；普通暂停、离屏和跨页保留沿原生命周期。',
+  `局部增强示例：
+export default ({root, scope, listen, observe}) => {
+  observe('value', value => {
+    const output = root?.querySelector('[data-value]');
+    if (output) output.textContent = String(value ?? '');
+  });
+  listen('click', '[data-increment]', () => scope.state.set('value', Number(scope.state.get('value') ?? 0) + 1));
+};`,
+  '仍可完整深改 API5：保留 import、...implementation；await implementation.mount(context) 后自行接入，return mounted 或显式转交原 update/dispose；新增 DOM/外部资源需要 cleanup。',
+].join('\n')
 
 /** UI and file observations use the same author entry, without mutating a builtin on read. */
 export function prepareComponentAuthorSource(project: CourseProjectV10, effective: ComponentImplementation | undefined): ComponentAuthorSource | undefined {
@@ -29,6 +50,40 @@ export function prepareComponentAuthorSource(project: CourseProjectV10, effectiv
       source: "import implementation from './implementation';\n\nexport default {\n  ...implementation,\n  mount(context) {\n    return implementation.mount(context);\n  },\n};\n" },
     definitions: Object.hasOwn(project.definitions, id) ? [] : [{ id, title: `${effective.key} 实现`, role: 'mixed', implementation: source }],
   }
+}
+
+/** A local enhancement is ordinary Source modules; the file adapter only chooses this planner. */
+export function componentAuthorEnhancementEdits(project: CourseProjectV10, resources: DocumentResources,
+  instanceId: string, content: string | Source, language: Source['language'] = 'javascript'): ComponentEdit[] {
+  const instance = project.instances[instanceId]
+  if (!instance) throw new Error('增强目标对象已不存在')
+  const effective = instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation
+  const prepared = prepareComponentAuthorSource(project, effective)
+  if (!prepared) throw new Error('当前组件没有可增强的 Source 实现')
+  const target = { kind: 'instance' as const, instanceId }, root = prepared.implementation
+  const replacement: Source = typeof content === 'string' ? { kind: 'source', language, source: content } : content
+  const enhancementId = root.moduleBindings?.['./enhancement']
+  if (enhancementId && root.moduleBindings?.['./implementation'] && root.moduleBindings?.['./enhancement-runtime']) {
+    if (root.workspace || root.source !== componentEnhancementWrapperSource)
+      throw new Error('增强组合入口已被人工深改；请修改其当前 enhancement 依赖或完整 Source，原增强输入已保留。')
+    return componentAuthorSourceEdits(project, resources, target, prepared, replacement, undefined, enhancementId)
+  }
+  // A defined Source may import itself or participate in a cycle. Retain that actual module identity.
+  const definedBase = !instance.implementationOverride && effective?.kind === 'source'
+  const baseId = definedBase ? instance.definitionId : crypto.randomUUID()
+  const behaviorId = crypto.randomUUID(), runtimeId = 'guoling.source-enhancement-runtime'
+  const runtime = project.definitions[runtimeId]
+  const actualRuntimeId = !runtime || runtime.implementation.kind === 'source' && runtime.implementation.source === componentEnhancementRuntimeSource
+    ? runtimeId : crypto.randomUUID()
+  const definitions: ComponentDefinition[] = [...prepared.definitions,
+    ...(!definedBase ? [{ id: baseId, title: '局部增强的原实现', role: 'mixed' as const, implementation: root }] : []),
+    { id: behaviorId, title: '局部业务增强', role: 'mixed', implementation: replacement },
+    ...(!runtime || actualRuntimeId !== runtimeId ? [{ id: actualRuntimeId, title: '局部增强生命周期', role: 'mixed' as const,
+      implementation: { kind: 'source' as const, language: 'javascript' as const, source: componentEnhancementRuntimeSource } }] : [])]
+  const implementation: Source = { kind: 'source', language: 'javascript', source: componentEnhancementWrapperSource,
+    moduleBindings: { './implementation': baseId, './enhancement': behaviorId, './enhancement-runtime': actualRuntimeId },
+    ...(root.resourceBindings ? { resourceBindings: root.resourceBindings } : {}) }
+  return [...definitions.map(definition => ({ type: 'definition.set' as const, definition })), ...componentSourceAuthoringEdits(target, implementation)]
 }
 
 export function componentAuthorSourceProject(project: CourseProjectV10, prepared: ComponentAuthorSource): CourseProjectV10 {

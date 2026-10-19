@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { ComponentEdit, CourseProjectV10 } from '../../shared/contracts/component-platform'
 import { componentBackgroundSchema, componentPresentationSchema } from '../../shared/contracts/component-platform/schema'
 import type { ToolTarget } from '../../shared/workbench/tools'
+import { mergeComponentBackground } from '../../shared/componentBackgroundPaint'
 
 export const coursePresentationInputSchema = z.object({
   target: z.string().min(1),
@@ -73,7 +74,10 @@ export function coursePresentationEdits(project: CourseProjectV10,
       const state = requireState()
       if (value.background === null) delete state.background
       else {
-        state.background = { ...state.background, ...value.background }
+        state.background = mergeComponentBackground(state.background, value.background ?? {})
+        // CSS paint is one background branch. The existing inherit controls
+        // return that branch to its parent rather than silently retaining it.
+        if (value.inherit?.length) delete state.background.paint
         for (const field of value.inherit ?? []) delete state.background[field]
       }
       break

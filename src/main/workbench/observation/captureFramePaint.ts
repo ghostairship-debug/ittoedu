@@ -19,7 +19,7 @@ export function captureFramePaintInRealm(token: string, action: 'install' | 'sta
     window.removeEventListener('message', receive)
   }
   window.addEventListener('message', receive)
-  const ready = visible.then(async visible => {
+  const visibility = visible.then(visible => {
     // The parent owns its iframe's actual CSS box. A hidden child document can
     // still report a full viewport and visible document while its rAF is paused.
     const frames: Array<HTMLIFrameElement | HTMLFrameElement> = []
@@ -34,8 +34,13 @@ export function captureFramePaintInRealm(token: string, action: 'install' | 'sta
       const rect = frame.getBoundingClientRect()
       const paints = visible && rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0
         && rect.left < innerWidth && rect.top < innerHeight && frame.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+        && getComputedStyle(frame).clipPath !== 'polygon(0px 0px, 0px 0px, 0px 0px)'
       frame.contentWindow?.postMessage({ type: 'guoling.capture.paint', token, visible: paints }, '*')
     }
+    return visible
+  })
+  let painted: Promise<void> | undefined
+  const wait = () => painted ??= visibility.then(async visible => {
     if (!visible) return
     await document.fonts.ready
     await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
@@ -45,18 +50,28 @@ export function captureFramePaintInRealm(token: string, action: 'install' | 'sta
     resolveVisible(false)
     Reflect.deleteProperty(states, property)
   }
-  Object.defineProperty(states, property, { configurable: true, value: { start: () => resolveVisible(true), wait: () => ready, dispose } satisfies State })
+  Object.defineProperty(states, property, { configurable: true, value: { start: () => resolveVisible(true), wait, dispose } satisfies State })
 }
 
 /** Only frames with pixels in their ancestor's viewport acknowledge a painted frame. */
-export async function waitForCaptureFramePaint(mainFrame: WebFrameMain, token: string): Promise<void> {
-  const frames = mainFrame.framesInSubtree.filter(frame => !frame.detached)
+export async function waitForCaptureFramePaint(mainFrame: WebFrameMain, token: string,
+  observedFrames?: readonly WebFrameMain[]): Promise<void> {
+  const frames = (observedFrames ?? mainFrame.framesInSubtree).filter(frame => !frame.detached)
   const run = (frame: WebFrameMain, action: Parameters<typeof captureFramePaintInRealm>[1]) =>
     frame.executeJavaScript(`(${captureFramePaintInRealm.toString()})(${JSON.stringify(token)},${JSON.stringify(action)})`)
   try {
     await Promise.all(frames.map(frame => run(frame, 'install')))
     await run(mainFrame, 'start')
-    await Promise.all(frames.map(async frame => {
+    // A parent rAF alongside its children can still compose their previous
+    // surfaces. Let each child finish before the containing frame paints;
+    // unrelated frames at the same depth can prepare together.
+    const levels = new Map<number, WebFrameMain[]>()
+    for (const frame of frames) {
+      let depth = 0
+      for (let parent = frame.parent; parent; parent = parent.parent) depth++
+      levels.set(depth, [...(levels.get(depth) ?? []), frame])
+    }
+    for (const [, level] of [...levels].sort(([a], [b]) => b - a)) await Promise.all(level.map(async frame => {
       try { if (!frame.detached) await run(frame, 'wait') }
       catch (error) { if (!frame.detached) throw error }
     }))

@@ -1,4 +1,5 @@
-import {componentAssetIds} from '../../components/library/references'
+import {createComponentReferenceCapture} from '../../components/library/references'
+import { componentBackgroundAssetIds } from '../../../shared/componentBackgroundPaint'
 import {resolveComponentPresentation,resolveComponentBackground} from '../../../shared/contracts/component-platform/project'
 import type { ComponentAsset, ComponentImplementation, CourseProjectV10, JsonObject } from '../../../shared/contracts/component-platform/project'
 import type { PublishedCourseV3, PublishedDefinition, PublishedImplementation, PublishedInstance } from '../../../shared/contracts/component-platform/published'
@@ -211,9 +212,10 @@ export async function buildPublishedCourseV3(
 
   const assetIds=new Set<string>()
   const resources={assets:{...sources.assetBytes},components:sources.componentFiles??{}}
+  const references=createComponentReferenceCapture(project,resources)
   const versions=[project,...project.surfaces.flatMap(surface=>(surface.presentation?.states??[]).map(state=>resolveComponentPresentation(project,surface.id,state.id)))]
-  for(const version of versions){for(const instance of Object.values(version.instances))for(const id of componentAssetIds(instance,version.definitions[instance.definitionId],version,resources))assetIds.add(id);for(const surface of version.surfaces){const id=resolveComponentBackground(version,surface).assetId;if(id)assetIds.add(id)}}
-  if(project.background?.assetId)assetIds.add(project.background.assetId)
+  for(const version of versions){for(const instance of Object.values(version.instances))for(const id of references.componentAssetIds(instance,version.definitions[instance.definitionId],version))assetIds.add(id);for(const surface of version.surfaces)for(const id of componentBackgroundAssetIds(resolveComponentBackground(version,surface)))assetIds.add(id)}
+  for(const id of componentBackgroundAssetIds(project.background))assetIds.add(id)
   for(const asset of Object.values(project.theme?.assets??{}))assetIds.add(asset.assetId)
   for(const sound of Object.values(project.media?.audio.sounds??{}))assetIds.add(sound.assetId)
   const assets: PublishedCourseV3['assets'] = {}

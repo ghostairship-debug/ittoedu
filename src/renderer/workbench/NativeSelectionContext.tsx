@@ -1,4 +1,4 @@
-import { AArrowDown, AArrowUp, AlignCenter, AlignLeft, AlignRight, AlignHorizontalJustifyStart, Baseline, Bold, ChevronsDownUp, ChevronsUpDown, Crop, Eye, EyeOff, Film, Highlighter, ImageIcon, Lock, Italic, PaintBucket, Pencil, Play, Repeat, Scan, Sigma, SlidersHorizontal, Square, Type, Underline, Unlock, VolumeX } from 'lucide-react'
+import { AlignHorizontalJustifyStart, Baseline, ChevronsDownUp, ChevronsUpDown, Crop, Eye, EyeOff, Film, ImageIcon, Lock, PaintBucket, Play, Repeat, Scan, Sigma, SlidersHorizontal, Square, Type, Unlock, VolumeX } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { isStrokeOnlyShapeType } from '../../shared/contracts/native-v1'
 import { useCourseEditorActions } from '../documents/CourseEditorActionsContext'
@@ -29,6 +29,10 @@ import { proEditorRailController } from '../ui/proEditorRailController'
 import { frameCorners, multiplyMatrices, type AffineMatrix } from '../../core/components/geometry'
 import { componentParentMatrix } from '../composition/crossSurfaceCommands'
 import { owningContainer } from '../../shared/contracts/component-platform/project'
+import { TextFormatActions } from '../editing/quickbar/TextFormatActions'
+import { authorSpotFormatView, authorSpotStylePatch } from '../componentPlatform/surfaces/slide/authorSpotFormatting'
+import { authorSpotStyleEdits } from '../../core/components/authoring/componentAuthorEdits'
+import { slideLightObjectCommands } from '../editing/commands/slideLightCommands'
 
 type ObjectProperties = Extract<PropertiesContext, { kind: 'slide-native' | 'multi-selection' }>
 type GlobalProperties = Extract<PropertiesContext, { kind: 'course-global' }>
@@ -55,12 +59,8 @@ function matchesFlowOverlay(context: PropertiesContext, itemIds: readonly string
 
 import { stepFontSize } from '../../shared/fontSizeStep'
 export { stepFontSize } from '../../shared/fontSizeStep'
-const FONT_SIZE_MIN = 8, FONT_SIZE_MAX = 400
 /** Canvas selections draw a rotation handle about 25px above the frame; the bar stays clear of it. */
 const ROTATION_HANDLE_CLEARANCE = 34
-const ALIGN_ORDER = ['left', 'center', 'right'] as const
-const ALIGN_ICON = { left: <AlignLeft size={14} />, center: <AlignCenter size={14} />, right: <AlignRight size={14} /> }
-const ALIGN_LABEL = { left: '左对齐', center: '居中', right: '右对齐' }
 
 function run(action: () => unknown, onError: (message: string) => void) {
   try { void Promise.resolve(action()).catch(error => onError(error instanceof Error ? error.message : String(error))) }
@@ -76,21 +76,7 @@ function elementLabel(view: PropertiesItemView): string {
 /** Type-specific common actions of one selected object; everything else stays in the editor. */
 function ObjectActions({ view, patch, replaceImage, editText, extra = {} }: { view: PropertiesItemView; patch(patch: PropertiesPatch): void; replaceImage?: () => void; editText?: () => void; extra?: Pick<SingleObjectState, 'editFormula' | 'crop' | 'fit' | 'replaceVideo'> }) {
   if (view.type === 'text') {
-    const sizes = [...new Set(Array.from(view.text).map((_char, index) => view.runs.find(run => run.start <= index && run.end > index)?.style.fontSize ?? view.style.fontSize))]
-    const align = ALIGN_ORDER.includes(view.style.align) ? view.style.align : 'left'
-    const next = ALIGN_ORDER[(ALIGN_ORDER.indexOf(align) + 1) % ALIGN_ORDER.length]!
-    return <>
-      {editText && <QuickBarButton label="编辑文字" icon={<Pencil size={14} />} onClick={editText} />}
-      <QuickBarButton label="加粗" icon={<Bold size={14} />} pressed={view.style.bold} onClick={() => patch({ style: { bold: !view.style.bold } })} />
-      <QuickBarButton label="斜体" icon={<Italic size={14} />} pressed={view.style.italic} onClick={() => patch({ style: { italic: !view.style.italic } })} />
-      <QuickBarButton label="下划线" icon={<Underline size={14} />} pressed={view.style.underline} onClick={() => patch({ style: { underline: !view.style.underline } })} />
-      <QuickBarButton label="减小字号" icon={<AArrowDown size={15} />} disabled={sizes.length > 0 && sizes.every(size => size <= FONT_SIZE_MIN)} onClick={() => patch({ fontSizeStep: -1 })} />
-      <QuickBarLabel>{sizes.length > 1 ? '混合' : Math.round(sizes[0] ?? view.style.fontSize)}</QuickBarLabel>
-      <QuickBarButton label="增大字号" icon={<AArrowUp size={15} />} disabled={sizes.length > 0 && sizes.every(size => size >= FONT_SIZE_MAX)} onClick={() => patch({ fontSizeStep: 1 })} />
-      <QuickBarColorButton label="文字颜色" icon={<Baseline size={14} />} value={view.style.color} onPick={color => { if (color) patch({ style: { color } }) }} />
-      <QuickBarColorButton label="高亮" icon={<Highlighter size={14} />} variant="highlight" value={view.style.highlightColor} onPick={highlightColor => patch({ style: { highlightColor } })} />
-      <QuickBarButton label={`${ALIGN_LABEL[align]}（点按切换为${ALIGN_LABEL[next]}）`} icon={ALIGN_ICON[align]} onClick={() => patch({ style: { align: next } })} />
-    </>
+    return <TextFormatActions view={view} patch={patch} editText={editText} />
   }
   if (view.type === 'formula') return <>
     {extra.editFormula && <QuickBarButton label="编辑公式" icon={<Sigma size={14} />} onClick={extra.editFormula} />}
@@ -144,6 +130,7 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
   const actions = useCourseEditorActions()
   const context = usePropertiesContext({ onReplaceImage: () => actions?.replaceImage() })
   const project = useEditorStore(state => state.courseView.project)
+  const editingProject = useEditorStore(state => state.courseView.editingProject)
   const globalCount = project ? itemIds.filter(id => {
     let owner = owningContainer(project, id)
     while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
@@ -265,7 +252,31 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
   let content: ReactNode = null
   // The selection's right-click menu: the whole list, from the same definitions as the bar's "⋯".
   let contextItems: MenuCommand[] = []
-  if (single) {
+  const professionalText = single?.view.type === 'text' && selectedAuthor?.kind === 'text' && !selectedAuthor.sourceRegion
+    && selectedAuthor.fieldScope !== 'authoring' && selectedAuthor.dataPath?.length === 1 && selectedAuthor.dataPath[0] === 'content'
+  if (single && selectedAuthor?.kind === 'text' && !professionalText) {
+    const localView = (editingProject ?? project) && authorSpotFormatView((editingProject ?? project)!, selectedAuthor)
+    const patchLocal = (patch: PropertiesPatch) => run(async () => {
+      const owner = useEditorStore.getState(), target = owner.courseKernel.captureTarget(documentId!)
+      if (target.surfaceId !== locationId || target.activeStateId !== (stateId ?? null) || target.instanceId !== selectedAuthor.instanceId)
+        throw new Error('当前文字选择已改变，请重新选择')
+      if (single!.disabledReason || single!.view.locked) throw new Error(single!.disabledReason ?? '对象已锁定')
+      const currentView = authorSpotFormatView(target.editingProject, selectedAuthor)
+      if (!currentView) throw new Error('此片段由程序共享排版，请在组件源码中修改格式')
+      const edits = authorSpotStyleEdits(target.editingProject, selectedAuthor, authorSpotStylePatch(selectedAuthor, currentView, patch))
+      await owner.courseKernel.editCaptured(owner.courseKernel.capture(edits, target))
+    }, report)
+    const localCommands = slideLightObjectCommands({ isText: true, locked: single.view.locked || Boolean(single.disabledReason), clickBindable: false, sounds: [], locations: [] })
+      .filter(command => command.kind === 'font' || command.kind === 'line-spacing' && localView?.lineSpacing)
+    content = <>
+      {localView && !single.disabledReason && !single.view.locked ? <>
+        <TextFormatActions view={localView} patch={patchLocal} alignment={localView.alignment} highlight={localView.highlight} editText={() => run(() => useEditorStore.getState().beginSlideSpotEdit(selectedAuthor), report)} />
+        <SlideLightActions commands={localCommands} fontFamily={localView.style.fontFamily} lineSpacing={localView.style.lineSpacing}
+          backgroundColor={null} onRun={command => patchLocal({ style: command.kind === 'font' ? { fontFamily: String(command.value) } : { lineSpacing: Number(command.value) } })} onError={report} />
+      </> : <QuickBarLabel>{single.disabledReason ?? (single.view.locked ? '对象已锁定' : '此片段格式由组件源码控制')}</QuickBarLabel>}
+      <QuickBarSeparator />{ai}
+    </>
+  } else if (single) {
     const node = single.view, patch = single.patch
     // Cropping and replacing a video are Slide-page tools for now (M21).
     const slidePage = selection?.kind === 'slide-native' && !selection.spatialMode

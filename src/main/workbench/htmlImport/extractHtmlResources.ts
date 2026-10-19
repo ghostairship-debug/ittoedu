@@ -45,6 +45,7 @@ type Sink = {
   htmlStack: Set<string>
   domElements: Map<string, Usage>
   moduleAliases: Map<string, string>
+  localReferences: Set<string>
 }
 type Flags = { url: boolean; remote: boolean }
 type DataHit = {
@@ -86,9 +87,19 @@ export const MODULE_BASE_ATTRIBUTE = 'data-guoling-module-base'
 const clip = (value: string, max = 64) => value.length <= max ? value : value.slice(0, max)
 const copyBytes = (bytes: Uint8Array) => new Uint8Array(bytes)
 const placeholder = (key: string) => `cw-resource:${key}`
-const createSink = (): Sink => ({ resources: new Map(), remoteReferences: [], diagnostics: [], modules: new Map(), cssStack: new Set(), htmlStack: new Set(), domElements: new Map(), moduleAliases: new Map() })
+const createSink = (): Sink => ({ resources: new Map(), remoteReferences: [], diagnostics: [], modules: new Map(), cssStack: new Set(), htmlStack: new Set(), domElements: new Map(), moduleAliases: new Map(), localReferences: new Set() })
+
+/** The existing parser owns both rewriting and dependency discovery. Retained
+ * files can seed one capture without accidentally publishing unused History. */
+function siblingResource(sink: Sink, siblings: Map<string, Uint8Array>, key: string | null): Uint8Array | undefined {
+  if (!key) return undefined
+  sink.localReferences.add(key)
+  return siblings.get(key)
+}
 
 function addDiagnostic(sink: Sink, level: ImportDiagnostic['level'], code: string, message: string, reference?: string) {
+  if (code === 'unsupported-dynamic-url-sink' || code === 'dynamic-html-preserved')
+    message += '；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准'
   sink.diagnostics.push(reference === undefined ? { level, code, message } : { level, code, message, reference })
 }
 
@@ -249,7 +260,7 @@ function resolveRelative(baseDir: string, reference: string): string | null {
 
 function rewriteRelative(reference: string, context: Context, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>): { value: string; changed: boolean } {
   const key = resolveRelative(baseDir, reference)
-  const bytes = key ? siblings.get(key) : undefined
+  const bytes = siblingResource(sink, siblings, key)
   if (!key || !bytes) {
     addDiagnostic(sink, 'warning', 'missing-relative-resource', `找不到相对资源 ${clip(reference, 180)}，已保留引用作为待填位置`, key ?? reference)
     return { value: reference, changed: false }
@@ -559,7 +570,7 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
       const reference = match[2] ?? match[4]
       const conditions = importConditions(match[5] ?? '')
       const key = resolveRelative(baseDir, reference)
-      const bytes = key ? siblings.get(key) : undefined
+      const bytes = siblingResource(sink, siblings, key)
       if (/^https?:|^\/\//i.test(reference)) {
         const rewritten = rewriteSingleUrl(reference, 'css-url', baseDir, sink, siblings, false, 'stylesheet')
         if (rewritten.changed) {
@@ -640,7 +651,7 @@ function collectModule(reference: string, baseDir: string, sink: Sink, siblings:
     return
   }
   if (sink.modules.has(key)) return
-  const bytes = siblings.get(key)
+  const bytes = siblingResource(sink, siblings, key)
   if (!bytes) {
     addDiagnostic(sink, 'warning', 'missing-relative-resource', `找不到本地模块 ${key}；原引用与其他内容已保留`, key)
     return
@@ -1231,7 +1242,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
       } else if (src?.hasValue && ['html', 'htm'].includes(extensionOf(decodeEntities(src.rawValue)))) {
         const reference = decodeEntities(src.rawValue).trim()
         const key = resolveRelative(baseDir, reference)
-        const bytes = key ? siblings.get(key) : undefined
+        const bytes = siblingResource(sink, siblings, key)
         if (bytes && key) {
           if (sink.htmlStack.has(key)) addDiagnostic(sink, 'error', 'recursive-html-document', `嵌入 HTML 循环引用，无法建立离线文档：${key}`, reference)
           else {
@@ -1279,7 +1290,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
         if (!managedMediaType(mediaTypeForPath(decoded)) && data?.kind !== 'media' && !remoteMedia) {
           const key = resolveRelative(baseDir, decoded)
           // Keep the existing bad-input diagnostics even when the performance hint is omitted.
-          if (!key || !siblings.has(key)) rewriteSingleUrl(decoded, 'html-attr', baseDir, sink, siblings, true, attributeUsage(tag, 'href', mediaParent))
+          if (!siblingResource(sink, siblings, key)) rewriteSingleUrl(decoded, 'html-attr', baseDir, sink, siblings, true, attributeUsage(tag, 'href', mediaParent))
           addDiagnostic(sink, 'warning', 'resource-hint-omitted', `已移除非受管素材的加载提示 ${clip(decoded, 120)}；不影响页面正文，脚本或样式请内联`, decoded)
           i = tag.end
           continue
@@ -1293,7 +1304,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
       if (href?.hasValue && stylesheet && extensionOf(decodeEntities(href.rawValue)) === 'css') {
         const decoded = decodeEntities(href.rawValue).trim()
         const key = resolveRelative(baseDir, decoded)
-        const bytes = key ? siblings.get(key) : undefined
+        const bytes = siblingResource(sink, siblings, key)
         if (/^https?:/i.test(decoded) || decoded.startsWith('//') || /^https?:\/\//i.test(baseDir)) {
           const rewritten = rewriteSingleUrl(decoded, 'html-attr', baseDir, sink, siblings, true, 'stylesheet')
           if (rewritten.changed) { href.value = rewritten.value; href.changed = true }
@@ -1338,7 +1349,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
         if (/^https?:|^\/\//i.test(decoded)) addDiagnostic(sink, 'warning', 'remote-script', `远程脚本已保留: ${clip(decoded, 180)}；预览与发布播放器的 CSP 阻止远程脚本加载，请内联该库或改用本地脚本文件`, decoded)
         if (/^data:/i.test(decoded)) addDiagnostic(sink, 'warning', 'unsupported-script-source', 'data URI 脚本源保留原文；不对其重写资源闭包', clip(decoded))
         const key = resolveRelative(baseDir, decoded)
-        const bytes = key ? siblings.get(key) : undefined
+        const bytes = siblingResource(sink, siblings, key)
         const moduleScript = javascriptKind(attributeBy(tag.attrs, 'type')?.rawValue ?? null) === 'module'
         if (moduleScript && !/^(?:[a-zA-Z][a-zA-Z0-9+.-]*:|\/\/)/.test(decoded)) {
           // Keep the module script URL and its directory relation in author HTML.
@@ -1402,5 +1413,6 @@ export function extractHtmlResources(input: ExtractHtmlResourcesInput): ExtractH
   const sink = createSink()
   const siblings = siblingMap(input.siblingFiles)
   const html = transformHtml(input.html, sink, siblings)
-  return { html, ...(sink.modules.size ? { modules: Object.fromEntries(sink.modules) } : {}), resources: [...sink.resources.values()], remoteReferences: sink.remoteReferences, diagnostics: sink.diagnostics }
+  return { html, ...(sink.modules.size ? { modules: Object.fromEntries(sink.modules) } : {}), resources: [...sink.resources.values()],
+    remoteReferences: sink.remoteReferences, diagnostics: sink.diagnostics, localReferences: [...sink.localReferences] }
 }

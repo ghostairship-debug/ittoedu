@@ -60,11 +60,15 @@ it('persists a receipt before dispatch, seals a checked artifact, and never repl
 
 it('rejects unapproved copy roots and preserves unknown effects after cancellation', async () => {
   const paths = await fixture()
+  let entered!: () => void
+  const running = new Promise<void>(resolve => { entered = resolve })
   const service = new DelegationJobService({ ...paths, runner: { run: (_request, options) => new Promise(resolve => {
+    entered()
     options.signal?.addEventListener('abort', () => resolve(result('child-1', 'unknown')), { once: true })
   }) } })
   await expect(service.start(input(paths.root))).rejects.toThrow('副本授权根')
   await service.start(input(paths.copyRoot))
+  await running
   const stopped = await service.cancel('parent-run', 'delegate-1')
   expect(stopped).toMatchObject({ status: 'unknown', terminal: true, stopped: true, artifacts: [] })
   await expect(service.readArtifact('parent-run', 'delegate-1', 'answer.txt')).rejects.toThrow('尚未完成')

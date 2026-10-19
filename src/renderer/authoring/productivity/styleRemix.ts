@@ -34,6 +34,6 @@ export function applyStyleRemix(context: ProductivityContext, preview: StyleRemi
     const failures = checked.slots.filter(slot => slot.issue).map(slot => `${slot.label}：${slot.issue}`)
     if (!checked.slots.length || failures.length) throw new Error(failures.join('\n') || '没有可替换的文字槽位')
     const plan = planCourseStyleRemixEdits(context.document, preview.sourceSceneId, replacements)
-    return { ok: true, step: { ...designProductionStep(context, plan.edits), createdSurfaceId: plan.createdSurfaceId } }
+    return { ok: true, step: { ...designProductionStep(context, plan.edits, plan.readPaths), createdSurfaceId: plan.createdSurfaceId } }
   } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : '样板改写失败' } }
 }

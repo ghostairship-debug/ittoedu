@@ -3,6 +3,7 @@ import { compileHtmlModules, retainedNativeModuleSyntaxSupport } from './compile
 import type { Loader, Message, Plugin } from 'esbuild'
 import { loadRuntimeEsbuild, runtimeEsbuildVersion } from '../../componentCompilerRuntime'
 import { componentModuleFileExtensions, componentModuleSpecifier } from '../../../../core/components/source/moduleSpecifier'
+import { componentLifecycleDiagnostics } from './componentLifecycleDiagnostics'
 import type {
   ComponentCompilationDiagnostic, ComponentCompilationInput, ComponentCompiler,
 } from '../../../../core/components/compilation/types'
@@ -34,7 +35,7 @@ function diagnostics(messages: readonly Message[], severity: 'error' | 'warning'
 /** esbuild reads only supplied virtual files and returns bytes; it never runs candidate code. */
 export function createEsbuildComponentCompiler(): ComponentCompiler {
   return {
-    identity: `esbuild:${runtimeEsbuildVersion}:component-memory-esm-11`,
+    identity: `esbuild:${runtimeEsbuildVersion}:component-memory-esm-12`,
     async compile(input: ComponentCompilationInput) {
       if (input.options?.preserveModules) {
         const { transform } = await loadRuntimeEsbuild()
@@ -128,11 +129,15 @@ export function createEsbuildComponentCompiler(): ComponentCompiler {
           sourcemap: (input.options?.sourceMap ?? true) ? 'inline' : false,
           logLevel: 'silent', metafile: false,
         })
+        const entry = `/source/${relativeFile(input.entry)}`
+        const loader = entryLoaders.get(entry) ?? loaders[path.posix.extname(entry).toLowerCase()]
+        const contractDiagnostics = loader === 'js'
+          ? componentLifecycleDiagnostics(files.get(entry)!, input.entry) : []
         return {
           status: 'ready', artifact: {
             format: 'esm', code: result.outputFiles!.find(file => file.path.endsWith('.js'))!.text,
             css: result.outputFiles!.find(file => file.path.endsWith('.css'))?.text ?? '',
-            diagnostics: diagnostics(result.warnings, 'warning', names),
+            diagnostics: [...diagnostics(result.warnings, 'warning', names), ...contractDiagnostics],
           },
         }
       } catch (error) {

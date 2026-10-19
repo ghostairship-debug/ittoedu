@@ -40,6 +40,25 @@ async function tokenServer(handler?: (fields: URLSearchParams, response: ServerR
 function callback(authorizationURL: string, state?: string) { const auth = new URL(authorizationURL), url = new URL(auth.searchParams.get('redirect_uri')!)
   url.search = new URLSearchParams({ state: state ?? auth.searchParams.get('state')!, code: 'new-owner-code' }).toString(); return url.toString() }
 
+it('default OAuth callback listens on IPv4 while retaining the localhost redirect', async () => {
+  const { store, saved } = await setup()
+  let authorizationURL = ''
+  const transport = await tokenServer((fields, response) => {
+    expect(new URL(fields.get('redirect_uri') ?? '').hostname).toBe('localhost')
+    response.setHeader('Content-Type', 'application/json')
+    response.end(JSON.stringify({ access_token: token(), refresh_token: 'private-refresh', expires_in: 120 }))
+  })
+  const oauth = new OAuthDesktopService({ store, openExternal: async url => { authorizationURL = url }, callbackPort: 0, fetch: transport })
+  const started = await oauth.start(saved.connection.id, saved.connection.revision)
+  try {
+    const callbackURL = new URL(callback(authorizationURL))
+    expect(callbackURL.hostname).toBe('localhost')
+    callbackURL.hostname = '127.0.0.1'
+    expect((await fetch(callbackURL)).status).toBe(200)
+    expect(oauth.status(started.loginId).status).toBe('connected')
+  } finally { await oauth.cancel(started.loginId) }
+})
+
 it('human login remains pending beyond fifteen minutes and can finish through its real loopback callback', async () => {
   const { store, saved } = await setup(); let authorizationURL = '', now = 1_000_000
   const transport = await tokenServer()

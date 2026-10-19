@@ -1,4 +1,5 @@
 import type { RuntimePresentationTransition } from '../runtime/types'
+import type { ComponentNavigationTransition } from '../component-platform/navigationMotion'
 import type {
   CourseStateCondition,
   CourseStateScalar,
@@ -198,8 +199,8 @@ export type NodeMotionAction = (
 
 /** Payload family used by both sequential and parallel Project V8 action steps. */
 export type InteractionActionPayload =
-  | { type: 'step.next' }
-  | { type: 'step.previous' }
+  | { type: 'step.next'; transition?: ComponentNavigationTransition }
+  | { type: 'step.previous'; transition?: ComponentNavigationTransition }
   | {
       type: 'presentation.set'
       stateId: string
@@ -210,12 +211,13 @@ export type InteractionActionPayload =
       sceneId: string
       /** Omit to enter the target scene's authored initial state. */
       targetStateId?: string
+      transition?: ComponentNavigationTransition
     }
-  | { type: 'scene.next' }
-  | { type: 'location.go'; locationId: string }
-  | { type: 'scene.previous' }
-  | { type: 'scene.replay' }
-  | { type: 'course.restart' }
+  | { type: 'scene.next'; transition?: ComponentNavigationTransition }
+  | { type: 'location.go'; locationId: string; transition?: ComponentNavigationTransition }
+  | { type: 'scene.previous'; transition?: ComponentNavigationTransition }
+  | { type: 'scene.replay'; transition?: ComponentNavigationTransition }
+  | { type: 'course.restart'; transition?: ComponentNavigationTransition }
   | CourseStateSetAction
   | AudioInteractionAction
   | VideoInteractionAction

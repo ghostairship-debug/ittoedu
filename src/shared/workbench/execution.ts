@@ -84,12 +84,16 @@ export interface ExecutionModelRecord {
   responseId?: string
   /** Actual provider terminal label; tool arguments are validated independently. */
   finishReason?: string
+  /** The endpoint's original truncation reason; normalized length alone does not identify a task limit. */
+  finishDetails?: { reason: string; limit?: 'output' | 'context' }
   /** Exact message appended from this completed conversation request; auxiliary requests have none. */
   assistantMessageIndex?: number
   failure?: ModelFailure
   payload?: { phase: 'initial' | 'dynamic'; digest: string; serializedBytes: number }
   /** Local unfinished content only; never calls, model messages, effects or replay inputs. */
   argumentDrafts?: Array<{ state: 'incomplete-prefix'; providerCallId?: string; toolName?: string; argumentsText: string }>
+  /** Latest cumulative provider report for this request; never summed across stream events. */
+  usage?: import('./modelProvider').ModelUsage
   /** Provider-reported counters, not balances; used to size the working context. */
   inputTokens?: number
   outputTokens?: number
@@ -102,7 +106,10 @@ export interface WorkingNote {
   userConstraints: string[]
   /** Model working choices. A sourceRef identifies an existing host input or returned tool call, not proof of the claim. */
   decisions: Array<{ text: string; reason?: string; sourceRefs?: string[] }>
+  /** Required work for the user's current requested result; optional improvements belong in followUps. */
   remaining: string[]
+  /** Advisory optional improvements. Never completion evidence or an unfinished-operation obligation. */
+  followUps?: string[]
   openQuestions: string[]
   risks: string[]
 }
@@ -110,6 +117,8 @@ export interface WorkingNote {
 export type ExecutionDocumentBinding = SavedCourseIdentity
 export interface ExecutionRunRecord {
   schemaVersion: 1
+  /** Main-owned parent/job identity; model input cannot supply this relationship. */
+  delegatedBy?: { runId: string; jobId: string }
   runId: string
   version: number
   input: ExecutionStart
@@ -128,7 +137,7 @@ export interface ExecutionRunRecord {
   requests: ExecutionModelRecord[]
   tools: ExecutionToolRecord[]
   /** Durable user adjustments; the original provider, grant and input remain frozen. */
-  steering?: { submissionId: string; text: string; advancementMode?: ExecutionAdvancementMode; acceptedAt: number; messageIndex?: number; appliedAt?: number }[]
+  steering?: { submissionId: string; text: string; senderRunId?: string; advancementMode?: ExecutionAdvancementMode; acceptedAt: number; messageIndex?: number; appliedAt?: number }[]
   failure?: { code: string; message: string; outcome?: ModelFailure['outcome'] }
   /** Fact summary contains only actual tool returns; it cannot grant permissions. */
   compacted?: { atRequest: number; facts: string; fromMessage?: number
@@ -164,5 +173,5 @@ export interface ExecutionRunRecord {
 
 /** The latest accepted preference, derived from the original freeze and its ordered adjustments. */
 export function executionAdvancementMode(record: Pick<ExecutionRunRecord, 'input' | 'steering'>): ExecutionAdvancementMode | undefined {
-  return record.steering?.filter(value => value.advancementMode).at(-1)?.advancementMode ?? record.input.advancementMode
+  return record.steering?.filter(value => value.advancementMode && !value.senderRunId).at(-1)?.advancementMode ?? record.input.advancementMode
 }

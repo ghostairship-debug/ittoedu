@@ -16,6 +16,14 @@
 
 `asset.search {packageId,version?}` 读取已找到条目的真实对象、rootIds、页面及可改输入；`asset.use {packageId,path,rootIds?}` 可插入完整条目或选定对象子树。`asset.save` 沿同一库服务提炼对象(默认)、页面(`scope:"page",path`)或课程结构(`scope:"structure",pages:[实际页面路径]`)；软件映射新页面、内部导航、状态及依赖，保原人工内容和主题。未知程序内部页面不能仅按预览未访问就裁剪。
 
-受限计算使用当前计算能力，点名获授权输入与所需输出；不以未授权 shell 或安装依赖替代。等待或查状态只沿用返回的 `job`，不另外选择作业类型；作业 ready 表示成果可用，还未写入用户文件。交付用户选定输出用 `artifact.save {source,destination}`，`source` 直接取创建、状态或等待回执，用户决定目的地；软件处理来源身份及保存，报告引用实际返回路径。无需保存中间缓存，不猜或拼 job/resource/name。未返回成功保存时说明真实状态，结果未知沿原操作查证，不重发作业。
+计算和委派使用当前已授权能力，点名输入与所需输出；实际权限和可用执行方式以本任务事实为准。等待或查状态只沿用返回的 `job`，不另外选择作业类型；作业 ready 表示成果可用，还未写入工程或用户文件。`delegate.read`、计算或作业回执返回的真实 `source` 可直接交 `project.apply.from`，软件读取原字节及同组相对依赖，沿本次目标和可选region正式采用；不要求父模型复制源码、逐文件 `artifact.save` 或另建依赖登记表。同任务Continue沿原回执续读，成果可读不代表当前运行拥有旧任务的写入或取消权。
+
+用户需要独立成果文件时用 `artifact.save {source,destination}`，`source` 直接取创建、状态或等待回执，用户决定目的地；软件处理来源身份及保存，报告引用实际返回路径。无需保存中间缓存，不猜或拼 job/resource/name。采用和文件保存分别读真实回执；未返回成功保存时说明真实状态，结果未知沿原操作查证，不重发作业。
+
+有实际信息依赖时，可用`delegate.message {job,text}`向同一协作任务中的具体同伴发送消息；接收表示消息已入队，不表示对方已执行或候选完成，终态续接沿`delegate.resume`。独立任务无需互聊，消息不授予文档writer或用户批准。用户可从父会话打开子任务详情、查看工具及候选，单独停止、补充或沿原记录续接。普通状态只给工作事实，计量保留内部。
+
+用户明确需要原始运行诊断时，可用`job.status {job,detail:"diagnostic"}`读取该作业内部账本；普通status/wait和聊天不显示这些计量。诊断是只读，不重启、取消或重新执行旧作业，也不把读到的旧失败变成新的工具失败。
+
+确有多步读取、过滤、聚合或机械控制流时，可按需加载内置任务执行引擎的`programmatic.execute {code}`。异步JavaScript中用`await tools.describe(names)`取得所需真实定义，用`await tools.call(name,input)`调用本任务已有授权工具，显式`return`必要结果；中间完整回执留现任务记录，沿返回的callId用`programmatic.read {runId?,callId,path?,offset?,limit?}`精确回读，旧runId仅限当前已授权续接链。错误可catch以选择其他方法，但真实失败仍在回执中。代码没有Node、shell、网络或原始宿主对象；Stop中断后续调用。普通脚本不是整段原子事务，需一次事务时仍用现batch；部分失败后按已完成子回执继续，不从头重放已有副作用。简单改字直接使用原工具，无需写代码。
 
 新增工程内容中的相对资源由工程入口解析实际闭包。局部资源问题保留原件和其他可用内容，按诊断修复；不截图静态化。文件交付语义见[文件与保存](files-and-delivery.md)。

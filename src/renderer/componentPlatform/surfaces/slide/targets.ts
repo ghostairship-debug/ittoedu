@@ -11,6 +11,8 @@ export interface FreeObjectTarget {
   parent: ComponentContainer
   ancestors: string[]
   preserveAspectRatio: boolean
+  resizeMode?: 'scale' | 'box'
+  directSelection?: boolean
   stroke?: { points: GeometryPoint[]; width: number }
 }
 export interface FreeBounds { left: number; top: number; right: number; bottom: number; width: number; height: number }
@@ -27,6 +29,7 @@ export function freeSurfaceTargets(project: CourseProjectV10, surfaceId: string)
       const shape = key === 'guoling.shape' ? shapeDataSchema.safeParse(instance.data) : null
       if (instance.frame) result.push({ instanceId: id, frame: instance.frame, parentToSurface: matrix, parent,
         ancestors, preserveAspectRatio: key === 'guoling.image' && imageData?.preserveAspectRatio !== false,
+        ...(key === 'guoling.text' ? { resizeMode: 'box' as const, directSelection: true } : {}),
         ...(shape?.success && (shape.data.shapeType === 'line' || shape.data.shapeType === 'elbow-arrow') ? {
           stroke: { points: resolveNativeLinePoints(shape.data.lineGeometry, instance.frame.width, instance.frame.height, shape.data.shapeType), width: shape.data.style.borderWidth } } : {}) })
       visit(instance.childIds ?? [], { kind: 'instance', instanceId: id },
@@ -58,7 +61,7 @@ export function selectedFreeTargets(targets: readonly FreeObjectTarget[], ids: r
   return targets.filter(target => selected.has(target.instanceId) && !target.ancestors.some(id => selected.has(id)))
 }
 
-/** Default hit selects a card/group; deep hit is an explicit internal-edit gesture. */
+/** Text remains directly editable inside a card; other children use explicit deep selection. */
 export function hitFreeObject(targets: readonly FreeObjectTarget[], point: GeometryPoint, deep = false, surfaceToPointer: AffineMatrix = IDENTITY_MATRIX): FreeObjectTarget | null {
   for (const target of [...targets].reverse()) {
     const matrix = frameToSpaceMatrix(target.frame, target.parentToSurface)
@@ -75,7 +78,7 @@ export function hitFreeObject(targets: readonly FreeObjectTarget[], point: Geome
       })
       if (!hit) continue
     } else if (!frameContainsPoint(target.frame, point, target.parentToSurface)) continue
-    if (deep || !target.ancestors.length) return target
+    if (deep || target.directSelection || !target.ancestors.length) return target
     return targets.find(value => value.instanceId === target.ancestors[0]) ?? target
   }
   return null

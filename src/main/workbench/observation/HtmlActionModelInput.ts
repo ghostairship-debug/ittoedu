@@ -11,7 +11,7 @@ export function htmlActionModelMessage(input: { toolCallId: string; target: stri
     throw new Error('HTML 观察图像资源与回执不符')
   const identity = observation.identity
   return { role: 'user', content: [
-    { type: 'text', text: `工具 ${input.toolName ?? 'html.observe'} 后的真实画面。toolCallId=${input.toolCallId}; target=${input.target}; documentId=${identity.documentId}; epoch=${identity.epoch}; revision=${identity.revision}; loadId=${identity.loadId}; generation=${observation.generation}; pageUrl=${observation.currentUrl}; source=${observation.source}。请只据此画面和工具回执判断。` },
+    { type: 'text', text: `工具 ${input.toolName ?? 'html.observe'} 后的真实画面。toolCallId=${input.toolCallId}; target=${input.target}; documentId=${identity.documentId}; epoch=${identity.epoch}; revision=${identity.revision}; loadId=${identity.loadId}; generation=${observation.generation}; resourceId=${observation.image.resourceId}; pageUrl=${observation.currentUrl}; source=${observation.source}。这是捕获时的画面；操作只使用最新观察回执的元素句柄。` },
     { type: 'image_url', image_url: { url: `data:image/png;base64,${Buffer.from(bytes).toString('base64')}`, detail: 'auto' } },
   ] }
 }

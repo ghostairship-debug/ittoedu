@@ -4,12 +4,45 @@ import { NativeSelectionContext, stepFontSize } from '../../src/renderer/workben
 import { createCourseDocumentHost } from '../helpers/courseDocumentHost'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
+import { textComponentDataSchema } from '../../src/components/text/data'
+import type { ComponentAuthorSpot } from '../../src/shared/contracts/component-platform'
 
 const store = () => useEditorStore.getState()
 const previousDesktopAPI = window.desktopAPI
 afterEach(() => {
   cleanup(); if (store().courseView.project) store().cancelTextEdit(); store().courseBridge.dispose()
   Object.defineProperty(window, 'desktopAPI', { configurable: true, value: previousDesktopAPI })
+})
+
+it('keeps professional text formatting when the canvas selects its registered rich-content author spot', async () => {
+  const host = await createCourseDocumentHost()
+  await store().connectCourseDocuments(host.api); store().setEditingScope('scene')
+  store().addTextNode(); await store().drainCourseDocument()
+  const documentId = store().courseView.activeDocumentId!, id = selectSelectedNodeId(store())!
+  Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { documents: host.api } })
+  await store().courseKernel.edit([{ type: 'data.set', instanceId: id, path: ['content'],
+    value: { inlines: [{ type: 'text', text: 'Professional text', style: { color: '#123e40', italic: true } }] } }])
+  const depth = host.registry.get(documentId).read().undoDepth
+  function CurrentSelection() {
+    const view = useEditorStore(state => state.courseView), content = textComponentDataSchema.parse(view.editingProject!.instances[id]!.data).content
+    const authorSpot: ComponentAuthorSpot = { id: `professional:${id}`, instanceId: id, mountGeneration: 1, kind: 'text',
+      dataPath: ['content'], initialValue: JSON.parse(JSON.stringify(content)), localBounds: { width: 120, height: 40, transform: [1, 0, 0, 1, 0, 0] } }
+    return <CourseEditorChromeContext.Provider value={{ documentId, mode: 'light', setMode() {} }}><main>
+      <NativeSelectionContext documentId={documentId} revision={view.snapshot?.revision ?? 0} surfaceId={view.surfaceId}
+        itemIds={[id]} authorSpot={authorSpot} enabled bounds={() => ({ left: 200, top: 200, width: 120, height: 40 })} />
+    </main></CourseEditorChromeContext.Provider>
+  }
+  render(<CurrentSelection />)
+  const bar = await screen.findByRole('toolbar', { name: '选中对象快捷工具' })
+  expect(within(bar).queryByText('此片段格式由组件源码控制')).toBeNull()
+  expect(within(bar).getByRole('button', { name: '加粗' })).toBeTruthy()
+  fireEvent.click(within(bar).getByRole('button', { name: '文字颜色' }))
+  await act(async () => { fireEvent.click(screen.getByRole('radio', { name: '红色' })); await store().drainCourseDocument() })
+  const changed = textComponentDataSchema.parse(store().courseView.project!.instances[id]!.data)
+  expect(changed.appearance.color).toBe('#ef4444')
+  expect(changed.content.inlines).toEqual([{ type: 'text', text: 'Professional text', style: { color: '#ef4444', italic: true } }])
+  expect(host.registry.get(documentId).read().undoDepth).toBe(depth + 1)
+  expect(store().courseView.project!.instances[id]!.authoring).toBeUndefined()
 })
 
 it('M21 quick bar edits a selected object and a legal multi-selection through existing commands, one History step each', async () => {

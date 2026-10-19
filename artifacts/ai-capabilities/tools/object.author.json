@@ -109,6 +109,9 @@
                   "locationId": {
                     "$ref": "#/$defs/__schema17"
                   },
+                  "transition": {
+                    "$ref": "#/$defs/__schema18"
+                  },
                   "type": {
                     "const": "location.go",
                     "type": "string"
@@ -129,6 +132,9 @@
                   "targetStateId": {
                     "$ref": "#/$defs/__schema17"
                   },
+                  "transition": {
+                    "$ref": "#/$defs/__schema18"
+                  },
                   "type": {
                     "const": "scene.go",
                     "type": "string"
@@ -143,6 +149,9 @@
               {
                 "additionalProperties": false,
                 "properties": {
+                  "transition": {
+                    "$ref": "#/$defs/__schema18"
+                  },
                   "type": {
                     "const": "step.next",
                     "type": "string"
@@ -156,6 +165,9 @@
               {
                 "additionalProperties": false,
                 "properties": {
+                  "transition": {
+                    "$ref": "#/$defs/__schema18"
+                  },
                   "type": {
                     "const": "step.previous",
                     "type": "string"
@@ -169,6 +181,9 @@
               {
                 "additionalProperties": false,
                 "properties": {
+                  "transition": {
+                    "$ref": "#/$defs/__schema18"
+                  },
                   "type": {
                     "const": "scene.next",
                     "type": "string"
@@ -182,6 +197,9 @@
               {
                 "additionalProperties": false,
                 "properties": {
+                  "transition": {
+                    "$ref": "#/$defs/__schema18"
+                  },
                   "type": {
                     "const": "scene.previous",
                     "type": "string"
@@ -195,6 +213,9 @@
               {
                 "additionalProperties": false,
                 "properties": {
+                  "transition": {
+                    "$ref": "#/$defs/__schema18"
+                  },
                   "type": {
                     "const": "scene.replay",
                     "type": "string"
@@ -208,6 +229,9 @@
               {
                 "additionalProperties": false,
                 "properties": {
+                  "transition": {
+                    "$ref": "#/$defs/__schema18"
+                  },
                   "type": {
                     "const": "course.restart",
                     "type": "string"
@@ -258,7 +282,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "fadeInMs": {
-                    "$ref": "#/$defs/__schema18"
+                    "$ref": "#/$defs/__schema21"
                   },
                   "ifPlaying": {
                     "enum": [
@@ -301,10 +325,10 @@
                 "additionalProperties": false,
                 "properties": {
                   "fadeOutMs": {
-                    "$ref": "#/$defs/__schema18"
+                    "$ref": "#/$defs/__schema21"
                   },
                   "target": {
-                    "$ref": "#/$defs/__schema19"
+                    "$ref": "#/$defs/__schema22"
                   },
                   "type": {
                     "const": "audio.pause",
@@ -321,10 +345,10 @@
                 "additionalProperties": false,
                 "properties": {
                   "fadeInMs": {
-                    "$ref": "#/$defs/__schema18"
+                    "$ref": "#/$defs/__schema21"
                   },
                   "target": {
-                    "$ref": "#/$defs/__schema19"
+                    "$ref": "#/$defs/__schema22"
                   },
                   "type": {
                     "const": "audio.resume",
@@ -341,10 +365,10 @@
                 "additionalProperties": false,
                 "properties": {
                   "fadeOutMs": {
-                    "$ref": "#/$defs/__schema18"
+                    "$ref": "#/$defs/__schema21"
                   },
                   "target": {
-                    "$ref": "#/$defs/__schema19"
+                    "$ref": "#/$defs/__schema22"
                   },
                   "type": {
                     "const": "audio.stop",
@@ -361,7 +385,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "target": {
-                    "$ref": "#/$defs/__schema19"
+                    "$ref": "#/$defs/__schema22"
                   },
                   "type": {
                     "const": "audio.toggle-mute",
@@ -501,10 +525,10 @@
                         "type": "string"
                       },
                       "durationMs": {
-                        "$ref": "#/$defs/__schema18"
+                        "$ref": "#/$defs/__schema21"
                       },
                       "easing": {
-                        "$ref": "#/$defs/__schema20"
+                        "$ref": "#/$defs/__schema23"
                       },
                       "effect": {
                         "const": "slide",
@@ -532,10 +556,10 @@
                     "additionalProperties": false,
                     "properties": {
                       "durationMs": {
-                        "$ref": "#/$defs/__schema18"
+                        "$ref": "#/$defs/__schema21"
                       },
                       "easing": {
-                        "$ref": "#/$defs/__schema20"
+                        "$ref": "#/$defs/__schema23"
                       },
                       "effect": {
                         "enum": [
@@ -579,10 +603,10 @@
                         "type": "string"
                       },
                       "durationMs": {
-                        "$ref": "#/$defs/__schema18"
+                        "$ref": "#/$defs/__schema21"
                       },
                       "easing": {
-                        "$ref": "#/$defs/__schema20"
+                        "$ref": "#/$defs/__schema23"
                       },
                       "effect": {
                         "const": "slide",
@@ -610,10 +634,10 @@
                     "additionalProperties": false,
                     "properties": {
                       "durationMs": {
-                        "$ref": "#/$defs/__schema18"
+                        "$ref": "#/$defs/__schema21"
                       },
                       "easing": {
-                        "$ref": "#/$defs/__schema20"
+                        "$ref": "#/$defs/__schema23"
                       },
                       "effect": {
                         "enum": [
@@ -652,11 +676,107 @@
         "type": "string"
       },
       "__schema18": {
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "enum": [
+              "left",
+              "right",
+              "up",
+              "down"
+            ],
+            "type": "string"
+          },
+          "durationMs": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "easing": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "effect": {
+            "enum": [
+              "none",
+              "fade",
+              "slide",
+              "zoom"
+            ],
+            "type": "string"
+          },
+          "incoming": {
+            "$ref": "#/$defs/__schema19"
+          },
+          "outgoing": {
+            "$ref": "#/$defs/__schema19"
+          }
+        },
+        "type": "object"
+      },
+      "__schema19": {
+        "additionalProperties": false,
+        "properties": {
+          "keyframes": {
+            "items": {
+              "$ref": "#/$defs/__schema20"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "timing": {
+            "additionalProperties": false,
+            "properties": {
+              "delay": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "duration": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "easing": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "keyframes"
+        ],
+        "type": "object"
+      },
+      "__schema2": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema20": {
+        "additionalProperties": false,
+        "properties": {
+          "easing": {
+            "type": "string"
+          },
+          "offset": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "opacity": {
+            "type": "number"
+          },
+          "transform": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "__schema21": {
         "maximum": 60000,
         "minimum": 0,
         "type": "number"
       },
-      "__schema19": {
+      "__schema22": {
         "oneOf": [
           {
             "additionalProperties": false,
@@ -713,11 +833,7 @@
           }
         ]
       },
-      "__schema2": {
-        "minLength": 1,
-        "type": "string"
-      },
-      "__schema20": {
+      "__schema23": {
         "enum": [
           "linear",
           "ease-in",

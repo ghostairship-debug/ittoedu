@@ -1,4 +1,5 @@
 import type { TeacherControllerPort } from '../../shared/contracts/component-platform'
+import type { ProjectPlaybackSettings } from '../../shared/contracts/playback-v1'
 
 const navigationHeight = 52
 
@@ -6,15 +7,16 @@ const navigationHeight = 52
 export function createPlaybackNavigationContent(root: HTMLElement): HTMLElement {
   const content = root.ownerDocument.createElement('div')
   content.dataset.playbackNavigationContent = ''
-  Object.assign(content.style, { position: 'absolute', inset: '0', bottom: `${navigationHeight}px`, overflow: 'hidden', minWidth: '0', minHeight: '0' })
+  Object.assign(content.style, { position: 'absolute', inset: '0', overflow: 'hidden', minWidth: '0', minHeight: '0' })
   if (root.ownerDocument.defaultView?.getComputedStyle(root).position === 'static') root.style.position = 'relative'
   root.append(content)
   return content
 }
 
-/** Pointer chrome consumes the existing student navigation port; it owns no page/step state. */
+/** Legacy fallback for projects without authored playback settings; canvas/none use authored controls. */
 export function mountPlaybackNavigationChrome(root: HTMLElement, navigation: TeacherControllerPort,
-  options: { content: HTMLElement; active?(): boolean; report?(message: string): void }) {
+  options: { content: HTMLElement; playback?: ProjectPlaybackSettings; active?(): boolean; report?(message: string): void }) {
+  if (options.playback) return { sync() {}, destroy() {} }
   const dom = root.ownerDocument, bar = dom.createElement('nav'), progress = dom.createElement('span')
   bar.dataset.playbackChrome = 'navigation'
   bar.setAttribute('aria-label', '演示导航')

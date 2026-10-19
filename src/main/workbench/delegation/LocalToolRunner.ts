@@ -59,12 +59,13 @@ export class LocalToolRunner {
     const result: DelegationExecutionResult = { taskId, status: 'unconfigured', artifacts: [], reason: '', externalChangesPossible: false }
     const boundary = this.options.boundary ?? new WindowsCodexSandboxBoundary()
     if (options.signal?.aborted) return { ...result, status: 'cancelled', reason: '本地工具在启动前已停止' }
-    if (!await boundary.assertReady(command.cwd, 'workspace', command.sandboxExecutable))
+    const ready = await boundary.assertReady(command.cwd, 'workspace', command.sandboxExecutable, { signal: options.signal })
+    if (options.signal?.aborted) return { ...result, status: 'cancelled', reason: '本地工具在准备期间已停止' }
+    if (!ready)
       return { ...result, reason: '本地工具工作副本的受限执行边界尚不可用，未启动命令' }
-    if (options.signal?.aborted) return { ...result, status: 'cancelled', reason: '本地工具在启动前已停止' }
     const child = boundary.launchToolRestricted({ copyRoot: command.cwd, sandboxExecutable: command.sandboxExecutable,
       executable: command.executable, args: command.args,
-      options: { cwd: command.cwd, env: localEnvironment(), windowsHide: true, shell: false } })
+      options: { cwd: command.cwd, env: localEnvironment(), windowsHide: true, shell: false }, signal: options.signal })
     result.externalChangesPossible = true
     const emit = (event: DelegationEvent) => { try { options.onEvent?.(event) } catch { /* A view cannot control the process. */ } }
     emit({ kind: 'started', detail: `本地工具已启动：${path.basename(command.executable)}` })
@@ -88,7 +89,7 @@ export class LocalToolRunner {
     try {
       if (options.signal?.aborted) stop()
       child.stdin.on('error', () => undefined)
-      child.stdin.end(command.stdin ?? '')
+      if (!stopWork && !options.signal?.aborted) child.stdin.end(command.stdin ?? '')
       const exited = await Promise.race([exit, stoppedWait])
       const outTail = stdout.end(), errTail = stderr.end()
       if (outTail) emit({ kind: 'stdout', detail: outTail })
