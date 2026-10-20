@@ -21,6 +21,15 @@ function reportUrl(value: string): string {
 
 const reportErrors = (errors: HtmlActionDiagnostic[]) => errors.map(error => ({ ...error, source: reportUrl(error.source) }))
 
+/** Facts about this invocation, kept independently from follow-up evidence. */
+export interface ActionReceiptFacts {
+  operationId?: string
+  dispatch: 'not_dispatched' | 'dispatched'
+  application: 'not_applied' | 'applied' | 'unknown'
+  goal: 'achieved' | 'mismatch' | 'unverified'
+  observation: 'not_requested' | 'complete' | 'failed'
+}
+
 export interface HtmlActionPreviewPort {
   automationContext(leaseId: string, loadId: string, revision: number): Promise<HtmlPreviewAutomationContext>
   automationContextForDocument(input: { documentId: string; epoch: string; revision: number; tabId?: string; runId?: string }): Promise<HtmlPreviewAutomationContext>
@@ -39,6 +48,7 @@ export interface HtmlActionIdentity {
 }
 
 export interface HtmlActionObservation {
+  actionReceipt?: ActionReceiptFacts
   identity: HtmlActionIdentity
   source: 'live-html-preview' | 'isolated-html-preview'
   generation: number
@@ -169,7 +179,7 @@ export class HtmlActionService {
     }
     if (!session || session.identity.revision !== document.revision)
       throw new Error('请先观察当前 HTML 源码版本，再执行页面动作')
-    if (action.name === 'html.navigate') return this.navigate(runId, input.index!)
+    if (action.name === 'html.navigate') return this.navigate(runId, input.index!, action.operationId)
     if (action.name === 'html.errors') return this.errors(runId)
     if (!action.operationId) throw new Error('HTML 操作缺少宿主执行身份')
     return action.name === 'html.click'
@@ -397,18 +407,61 @@ export class HtmlActionService {
     } finally { session.busy = false }
   }
 
-  async navigate(runId: string, index: number): Promise<HtmlActionObservation> {
+  async navigate(runId: string, index: number, operationId?: string): Promise<HtmlActionObservation> {
     if (!Number.isSafeInteger(index) || index < 0 || index > 10_000) throw new Error('HTML 页码无效')
     const session = this.requireHtml(runId)
+    const digest = JSON.stringify({ type: 'navigate', index })
+    if (operationId) {
+      if (operationId.length > 256) throw new Error('HTML 操作身份无效')
+      const prior = session.actionReceipts.get(operationId)
+      if (prior) {
+        if (prior.digest !== digest) throw new Error('HTML 操作身份冲突')
+        return prior.promise as Promise<HtmlActionObservation>
+      }
+      const used = this.usedActionIds.get(runId) ?? new Set<string>()
+      if (used.has(operationId)) throw new Error('HTML 操作身份已在旧观察会话使用，不能重发')
+    }
     if (session.busy) throw new Error('HTML 操作尚未完成')
+    if (operationId) {
+      const used = this.usedActionIds.get(runId) ?? new Set<string>()
+      used.add(operationId)
+      this.usedActionIds.set(runId, used)
+    }
     session.busy = true
     session.handles.clear()
     session.lastObservation = undefined
-    try {
-      await this.assertCurrent(session)
-      await this.waitForRun(runId, () => this.options.frames.navigate(session.context, session.frameToken, index))
-      return await this.observeCurrent(session)
-    } finally { session.busy = false }
+    const facts: ActionReceiptFacts = { ...(operationId ? { operationId } : {}), dispatch: 'not_dispatched',
+      application: 'not_applied', goal: 'unverified', observation: 'not_requested' }
+    const promise = (async () => {
+      try {
+        await this.assertCurrent(session)
+        facts.dispatch = 'dispatched'; facts.application = 'unknown'
+        await this.waitForRun(runId, () => this.options.frames.navigate(session.context, session.frameToken, index))
+        facts.application = 'applied'
+        facts.observation = 'failed'
+        const observation = await this.observeCurrent(session)
+        facts.observation = 'complete'
+        // The existing navigation owner clamps the requested index to its pages.
+        facts.goal = observation.pageIndex === Math.min(index, Math.max(0, observation.pageCount - 1)) ? 'achieved' : 'mismatch'
+        return { ...observation, actionReceipt: { ...facts } }
+      } catch (cause) { throw this.actionFailure(session, facts, cause) }
+      finally { session.busy = false }
+    })()
+    if (operationId) session.actionReceipts.set(operationId, { digest, promise })
+    return promise
+  }
+
+  private actionFailure(session: ActionSession, facts: ActionReceiptFacts, cause: unknown): Error {
+    const family = session.kind === 'html' ? 'html' : 'view'
+    const detail = cause instanceof Error ? ` 原因：${cause.message}` : ''
+    const error = facts.application === 'unknown'
+      ? Object.assign(new Error(`页面动作结果未知；动作已经发出，请先用 ${family}.observe 查证当前页面，不要重新提交点击或输入。${detail}`),
+        { code: `${family}-action-outcome-unknown` })
+      : facts.application === 'applied' && facts.observation === 'failed'
+        ? Object.assign(new Error(`页面动作已确认应用，但后续观察失败；请用 ${family}.observe 继续查证，不要重复提交该动作。${detail}`),
+          { code: `${family}-action-observation-failed` })
+        : cause instanceof Error ? cause : new Error(String(cause))
+    return Object.assign(error, { actionReceipt: { ...facts } })
   }
 
   private action(runId: string, operationId: string, handle: string,
@@ -433,30 +486,34 @@ export class HtmlActionService {
     session.handles.clear()
     session.lastObservation = undefined
     const promise = (async () => {
-      let actionMayHaveApplied = false
+      const facts: ActionReceiptFacts = { operationId, dispatch: 'not_dispatched', application: 'not_applied',
+        goal: 'unverified', observation: 'not_requested' }
       try {
         await this.assertCurrent(session)
-        actionMayHaveApplied = true
+        facts.dispatch = 'dispatched'; facts.application = 'unknown'
         const result = await this.waitForRun(runId, () => this.options.frames.act(session.context, session.frameToken,
           { ...input, path: target.path, fingerprint: target.fingerprint, ...(target.frameToken ? { frameToken: target.frameToken, frameProcessId: target.frameProcessId } : {}) },
           () => !session.stopped && this.runs.get(runId) === session))
-        actionMayHaveApplied = result.applied
-        await this.assertCurrent(session)
+        facts.application = result.applied ? 'applied' : 'not_applied'
         if (!result.applied) throw new Error(result.reason === 'stale-element'
           ? 'HTML 元素已变化，请重新观察' : `HTML 操作未应用：${result.reason ?? '未知原因'}`)
         if (result.inputOutcome?.status === 'value-mismatch') {
           // The frame returned a terminal result with a measured value. This is
           // a failed input goal, not a lost action receipt. Keep the receipt so
           // the same operation cannot send its trusted events a second time.
-          actionMayHaveApplied = false
+          facts.goal = 'mismatch'
           throw Object.assign(new Error(`输入动作已完成，但控件未保留请求值（请求：${result.inputOutcome.requestedValue.slice(0, 180)}；当前值：${result.inputOutcome.actualValue.slice(0, 180)}）。请用 ${session.kind === 'html' ? 'html.observe' : 'view.observe'} 重新观察后决定下一步。`),
             { code: `${session.kind === 'html' ? 'html' : 'view'}-input-value-mismatch` })
         }
-        return await this.observeCurrent(session)
+        // The trusted input port measures retention before returning its ACK.
+        if (input.type === 'input') facts.goal = 'achieved'
+        facts.observation = 'failed'
+        await this.assertCurrent(session)
+        const observation = await this.observeCurrent(session)
+        facts.observation = 'complete'
+        return { ...observation, actionReceipt: { ...facts } }
       } catch (cause) {
-        if (!actionMayHaveApplied) throw cause
-        throw Object.assign(new Error(`页面动作结果未知；动作已经发出，请先用 ${session.kind === 'html' ? 'html.observe' : 'view.observe'} 查证当前页面，不要重新提交点击或输入。${cause instanceof Error ? ` 原因：${cause.message}` : ''}`),
-          { code: session.kind === 'html' ? 'html-action-outcome-unknown' : 'view-action-outcome-unknown' })
+        throw this.actionFailure(session, facts, cause)
       } finally { session.busy = false }
     })()
     // Keep failed/unknown receipts: repeating an operation ID must not click twice.

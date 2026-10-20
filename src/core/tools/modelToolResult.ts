@@ -2,6 +2,8 @@ import type { DocumentOperationResult } from '../../shared/workbench/document'
 import type { ToolResult } from '../../shared/workbench/tools'
 import type { ExportReceipt, SaveReceipt } from '../../shared/workbench/toolPorts'
 import { agentFileMutationNames } from './AgentFileTools'
+import { publicOperationReceipt as projectReceipt, publicWriteToolResult } from './publicWriteReceipt'
+import { boundedToolResult } from './modelDeliveryBudget'
 import type { ContentApplyRequest, ContentApplyResult, ContentApplySource, ContentObjectDraft } from '../contentApply/planning/types'
 import type { ComponentDefinition, ComponentEdit, ComponentImplementation } from '../../shared/contracts/component-platform'
 
@@ -33,13 +35,6 @@ function operationReceipt(value: unknown): value is DocumentOperationResult {
     && typeof value.documentId === 'string' && typeof value.operationId === 'string'
     && typeof value.beforeRevision === 'number' && typeof value.revision === 'number'
     && value.persistence === 'recoverable'
-}
-
-function projectReceipt(receipt: DocumentOperationResult): DocumentOperationResult {
-  if (!('appliedChanges' in receipt) || !receipt.appliedChanges) return receipt
-  return { ...receipt, appliedChanges: { ...receipt.appliedChanges,
-    changes: receipt.appliedChanges.changes.map(({ value: _value, ...change }) => change),
-  } }
 }
 
 function contentApplyResult(value: unknown): value is ContentApplyResult & Record<string, unknown> {
@@ -125,7 +120,8 @@ function projectInput(input: ContentApplyRequest): unknown {
 }
 
 /** Model replies describe committed paths; normalized document values stay in the host receipt. */
-export function modelToolResult(toolName: string, result: ToolResult): ToolResult {
+function legacyModelToolResult(toolName: string, result: ToolResult): ToolResult {
+  result = publicWriteToolResult(toolName, result)
   // Pixel references are host-only transport input, not authored text or model capabilities.
   if (result.kind === 'read' && result.images) {
     const { images: _images, ...textResult } = result
@@ -167,6 +163,15 @@ export function modelToolResult(toolName: string, result: ToolResult): ToolResul
   return result
 }
 
+/** Legacy journal projection and all current public consumers share one delivery ceiling. */
+export function modelToolResult(toolName: string, result: ToolResult, origin?: Parameters<typeof boundedToolResult>[2]): ToolResult {
+  const value = legacyModelToolResult(toolName, result)
+  const data = value.kind === 'read' && record(value.data) ? value.data : undefined
+  const source = origin ?? (['project.apply', 'project.read'].includes(toolName) && typeof data?.path === 'string'
+    ? { tool: 'project.read', input: { path: data.path } } : undefined)
+  return boundedToolResult(toolName, value, source)
+}
+
 /** Business receipt facts shared by every consumer; ordinary read data is not a write receipt. */
 const revision = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 type SuccessfulReceipt = Extract<DocumentOperationResult, { status: 'applied' | 'unchanged' }>
@@ -183,6 +188,9 @@ export function contentApplyFact(name: string, result?: ToolResult): Omit<Conten
 
 export function operationFact(name: string, result?: ToolResult): DocumentOperationResult | null {
   if (result?.kind === 'document-operation') return result.result
+  if (name === 'course.createFromHtml' && result?.kind === 'read' && record(result.data)
+    && record(result.data.import) && result.data.import.kind === 'document-operation'
+    && operationReceipt(result.data.import.result)) return result.data.import.result
   if (['image.generate', 'image.edit', 'image.status'].includes(name) && result?.kind === 'read' && record(result.data)
     && record(result.data.application) && operationReceipt(result.data.application.receipt)) return result.data.application.receipt
   return contentApplyFact(name, result)?.receipt ?? null
@@ -239,7 +247,7 @@ export function reconciledToolResult(name: string, previous: ToolResult | undefi
     commit: receipt.result.status === 'applied' ? 'committed' : receipt.result.status === 'unchanged' ? 'unchanged' : 'not_committed' } }
 }
 
-export interface ServiceToolOutcome { status: 'failed' | 'unknown' | 'pending' | 'stopped' | 'saved' | 'generated' | 'written'; message: string }
+export interface ServiceToolOutcome { status: 'failed' | 'unknown' | 'pending' | 'stopped' | 'saved' | 'generated' | 'written' | 'applied-with-diagnostics'; message: string }
 const fileMutations = new Set<string>(agentFileMutationNames)
 
 /** Only tools whose read receipt is itself a service job use its status for task settlement. */
@@ -279,7 +287,7 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
     if (apply.commit === 'not_committed') return { status: 'failed', message: diagnostic ?? '内容修改未提交' }
     // A committed local warning is an application fact, not a failed transaction.
     if (apply.usability === 'unusable' || apply.usability === 'partial' && error)
-      return { status: 'failed', message: diagnostic ?? (apply.usability === 'unusable' ? '内容已提交，但当前不能使用' : '内容已提交，仍有局部问题待修复') }
+      return { status: 'applied-with-diagnostics', message: diagnostic ?? (apply.usability === 'unusable' ? '内容已提交，但当前不能使用' : '内容已提交，仍有局部问题待修复') }
   }
   if (name === 'course.createFromHtml') {
     if (data.status === 'saved' && data.saved === true) return { status: 'saved', message: 'HTML 课件已创建并保存' }

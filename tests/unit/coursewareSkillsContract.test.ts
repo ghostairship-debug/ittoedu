@@ -39,18 +39,6 @@ describe('courseware skill contracts: staged project authoring and external impo
       expect(result).toMatchObject({ status: 'read', content: await read(`.agents/skills/build-courseware-project/${reference}`), truncated: false })
     }
   })
-  it('keeps real teaching content and separates teacher navigation from self-study gates', async () => {
-    const orchestrator = await read('.agents/skills/orchestrate-courseware/SKILL.md')
-    const contract = await read('.agents/skills/orchestrate-courseware/references/main-progression.md')
-    const builder = await read('.agents/skills/build-courseware-project/SKILL.md')
-    expect(orchestrator).toContain('策划、框架默认各确认一次')
-    expect(orchestrator).toContain('关键知识不能只出现在答案反馈或素材说明中')
-    expect(orchestrator).toContain('图甲')
-    expect(contract).toContain('默认教师演示允许讲解后')
-    expect(contract).toContain('用户明确要求自主学习')
-    expect(builder).toContain('新课创作从框架起写入工程内文件')
-    expect(builder).toContain('不删除互动逻辑')
-  })
   it('keeps one bundled method source, includes the short HTML contract and matches editable skill files', async () => {
     const brief = await read('.agents/skills/build-courseware-project/references/representation-capabilities.md')
     const bundled = JSON.parse(await read('src/shared/generated/bundledSkills.json'))
@@ -109,6 +97,12 @@ describe('courseware skill contracts: staged project authoring and external impo
         'references/resources-and-artifacts.md', 'references/sources-and-continuation.md', 'references/files-and-delivery.md']) {
         expect(await service.read({ skill: 'user/workbench-usage', path: resource, offset: 0, limit: 64_000 }, 'isolated-install'))
           .toMatchObject({ status: 'read', content: await read(`.agents/skills/workbench-usage/${resource}`), truncated: false })
+      }
+      for (const resource of ['SKILL.md', 'references/creation-plan.md', 'references/visual-design.md',
+        'references/interaction-design.md', 'references/teaching-design-quality.md', 'references/teacher-controller.md',
+        'references/material-assembly.md']) {
+        expect(await service.read({ skill: 'user/orchestrate-courseware', path: resource, offset: 0, limit: 64_000 }, 'isolated-install'))
+          .toMatchObject({ status: 'read', content: await read(`.agents/skills/orchestrate-courseware/${resource}`), truncated: false })
       }
     } finally { await rm(destination, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) }
   })

@@ -10,6 +10,7 @@ import { webContentRealmSource } from '../../components/web/contentRealmImplemen
 import type { WebRuntimeData } from '../../components/web/moduleGraph'
 import { hasWebContentData } from '../../components/web/sourcePreparation'
 import { resolveWebResourceBindings } from '../../components/web/resources'
+import { webRuntimeResourceAddress } from '../../components/web/resourceUrlLease'
 import { attachComponentPlatformNavigationKeys } from '../behaviors/navigation/shortcuts'
 import type { PresenterInputFeedback } from '../PlayerPresenterInput'
 import { waitForPublishedObservationReady } from '../surfaces/publishedCapture'
@@ -201,7 +202,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
       if (!compiled) throw new Error('此源码未附可执行ESM；原始源码已保留')
       return prepareSandboxComponent({ format: 'esm', code: compiled.code, css: compiled.css ?? '', diagnostics: [] }, signal,
         { state: () => player.runtime.stateSnapshot(), targets: () => player.runtime.targetSnapshots('full'), teacherController,
-          webInstance: instance => hasWebContentData(instance.data) ? resolveWebResourceBindings(instance, id => player.runtime.contentAssetUrl(id) ?? publishedResourceUrls[id], options.report, source.resourceBindings) : instance,
+          webInstance: instance => hasWebContentData(instance.data) ? resolveWebResourceBindings(instance, id => (player.runtime.contentAssetUrl(id) ?? publishedResourceUrls[id]) ? webRuntimeResourceAddress(id) : undefined, options.report, source.resourceBindings) : instance,
           authorHtml: instance => {
             const key = componentDefinitionBuiltinKey(model.project.definitions[instance.definitionId]), data = instance.data
             return ['guoling.web', 'guoling.html-program'].includes(key ?? '') && data && typeof data === 'object' && !Array.isArray(data) && typeof data.html === 'string' ? data.html : undefined
@@ -212,7 +213,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
     },
     resolveBuiltin: async (_key, signal, instance) => ({ ...await prepareSandboxComponent({ format: 'esm', code: webContentRealmSource(), css: '', diagnostics: [] }, signal,
       { builtinKey: _key, state: () => player.runtime.stateSnapshot(), targets: profile => player.runtime.targetSnapshots(profile), teacherController,
-        instance: instance => resolveWebResourceBindings(instance, id => player.runtime.contentAssetUrl(id) ?? publishedResourceUrls[id], options.report), htmlAuthoring: true,
+        instance: instance => resolveWebResourceBindings(instance, id => (player.runtime.contentAssetUrl(id) ?? publishedResourceUrls[id]) ? webRuntimeResourceAddress(id) : undefined, options.report), htmlAuthoring: true,
         connectOrigins: () => model.project.logic?.network?.connectOrigins ?? [], themeCss: () => player.runtime.themeCss(), resources: () => ({ ...publishedResourceUrls, ...player.runtime.resourceUrls() }), bootstrap: options.componentBootstrap }), webModuleGraph: (instance.data as unknown as WebRuntimeData).moduleGraph }),
   })
   try {

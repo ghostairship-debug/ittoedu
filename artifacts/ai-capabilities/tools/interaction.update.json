@@ -126,7 +126,14 @@
                     "$ref": "#/$defs/__schema2"
                   },
                   "type": {
-                    "const": "node.click",
+                    "enum": [
+                      "node.click",
+                      "video.started",
+                      "video.paused",
+                      "video.ended",
+                      "node.activated",
+                      "input.submit"
+                    ],
                     "type": "string"
                   }
                 },
@@ -235,57 +242,6 @@
                   "nodeId": {
                     "$ref": "#/$defs/__schema2"
                   },
-                  "type": {
-                    "const": "video.started",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "type",
-                  "nodeId"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "nodeId": {
-                    "$ref": "#/$defs/__schema2"
-                  },
-                  "type": {
-                    "const": "video.paused",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "type",
-                  "nodeId"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "nodeId": {
-                    "$ref": "#/$defs/__schema2"
-                  },
-                  "type": {
-                    "const": "video.ended",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "type",
-                  "nodeId"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "nodeId": {
-                    "$ref": "#/$defs/__schema2"
-                  },
                   "seconds": {
                     "$ref": "#/$defs/__schema4"
                   },
@@ -298,23 +254,6 @@
                   "type",
                   "nodeId",
                   "seconds"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "nodeId": {
-                    "$ref": "#/$defs/__schema2"
-                  },
-                  "type": {
-                    "const": "node.activated",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "type",
-                  "nodeId"
                 ],
                 "type": "object"
               },
@@ -353,23 +292,6 @@
                 "required": [
                   "type",
                   "command"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "nodeId": {
-                    "$ref": "#/$defs/__schema2"
-                  },
-                  "type": {
-                    "const": "input.submit",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "type",
-                  "nodeId"
                 ],
                 "type": "object"
               }
@@ -490,87 +412,14 @@
                         "$ref": "#/$defs/__schema13"
                       },
                       "type": {
-                        "const": "step.next",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "transition": {
-                        "$ref": "#/$defs/__schema13"
-                      },
-                      "type": {
-                        "const": "step.previous",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "transition": {
-                        "$ref": "#/$defs/__schema13"
-                      },
-                      "type": {
-                        "const": "scene.next",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "transition": {
-                        "$ref": "#/$defs/__schema13"
-                      },
-                      "type": {
-                        "const": "scene.previous",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "transition": {
-                        "$ref": "#/$defs/__schema13"
-                      },
-                      "type": {
-                        "const": "scene.replay",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "transition": {
-                        "$ref": "#/$defs/__schema13"
-                      },
-                      "type": {
-                        "const": "course.restart",
+                        "enum": [
+                          "step.next",
+                          "step.previous",
+                          "scene.next",
+                          "scene.previous",
+                          "scene.replay",
+                          "course.restart"
+                        ],
                         "type": "string"
                       }
                     },
@@ -653,7 +502,10 @@
                         "$ref": "#/$defs/__schema16"
                       },
                       "type": {
-                        "const": "audio.pause",
+                        "enum": [
+                          "audio.pause",
+                          "audio.stop"
+                        ],
                         "type": "string"
                       }
                     },
@@ -674,26 +526,6 @@
                       },
                       "type": {
                         "const": "audio.resume",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "target"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "fadeOutMs": {
-                        "$ref": "#/$defs/__schema12"
-                      },
-                      "target": {
-                        "$ref": "#/$defs/__schema16"
-                      },
-                      "type": {
-                        "const": "audio.stop",
                         "type": "string"
                       }
                     },
@@ -727,75 +559,13 @@
                         "$ref": "#/$defs/__schema2"
                       },
                       "type": {
-                        "const": "video.play",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "nodeId"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "nodeId": {
-                        "$ref": "#/$defs/__schema2"
-                      },
-                      "type": {
-                        "const": "video.pause",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "nodeId"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "nodeId": {
-                        "$ref": "#/$defs/__schema2"
-                      },
-                      "type": {
-                        "const": "video.restart",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "nodeId"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "nodeId": {
-                        "$ref": "#/$defs/__schema2"
-                      },
-                      "type": {
-                        "const": "video.stop",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "nodeId"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "nodeId": {
-                        "$ref": "#/$defs/__schema2"
-                      },
-                      "type": {
-                        "const": "video.toggle",
+                        "enum": [
+                          "video.play",
+                          "video.pause",
+                          "video.restart",
+                          "video.stop",
+                          "video.toggle"
+                        ],
                         "type": "string"
                       }
                     },

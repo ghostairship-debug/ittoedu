@@ -1,10 +1,11 @@
 {
   "skills": [
     {
-      "description": "根据主题、材料或目标创作可持续编辑的互动演示；共同设计整作内容、视觉、互动与导航，批量形成正式页面和布局框架，再沿同一工程装配素材与互动，快速交付核心可用、可继续编辑的首版。",
+      "description": "根据主题、材料或目标创作可持续编辑的互动演示；共同设计整作主线、可直接创作的场景稿、视觉与导航，主动补足必要媒体，合理协作并沿同一正式工程完成正文和主要互动，交付完整可用、可继续编辑的首版。",
       "name": "orchestrate-courseware",
       "path": "skills/orchestrate-courseware/SKILL.md",
       "references": [
+        "skills/orchestrate-courseware/references/creation-plan.md",
         "skills/orchestrate-courseware/references/examples/text-evidence.html",
         "skills/orchestrate-courseware/references/examples/variable-relation.html",
         "skills/orchestrate-courseware/references/interaction-design.md",
@@ -16,7 +17,7 @@
         "skills/orchestrate-courseware/references/web-composition-examples.md",
         "skills/orchestrate-courseware/scripts/assemble-html.mjs"
       ],
-      "version": "1fc3343712c872977fee61f8f3f8512db075484e916a0c3fd4092892c5191e3e"
+      "version": "3842e8e063224c65f0d09df635957ddf7b16a25bb70fd55afbb87261d0d0dd54"
     },
     {
       "description": "将已有第三方或外来 HTML 保真导入可编辑课件；适用于 HTML 转课件，不承担新课创作与已有工程续改。",
@@ -41,7 +42,7 @@
       "name": "edit-content",
       "path": "skills/edit-content/SKILL.md",
       "references": [],
-      "version": "967352c46d8162e1ae1d8c062bcfb3213b4c03abe58a4bc6801ca3f5cfb7676c"
+      "version": "237b09c08df62b7551f7827bd7fd79f0a68e7ef1497cc94774c86223c7b59a7d"
     },
     {
       "description": "新建或局部修改 Word、Excel、PowerPoint 原格式文件；适用于 DOCX 报告与表格、XLSX 数据与公式、PPTX 幻灯片文字，不用于课件导入或软件代码开发。",
@@ -77,7 +78,7 @@
         "skills/workbench-usage/references/selection-and-editing.md",
         "skills/workbench-usage/references/sources-and-continuation.md"
       ],
-      "version": "03e962d73bc953a46e10f4bc7a549b3062f600c4a8184a6bad601e1a8b75b77e"
+      "version": "fb99436bdebe8c160bebeee060a147cdebdb207b0b34399576657dbafdea80c6"
     }
   ]
 }

@@ -16,7 +16,7 @@ const noteSchema = z.object({ goal: z.string().max(MAX_GOAL_CHARS),
 /** Replaces only supplied model-owned sections. No goal, user constraint, permission or result field is accepted. */
 export const taskNoteInputSchema = z.object({
   /** A model-recognized continuation of a host-delivered history source; Engine validates and carries the note. */
-  continuationRunId: z.string().min(1).max(512).describe('宿主已提供历史的 runId 或完整 sourceId（run:<runId>:<消息序号>）；软件解析来源身份，不需拆解编号。').optional(),
+  continuationRunId: z.string().min(1).max(512).describe('仅承接历史目标时填宿主已提供的历史 runId 或 sourceId（run:<runId>:<消息序号>）；本轮普通笔记省略，软件解析来源身份。').optional(),
   decisions: z.array(decision).max(16).optional(),
   remaining: z.array(line).max(24).describe('达到用户当前要求的结果仍必需的未完成事项，包括已知严重运行、数据或核心功能错误。可用首版已达到当前要求时更新为 []；可选精修、额外验用和未要求的导出写入 followUps。').optional(),
   followUps: z.array(line).max(24).describe('当前要求之外可选的后续改善，不阻止本次完成，也不作为完成证明。用户明确要求的终稿、导出或完整验用不能移到这里。').optional(),

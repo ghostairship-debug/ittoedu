@@ -18,7 +18,7 @@ function inside(root: string, target: string): boolean {
   return relative === '' || relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
 }
 
-export type ArtifactSourceKind = 'image' | 'compute' | 'delegation'
+export type ArtifactSourceKind = 'image' | 'media' | 'compute' | 'delegation'
 export interface ArtifactDeliveryInput {
   runId: string
   operationId: string
@@ -29,7 +29,7 @@ export interface ArtifactDeliveryInput {
   destination: string
   sourceKind: ArtifactSourceKind
   sourceId: string
-  /** Main has already verified these bytes against the image/compute owner. */
+  /** Main has already verified these bytes against the resource or job owner. */
   bytes: Uint8Array
   /** Exact canonical target from an approval for this operation, when required. */
   approvedTargetPath?: string
@@ -193,7 +193,7 @@ export class HostArtifactDeliveryService {
   async deliver(input: ArtifactDeliveryInput): Promise<ArtifactDeliveryResult> {
     if (this.stoppedRuns.has(input.runId)) throw new DeliveryStopped()
     if (!input.runId || !input.sourceId
-      || !['image', 'compute', 'delegation'].includes(input.sourceKind)) throw new Error('成果来源身份无效')
+      || !['image', 'media', 'compute', 'delegation'].includes(input.sourceKind)) throw new Error('成果来源身份无效')
     if (!(input.bytes instanceof Uint8Array)) throw new Error('成果字节无效')
     const bytes = Uint8Array.from(input.bytes), digest = hash(bytes)
     const scope = await this.preflight(input)

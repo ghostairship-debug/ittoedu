@@ -51,6 +51,7 @@ it('retires revision and generation authority while current controls, unique fee
 
   const latest = [...messages, ...round('new-revision', capture(2, 1, '修订后：准备继续'))]
   const revisionView = retireSupersededObservationMessages('run', latest, 6)
+  expect(revisionView.slice(0, 3)).toEqual(projected.slice(0, 3)) // A third observation does not rewrite the already retired prefix.
   const retired = JSON.parse(String(revisionView[4]!.content)).data
   expect(retired).not.toHaveProperty('structure')
   expect(retired).not.toHaveProperty('elements')

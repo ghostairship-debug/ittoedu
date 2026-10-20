@@ -4,6 +4,7 @@ import type { ToolTarget } from '../../../shared/workbench/tools'
 import { DocumentRegistry } from '../../../core/documents/DocumentRegistry'
 import type { DocumentToolGateway } from '../../../core/tools/DocumentToolGateway'
 import { documentDigest } from '../../../core/documents/documentDigest'
+import { publicOperationReceipt } from '../../../core/tools/publicWriteReceipt'
 import { containsTarget, courseInstanceContext, courseInstanceTextTarget, isCourseInstanceRange, mapExternalCourseTextTarget, mapHtmlAuthorFieldTarget, mapMarkdownRange, readCourseInstanceText, readTarget, readEditableTargetContent, targetFootprint } from '../../../core/tools/ToolTargets'
 
 type EditGateway = Pick<DocumentToolGateway, 'resolveEditTarget' | 'operationIdentity'>
@@ -240,22 +241,25 @@ export class EditSessionService {
     const entry = this.entries.get(editId)
     if (!entry || entry.snapshot.status === 'aborted') return
     if (entry.snapshot.status === 'finished') {
-      if (documentDigest(operationResult) !== documentDigest(entry.result)) throw new EditSessionError(editId, 'receipt-conflict', '编辑组收到不同的正式提交回执')
+      if (!entry.result || documentDigest(publicOperationReceipt(operationResult)) !== documentDigest(publicOperationReceipt(entry.result)))
+        throw new EditSessionError(editId, 'receipt-conflict', '编辑组收到不同的正式提交回执')
       return
     }
     const session = this.registry.get(entry.snapshot.documentId)
     const actual = session.lookupOperation(entry.operationId)
     if (operationResult.documentId !== entry.snapshot.documentId || operationResult.operationId !== entry.operationId
-      || !actual || documentDigest(actual) !== documentDigest(operationResult) || session.read().epoch !== entry.snapshot.epoch) {
+      || !actual || documentDigest(publicOperationReceipt(actual)) !== documentDigest(publicOperationReceipt(operationResult)) || session.read().epoch !== entry.snapshot.epoch) {
       this.abort(editId, '正式编辑回执不属于当前编辑组或尚未确认')
       return
     }
     if (operationResult.status !== 'applied' && operationResult.status !== 'unchanged') {
       this.abort(editId, 'message' in operationResult ? operationResult.message : '正式编辑未完成'); return
     }
-    entry.result = structuredClone(operationResult)
+    // The supplied receipt may be public metadata. The canonical owner supplies
+    // the full result used by preview/recovery; it never re-enters public output.
+    entry.result = structuredClone(actual)
     entry.snapshot.status = 'finished'; entry.snapshot.revision = operationResult.revision
     this.release(entry)
-    this.emit({ type: 'edit.finished', snapshot: entry.snapshot, result: operationResult })
+    this.emit({ type: 'edit.finished', snapshot: entry.snapshot, result: actual })
   }
 }

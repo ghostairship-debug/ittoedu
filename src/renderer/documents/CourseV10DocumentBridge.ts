@@ -247,6 +247,9 @@ export class CourseV10DocumentBridge {
     for (const [id, projection] of this.projections) if (!documentIds || documentIds.includes(id)) snapshots.push(await projection.drain())
     return snapshots
   }
+  async flushInput(documentIds?: readonly string[]): Promise<void> {
+    for (const [id, projection] of this.projections) if (!documentIds || documentIds.includes(id)) await projection.flushInput()
+  }
   async save(saveAs = false, directory?: SaveDirectoryContext, documentId?: string): Promise<boolean> {
     const projection = this.projection(documentId)
     await projection.drain()

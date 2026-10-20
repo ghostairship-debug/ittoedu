@@ -69,11 +69,16 @@ it('M26 archives complete large old rounds while recent pairs and original messa
   expect(view.messages[1]!.tool_calls).toBeUndefined()
   expect(view.messages[1]!.content).toContain('run:r:1')
   expect(JSON.stringify(view.messages[1])).not.toContain('archivedArguments')
-  expect(view.messages.slice(-4)).toEqual(messages.slice(-4))
+  expect(view.messages[3]).toEqual(messages[3])
+  expect(view.messages[5]).toEqual(messages[5])
+  for (const index of [4, 6]) {
+    expect(view.messages[index].tool_call_id).toBe(messages[index].tool_call_id)
+    expect(JSON.parse(String(view.messages[index].content)).modelDelivery).toMatchObject({ complete: false, sourceId: `run:r:${index}` })
+  }
   expect(view.toolBytesRemoved).toBeGreaterThan(20000)
   const first = readContextMessage(messages[2]!, contextReadSchema.parse({ sourceId: 'run:r:2', maxChars: 6000 }))
   const next = readContextMessage(messages[2]!, contextReadSchema.parse({ sourceId: 'run:r:2', offset: first.data.nextOffset, maxChars: 12000 }))
-  expect(first.data.text + next.data.text).toBe((messages[2]!.content as string).slice(0, 18000))
+  expect(first.data.text + next.data.text).toBe((messages[2]!.content as string).slice(0, next.data.nextOffset))
   expect(contextSourceIndex('run:r:2')).toEqual({ runId: 'r', index: 2 })
   expect(() => readContextMessage(messages[0]!, contextReadSchema.parse({ sourceId: 'run:r:0' }))).toThrow('公开运行结果')
   expect(() => readContextMessage(picture(1), contextReadSchema.parse({ sourceId: 'run:r:1', imageIndexes: [1] }))).toThrow('图片索引')
@@ -190,9 +195,16 @@ it('archives only superseded HTML snapshots while current native rounds, latest 
   expect(old.data).not.toHaveProperty('structure')
   expect(old.data).not.toHaveProperty('elements')
   expect((view.messages[2]!.content as string).length).toBeLessThan(2500)
-  expect(view.messages.slice(4, 8)).toEqual(messages.slice(4, 8))
+  expect(view.messages[4]).toEqual(messages[4])
+  expect(view.messages[6]).toEqual(messages[6])
+  expect(JSON.parse(String(view.messages[5].content))).toMatchObject({ kind: 'error', code: failed.code,
+    modelDelivery: { complete: false, sourceId: 'run:r:5' } })
+  expect(JSON.parse(String(view.messages[5].content)).message).toContain('已发出动作，不能重放')
+  expect(JSON.parse(String(view.messages[7].content))).toMatchObject({ kind: 'read', data: { status: 'unknown' },
+    modelDelivery: { complete: false, sourceId: 'run:r:7' } })
   expect(JSON.parse(view.messages[9]!.content as string).data).toMatchObject({ observationStatus: 'historical', archivedContext: 'run:r:9' })
-  expect(view.messages.slice(-2)).toEqual(messages.slice(-2))
+  expect(view.messages.at(-2)).toEqual(messages.at(-2))
+  expect(JSON.parse(String(view.messages.at(-1)!.content)).modelDelivery).toMatchObject({ complete: false, sourceId: `run:r:${messages.length - 1}` })
   expect(view.toolBytesRemoved).toBeGreaterThan(12000)
   expect(view.messages.map(message => [message.role, message.tool_call_id, message.tool_calls, message.nativeResponses]))
     .toEqual(messages.map(message => [message.role, message.tool_call_id, message.tool_calls, message.nativeResponses]))
@@ -211,9 +223,14 @@ it('archives consumed long tool rounds after an old steering message without cha
   const original = structuredClone(messages), view = projectExecutionContext('long', messages, 2, 0, 800)
   expect(view.toolBytesRemoved).toBeGreaterThan(120000)
   expect(view.messages[2]).toEqual(messages[2])
-  expect(view.messages.slice(-3)).toEqual(messages.slice(-3))
+  expect(view.messages.at(-3)).toEqual(messages.at(-3))
+  expect(view.messages.at(-1)).toEqual(messages.at(-1))
+  expect(view.messages.at(-2)!.tool_call_id).toBe(messages.at(-2)!.tool_call_id)
+  expect(JSON.parse(String(view.messages.at(-2)!.content)).modelDelivery).toMatchObject({ complete: false, sourceId: 'run:long:14' })
   expect(view.messages.map(m => [m.role, m.tool_call_id, m.tool_calls])).toEqual(messages.map(m => [m.role, m.tool_call_id, m.tool_calls]))
-  expect(readContextMessage(messages[4]!, contextReadSchema.parse({ sourceId: 'run:long:4', maxChars: 40000 })).data.text).toBe(messages[4]!.content)
+  const read = readContextMessage(messages[4]!, contextReadSchema.parse({ sourceId: 'run:long:4', maxChars: 40000 }))
+  expect(read.data.text).toBe(String(messages[4]!.content).slice(0, read.data.nextOffset))
+  expect(read.data.truncated).toBe(true)
   expect(messages).toEqual(original)
 })
 
@@ -248,9 +265,9 @@ it('retires consumed note snapshots into source references without rewriting the
   messages.push({ role: 'assistant', content: 'The host currentWork is the current advisory record' })
   const original = structuredClone(messages), view = projectExecutionContext('notes', messages, 1)
   expect(JSON.stringify(view.messages)).not.toContain('old required item')
-  expect(JSON.stringify(view.messages)).not.toContain('current item')
+  expect(JSON.stringify(view.messages)).toContain('current item') // Latest receipt is the one current note source.
   expect(view.messages[1].tool_calls).toBeUndefined()
-  expect(view.messages[3].tool_calls).toBeUndefined()
+  expect(view.messages[3]).toEqual(messages[3])
   expect(view.messages[2].content).toContain('run:notes:2')
   expect(view.messages[0]).toEqual(messages[0])
   expect(messages).toEqual(original)
@@ -266,6 +283,8 @@ it('retires a consumed mixed note round legally and keeps its formal operation r
     { role: 'assistant', tool_calls: calls, nativeResponses: { protocol: 'chatgpt-responses', responseId: 'mixed', output: calls.map(call => ({ type: 'function_call', call_id: call.id, name: call.function.name, arguments: call.function.arguments })) } },
     { role: 'tool', tool_call_id: 'edit', content: JSON.stringify({ kind: 'document-operation', result: { status: 'applied', operationId: 'actual-edit', revision: 1 } }) },
     { role: 'tool', tool_call_id: 'note', content: '{"kind":"read","data":{"workingNote":{"remaining":["superseded required work"]}}}' },
+    { role: 'assistant', tool_calls: [{ id: 'new-note', type: 'function', function: { name: 'task.note', arguments: '{"remaining":[]}' } }] },
+    { role: 'tool', tool_call_id: 'new-note', content: '{"kind":"read","data":{"workingNote":{"remaining":[]}}}' },
     { role: 'assistant', content: 'the old round has been consumed' }]
   const before = structuredClone(messages), view = projectExecutionContext('mixed', messages, 1)
   expect(JSON.stringify(view.messages)).not.toContain('superseded required work')

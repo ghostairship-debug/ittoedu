@@ -3,7 +3,7 @@ import type { HtmlActionObservation } from './HtmlActionService'
 
 /** Delivers a captured HTML frame only after all receipts in that tool turn. */
 export function htmlActionModelMessage(input: { toolCallId: string; target: string;
-  toolName?: 'html.observe' | 'html.navigate' | 'html.click' | 'html.input';
+  toolName?: 'html.observe' | 'html.navigate' | 'html.click' | 'html.input' | 'view.observe' | 'view.click' | 'view.input';
   observation: HtmlActionObservation; bytes: Uint8Array }): ModelChatMessage {
   const { observation, bytes } = input
   if (observation.image.mimeType !== 'image/png' || bytes.byteLength !== observation.image.byteLength

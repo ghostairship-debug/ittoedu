@@ -4,13 +4,14 @@ import { isMeasuredWebFragmentBox, measuredFragmentBoxStyle, measuredFragmentExt
 import { webResourceReferenceMarker } from './resources'
 import { DomTextOverrides, domTextOverrideRealmSource, type DomTextOverrideController } from '../../player/lightEdit/domTextOverrides'
 import type { LightEditTextOverride } from '../../shared/contracts/runtime/lightEdit'
+import { createLocalStageLayout } from './localStageLayout'
 
 /** Serialized builtin runs in the content realm, including the author's scripts. */
 export async function mountWebContent(context: ComponentRuntimeContext<WebRuntimeData> & { builtinKey?: string; resourceCss?: string }, fragmentBox = {
   isMeasured: isMeasuredWebFragmentBox, style: measuredFragmentBoxStyle, extent: measuredFragmentExtent,
   resourceMarker: webResourceReferenceMarker,
 }, authoredDocument = false, textOverridesFactory: (roots: readonly Node[], rules: readonly LightEditTextOverride[]) => DomTextOverrideController =
-  (roots, rules) => new DomTextOverrides(roots, rules)) {
+  (roots, rules) => new DomTextOverrides(roots, rules), stageLayoutFactory = createLocalStageLayout) {
   const { root, scope } = context
   if (!root) throw new Error('Web 内容需要视觉内容根')
   const textWindow = window as Window & { __cwPageTextOverrides?: DomTextOverrideController }
@@ -31,6 +32,7 @@ export async function mountWebContent(context: ComponentRuntimeContext<WebRuntim
   let signature: string | undefined, instance = context.instance, disposed = false, rootStyle = authoredDocument ? root.style.cssText : '', renderRevision = 0, measuredContainer = false
   let styledElement: HTMLElement | null = null, appliedRootStyle = ''
   let releaseLayout = () => {}
+  let stageLayout: ReturnType<typeof createLocalStageLayout> | undefined
   const urls = new Set<string>(), style = document.createElement('style'), headNodes: Node[] = [], cancelScripts = new Set<() => void>()
   document.head.append(style)
   const report = (message: string) => scope.events.emit('component.diagnostic', { instanceId: instance.id, message })
@@ -232,14 +234,19 @@ export async function mountWebContent(context: ComponentRuntimeContext<WebRuntim
   }
   const dispose = () => {
     if (disposed) return
-    disposed = true; renderRevision++; releaseLayout(); releaseUrls(); clearHeadNodes(); pageText.destroy(); style.remove(); root.replaceChildren()
+    disposed = true; renderRevision++; stageLayout?.dispose(); releaseLayout(); releaseUrls(); clearHeadNodes(); pageText.destroy(); style.remove(); root.replaceChildren()
     if (textWindow.__cwPageTextOverrides === pageText) Reflect.deleteProperty(textWindow, '__cwPageTextOverrides')
     if (measuredContainer) { root.style.cssText = containerStyle; measuredContainer = false }
     for (const { element, values } of documentAttributes) replaceAttributes(element, values)
   }
   scope.cleanup(dispose)
   await render()
-  if (context.layout) {
+  // The helper owns only derived DOM/CSS in this mount generation, never author data.
+  // Adopt the parser's initial projection with the actual layout port at mount.
+  if (!disposed && scope.isActive() && !scope.signal.aborted) stageLayout = stageLayoutFactory(root, { layout: () => context.layout?.read(),
+    active: () => !disposed && scope.isActive() && !scope.signal.aborted,
+    report: fact => scope.events.emit('component.layout', { instanceId: instance.id, ...fact }) })
+  if (context.layout && !disposed && scope.isActive() && !scope.signal.aborted) {
     let queued = false
     const reportSize = () => {
       if (disposed || !scope.isActive()) return
@@ -257,6 +264,7 @@ export async function mountWebContent(context: ComponentRuntimeContext<WebRuntim
       // Native documents react to their browser viewport. Replaying the initial
       // body style on resize would overwrite live authored program state.
       if (!authoredDocument) writeStyle()
+      stageLayout?.refresh()
       enqueue()
     })
     const observer = new MutationObserver(enqueue)
@@ -270,12 +278,12 @@ export async function mountWebContent(context: ComponentRuntimeContext<WebRuntim
   }
   pageText.applyAll()
   scope.cleanup(() => pageText.destroy())
-  return { async update(next: ComponentInstance<WebRuntimeData>) { instance = next; await render(); pageText.applyAll() },
-    updatePlacement(frame: ComponentInstance['frame']) { instance = { ...instance, frame }; if (!authoredDocument) writeStyle() }, dispose }
+  return { async update(next: ComponentInstance<WebRuntimeData>) { instance = next; await render(); stageLayout?.refresh(); pageText.applyAll() },
+    updatePlacement(frame: ComponentInstance['frame']) { instance = { ...instance, frame }; if (!authoredDocument) writeStyle(); stageLayout?.refresh() }, dispose }
 }
 
 /** A single content-realm source owner keeps imported box rules available after serialization/minification. */
 export function webContentRealmSource(): string {
   return `${domTextOverrideRealmSource()}const fragmentBox={isMeasured:(${isMeasuredWebFragmentBox.toString()}),style:(${measuredFragmentBoxStyle.toString()}),extent:(${measuredFragmentExtent.toString()}),resourceMarker:(${webResourceReferenceMarker.toString()})};
-const mount=(${mountWebContent.toString()});export default {mount(context){return mount(context,fragmentBox,context.authoredDocument===true,createPageTextOverrides)}}`
+const mount=(${mountWebContent.toString()});export default {mount(context){return mount(context,fragmentBox,context.authoredDocument===true,createPageTextOverrides,(${createLocalStageLayout.toString()}))}}`
 }

@@ -13,6 +13,8 @@ import { DocumentHostService } from '../../src/main/workbench/DocumentHostServic
 import { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
 import { imageProvenance } from '../../src/main/workbench/images/imageRoute'
 import { OpenImageService } from '../../src/main/workbench/assetSources/OpenImageService'
+import { MediaCapabilityService } from '../../src/main/workbench/media/MediaCapabilityService'
+import { SpeechMediaJobAdapter } from '../../src/main/workbench/media/SpeechMediaJobAdapter'
 import type { ImageModelSelection } from '../../src/shared/workbench/images'
 import type { ToolResult } from '../../src/shared/workbench/tools'
 
@@ -26,6 +28,59 @@ const data = (result: ToolResult): any => {
   if (result.kind !== 'read') throw new Error(JSON.stringify(result))
   return result.data
 }
+
+it('saves the returned ready speech source through its media owner and rejects unknown, foreign and stopped media sources', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-speech-artifact-'))
+  // Fixed PCM bytes exercise resource delivery; no voice process or model is called.
+  const wav = Buffer.alloc(44 + 160)
+  wav.write('RIFF', 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8)
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22)
+  wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34)
+  wav.write('data', 36); wav.writeUInt32LE(160, 40)
+  const synthesize = vi.fn(async () => new Uint8Array(wav))
+  const adapter = new SpeechMediaJobAdapter({ directory: path.join(root, 'media'), local: {
+    voices: async () => [{ name: 'Fixed voice fixture', culture: 'en-US' }], synthesize,
+  } })
+  const capability = (await adapter.discoverLocal()).capability!
+  const media = new MediaCapabilityService([adapter]), readResource = vi.spyOn(media, 'readResource')
+  const host = new DocumentHostService(path.join(root, 'documents'))
+  host.tools.configureHostServices({ media,
+    beginRun: async grant => media.beginRun(grant.runId, { writable: true, capabilities: [capability] }),
+    stopRun: runId => media.stopRun(runId),
+    artifacts: { lookup: (runId, operationId) => host.artifactDeliveries.lookup(operationId, runId),
+      save: ({ grant, operationId, source, bytes, assertActive }) => host.artifactDeliveries.deliver({ runId: grant.runId, operationId,
+        workspaceRoot: requireWorkspaceRoot(grant.fileAccess), permission: grant.fileAccess!.permission,
+        destination: source.destination, ...artifactDeliverySource(source), bytes, assertActive }) },
+  })
+  const begin = (runId: string) => host.tools.beginRun({ runId, actor: 'agent', documents: [], fileAccess: { permission: 'workspace', workspaceRoot: root } })
+  try {
+    await begin('speech-owner')
+    const generated = data(await host.tools.execute('speech-owner', 'generate', { name: 'media.start', input: { kind: 'speech', engine: 'local', prompt: 'Fixed delivery fixture' } }))
+    expect(generated).toMatchObject({ status: 'started', job: { status: 'ready' } })
+    const resource = generated.job.resources[0]
+    const receipt = data(await host.tools.execute('speech-owner', 'save', { name: 'artifact.save', input: { source: resource.source, destination: 'speech.wav' } }))
+    expect(receipt).toMatchObject({ status: 'written', sourceKind: 'media', sourceId: resource.source, byteLength: wav.byteLength, path: path.join(root, 'speech.wav') })
+    expect(await fs.readFile(receipt.path)).toEqual(wav)
+    expect(readResource).toHaveBeenCalledWith('speech-owner', resource.resourceId)
+    expect(await host.tools.execute('speech-owner', 'unknown', { name: 'artifact.save', input: { source: 'media:unknown', destination: 'unknown.wav' } }))
+      .toMatchObject({ kind: 'error', message: '媒体资源不存在或类型不受支持' })
+    expect(readResource).toHaveBeenCalledWith('speech-owner', 'unknown')
+    await begin('unrelated')
+    expect(await host.tools.execute('unrelated', 'foreign', { name: 'artifact.save', input: { source: resource.source, destination: 'foreign.wav' } }))
+      .toMatchObject({ kind: 'error', message: '语音资源不属于当前任务' })
+    await host.tools.stop('speech-owner')
+    expect(await host.tools.execute('speech-owner', 'late', { name: 'artifact.save', input: { source: resource.source, destination: 'late.wav' } }))
+      .toMatchObject({ kind: 'error' })
+    for (const filename of ['unknown.wav', 'foreign.wav', 'late.wav']) await expect(fs.stat(path.join(root, filename))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(synthesize).toHaveBeenCalledOnce()
+  } finally {
+    await Promise.allSettled(['speech-owner', 'unrelated'].map(runId => host.tools.stop(runId)))
+    readResource.mockRestore()
+    if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep) || !path.basename(root).startsWith('g20-speech-artifact-'))
+      throw new Error('Unexpected speech fixture directory')
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
 
 it('cold opens a saved document and saves its ready image through public artifact.save without generating again, preserving source and grant boundaries', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-artifact-save-tool-'))

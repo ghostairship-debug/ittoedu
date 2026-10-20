@@ -1,5 +1,20 @@
 # 局部布局与可选专业内容
 
+固定舞台的最小可选声明如下。它授权软件仅在此组选择 `wide/compact` 与有界间距；外围对象独立，派生属性不写 History/frame/源文。普通 Flow 保自然高度。
+
+```html
+<section data-gl-layout="stage" data-gl-variants="wide compact"
+  style="--gl-gap-min:8px;--gl-gap-max:20px;--gl-padding-min:12px;--gl-font-min:22px">
+  <header data-gl-slot="heading">活动标题</header>
+  <div data-gl-slot="body">活动主体</div>
+  <div data-gl-slot="feedback">随状态更新的反馈</div>
+  <aside data-gl-scroll="auxiliary">允许滚动的完整原文</aside>
+  <nav data-gl-slot="actions">持续可达的主要操作</nav>
+</section>
+```
+
+作者可为 `[data-gl-runtime-variant="compact"]` 写自己的紧凑 CSS。软件不缩字体、不隐藏正文、不扩框压邻居，人工 inline 覆盖优先；真实观察的布局事实会指出裁切、重叠、主动作不可达和 `needsContentDecision`。合法组合仍不足时由作者决定取舍。该局部声明已贯穿正式装配、Published、compiled 与离线消费者；不代表任意程序内部坐标可自动改排。
+
 普通HTML/CSS可以表达新建自由范围的完整构图，Grid、Flex、SVG、CSS效果和必要程序都是合法源文；现工程入口负责测量装配可保真的独立内容。最终的独立标题、说明和配图保正式可编辑对象，按实际共享关系保留局部程序；不要把源文可整段表达误解为最终只用一个整页Web对象。已有作品沿当前工程局部续改，不用外部整课重导覆盖。以下是有共同排版或状态关系的范例，不是必套的课程、页面或分阶段模板；[分素材装配](material-assembly.md)按实际操作需要读取。
 
 ```html

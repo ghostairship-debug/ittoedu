@@ -60,7 +60,7 @@ import type { WebMaterialResult } from '../network/WebResearchService'
 import { continueDocumentTargets } from './continuationTargets'
 import { executionAdvancementModeSchema, type ExecutionAdvancementMode } from '../../../shared/workbench/conversations'
 import { programmaticExecuteInputSchema, programmaticReadInputSchema } from '../../../shared/workbench/programmatic'
-import { ProgrammaticToolRunner, readProgrammaticResult } from './ProgrammaticToolRunner'
+import { ProgrammaticToolRunner, projectProgrammaticModelResult, readProgrammaticResult } from './ProgrammaticToolRunner'
 import { programmaticTools } from '../../../core/tools/ProgrammaticTools'
 
 interface EditProjectionPort {
@@ -150,6 +150,9 @@ interface ActiveRun {
   priorImages: ContinuationImage[]
   priorImagePaths: Map<string, string>
   reissuedImages: Map<string, string>
+  currentWorkFacts?: Record<string, string>
+  currentDocumentFacts?: Map<string, string>
+  previousRequest?: { requestId: string; serialized: string }
 }
 const completionIssueSignature = (issues: ReturnType<typeof executionCompletionIssues>): string =>
   JSON.stringify(issues.map(issue => [issue.callId, issue.receiptCallId, issue.status, issue.documentId, issue.job, issue.message]).sort())
@@ -223,10 +226,10 @@ const taskModeInput = z.object({ advancementMode: executionAdvancementModeSchema
 const taskModeTool: ModelToolDefinition = { name: TASK_MODE,
   description: '仅当用户本次原话或新回答已经明确要求改变推进方式时，记录该要求。sourceRef 使用 task:instruction、steering:<提交编号> 或 tool:<已回答 ask_user 调用编号>。通常直接按任务判断并推进，无需询问模式或先调用本工具；用户正文的明确要求始终有效。',
   inputSchema: z.toJSONSchema(taskModeInput) as ModelJsonObject }
-const loadToolsSchema = z.object({ families: z.array(z.enum(toolFamilies)).min(1).max(toolFamilies.length).optional(),
+export const loadToolsSchema = z.object({ families: z.array(z.enum(toolFamilies)).min(1).max(toolFamilies.length).optional(),
   names: z.array(z.string().min(1)).min(1).optional() }).strict()
 export const loadToolsDefinition: ModelToolDefinition = { name: LOAD_TOOLS,
-  description: '仅在缺少所需工具时按names展开具体工具，或按families展开相关工具族；已有工具直接使用。只披露当前授权能力，不增加权限。',
+  description: '按 names 展开具体工具，或按 families 展开完整相关工具族；已有定义直接使用。披露不限制合法调用，不增加文档或文件授权；未知名称逐项诊断，有效项仍展开。',
   inputSchema: z.toJSONSchema(loadToolsSchema) as ModelJsonObject }
 /** A selection travels with the task up to this size; larger ones stay readable through paged `read`. */
 const SELECTION_PREVIEW_CHARS = 4000
@@ -240,6 +243,9 @@ function stringsIn(value: unknown, found: string[] = []): string[] {
 }
 const baseName = (value: string) => value.split(/[\\/]/).at(-1) || value
 const terminal = (status: ExecutionRunRecord['status']) => !['queued', 'running', 'stopping'].includes(status)
+/** Collaboration is queued data; only human adjustments supersede unstarted work. */
+const userSteeringCount = (record: ExecutionRunRecord, appliedOnly = false) => record.steering?.filter(value =>
+  !value.senderRunId && (!appliedOnly || value.messageIndex !== undefined)).length ?? 0
 const fileMutationNames = new Set<string>(agentFileMutationNames)
 const containsImage = (messages: readonly ModelChatMessage[]): boolean => messages.some(message =>
   Array.isArray(message.content) && message.content.some(part => !!part && typeof part === 'object'
@@ -607,7 +613,16 @@ export class ExecutionEngine {
         if (reread) return false
       }
       return true
-    }).map(tool => ({ ...tool, sourceRunId: run.runId })))
+    }).map(tool => {
+      const registration = toolRegistration(tool.call.name)
+      let pureRead = false
+      try { pureRead = !!registration && (typeof registration.effect === 'function' ? registration.effect(tool.call.input) : registration.effect) === null } catch { /* Preserve unknown effects. */ }
+      const retired = run.runId !== record.runId && !['preparing', 'running', 'stopping'].includes(run.status)
+        && pureRead && (tool.state === 'executing' || tool.result?.kind === 'error' && /tool-outcome-unknown|read-cancelled|read-timeout/.test(tool.result.code))
+      const required = (isViewObservationTool(tool.call.name) || tool.call.name === 'html.observe')
+        && !['optional', 'diagnostic'].includes(String((tool.call.input as { purpose?: unknown } | null)?.purpose))
+      return { ...tool, sourceRunId: run.runId, ...(retired ? { retiredReadAttempt: { verificationRequired: required } } : {}) }
+    }))
     const currentIds = continuationDocumentIds(lineage, this.options.registry.list())
     const snapshots = this.options.registry.list()
     for (const tool of tools) {
@@ -717,8 +732,10 @@ export class ExecutionEngine {
       await this.event(record, tool.callId, 'tool', { ...applicationEventFacts(tool.call.name, tool.result),
         status: serviceToolOutcome(tool.call.name, tool.result)?.status ?? (toolFailed(tool.call.name, tool.result) ? 'failed' : 'returned'),
         text: serviceToolOutcome(tool.call.name, tool.result)?.message ?? '已查证正式操作回执' }, 'append')
-      if (contentApplyFact(tool.call.name, tool.result)?.commit !== 'unknown' && tool.call.name === 'project.apply')
-        record.messages.push({ role: 'user', content: `原调用 ${tool.callId} 已按原操作编号查证；未重放。正式结果：${JSON.stringify(modelToolResult(tool.call.name, tool.result))}` })
+      if (contentApplyFact(tool.call.name, tool.result)?.commit !== 'unknown' && tool.call.name === 'project.apply') {
+        ;(record.hostDataMessageIndexes ??= []).push(record.messages.length)
+        record.messages.push({ role: 'user', content: `原调用 ${tool.callId} 已按原操作编号查证；未重放。正式结果：${JSON.stringify(tool.result)}` })
+      }
       changed = true
     }
     if (changed) await this.checkpoint(record)
@@ -760,6 +777,7 @@ export class ExecutionEngine {
     options?.signal?.throwIfAborted()
     if (this.closing) throw new Error('应用正在关闭；输入与已有回执保留，未启动新任务')
     const frozen = structuredClone(input)
+    frozen.speechSelection ??= { unavailableReason: '任务接受时未配置GPT语音' }
     frozen.permission ??= DEFAULT_PERMISSION_MODE
     // A card's default focus is still readable when the task has no write grant.
     if (frozen.permission === 'read-only') delete frozen.contentOutput
@@ -774,6 +792,7 @@ export class ExecutionEngine {
     if (continuation) {
       const previous = await this.read(continuation.runId)
       if (!previous || !terminal(previous.status) || previous.input.conversationId !== frozen.conversationId) throw new Error('先前运行不可继续')
+      if (continuation.sameTask) frozen.speechSelection = structuredClone(previous.input.speechSelection ?? { unavailableReason: '任务接受时未配置GPT语音' })
       await this.reconcileReceipts(previous)
       const lineage = await this.continuationLineage(previous)
       if (continuation.sameTask && options?.continuationReads !== 'none') continuationReads = this.taskReadAncestors(frozen, previous, lineage)
@@ -883,6 +902,8 @@ export class ExecutionEngine {
       const fileReadPaths = [...new Set(Object.values(boundPaths))]
       options?.signal?.throwIfAborted()
       await this.options.gateway.beginRun({ runId, actor: 'agent', documents: frozen.documents, searchSelection: frozen.selection,
+        speechSelection: structuredClone(frozen.speechSelection),
+        ...(options?.delegatedBy ? { delegatedBy: structuredClone(options.delegatedBy) } : {}),
         ...(frozen.contentOutput ? { contentOutput: frozen.contentOutput } : {}),
         ...(frozen.webAuthorization ? { webAuthorization: frozen.webAuthorization } : {}),
         ...(frozen.inputContext?.attachments.length ? { materialIds: frozen.inputContext.attachments.map(item => item.attachmentId) } : {}),
@@ -1192,9 +1213,9 @@ export class ExecutionEngine {
     try {
       await acceptance
     } finally { if (active.steeringAcceptance === acceptance) delete active.steeringAcceptance }
-    this.abortPreviews(active, '已收到任务调整，尚未提交的旧片段已撤回')
     // Waiting for an unstarted operation or an unanswered question is already a safe boundary.
     if (!senderRunId) {
+      this.abortPreviews(active, '已收到任务调整，尚未提交的旧片段已撤回')
       active.approval?.settle('steering')
       active.question?.settle({ kind: 'steering' })
     }
@@ -1228,10 +1249,10 @@ export class ExecutionEngine {
       && (value.result.data as { status?: unknown })?.status === 'answered') : undefined
     if (sourceRef !== 'task:instruction' && !adjustment && !question) throw new Error('模式来源必须是本次用户原话、已接受调整或实际提问回答')
     if (active.stopped) throw new Error('任务已停止，未接受模式调整')
-    const acceptedAdjustments = record.steering?.length ?? 0
+    const acceptedAdjustments = userSteeringCount(record)
     if (!record.delegatedBy) await this.options.setAdvancementMode?.(record.input.conversationId, advancementMode,
-      () => !active.stopped && (record.steering?.length ?? 0) === acceptedAdjustments)
-    if (active.stopped || (record.steering?.length ?? 0) !== acceptedAdjustments) throw new Error('已有更新的任务调整，旧模式识别未接受')
+      () => !active.stopped && userSteeringCount(record) === acceptedAdjustments)
+    if (active.stopped || userSteeringCount(record) !== acceptedAdjustments) throw new Error('已有更新的任务调整，旧模式识别未接受')
     const submissionId = `mode:${tool.callId}`
     if (!record.steering?.some(value => value.submissionId === submissionId)) (record.steering ??= []).push({ submissionId,
       text: `用户推进偏好已同步为 ${advancementMode}；原话来源 ${sourceRef}。`, advancementMode, acceptedAt: this.now() })
@@ -1416,7 +1437,7 @@ export class ExecutionEngine {
     const pending = new Promise<ApprovalDecision | 'stopped' | 'steering'>(resolve => { settle = resolve })
     active.approval = { callId: tool.callId, settle }
     if (active.stopped) settle('stopped')
-    else if (record.steering?.some(value => value.messageIndex === undefined)) settle('steering')
+    else if (record.steering?.some(value => !value.senderRunId && value.messageIndex === undefined)) settle('steering')
     await this.event(record, 'run-state', 'run.state', { status: 'waiting', phase: 'user', label: '等待你批准修改' })
     await this.event(record, tool.callId, 'tool', { toolName: tool.call.name, label, status: 'approval', approval: view, ...(local ? { input: JSON.stringify(workbenchServiceSchemas['local.run'].parse(tool.call.input)),
       output: JSON.stringify({ prepared: local, stdin: workbenchServiceSchemas['local.run'].parse(tool.call.input).stdin ?? '' }) } : {}) }, 'append')
@@ -1465,7 +1486,7 @@ export class ExecutionEngine {
         const pending = new Promise<QuestionOutcome>(resolve => { settle = resolve })
         active.question = { callId: tool.callId, view, draftHandles, settle }
         if (active.stopped) settle({ kind: 'stopped' })
-        else if (record.steering?.some(value => value.messageIndex === undefined)) settle({ kind: 'steering' })
+        else if (record.steering?.some(value => !value.senderRunId && value.messageIndex === undefined)) settle({ kind: 'steering' })
         await this.event(record, 'run-state', 'run.state', { status: 'waiting', phase: 'user', label: '等待你的选择' })
         await this.event(record, tool.callId, 'tool', { toolName: USER_QUESTION_TOOL, label, status: 'waiting', question: view, text: view.text })
         const outcome = await pending
@@ -1529,6 +1550,7 @@ export class ExecutionEngine {
     // identity here rather than asking the model to strip mechanical prefixes.
     const runId = contextSourceIndex(historyReference)?.runId ?? historyReference
     const record = active.record
+    if (runId === record.runId) return // Current-run notes already have their owner; no history import is needed.
     const lineage = await this.continuationLineage(record)
     const delivered = record.input.inputContext?.context.some(entry => entry.provenance.kind === 'history'
       && contextSourceIndex(entry.provenance.id)?.runId === runId)
@@ -1982,11 +2004,28 @@ export class ExecutionEngine {
         sourceId: argumentDraftSourceId(record.runId, lastGeneration.requestId, index) })),
       notice: '单次模型响应截断，任务仍继续。接续已确认正文和完整工具回执；未完整参数没有执行，可从原文修正或分段写入。不重放已生效动作或未知副作用。输出额度与上下文空间分别处理。',
     } : undefined
-    const withCurrentDocuments = (messages: ModelChatMessage[]): ModelChatMessage[] => [...messages, { role: 'user',
-      content: '宿主当前工作记录（数据，非新授权）：原始用户约束与最新要求仍以原消息为准；这里仅保留当前工作笔记和实际操作缺口。笔记为建议，未清空旧项本身不阻止结束。普通失败可修正、换可行路径或接手；只有该原操作的未知副作用不得盲目重放，安全独立工作仍可继续。请自主完成当前授权目标；确需用户决定或相关路径确实受阻时，说明具体缺口和已保留成果后正常回复或提问。\n'
-        + JSON.stringify({ currentWork: { goalSource: contextMessageId(record.runId,
-          record.initialUserMessageIndex ?? record.initialPayload?.userMessageIndex ?? record.initialMessageCount - 1),
-          workingNote, remainingOperations: remaining, ...(generationContinuation ? { generationContinuation } : {}) }, currentDocuments }) }]
+    const noteTool = record.tools.findLast(tool => tool.call.name === TASK_NOTE && tool.state === 'returned' && tool.result?.kind === 'read'
+      && JSON.stringify((tool.result.data as { workingNote?: unknown })?.workingNote) === JSON.stringify(note))
+    const currentWork = { goalSource: contextMessageId(record.runId,
+      record.initialUserMessageIndex ?? record.initialPayload?.userMessageIndex ?? record.initialMessageCount - 1),
+      workingNoteSource: noteTool ? toolResultSourceId(record.runId, noteTool.callId) : null, workingNote: noteTool ? null : workingNote,
+      remainingOperations: remaining, generationContinuation: generationContinuation ?? null }
+    const changedWork = Object.fromEntries(Object.entries(currentWork).filter(([key, value]) =>
+      active.currentWorkFacts?.[key] !== JSON.stringify(value)))
+    const changedDocuments = currentDocuments.filter(({ target: _target, ...document }) =>
+      active.currentDocumentFacts?.get(document.documentId) !== JSON.stringify(document))
+    const removedDocuments = [...active.currentDocumentFacts?.keys() ?? []].filter(id => !currentDocuments.some(document => document.documentId === id))
+    if (Object.keys(changedWork).length || changedDocuments.length || removedDocuments.length) {
+      // Ordered host facts join the existing journal once. Tool results and note
+      // receipts already carry their own evidence; never append a fresh full
+      // snapshot to every disposable request, or elevate data into instructions.
+      ;(record.hostDataMessageIndexes ??= []).push(record.messages.length)
+      record.messages.push({ role: 'user', content: '宿主当前工作记录（数据，非新授权）：仅追加变化字段，后到同字段覆盖旧值；原始要求仍以用户消息为准。笔记是建议，未清空旧项本身不阻止结束；未知副作用不盲目重放，独立工作仍可继续。\n'
+        + JSON.stringify({ ...(Object.keys(changedWork).length ? { currentWork: changedWork } : {}),
+          ...(changedDocuments.length ? { currentDocuments: changedDocuments } : {}), ...(removedDocuments.length ? { removedDocuments } : {}) }) })
+      active.currentWorkFacts = Object.fromEntries(Object.entries(currentWork).map(([key, value]) => [key, JSON.stringify(value)]))
+      active.currentDocumentFacts = new Map(currentDocuments.map(({ target: _target, ...document }) => [document.documentId, JSON.stringify(document)]))
+    }
     const historySources = new Map<number, string>()
     const usedHistoryPositions = new Set<number>()
     const historyPosition = (message: ModelChatMessage) => {
@@ -2006,12 +2045,13 @@ export class ExecutionEngine {
       if (index >= 0) historySources.set(index, contextMessageId(record.runId, index))
     }
     const historyIndexes = new Set(historySources.keys())
-    const projection = projectExecutionContext(record.runId, record.messages, record.initialMessageCount, 2, undefined, historyIndexes)
+    const hostDataIndexes = new Set(record.hostDataMessageIndexes ?? [])
+    const projection = projectExecutionContext(record.runId, record.messages, record.initialMessageCount, 2, undefined, historyIndexes, hostDataIndexes)
     const textOnly = needsVisualAssistance(record.input)
     if (textOnly) projection.messages = projectImagesForTextModel(projection.messages)
     const boundedThrough = record.compacted?.boundedThroughMessage
     if (boundedThrough) {
-      const archived = projectExecutionContext(record.runId, record.messages, record.initialMessageCount, 0, record.compacted?.boundedTextLimit, historyIndexes).messages
+      const archived = projectExecutionContext(record.runId, record.messages, record.initialMessageCount, 0, record.compacted?.boundedTextLimit, historyIndexes, hostDataIndexes).messages
       const prior = textOnly ? projectImagesForTextModel(archived) : archived
       for (let index = record.initialMessageCount; index < Math.min(boundedThrough, projection.messages.length); index++) projection.messages[index] = prior[index]
     }
@@ -2022,7 +2062,7 @@ export class ExecutionEngine {
     const measure = (messages: ModelChatMessage[]) => {
       const existing = candidates.get(messages)
       if (existing) return existing
-      const result = this.preparePayload(record.input.selection, withCurrentDocuments(messages), tools,
+      const result = this.preparePayload(record.input.selection, messages, tools,
         { key: `conversation:${record.input.conversationId}:main` })
       result.remainingSignature = remainingSignature
       candidates.set(messages, result)
@@ -2085,7 +2125,7 @@ export class ExecutionEngine {
     const currentSize = measure(current)
     const softPressure = currentSize.tokens > inputLimit * .85
     if (fits(currentSize) && !force && (!softPressure || starts.length < 3)) return currentSize
-    if (record.tools.some(tool => tool.state !== 'returned')) throw new Error('待处理工具尚未收拢，不能压缩它的上下文')
+    if (record.tools.some(tool => tool.origin !== 'host' && tool.state !== 'returned')) throw new Error('待处理工具尚未收拢，不能压缩它的上下文')
     if (record.messages.length === record.initialMessageCount) throw new Error('初始输入超过模型可用窗口；原指令与附件已保留，请用材料引用或核对模型窗口配置')
     const header = await prefix()
     for (const start of [...new Set(starts.slice(-2))]) {
@@ -2099,9 +2139,15 @@ export class ExecutionEngine {
         const results = Math.max(1, tail.filter(message => message.role === 'tool').length)
         const availableTokens = Math.max(0, Math.min(inputLimit, active.rejectedInputLimit ?? Infinity) - measure(header).tokens - 2000)
         textLimit = Math.max(300, Math.min(8000, Math.floor(availableTokens / results / 1.5)))
-        const bounded = projectExecutionContext(record.runId, record.messages, record.initialMessageCount, 0, textLimit, historyIndexes).messages
-        tail = (textOnly ? projectImagesForTextModel(bounded) : bounded).slice(start)
-        candidate = [...header, ...tail]; cost = measure(candidate)
+        for (;;) {
+          const bounded = projectExecutionContext(record.runId, record.messages, record.initialMessageCount, 0, textLimit, historyIndexes, hostDataIndexes).messages
+          tail = (textOnly ? projectImagesForTextModel(bounded) : bounded).slice(start)
+          candidate = [...header, ...tail]; cost = measure(candidate)
+          if (fits(cost) || textLimit <= 300) break
+          // Measure the actual adapter payload again: native arguments and tool
+          // definitions can occupy most of the window, independently of output.
+          textLimit = Math.max(300, Math.floor(textLimit / 2))
+        }
       }
       if (!fits(cost) || force && cost.tokens >= currentSize.tokens && cost.bytes >= currentSize.bytes) continue
       const priorSummary = summary
@@ -2208,7 +2254,9 @@ export class ExecutionEngine {
     let webSource: { url: string; version?: string } | undefined
     this.options.gateway.captureHostOperation(record.runId, this.options.gateway.operationIdentity(record.runId, tool.callId), tool.call)
     if (active.unresolvedToolNames.size || active.unresolvedEffects.length
-      || record.tools.some(prior => prior.state === 'returned' && contentApplyFact(prior.call.name, prior.result)?.commit === 'unknown'))
+      || record.tools.some(prior => prior.callId !== tool.callId && prior.call.name !== 'programmatic.execute'
+        && (prior.state === 'executing' && this.effectNames(prior.call).length > 0
+          || prior.state === 'returned' && contentApplyFact(prior.call.name, prior.result)?.commit === 'unknown')))
       await this.refreshUnresolvedEffects(active, tool.callId)
     await this.waitForBrowser(active)
     tool.effectTargets ??= await this.options.gateway.effectTargets(record.runId, tool.call)
@@ -2372,7 +2420,7 @@ export class ExecutionEngine {
               if (!source || source.input.conversationId !== record.input.conversationId) throw new Error('该上下文不属于当前运行、明确继续链或宿主冻结的历史来源')
               const unfinished = draft ? source.requests.find(request => request.requestId === draft.requestId)?.argumentDrafts?.[draft.index] : undefined
               const originalTool = rawTool ? source.tools.find(tool => tool.callId === rawTool.callId
-                && (isViewObservationTool(tool.call.name) || isHtmlActionTool(tool.call.name))) : undefined
+                && tool.state === 'returned' && tool.result !== undefined) : undefined
               let readableToolResult = originalTool?.result
               if (readableToolResult?.kind === 'read' && readableToolResult.data && typeof readableToolResult.data === 'object') {
                 const data = readableToolResult.data as Record<string, unknown>, full = data.fullObservation
@@ -2446,9 +2494,13 @@ export class ExecutionEngine {
               }
             } else if (tool.call.name === 'programmatic.execute') {
               const input = programmaticExecuteInputSchema.parse(tool.call.input)
-              const steeringAtStart = record.steering?.length ?? 0
+              const steeringAtStart = userSteeringCount(record)
+              const canonicalDefinitions = await this.options.gateway.describe()
+              const hostDefinitions = await this.runTools(record.runId, active.permission, record.input.workspaceRoot)
               tool.result = await this.programmatic.execute({ runId: record.runId, callId: tool.callId,
-                code: input.code, definitions: active.tools, signal: active.controller.signal,
+                code: input.code, definitions: [...canonicalDefinitions.map(definition => ({
+                  name: definition.name, description: definition.description, inputSchema: definition.schema as ModelJsonObject,
+                })), ...hostDefinitions.filter(definition => !canonicalDefinitions.some(tool => tool.name === definition.name))], signal: active.controller.signal,
                 executeTool: async (callId, call) => {
                   try { return (await this.executeHost(active, callId, tool.requestId, call, steeringAtStart)).result! }
                   catch (error) {
@@ -2462,7 +2514,9 @@ export class ExecutionEngine {
               const lineage = input.runId && input.runId !== record.runId ? await this.options.runs.taskLineage(record.runId) : [record.runId]
               if (input.runId && !lineage.includes(input.runId)) throw new Error('该代码编排回执不属于当前任务续接链')
               const source = input.runId && input.runId !== record.runId ? await this.options.runs.read(input.runId) : record
-              tool.result = readProgrammaticResult(input, source?.tools ?? [])
+              const internal = tool.origin === 'host' && record.tools.some(parent => parent.call.name === 'programmatic.execute'
+                && parent.state === 'executing' && tool.callId.startsWith(`${parent.callId}:ptc:`))
+              tool.result = readProgrammaticResult(input, source?.tools ?? [], { internal })
             } else if (tool.call.name === TASK_MODE) {
               const input = taskModeInput.parse(tool.call.input)
               await this.acceptMode(active, tool, input.advancementMode, input.sourceRef)
@@ -2481,7 +2535,6 @@ export class ExecutionEngine {
             } else if (tool.call.name === 'task.delivery' && tool.origin === 'host') {
               tool.result = await this.options.gateway.completeTaskDelivery(record.runId, tool.callId, tool.call.input, active.controller.signal)
             } else if (tool.call.name === LOAD_TOOLS) {
-              if (!active.tools.some(item => item.name === LOAD_TOOLS)) throw new Error('当前任务没有可展开的工具族')
               const input = loadToolsSchema.parse(tool.call.input), requested = input.families ?? []
               if (!requested.length && !input.names?.length) throw new Error('请提供实际需要的names或families')
               active.loadedHostFamilies ??= new Set()
@@ -2490,8 +2543,11 @@ export class ExecutionEngine {
               for (const name of input.names ?? []) active.loadedHostNames.add(name)
               const available = [...await this.options.gateway.loadToolFamilies(record.runId, requested, input.names)]
               await this.refreshTools(active)
+              const unavailable = (input.names ?? []).filter(name => !active.tools.some(item => item.name === name))
+                .map(name => ({ name, code: toolRegistration(name) ? 'service-unavailable' : 'unknown-tool',
+                  message: toolRegistration(name) ? '当前宿主服务未接通；有效工具已展开' : '未注册此工具名；有效工具已展开' }))
               tool.result = { kind: 'read', data: { loaded: requested.filter(family => active.tools.some(item => familyOfTool(item.name) === family)),
-                ...(input.names ? { tools: active.tools.filter(item => input.names!.includes(item.name)) } : {}), available } }
+                ...(input.names ? { tools: active.tools.filter(item => input.names!.includes(item.name)), unavailable } : {}), available } }
             } else if (tool.call.name === 'course.createFromHtml' && this.options.files && record.input.workspaceRoot) {
               tool.result = await createCourseFromHtml(createCourseFromHtmlInputSchema.parse(tool.call.input), {
                 callId: tool.callId, permission: active.permission,
@@ -2664,7 +2720,9 @@ export class ExecutionEngine {
       ...(tool.result?.kind === 'error' ? { error: safeDetailString(tool.result.message) } : serviceOutcome ? { error: safeDetailString(serviceOutcome.message) } : {}),
       ...applicationEventFacts(tool.call.name, tool.result) })
     if (tool.origin !== 'host') {
-      let projected = publicResult && modelToolResult(tool.call.name, publicResult)
+      let projected = publicResult && modelToolResult(tool.call.name, tool.call.name === 'programmatic.execute'
+        ? projectProgrammaticModelResult({ ...tool, result: publicResult }, record.tools)! : publicResult,
+        { sourceId: toolResultSourceId(record.runId, tool.callId) })
       if (projected?.kind === 'read' && projected.data && typeof projected.data === 'object'
         && (isViewObservationTool(tool.call.name) || isHtmlActionTool(tool.call.name)))
         projected = { ...projected, data: { ...projected.data, fullObservationSource: { sourceId: toolResultSourceId(record.runId, tool.callId),
@@ -2733,7 +2791,7 @@ export class ExecutionEngine {
       await this.checkpoint(active.record)
     }
     await active.steeringAcceptance?.catch(() => undefined)
-    if (tool.state !== 'returned' && steeringVersion !== undefined && (active.record.steering?.length ?? 0) > steeringVersion)
+    if (tool.state !== 'returned' && steeringVersion !== undefined && userSteeringCount(active.record) > steeringVersion)
       await this.cancelUnstartedForSteering(active, tool)
     else await this.execute(active, tool)
     return tool
@@ -2764,6 +2822,8 @@ export class ExecutionEngine {
     for (const tool of calls) {
       if (!isViewObservationTool(tool.call.name) || tool.result?.kind !== 'read'
         || !tool.result.data || typeof tool.result.data !== 'object') continue
+      const source = (tool.result.data as { source?: string }).source
+      if (source === 'live-html-preview' || source === 'isolated-html-preview') continue
       const observation = tool.result.data as ObservationResult
       const identity = observation.identity
       if (!identity || typeof identity.documentId !== 'string' || typeof identity.locationId !== 'string'
@@ -2851,9 +2911,10 @@ export class ExecutionEngine {
       added = true
     }
     for (const tool of calls) {
-      if (!['html.observe', 'html.navigate', 'html.click', 'html.input'].includes(tool.call.name)
+      if (!['html.observe', 'html.navigate', 'html.click', 'html.input', 'view.observe', 'view.click', 'view.input'].includes(tool.call.name)
         || tool.result?.kind !== 'read') continue
       const observation = tool.result.data as import('../observation/HtmlActionService').HtmlActionObservation | null
+      if (observation?.source !== 'live-html-preview' && observation?.source !== 'isolated-html-preview') continue
       if (!observation?.identity || !observation.image?.resourceId) continue
       try {
         const current = await this.options.registry.get(observation.identity.documentId).drain()
@@ -2868,7 +2929,7 @@ export class ExecutionEngine {
         const image = (await this.preparedResultImages(active, tool.result))[0]
         if (!image) throw new Error('HTML 观察结果没有可消费图片')
         record.messages.push(htmlActionModelMessage({ toolCallId: tool.providerCallId,
-          toolName: tool.call.name as 'html.observe' | 'html.navigate' | 'html.click' | 'html.input',
+          toolName: tool.call.name as 'html.observe' | 'html.navigate' | 'html.click' | 'html.input' | 'view.observe' | 'view.click' | 'view.input',
           target: observation.title, observation, bytes: image.bytes }))
         added = true
       } catch {
@@ -2979,8 +3040,11 @@ export class ExecutionEngine {
         if (active.record.steering?.some(value => value.messageIndex === undefined)) break
       }
       if (active.stopped) break
-      if (observation?.result) active.record.messages.push({ role: 'user', content:
-        `宿主已等待原作业，没有重发生产请求。原作业 ${job.job} 的实际结果：${JSON.stringify(modelToolResult('job.wait', observation.result))}。需要正文或成果字节时读取该原作业的成果；按真实结果继续或如实回复。` })
+      if (observation?.result) {
+        ;(active.record.hostDataMessageIndexes ??= []).push(active.record.messages.length)
+        active.record.messages.push({ role: 'user', content:
+          `宿主已等待原作业，没有重发生产请求。原作业 ${job.job} 的实际结果：${JSON.stringify(observation.result)}。需要正文或成果字节时读取该原作业的成果；按真实结果继续或如实回复。` })
+      }
       if (active.record.steering?.some(value => value.messageIndex === undefined)) break
     }
     await this.checkpoint(active.record)
@@ -3025,6 +3089,22 @@ export class ExecutionEngine {
         const payloadDigest = createHash('sha256').update(serialized).digest('hex')
         if (initial && record.initialPayload && payloadDigest !== record.initialPayload.payloadDigest) throw new Error('首次最终请求与编译清单不一致，未发送')
         const requestId = `${logicalRoundId}.attempt-${attempts + 1}`, request: ExecutionRunRecord['requests'][number] = { requestId, state: 'sending', payload: { phase: initial ? 'initial' : 'dynamic', digest: payloadDigest, serializedBytes: Buffer.byteLength(serialized, 'utf8') } }
+        if (active.previousRequest) {
+          const previous = active.previousRequest, before = Buffer.from(previous.serialized), after = Buffer.from(serialized)
+          let stableBytes = 0
+          while (stableBytes < Math.min(before.length, after.length) && before[stableBytes] === after[stableBytes]) stableBytes++
+          let firstDifference: NonNullable<NonNullable<typeof request.payload>['prefix']>['firstDifference'] = 'parameters'
+          if (previous.serialized === serialized) firstDifference = 'identical'
+          else try {
+            const prior = JSON.parse(previous.serialized), next = JSON.parse(serialized)
+            const changed = (key: string) => JSON.stringify(prior[key]) !== JSON.stringify(next[key])
+            const field = Object.keys(next).find(changed)
+            firstDifference = field === 'instructions' || field === 'system' ? 'instructions'
+              : field === 'tools' ? 'tools' : field === 'messages' || field === 'input' ? 'messages' : 'parameters'
+          } catch { /* Unsupported serializer still has an exact byte prefix diagnostic. */ }
+          request.payload!.prefix = { previousRequestId: previous.requestId, stableBytes, previousBytes: before.length, firstDifference }
+        }
+        active.previousRequest = { requestId, serialized }
         this.timing(record, `${record.runId}:${requestId}:prepared`, 'request.prepared', { requestId,
           detail: { serializedBytes: Buffer.byteLength(serialized, 'utf8') } })
         attempts += 1
@@ -3034,13 +3114,14 @@ export class ExecutionEngine {
           request.state = 'failed'; request.failure = { outcome: 'not-sent', kind: 'aborted', code: 'stopped-before-send', message: '运行在模型请求发送前已停止' }
           break
         }
-        const steeringAtDispatch = record.steering?.filter(value => value.messageIndex !== undefined).length ?? 0
+        const steeringAtDispatch = userSteeringCount(record, true)
         let completed: Extract<ModelEvent, { type: 'response.completed' }> | undefined
         let readableTextStarted = false
         let firstProviderEvent = false, firstContent = false
         // This is adapter entry, not proof that fetch opened a connection or sent bytes.
         await this.event(record, 'run-state', 'run.state', { status: 'running', phase: 'waiting-response', requestId, label: '等待模型响应' })
         this.timing(record, `${record.runId}:${requestId}:dispatched`, 'request.dispatched', { requestId })
+        const dispatchedAt = this.now()
         const stream = context.prepared ? context.prepared.stream(requestId, { signal: active.controller.signal })
           : this.options.provider.stream({ requestId, selection,
             messages: structuredClone(finalPayload?.messages ?? workingMessages), tools: finalPayload?.tools ?? tools,
@@ -3053,6 +3134,7 @@ export class ExecutionEngine {
           // A local adapter failure (including missing credentials) is not a Provider event.
           if (!firstProviderEvent && event.type !== 'response.failed' && event.type !== 'response.activity') {
             firstProviderEvent = true
+            request.firstEventWaitMs = Math.max(0, this.now() - dispatchedAt)
             // Promote only exact pending facts in the payload accepted by the
             // backend. Merely preparing or failing to send is not observation.
             if (changedContentFacts.length) this.options.gateway.acknowledgeContentFacts(record.runId, changedContentFacts)
@@ -3064,6 +3146,7 @@ export class ExecutionEngine {
             || event.type === 'response.completed' && (typeof event.assistant.content === 'string' && event.assistant.content.length > 0
               || event.toolCalls.some(call => call.argumentsText.length > 0)))) {
             firstContent = true
+            request.firstContentWaitMs = Math.max(0, this.now() - dispatchedAt)
             this.timing(record, `${record.runId}:${requestId}:first-content`, 'provider.first-content', { requestId,
               detail: { contentKind: event.type === 'tool.delta' ? 'tool-arguments'
                 : event.type === 'response.completed' ? typeof event.assistant.content === 'string' && event.assistant.content.length > 0
@@ -3240,10 +3323,11 @@ export class ExecutionEngine {
         let observationsDeliveredThrough = 0, supersededRound = false
         await runToolRoundInOrder(calls, {
           signal: active.controller.signal,
-          mayParallel: tool => !supersededRound && (record.steering?.length ?? 0) === steeringAtDispatch && parallelReads.has(tool),
+          isCurrent: tool => this.active.get(record.runId) === active && tool.state !== 'returned' && !active.stopped,
+          mayParallel: tool => !supersededRound && userSteeringCount(record) === steeringAtDispatch && parallelReads.has(tool),
           execute: async (tool, index) => {
             await active.steeringAcceptance?.catch(() => undefined)
-            if ((record.steering?.length ?? 0) > steeringAtDispatch) supersededRound = true
+            if (userSteeringCount(record) > steeringAtDispatch) supersededRound = true
             if (supersededRound) { await this.cancelUnstartedForSteering(active, tool); return }
 
             if (!parallelReads.has(tool)) return this.execute(active, tool).then(() => undefined)
@@ -3261,11 +3345,20 @@ export class ExecutionEngine {
               result = await this.options.gateway.lookup(record.runId, tool.callId, tool.call).catch(() => null)
                 ?? { kind: 'error' as const, code: 'tool-outcome-unknown', message: '工具回执中断，尚未确认结果；请重新观察后继续' }
             }
-            await this.event(record, tool.callId, 'tool', { status: result.kind === 'error' ? 'failed' : 'returned' }, 'append')
+            // The wait may already have retired this attempt. A late read is not
+            // a new completion event and cannot overwrite cancellation in the UI.
+            if (!active.stopped && !active.controller.signal.aborted && tool.state === 'executing')
+              await this.event(record, tool.callId, 'tool', { status: result.kind === 'error' ? 'failed' : 'returned' }, 'append')
             return result
           },
           commit: async (tool, outcome) => {
-            if (outcome.status === 'rejected') throw outcome.reason
+            if (outcome.status === 'rejected') {
+              if (!parallelReads.has(tool)) throw outcome.reason
+              const reason = outcome.reason as { code?: string; message?: string }
+              await this.execute(active, tool, { kind: 'error', code: reason?.code ?? 'read-failed',
+                message: reason?.message ?? '本次纯读等待已结束，未交付读取结果' })
+              return
+            }
             if (parallelReads.has(tool) && tool.notInvokedReason !== 'steering') await this.execute(active, tool, outcome.value)
           },
         })

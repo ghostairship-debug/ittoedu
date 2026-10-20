@@ -1,5 +1,5 @@
 import type { ComponentInstance, ComponentLayoutInput, CourseProjectV10 } from './contracts/component-platform'
-import { componentDefinitionBuiltinKey } from './contracts/component-platform'
+import { componentDefinitionBuiltinKey, owningContainer } from './contracts/component-platform'
 import { componentLayoutInput } from '../components/web/measuredFragmentBox'
 import { flowObjectExtent } from '../core/components/geometry/flowObjectExtent'
 import { resolveFlowMediaLayoutProjection, type FlowMediaLayoutWidths } from './flowMediaLayout'
@@ -23,6 +23,22 @@ export interface ComponentOuterPresentation {
   stageStyle: Record<string, string>
   contentStyle: Record<string, string>
   childrenStyle: Record<string, string>
+}
+
+/** Global Web input uses the existing native document paint owner in every player. */
+export function isGlobalFramedWebDocument(project: CourseProjectV10, instance: ComponentInstance): boolean {
+  const implementation = instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation
+  if (!instance.frame || implementation?.kind !== 'builtin' || !['guoling.web', 'guoling.html-program'].includes(implementation.key)) return false
+  let id = instance.id
+  const visited = new Set<string>()
+  while (!visited.has(id)) {
+    visited.add(id)
+    const owner = owningContainer(project, id)
+    if (owner?.kind === 'global') return true
+    if (owner?.kind !== 'instance') return false
+    id = owner.instanceId
+  }
+  return false
 }
 
 /** PM document sections and component projections share this author/playback policy. */
@@ -56,6 +72,10 @@ export function resolveComponentOuterPresentation(project: CourseProjectV10, ins
       transform: `matrix(${frame.transform.join(',')})`, transformOrigin: '0 0', maxWidth: '', margin: '', float: '' }
       : { position: 'relative', left: '', top: '', width: '100%', height: 'auto', transform: '', transformOrigin: '', maxWidth: '', margin: '', float: '' }
   outerStyle.cursor = typeof instance.style?.cursor === 'string' ? instance.style.cursor : ''
+  // Web paint and input live in its content iframe. Layout holders must not
+  // turn the transparent part of that frame into a second input surface.
+  outerStyle.pointerEvents = isGlobalFramedWebDocument(project, instance)
+    ? 'none' : String(instance.style?.pointerEvents ?? instance.style?.['pointer-events'] ?? 'auto')
   if (flow && (media || instance.flowLayout)) {
     const presentation = resolveFlowMediaLayoutProjection(instance.flowLayout?.width ?? 'content-width', input.flowLayout ?? { readingWidth: 860, wideContentWidth: 1100 })
     const wrap = instance.flowLayout?.wrap

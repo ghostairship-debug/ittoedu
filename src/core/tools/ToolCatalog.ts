@@ -263,8 +263,8 @@ export const gatewayToolRegistrations = [
     targets: () => [], handler: (context, input) => context.readSkill(input) }),
   registerGateway(skillListTool, { capability: 'read', effect: null, supports: context => context.skills !== false,
     targets: () => [], handler: (context, input) => context.listSkills(input) }),
-  registerGateway(viewObserveTool, { capability: 'read', effect: null, supports: context => context.observations !== false && hasRunDocument(context, 'course-v10'),
-    targets: (input, resolver) => 'target' in input ? handleToolTarget(input, resolver) : projectToolTarget(input, resolver), handler: (context, input) => context.observe(input) }),
+  registerGateway(viewObserveTool, { capability: 'read', effect: null, supports: context => context.observations !== false || context.htmlActions !== false,
+    targets: (input, resolver) => 'target' in input ? handleToolTarget(input, resolver) : 'path' in input ? projectToolTarget(input, resolver) : [], handler: (context, input) => context.observe(input) }),
   ...documentDeliveryTools.map(tool => registerGateway(tool, {
     capability: 'save', effect: tool.name === 'file.save' ? 'document-save' : 'document-export', exposure: 'direct', family: tool.name === 'document.export' ? 'build' : null,
     supports: context => context.deliveries !== false && hasRunDelivery(context, tool.name === 'document.export' ? 'course-v10' : undefined),
@@ -281,8 +281,43 @@ export const toolCatalog = [...hostToolCatalog, ...workbenchServiceToolCatalog, 
 export const toolRegistrations = [...toolCatalog, ...agentFileRegistrations, ...programmaticToolRegistrations]
 export function toolRegistration(name: string) { return toolRegistrations.find(tool => tool.name === name) }
 /** Model and MCP schemas are projected from the actual canonical parsers. */
+function compactSchemaUnions(schema: Record<string, any>): void {
+  // Merge only disjoint literal-tagged variants with otherwise identical
+  // constraints. Runtime Zod parsers and the accepted parameter set stay intact.
+  for (const key of ['properties', 'patternProperties', '$defs', 'dependentSchemas'])
+    for (const child of Object.values(schema[key] ?? {}))
+      if (child && typeof child === 'object') compactSchemaUnions(child as Record<string, any>)
+  for (const key of ['oneOf', 'anyOf', 'allOf', 'prefixItems']) for (const child of schema[key] ?? [])
+    if (child && typeof child === 'object') compactSchemaUnions(child)
+  for (const key of ['items', 'additionalProperties', 'unevaluatedProperties', 'not', 'if', 'then', 'else', 'contains', 'propertyNames'])
+    if (schema[key] && typeof schema[key] === 'object') compactSchemaUnions(schema[key])
+  for (const union of ['oneOf', 'anyOf']) {
+    if (!Array.isArray(schema[union])) continue
+    const groups = new Map<string, { discriminator: string; items: Record<string, any>[] }>()
+    for (const variant of schema[union]) {
+      if (variant.type !== 'object') continue
+      for (const discriminator of ['type', 'kind']) {
+        const value = variant.properties?.[discriminator]
+        if (value?.type !== 'string' || typeof value.const !== 'string' || !variant.required?.includes(discriminator)
+          || Object.keys(value).some(key => key !== 'type' && key !== 'const')) continue
+        const shape = { ...variant, properties: { ...variant.properties, [discriminator]: { type: 'string' } } }
+        const key = discriminator + JSON.stringify(shape), group = groups.get(key) ?? { discriminator, items: [] }
+        group.items.push(variant); groups.set(key, group)
+        break
+      }
+    }
+    for (const { discriminator, items } of groups.values()) {
+      const values = items.map(item => item.properties[discriminator].const)
+      if (items.length < 2 || new Set(values).size !== values.length) continue
+      const first = items[0]!
+      first.properties[discriminator] = { type: 'string', enum: values }
+      schema[union] = schema[union].filter((item: Record<string, any>) => item === first || !items.includes(item))
+    }
+  }
+}
 function describeInput(inputSchema: z.ZodType): Record<string, unknown> {
   const schema = z.toJSONSchema(inputSchema, { io: 'input', reused: 'ref' })
+  compactSchemaUnions(schema)
   const variants = schema.oneOf ?? schema.anyOf
   const isObject = (value: unknown) => {
     if (!value || typeof value !== 'object') return false
@@ -297,8 +332,15 @@ function describeInput(inputSchema: z.ZodType): Record<string, unknown> {
 }
 export function describeTools(names?: readonly string[], options?: { batchMutationNames: readonly string[]; compactBatch?: boolean }): ToolDefinition[] {
   return toolCatalog.filter(tool => !names || names.includes(tool.name)).map(tool => ({
-    name: tool.name, description: tool.name === 'batch' && options ? batchDescription + batchEndDescription : tool.description,
-    schema: describeInput(tool.name === 'batch' && options ? batchInputSchemaFor(options.batchMutationNames) : tool.inputSchema),
+    name: tool.name, description: tool.name === 'batch' ? batchDescription + '条目的 name 使用下列规范工具名，input 使用该工具定义的实际参数；执行时每项仍经规范解析器校验。' + batchEndDescription : tool.description,
+    schema: tool.name === 'batch' ? {
+      type: 'object', properties: { operations: { type: 'array', minItems: 1, items: {
+        type: 'object', properties: {
+          name: { type: 'string', enum: options?.batchMutationNames ?? mutationNamesIn(toolCatalog.map(tool => tool.name)) },
+          input: { type: 'object', additionalProperties: true, description: '对应 name 的规范工具输入。' },
+        }, required: ['name', 'input'], additionalProperties: false,
+      } } }, required: ['operations'], additionalProperties: false,
+    } : describeInput(tool.inputSchema),
     manual: structuredClone(tool.manual),
   }))
 }

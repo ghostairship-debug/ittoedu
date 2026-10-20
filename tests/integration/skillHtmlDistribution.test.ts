@@ -13,6 +13,14 @@ const examples = [
   ['references/examples/text-evidence.html', '吾十有五而志于学'],
   ['references/examples/variable-relation.html', '记录当前数据'],
 ] as const
+const authoringMethods = [
+  'references/creation-plan.md',
+  'references/visual-design.md',
+  'references/interaction-design.md',
+  'references/teaching-design-quality.md',
+  'references/teacher-controller.md',
+  'references/material-assembly.md',
+] as const
 it('packages current method and runnable HTML examples and reads them through the actual skills.read Gateway', async () => {
   const generated = await generateBundledSkillArtifacts(path.resolve(__dirname, '../..'))
   const bundle = JSON.parse(generated.bundle)
@@ -28,6 +36,16 @@ it('packages current method and runnable HTML examples and reads them through th
     for (const [resource, marker] of examples) {
       const result = await host.tools.execute('bundled-html', resource, { name: 'skills.read', input: { skill: 'orchestrate-courseware', path: resource, limit: 64000 } })
       expect(result).toMatchObject({ kind: 'read', data: { status: 'read', path: resource, content: expect.stringContaining(marker), truncated: false } })
+      if (resource === 'SKILL.md') expect((result as Extract<typeof result, { kind: 'read' }>).data)
+        .toMatchObject({ content: expect.stringContaining('data-gl-layout="stage"') })
+    }
+    for (const resource of authoringMethods) {
+      const result = await host.tools.execute('bundled-html', resource, { name: 'skills.read', input: { skill: 'orchestrate-courseware', path: resource, limit: 64000 } })
+      expect(result).toMatchObject({ kind: 'read', data: {
+        status: 'read', path: resource,
+        content: await fs.readFile(path.resolve(__dirname, '../../.agents/skills/orchestrate-courseware', resource), 'utf8'),
+        truncated: false,
+      } })
     }
   } finally { await host.tools.stop('bundled-html'); await fs.rm(directory, { recursive: true, force: true }) }
 })

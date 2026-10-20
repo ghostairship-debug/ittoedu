@@ -1,5 +1,10 @@
 /** Replace candidate URLs while retaining the author's descriptors and spacing. */
 export function replaceSrcsetUrls(srcset: string, url: string): string {
+  return mapSrcsetUrls(srcset, () => url)
+}
+
+/** Map only candidate URLs; descriptors, whitespace and unbound candidates stay authored. */
+export function mapSrcsetUrls(srcset: string, resolve: (url: string) => string | undefined): string {
   let cursor = 0, copied = 0, result = ''
   while (cursor < srcset.length) {
     while (cursor < srcset.length && /[\s,]/.test(srcset[cursor]!)) cursor++
@@ -8,7 +13,7 @@ export function replaceSrcsetUrls(srcset: string, url: string): string {
     let end = cursor
     while (end > start && srcset[end - 1] === ',') end--
     if (end === start) continue
-    result += srcset.slice(copied, start) + url
+    result += srcset.slice(copied, start) + (resolve(srcset.slice(start, end)) ?? srcset.slice(start, end))
     copied = end
     if (end < cursor) continue
     let depth = 0

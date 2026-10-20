@@ -71,6 +71,14 @@ export async function prepareComponentProjectFileSource(input: ComponentProjectF
   _intent: ContentApplyIntent, resources?: { readImage(source: string): Promise<HostImageInput | null> }): Promise<ContentApplySource> {
   const extension = path.extname(input.filename).toLowerCase()
   const cssSource = file.binding?.kind === 'theme' && extension === '.css'
+  const projectReferences = new Map<string, { bytes: Uint8Array; mediaType: string }>()
+  const canonicalReferences = Object.values(input.assetContext?.assets ?? {}).map(asset => [`cw-resource:${asset.id}`, asset.id])
+  const localReferences = Object.entries(input.assetContext?.references ?? {})
+  for (const [reference, id] of input.resourceNamespace === 'project'
+    ? [...localReferences, ...canonicalReferences] : [...canonicalReferences, ...localReferences]) {
+    const asset = input.assetContext?.assets[id!], bytes = input.assetContext?.bytes[id!]
+    if (asset && bytes) projectReferences.set(reference!, { bytes, mediaType: asset.mimeType ?? 'application/octet-stream' })
+  }
   const resourceReference = (reference: string) => reference.startsWith('cw-result:')
     ? decodeURIComponent(reference.slice('cw-result:'.length))
     : parseGeneratedImageReference(reference) ? reference : null
@@ -133,12 +141,15 @@ export async function prepareComponentProjectFileSource(input: ComponentProjectF
       const bytes = input.assetContext?.bytes[asset.id]
       if (bytes && !siblings.has(asset.path)) siblings.set(asset.path, bytes)
     }
-    const prepared = await prepareContentResources({ html, siblingFiles: siblings }, randomUUID)
+    const prepared = await prepareContentResources({ html, siblingFiles: siblings, resourceReferences: projectReferences }, randomUUID)
     const bindings = new Map<string, string>()
     input.resourceEdits = []; input.resourceBindings = {}
     input.diagnostics = [...input.diagnostics ?? [], ...prepared.diagnostics.map(issue => ({ ...issue, repairable: true }))]
     for (const resource of prepared.resources) {
       const existing = resource.origins.map(origin => {
+        const id = input.assetContext?.references?.[origin.reference]
+          ?? (origin.reference.startsWith('cw-resource:') ? origin.reference.slice('cw-resource:'.length) : undefined)
+        if (id && input.assetContext?.assets[id] && input.assetContext.bytes[id]) return input.assetContext.assets[id]
         const path = assetReferencePath(origin.reference)
         return path && !supplied.has(projectReferencePath(origin.reference) ?? '')
           ? Object.values(input.assetContext?.assets ?? {}).find(asset => asset.path === path) : undefined
@@ -227,6 +238,7 @@ export async function prepareComponentProjectFileSource(input: ComponentProjectF
     input.siblingFiles = siblings
   }
   const source = componentFileContentSource(file, input.text, input)
-  return source.kind === 'html' ? { ...source, original: { bytes: input.bytes, filename: path.basename(input.filename),
+  return source.kind === 'html' ? { ...source, resourceReferences: projectReferences,
+    original: { bytes: input.bytes, filename: path.basename(input.filename),
     mimeType: extension === '.html' || extension === '.htm' ? 'text/html' : 'text/plain' } } : source
 }

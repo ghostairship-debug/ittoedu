@@ -783,6 +783,7 @@ export class ComponentRuntimeWorld {
     this.reset = (async () => {
       await this.host.disposeScope(this.runScopeId)
       if (this.retired || !this.project) return
+      this.synced.clear()
       this.spots.clear(); this.spotPreviews.clear(); this.notifySpots(); this.state.clear()
       for (const declaration of this.project.logic?.courseState ?? []) this.setState(declaration.key, declaration.defaultValue)
       if (resetEpoch === this.playbackEpoch) this.playing = playing

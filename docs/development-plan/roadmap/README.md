@@ -2,7 +2,7 @@
 
 # v1.2–v2.0 正式开发路线
 
-本目录以 [当前开发总纲](../../../COURSEWARE_DEVELOPMENT_PLAN.md)、[架构合同](../ARCHITECTURE_CONTRACT.md) 和 [工作协议](../WORKING_PROTOCOL.md) 为正式权威链，把 1.2–2.0 转成可执行任务 DAG。本文只定义路线和发布门，不保存 `queued`、`active`、`blocked` 等协调状态；当前协调状态仍只看 [任务板](../TASK_BOARD.md)。已完成的 1.1 / 1.1.1 执行路线由 Git 历史保存，当前保全事实由 `v1.1.1` 标签、保全基线和不可降级矩阵承载。
+本目录以 [当前开发总纲](../README.md)、[架构合同](../ARCHITECTURE_CONTRACT.md) 和 [工作协议](../WORKING_PROTOCOL.md) 为正式权威链，把 1.2–2.0 转成可执行任务 DAG。本文只定义路线和发布门，不保存 `queued`、`active`、`blocked` 等协调状态；当前协调状态仍只看 [任务板](../TASK_BOARD.md)。已完成的 1.1 / 1.1.1 执行路线由 Git 历史保存，当前保全事实由 `v1.1.1` 标签、保全基线和不可降级矩阵承载。
 
 ## 不可退化边界
 

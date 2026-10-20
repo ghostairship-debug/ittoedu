@@ -6,7 +6,7 @@ import { markdownResourceReferences } from '../../shared/document/markdownResour
 import { validateDocumentResources } from '../../core/drivers/resources'
 import type { DocumentBinding, DocumentModel, DocumentResources } from '../../shared/workbench/document'
 import type { DocumentSourcePublication, PreparedDocumentSave } from '../../shared/workbench/documentSave'
-import { captureHtmlClosure } from './htmlImport/readHtmlClosure'
+import { captureHtmlClosure, readHtmlMediaDirectory } from './htmlImport/readHtmlClosure'
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT'
@@ -145,8 +145,8 @@ function retainPackage(resources: DocumentResources, held: DocumentResources, re
   return directory
 }
 
-/** Formats keep their real parsers. Both choose held bytes, then an authorized
- * open source, then disk, and hand exactly this manifest to the one publisher. */
+/** Formats keep their real parsers. Authorized current source sessions precede
+ * held dependency snapshots; held binary bytes still precede disk. */
 export async function prepareDocumentSave(model: DocumentModel, binding: DocumentBinding,
   options: CaptureDocumentSourceOptions = {}): Promise<PreparedDocumentSave> {
   const format = options.format ?? sourceDocumentFormat(model, binding)
@@ -156,7 +156,16 @@ export async function prepareDocumentSave(model: DocumentModel, binding: Documen
   const diagnostics: Diagnostic[] = []
   let references: string[]
   if (format === 'html') {
-    const closure = await captureHtmlClosure({ html: model.source, siblingFiles: sourceResourceFiles(model.resources),
+    const held = sourceResourceFiles(model.resources)
+    if (binding.kind === 'file' && options.currentSource) for (const relative of held.keys()) {
+      const current = await options.currentSource(path.resolve(path.dirname(binding.path), relative))
+      if (current !== undefined) held.set(relative, new TextEncoder().encode(current))
+    }
+    const closure = await captureHtmlClosure({ html: model.source, siblingFiles: held,
+      readRelativeDirectory: binding.kind === 'file' ? async relative => {
+        const root = await fs.realpath(path.dirname(binding.path))
+        return readHtmlMediaDirectory(root, root, relative)
+      } : undefined,
       readRelative: async relative => {
         const resource = await read(relative)
         return resource?.kind === 'file' ? resource.bytes : undefined

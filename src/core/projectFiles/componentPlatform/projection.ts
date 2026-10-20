@@ -1,4 +1,4 @@
-import { parse, serializeOuter, type DefaultTreeAdapterTypes } from 'parse5'
+import { defaultTreeAdapter, parse, serializeOuter, type DefaultTreeAdapterTypes } from 'parse5'
 import type { ComponentImplementation, ComponentInstance, CourseProjectV10 } from '../../../shared/contracts/component-platform'
 import type { DocumentResources } from '../../../shared/workbench/document'
 import type { ContentApplyTarget, HtmlContentProjection } from '../../contentApply/planning/types'
@@ -17,6 +17,7 @@ import { formulaComponentHtml, textComponentHtml } from '../../../components/tex
 import { imageDataSchema } from '../../../components/image/data'
 import { clampCrop, cropGeometry } from '../../../shared/imageCrop'
 import { componentBackgroundAssetIds } from '../../../shared/componentBackgroundPaint'
+import { projectCssSourceResources, projectHtmlSourceResources } from './sourceResources'
 
 export type ComponentProjectFileState = { surfaceId: string; stateId: string }
 export type ComponentProjectFileScope = ({ kind: 'document' } | { kind: 'surface'; surfaceId: string } | { kind: 'instance'; instanceId: string } | ({ kind: 'graph' } & SpatialGraphScope)) & { state?: ComponentProjectFileState }
@@ -78,14 +79,20 @@ export const componentProjectApiReferencePath = 'references/component-api5.md'
 
 const compactSummary = (parts: string[]) => parts.join(' ').replace(/\s+/g, ' ').trim().slice(0, 180)
 function htmlSummary(content: string): string {
-  const parts: string[] = []
+  let summary = ''
   const visit = (node: Node | DefaultTreeAdapterTypes.Document) => {
+    if (summary.length === 180) return
     if (element(node as Node) && ['head', 'script', 'style', 'template', 'noscript'].includes((node as Element).tagName)) return
-    if (node.nodeName === '#text') parts.push((node as DefaultTreeAdapterTypes.TextNode).value)
+    if (node.nodeName === '#text') {
+      const text = (node as DefaultTreeAdapterTypes.TextNode).value.replace(/\s+/g, ' ').trim().slice(0, 180)
+      if (text) summary = compactSummary([summary, text])
+    }
     if ('childNodes' in node) node.childNodes.forEach(visit)
   }
-  visit(parse(content))
-  return compactSummary(parts)
+  // Keep the parser's HTML semantics, but never join the complete page merely
+  // to return its first 180 preview characters.
+  visit(parse(content, { treeAdapter: projectionTreeAdapter }))
+  return summary
 }
 function dataSummary(value: unknown): string {
   const parts: string[] = []
@@ -112,8 +119,17 @@ export function componentProjectFileSummary(file: Pick<ComponentProjectFile, 'ki
   try { return dataSummary(JSON.parse(file.content)) } catch { return compactSummary([file.content]) }
 }
 
+// parse5's tokenizer builds long character tokens by concatenation. Detach the
+// text at the existing tree boundary so the projection doesn't retain a chain
+// of per-character strings alongside every other root's tree. All parser and
+// serializer semantics remain with parse5, including foster-parented text.
+const projectionTreeAdapter: typeof defaultTreeAdapter = {
+  ...defaultTreeAdapter,
+  insertText(parent, text) { defaultTreeAdapter.insertText(parent, structuredClone(text)) },
+  insertTextBefore(parent, text, reference) { defaultTreeAdapter.insertTextBefore(parent, structuredClone(text), reference) },
+}
 function bodyOf(html: string): Element {
-  const root = parse(html).childNodes.find(element)!
+  const root = parse(html, { treeAdapter: projectionTreeAdapter }).childNodes.find(element)!
   return root.childNodes.find(node => element(node) && node.tagName === 'body') as Element
 }
 function webHtml(project: CourseProjectV10, instance: ComponentInstance): string | undefined {
@@ -121,7 +137,8 @@ function webHtml(project: CourseProjectV10, instance: ComponentInstance): string
   const key = implementation?.kind === 'builtin' ? implementation.key : componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
   if (!['guoling.web', 'guoling.html-program'].includes(key ?? '')) return undefined
   const data = instance.data
-  return data && typeof data === 'object' && !Array.isArray(data) && typeof data.html === 'string' ? data.html : undefined
+  return data && typeof data === 'object' && !Array.isArray(data) && typeof data.html === 'string'
+    ? projectHtmlSourceResources(data.html, project, instance) : undefined
 }
 const attribute = (value: string) => value.replace(/[&<>"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[character]!)
 function instanceHtml(project: CourseProjectV10, instance: ComponentInstance): string | undefined {
@@ -141,7 +158,7 @@ function instanceHtml(project: CourseProjectV10, instance: ComponentInstance): s
   if (!asset?.width || !asset.height || !frame || data.feather.amount) return undefined
   const whole = cropGeometry({ ...data, frame, source: { width: asset.width, height: asset.height } }).whole
   const crop = clampCrop(data.crop), filters = data.filters
-  return `<div style="position:relative;overflow:hidden;width:100%;height:100%;border-radius:${data.cornerRadius}px;filter:brightness(${filters.brightness}) contrast(${filters.contrast}) saturate(${filters.saturation}) grayscale(${filters.grayscale}) blur(${filters.blur}px)"><img src="${attribute(`../${asset.path}`)}" alt="${attribute(data.alt)}" style="position:absolute;max-width:none;max-height:none;transform-origin:0 0;left:${whole.x}px;top:${whole.y}px;width:${whole.width}px;height:${whole.height}px;clip-path:inset(${crop.top * 100}% ${crop.right * 100}% ${crop.bottom * 100}% ${crop.left * 100}%);transform:translate(${data.flipX ? '100%' : '0'},${data.flipY ? '100%' : '0'}) scale(${data.flipX ? -1 : 1},${data.flipY ? -1 : 1})"></div>`
+  return `<div style="position:relative;overflow:hidden;width:100%;height:100%;border-radius:${data.cornerRadius}px;filter:brightness(${filters.brightness}) contrast(${filters.contrast}) saturate(${filters.saturation}) grayscale(${filters.grayscale}) blur(${filters.blur}px)"><img src="${attribute(`cw-resource:${asset.id}`)}" alt="${attribute(data.alt)}" style="position:absolute;max-width:none;max-height:none;transform-origin:0 0;left:${whole.x}px;top:${whole.y}px;width:${whole.width}px;height:${whole.height}px;clip-path:inset(${crop.top * 100}% ${crop.right * 100}% ${crop.bottom * 100}% ${crop.left * 100}%);transform:translate(${data.flipX ? '100%' : '0'},${data.flipY ? '100%' : '0'}) scale(${data.flipX ? -1 : 1},${data.flipY ? -1 : 1})"></div>`
 }
 
 /** Reconstructed from current canonical objects; no HTML source or mapping is persisted beside them. */
@@ -168,7 +185,7 @@ export function projectHtmlProjection(project: CourseProjectV10, rootIds: readon
     // A current projection anchor is software-owned, never a second persisted identity.
     if (!root.attrs.some(value => value.name === 'id')) root.attrs.push({ name: 'id', value: `guoling-object-${id}` })
     const data = instance.data as Record<string, unknown>
-    if (typeof data.css === 'string') css.add(data.css)
+    if (typeof data.css === 'string') css.add(projectCssSourceResources(data.css, project, instance))
     const styles = Object.entries(instance.style ?? {}).map(([key, value]) => `${key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}:${value}`).join(';')
     const frame = instance.frame
     const geometry = frame ? `position:absolute;left:0;top:0;width:${frame.width}px;height:${frame.height}px;transform-origin:0 0;transform:matrix(${frame.transform.join(',')})` : ''
@@ -347,7 +364,19 @@ export function componentProjectFiles(project: CourseProjectV10, resources: Docu
         note: '正文 Markdown 投影；软件保留身份和专业字段，修改不覆盖浮层、行为或人工 frame。' })
     }
   })
-  for (const plane of ['underlay', 'overlay'] as const) objects(project.global[plane], `global/${plane}`, defaultViewport)
+  for (const plane of ['underlay', 'overlay'] as const) {
+    const base = `global/${plane}`
+    const structure: ComponentProjectFile = { path: `${base}.json`, kind: 'structure',
+      target: { kind: 'container', container: { kind: 'global', plane } }, programViewport: defaultViewport,
+      summary: `全局${plane === 'overlay' ? '前景' : '背景'}；${project.global[plane].length} 个顶层对象`,
+      note: '跨页共享的正式内容容器；可直接 insert 内容，自设计持续导航只装配一次。透明空白保持场景操作。' }
+    files.push(structure)
+    objects(project.global[plane], base, defaultViewport)
+    structure.content = json({ plane, objects: project.global[plane].map((id, order) => {
+      const entry = objectEntries.get(id)!
+      return { order: order + 1, path: entry.path, kind: entry.kind, summary: entry.summary, frame: project.instances[id]!.frame }
+    }) })
+  }
   const usedPaths = new Set(files.map(file => file.path))
   for (const asset of Object.values(project.assets)) {
     const bytes = resources.assets[asset.id]

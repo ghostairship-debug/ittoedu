@@ -36,6 +36,10 @@ export interface ExtractHtmlResourcesInput {
   html: string
   /** 键为相对 HTML 所在目录的规范化路径，`/` 分隔。 */
   siblingFiles?: ReadonlyMap<string, Uint8Array>
+  /** References already owned by this same project; never filesystem authority. */
+  resourceReferences?: ReadonlyMap<string, { bytes: Uint8Array; mediaType: string }>
+  /** The confined capture owner tracks directory reads within this one capture. */
+  closedDirectories?: ReadonlySet<string>
 }
 
 export interface ExtractHtmlResourcesResult {

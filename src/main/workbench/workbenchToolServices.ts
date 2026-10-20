@@ -13,8 +13,10 @@ import { dispatchMaterialTool, readMaterialImageSource } from './execution/Mater
 import { attachmentsDesktopService } from './attachments/attachmentsDesktopService'
 import type { ExportBuildReply, ExportBuildProgress } from '../../shared/workbench/toolPorts'
 import type { ModelConnectionSnapshot } from '../../shared/workbench/modelProvider'
+import type { SpeechSelectionSnapshot } from '../../shared/workbench/speechSettings'
 import { IPC_CHANNELS } from '../../shared/ipcTypes'
 import { documentHost } from './documentHost'
+import { uiExportBuildRequest } from './uiDocumentSnapshot'
 import { ScopedSkillService, type SkillRoot } from './skills/ScopedSkillService'
 import { BundledSkillService } from './skills/BundledSkillService'
 import bundledSkills from '../../shared/generated/bundledSkills.json'
@@ -40,6 +42,9 @@ import { createElectronEmbeddedBrowserFactory } from './browserEmbedded/Electron
 import type { EmbeddedBrowserViewport } from '../../shared/workbench/embeddedBrowser'
 import { BrowserActionApprovals, type BrowserActionApproval, type BrowserTaskAction } from './externalTools/BrowserActionApprovals'
 import { MediaCapabilityService } from './media/MediaCapabilityService'
+import { SpeechMediaJobAdapter } from './media/SpeechMediaJobAdapter'
+import { WindowsSpeechSynthesizer } from './media/WindowsSpeechSynthesizer'
+import { freezeSpeechSelection, speechConnectionCapability } from './speechSelection'
 import { DelegationJobService } from './delegation/DelegationJobService'
 import { ReadonlyTaskRunner } from './delegation/ReadonlyTaskRunner'
 import { NativeTaskRunner, type NativeExecutionEnginePort } from './delegation/NativeTaskRunner'
@@ -49,6 +54,7 @@ import { ChatGPTResponsesProvider, OpenAIResponsesProvider } from './providers/C
 import { AnthropicMessagesProvider } from './providers/AnthropicMessagesProvider'
 import { routeModelProviders } from './providers/ModelProviderRouter'
 import { freezeSearchSelection } from './network/SearchRouter'
+import { defaultSearchSettings } from '../../shared/workbench/searchSettings'
 import { createSearchRouter } from './network/searchService'
 import { ChatGPTImageProvider } from './images/ChatGPTImageProvider'
 import { OpenAIImagesApiProvider } from './images/OpenAIImagesApiProvider'
@@ -235,7 +241,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   const delegation = new DelegationJobService({ directory: path.join(directory, 'delegation', 'jobs'),
     copyRootBase: path.join(directory, 'delegation', 'copies'), readonlyRunner: new ReadonlyTaskRunner({ provider: readonlyProvider,
       parentSelection: async runId => (await parentRuns.read(runId))?.input.selection ?? null }),
-    nativeRunner: new NativeTaskRunner({ engine: () => nativeExecutionEngine }) })
+    nativeRunner: new NativeTaskRunner({ engine: () => nativeExecutionEngine,
+      resolveSelection: (model, inherited) => executionSettingsStore().then(store => store.captureDelegationSelection(model, inherited)) }) })
   delegationService = delegation
   // The installed Codex CLI rejected both real command and patch writes. An operator must
   // verify an actual authorized copy write before enabling product-paid delegation.
@@ -260,8 +267,15 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       if (input.pageUrl && input.action) await approvals.grantFromTask({ ...input, pageUrl: input.pageUrl, action: input.action })
       return approvals.consume(input)
     } })
-  // Speech/video/music have no verified provider adapter in the current connection set.
-  const media = new MediaCapabilityService()
+  const speechSelections = new Map<string, SpeechSelectionSnapshot>()
+  const speech = new SpeechMediaJobAdapter({ directory: path.join(directory, 'media'), local: new WindowsSpeechSynthesizer(),
+    resolveConnection: async (capability, runId) => {
+      const connection = speechSelections.get(runId)?.connection
+      if (!connection || connection.id !== capability.connectionId || connection.revision !== capability.connectionRevision)
+        throw new Error('本次任务没有该冻结语音连接；未使用当前配置替代。')
+      return connection
+    }, credentialResolver: apiCredential })
+  const media = new MediaCapabilityService([speech])
   const observations = new ViewObservationService({
     snapshot: documentId => host.registry.get(documentId).drain(),
     observeInteractive: ({ runId, identity, snapshot, projectId, signal }) =>
@@ -297,7 +311,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       disposeWorkbenchExportPort()
       const ownerId = window.webContents.id
       exportOwnerId = ownerId
-      const ownedPort = new DocumentExportPort(ownerId, request => window.webContents.send(IPC_CHANNELS.documentExportBuildRequest, request),
+      const ownedPort = new DocumentExportPort(ownerId, request => window.webContents.send(IPC_CHANNELS.documentExportBuildRequest, uiExportBuildRequest(request)),
         cancel => { if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.documentExportBuildCancel, cancel) })
       exportPort = ownedPort
       const disposeOwner = () => { if (exportOwnerId === ownerId && exportPort === ownedPort) disposeWorkbenchExportPort() }
@@ -499,6 +513,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     jobs,
     ...(compute ? { compute } : {}),
     delegation: {
+      models: () => executionSettingsStore().then(store => store.availableDelegationModels()),
       availability: () => ({ ready: delegationWriteVerified,
         reason: delegationWriteVerified ? 'Codex Luna Fast 委派连接已显式验证可写'
           : '当前 Codex 委派写入被执行器策略阻断；本次未启动收费模型请求' }),
@@ -542,14 +557,23 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       delete: ({ runId: _runId, ...input }) => assetLibrary.delete(input),
       save: ({ runId: _runId, ...input }) => assetLibrary.save(input) },
     beginRun: async grant => {
-      if (grant.disclosedSettings && (await (await executionSettingsStore()).read()).profile.revision !== grant.disclosedSettings.profileRevision)
+      const parentRunId = grant.delegatedBy?.runId
+      if (!parentRunId && grant.disclosedSettings && (await (await executionSettingsStore()).read()).profile.revision !== grant.disclosedSettings.profileRevision)
         throw new Error('模型或服务配置在发送时已变化；本次未请求模型，请核对后重新发送。')
-      await roles.beginRun(grant.runId, grant.disclosedSettings)
-      search.beginRun(grant.runId, freezeSearchSelection(await (await executionSettingsStore()).read(), grant.searchSelection))
+      const speechSelection = grant.speechSelection ?? (parentRunId
+        ? { unavailableReason: '父任务未冻结远程语音 API 配置；本机语音仍可独立使用。' }
+        : freezeSpeechSelection(await (await executionSettingsStore()).read()))
+      await roles.beginRun(grant.runId, grant.disclosedSettings, parentRunId)
+      const parentSearch = parentRunId ? search.selection(parentRunId) : undefined
+      search.beginRun(grant.runId, parentRunId ? parentSearch ?? { settings: { ...defaultSearchSettings(), mode: 'off' },
+        profileRevision: grant.disclosedSettings?.profileRevision ?? 0, openai: null, deepseek: null,
+        diagnostic: '原父任务冻结的搜索配置未保留；当前子任务仍可继续，重新启用搜索需要新主任务配置。' }
+        : freezeSearchSelection(await (await executionSettingsStore()).read(), grant.searchSelection))
       frozenSkillRoots.set(grant.runId, workbenchSkillRootsForGrant(grant))
       const controller = new AbortController()
       deliverySignals.set(grant.runId, controller)
       runGrants.set(grant.runId, structuredClone(grant))
+      speechSelections.set(grant.runId, structuredClone(speechSelection))
       materialIds.set(grant.runId, new Set(grant.materialIds ?? []))
       try {
         webOptions.materials = (await attachmentsDesktopService()).attachments
@@ -557,10 +581,16 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
         openImages.beginRun(grant.runId)
         await mcp.beginRun(grant.runId, managedBrowserGrantForRun(grant))
         approvals.beginRun(grant.runId, input => !controller.signal.aborted && browserTaskActionWithinGrant(grant, input))
-        media.beginRun(grant.runId, { writable: grant.actor === 'agent' && !!grant.fileAccess && grant.fileAccess.permission !== 'read-only', capabilities: [] })
+        const localSpeech = await speech.discoverLocal()
+        const remoteSpeech = speechConnectionCapability(speechSelection)
+        controller.signal.throwIfAborted()
+        media.beginRun(grant.runId, { writable: grant.actor === 'agent' && !!grant.fileAccess && grant.fileAccess.permission !== 'read-only',
+          capabilities: [...(localSpeech.capability ? [localSpeech.capability] : []), ...(remoteSpeech ? [remoteSpeech] : [])],
+          unavailableReasons: { ...(localSpeech.reason ? { 'speech:local': localSpeech.reason } : {}),
+            ...(!remoteSpeech ? { 'speech:remote': speechSelection.unavailableReason ?? '本次任务未配置远程语音 API。' } : {}) } })
       } catch (error) {
         controller.abort(); deliverySignals.delete(grant.runId)
-        runGrants.delete(grant.runId); materialIds.delete(grant.runId)
+        runGrants.delete(grant.runId); speechSelections.delete(grant.runId); materialIds.delete(grant.runId)
         approvals.revokeRun(grant.runId)
         frozenSkillRoots.delete(grant.runId)
         search.endRun(grant.runId)
@@ -576,7 +606,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       openImages.stopRun(runId)
       frozenSkillRoots.delete(runId)
       search.endRun(runId)
-      runGrants.delete(runId); materialIds.delete(runId); host.agentFiles.releaseRun(runId)
+      runGrants.delete(runId); speechSelections.delete(runId); materialIds.delete(runId); host.agentFiles.releaseRun(runId)
       await host.artifactDeliveries.stopRun(runId)
       await Promise.allSettled([web.stopRun(runId), mcp.stopRun(runId), media.stopRun(runId), delegation.cancelRun(runId), ...(compute ? [compute.cancelRun(runId)] : [])])
     },

@@ -1,5 +1,5 @@
 {
-  "description": "启动一个复用当前执行引擎的自主子任务，按父任务冻结的模型和参数，自行取材、调用获授权工具、修订并交付候选文件。sources点名已授权来源，默认取当前打开稿及资源；sourceVersion=disk显式选磁盘版。可选target沿已观察project/path及region传当前frame、局部viewport和相关外围事实，纯素材任务可省略；sharedBrief提供必要共同约定和用户已有费用意愿，role仅为专业偏好，outputs点名相对成果。宿主授予独立候选空间，不提供主文档写权。返回job与真实子运行身份；用job.wait等待、delegate.read回读，返回source直接交project.apply from一次采用同组依赖与当前region，无需逐文件保存或父模型重写长源码。适合可独立交付单元，不需固定角色流水线或强制时长/token预算。每个父任务默认最多同时运行两项原生子任务；达上限时先等待或取消现有作业，不要重复派工。",
+  "description": "启动一个复用当前执行引擎的自主子任务，默认沿父任务冻结模型；model 可显式选择已配置连接、模型和参数，由宿主冻结并校验费用授权。子任务自行取材、调用获授权工具、修订并交付候选文件。sources点名已授权来源，默认取当前打开稿及资源；sourceVersion=disk显式选磁盘版。可选target沿已观察project/path及region传当前frame、局部viewport和相关外围事实，纯素材任务可省略；sharedBrief提供必要共同约定和用户已有费用意愿，role仅为专业偏好，outputs点名相对成果。宿主授予独立候选空间，不提供主文档写权。返回job与真实子运行身份；用job.wait等待、delegate.read回读，返回source直接交project.apply from一次采用同组依赖与当前region，无需逐文件保存或父模型重写长源码。适合可独立交付单元，不需固定角色流水线或强制时长/token预算。原生协作树默认并发上限 10，可在设置调整；超限按原作业排队，不要重复派工。大型创作通常按依赖组织 3–5 项合理协作。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -12,6 +12,45 @@
       },
       "__schema2": {
         "type": "number"
+      },
+      "__schema3": {
+        "maxLength": 512,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema4": {
+        "type": "string"
+      },
+      "__schema5": {
+        "anyOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        ]
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -19,6 +58,34 @@
     "properties": {
       "goal": {
         "$ref": "#/$defs/__schema0"
+      },
+      "model": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilityModel": {
+            "$ref": "#/$defs/__schema3"
+          },
+          "connectionId": {
+            "$ref": "#/$defs/__schema3"
+          },
+          "model": {
+            "$ref": "#/$defs/__schema3"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "propertyNames": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "connectionId",
+          "model"
+        ],
+        "type": "object"
       },
       "outputs": {
         "items": {

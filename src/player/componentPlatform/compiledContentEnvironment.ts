@@ -2,6 +2,7 @@ import type { ComponentRuntimeContext } from '../../shared/contracts/component-p
 import { webResourceReferenceMarker } from '../../components/web/resources'
 import { compiledLocalParentProperty, compiledNativeChildDiagnosticProperty, unsupportedJavascriptSubmitAttribute, type CompiledWebInitialization, type CompiledWebModuleActivation, type CompiledWebModuleProgram } from '../../core/publish/componentPlatform/compiledContract'
 import { compiledPreparedImportOptionsProperty, compiledScopeActiveProperty, createPreparedJavaScriptImportOptionsValidator, createPreparedJavaScriptNativeImport } from '../../shared/browser/validatePreparedJavaScriptImportOptions'
+import { createLocalStageLayout } from '../../components/web/localStageLayout'
 
 export interface CompiledContentEnvironment {
   root: HTMLElement
@@ -121,6 +122,7 @@ export function createCompiledContentEnvironment(context: ComponentRuntimeContex
   let finishInitializationTurn: (() => void) | undefined
   const pendingInitializationTasks = new Set<() => void>()
   const active = () => !disposed && context.scope.isActive()
+  let stageLayout: ReturnType<typeof createLocalStageLayout> | undefined
   const preparedOptions = createPreparedJavaScriptImportOptionsValidator(browser, active, createPreparedJavaScriptNativeImport(browser.Function))
   const nativeResolutionIntrinsics = {URL:browser.URL,decodeURI}
   const projectLayout = (mode: ReturnType<NonNullable<ComponentRuntimeContext['layout']>['read']>['mode'] | undefined): void => {
@@ -130,7 +132,7 @@ export function createCompiledContentEnvironment(context: ComponentRuntimeContex
     baseStyle.textContent = `html{width:100%;height:${natural ? 'auto' : '100%'};box-sizing:border-box}body{margin:0;height:${natural ? 'auto' : '100%'};min-height:${natural ? '0' : '100%'};box-sizing:border-box}`
   }
   projectLayout(context.layout?.read().mode)
-  const releaseLayout = context.layout?.subscribe(layout => { if (active()) projectLayout(layout.mode) })
+  const releaseLayout = context.layout?.subscribe(layout => { if (active()) { projectLayout(layout.mode); stageLayout?.refresh() } })
   const timers = new Map<number, ContentTimer>(), observers = new Set<{ disconnect(): void }>()
   let nextTimerId = 0, activityRunning = true
   const listeners: Array<{ target: EventTarget; type: string; listener: EventListenerOrEventListenerObject; capture: boolean; wrapped: EventListener }> = []
@@ -426,6 +428,7 @@ export function createCompiledContentEnvironment(context: ComponentRuntimeContex
   const dispose = (): void => {
     if (disposed) return
     disposed = true
+    stageLayout?.dispose()
     preparedOptions.dispose()
     finishInitializationTurn?.(); finishInitializationTurn = undefined
     for (const finish of pendingInitializationTasks) finish()
@@ -525,6 +528,8 @@ export function createCompiledContentEnvironment(context: ComponentRuntimeContex
         if (!active()) return
         if (!classicPhase) { readyState = 'interactive'; documentEvents.dispatchEvent(initializeEvent('readystatechange', documentView)) }
         documentEvents.dispatchEvent(initializeEvent('DOMContentLoaded', documentView))
+        if (active()) stageLayout = createLocalStageLayout(body, { layout: () => context.layout?.read(), active,
+          report: fact => context.scope.events.emit('component.layout', { instanceId: context.instance.id, ...fact }) })
         // Only prepared software jobs delay load; author-created promises and module TLA remain independently supervised.
         await Promise.all(asyncTasks)
         await initializationTurn()

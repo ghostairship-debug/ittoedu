@@ -4,23 +4,25 @@ import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
 import { searchSettingsSchema, defaultSearchSettings } from '../../../shared/workbench/searchSettings'
+import { speechGenerationSelectionSchema } from '../../../shared/workbench/speechSettings'
 import type { ModelConnectionSnapshot, ModelJson, ModelSelection } from '../../../shared/workbench/modelProvider'
 import { bodyStreamingIdentity, bodyStreamingRecord, type BodyStreamingObservation } from '../../../shared/workbench/bodyStreaming'
-import { modelCapabilityIdentity, modelCapabilityRecord, probedModelCapabilities,
+import { modelCapabilityIdentity, modelCapabilityRecord, modelCapabilitySelection, probedModelCapabilities,
   type ModelCapabilityProbeResult, type ModelCapabilityRecord } from '../../../shared/workbench/modelCapabilities'
 import {
-  executionRoles, type ExecutionConnectionView, type ExecutionModelFavorite, type ExecutionProfile, type ExecutionRole,
+  DEFAULT_NATIVE_CONCURRENCY_LIMIT, executionRoles, type AvailableDelegationModel, type ExecutionConnectionView, type ExecutionModelFavorite, type ExecutionProfile, type ExecutionRole, type ExecutionRoleSelection,
   type ExecutionSelectionSnapshot, type ExecutionSettingsView, type SaveExecutionConnection, type SaveExecutionProfile,
 } from '../../../shared/workbench/executionSettings'
 import type { CredentialEncryptionPort } from './providerCredentials'
 import type { ChatGPTOAuthCredential, OAuthCredentialTarget, OAuthSecureEntry } from './ChatGPTOAuthClient'
-import type { DiscoveredModel, DiscoveredModels } from '../../../shared/workbench/executionSettingsDesktop'
+import { executionDelegationModelSchema, executionNativeConcurrencySchema, type DiscoveredModel, type DiscoveredModels } from '../../../shared/workbench/executionSettingsDesktop'
 import { CHATGPT_IMAGE_MODEL_PREFERENCES, DEFAULT_CHATGPT_IMAGE_MODEL, supportsChatGPTOAuthImages, supportsOpenAIImages } from '../../../shared/workbench/images'
 import { modelKnowledgeEntrySchema } from '../../../shared/workbench/modelKnowledge'
 import { resolveModelProtocol } from '../../../shared/workbench/modelRouting'
 import { normalizeModelOutputParameters } from '../../../shared/workbench/modelOutputParameters'
-import { withoutManagedModelReasoning } from '../../../shared/workbench/modelReasoning'
+import { resolveModelReasoning, withoutManagedModelReasoning } from '../../../shared/workbench/modelReasoning'
 import { ModelKnowledgeService } from './ModelKnowledgeService'
+import { serializeModelPayload } from './ModelProviderRouter'
 
 const identity = z.string().trim().min(1)
 const capability = z.enum(['supported', 'unsupported', 'unknown'])
@@ -36,7 +38,7 @@ const connectionSchema = configSchema.omit({ authKind: true }).extend({ id: iden
 const selectionSchema = z.object({ connectionId: identity, model: identity, parameters: parameters.optional(), capabilityModel: identity.optional() }).strict()
 const rolesSchema = z.object({ conversation: selectionSchema.nullable(), vision: selectionSchema.nullable(),
   imageGenerate: selectionSchema.nullable(), imageEdit: selectionSchema.nullable(), compression: selectionSchema.nullable().optional() }).strict()
-const profileSchema = z.object({ revision: z.number().int().nonnegative(), updatedAt: z.string().datetime(), roles: rolesSchema, search: searchSettingsSchema.optional() }).strict()
+const profileSchema = z.object({ revision: z.number().int().nonnegative(), updatedAt: z.string().datetime(), roles: rolesSchema, search: searchSettingsSchema.optional(), speech: speechGenerationSelectionSchema.nullable().optional(), nativeConcurrencyLimit: executionNativeConcurrencySchema.optional() }).strict()
 const observationSchema = z.object({ requestId: identity, operationId: identity, observedAt: z.number().finite().nonnegative(), result: z.enum(['progressive', 'operation-only']) }).strict()
 const bodyStreamingSchema = z.object({ connectionId: identity, connectionRevision: z.number().int().positive(), model: identity,
   parametersKey: z.string(), latest: observationSchema, progressive: observationSchema.optional() }).strict()
@@ -212,7 +214,7 @@ export class ExecutionSettingsStore {
     return this.serial(async () => {
       const state = await this.load(), latest = new Map<string, StoredRevision>()
       for (const entry of state.revisions) latest.set(entry.connection.id, entry)
-      return { connections: [...latest.values()].map(entry => expose(entry, state)), profile: { ...structuredClone(state.profile), search: (structuredClone(state.profile.search) ?? defaultSearchSettings()) as import('../../../shared/workbench/searchSettings').SearchSettings }, bodyStreamingObservations: structuredClone(state.bodyStreamingObservations),
+      return { connections: [...latest.values()].map(entry => expose(entry, state)), profile: { ...structuredClone(state.profile), nativeConcurrencyLimit: state.profile.nativeConcurrencyLimit ?? DEFAULT_NATIVE_CONCURRENCY_LIMIT, search: (structuredClone(state.profile.search) ?? defaultSearchSettings()) as import('../../../shared/workbench/searchSettings').SearchSettings }, bodyStreamingObservations: structuredClone(state.bodyStreamingObservations),
         capabilityRecords: structuredClone(state.capabilityRecords), modelFavorites: structuredClone(state.modelFavorites), secureStorageAvailable: await this.available() }
     })
   }
@@ -421,11 +423,18 @@ export class ExecutionSettingsStore {
     const supplied = structuredClone(input)
     return this.serial(async () => {
       let parsed: SaveExecutionProfile
-      try { parsed = z.object({ expectedRevision: z.number().int().nonnegative().optional(), roles: rolesSchema, search: searchSettingsSchema.optional() }).strict().parse(supplied) }
+      try { parsed = z.object({ expectedRevision: z.number().int().nonnegative().optional(), roles: rolesSchema, search: searchSettingsSchema.optional(), speech: speechGenerationSelectionSchema.nullable().optional(), nativeConcurrencyLimit: executionNativeConcurrencySchema.optional() }).strict().parse(supplied) }
       catch { throw new ExecutionSettingsError('invalid-profile', '模型角色配置无效，原配置已保留。') }
       const state = await this.load()
       if (parsed.expectedRevision !== undefined && parsed.expectedRevision !== state.profile.revision) throw new ExecutionSettingsError('stale-profile', '模型角色配置已改变，请刷新后保存。')
       if (!isDeepStrictEqual(parsed.roles, state.profile.roles)) await this.requireEncryption()
+      if (parsed.speech) {
+        const entry = this.current(state, parsed.speech.connectionId)
+        if (!entry) throw new ExecutionSettingsError('unknown-connection', '语音配置引用了不存在的连接。')
+        if (entry.revoked) throw new ExecutionSettingsError('revoked-connection', '语音所选连接已撤销，请重新选择连接。')
+        if (entry.connection.auth.kind !== 'api-key' || entry.connection.protocol === 'anthropic-messages')
+          throw new ExecutionSettingsError('unsupported-speech-connection', '语音 API 需要明确选择 OpenAI 兼容协议的 API Key 连接。')
+      }
       for (const selected of Object.values(parsed.roles)) if (selected && !this.current(state, selected.connectionId)) throw new ExecutionSettingsError('unknown-connection', '模型角色引用了不存在的连接。')
       for (const role of ['conversation', 'vision', 'compression'] as const) {
         const selected = parsed.roles[role]
@@ -440,6 +449,9 @@ export class ExecutionSettingsStore {
           throw new ExecutionSettingsError('unsupported-image-connection', '图片角色需要明确启用 OpenAI Images API 的连接或已登录的 ChatGPT 连接。')
       }
       state.profile = { revision: state.profile.revision + 1, updatedAt: this.now().toISOString(),
+        ...(parsed.speech !== undefined ? { speech: parsed.speech }
+          : state.profile.speech !== undefined ? { speech: state.profile.speech } : {}),
+        nativeConcurrencyLimit: parsed.nativeConcurrencyLimit ?? state.profile.nativeConcurrencyLimit ?? DEFAULT_NATIVE_CONCURRENCY_LIMIT,
         search: (parsed.search ?? state.profile.search ?? defaultSearchSettings()) as import('../../../shared/workbench/searchSettings').SearchSettings, roles: { ...parsed.roles,
         ...(!Object.hasOwn(parsed.roles, 'compression') && state.profile.roles.compression !== undefined
           ? { compression: state.profile.roles.compression } : {}) } }
@@ -452,6 +464,64 @@ export class ExecutionSettingsStore {
       if (!executionRoles.includes(role)) throw new ExecutionSettingsError('unknown-role', '模型角色不存在。')
       const state = await this.load(), selected = state.profile.roles[role]
       if (!selected) throw new ExecutionSettingsError('role-unconfigured', '请先配置此角色的模型连接。')
+      const selection = await this.modelSelection(state, selected)
+      return freeze(structuredClone({ role, profileRevision: state.profile.revision, profileUpdatedAt: state.profile.updatedAt,
+        nativeConcurrencyLimit: state.profile.nativeConcurrencyLimit ?? DEFAULT_NATIVE_CONCURRENCY_LIMIT, ...selection }))
+    })
+  }
+  /** Resolve once before child start; the resulting selection is persisted with its run for resume. */
+  captureDelegationSelection(input: ExecutionRoleSelection | undefined, parent: Readonly<ModelSelection>): Promise<ModelSelection> {
+    if (!input) return Promise.resolve(freeze(structuredClone(parent)))
+    const parsed = executionDelegationModelSchema.safeParse(input)
+    if (!parsed.success) return Promise.reject(new ExecutionSettingsError('invalid-delegation-model', '子任务模型需要连接标识、模型名及有效 JSON 参数。'))
+    return this.serial(async () => {
+      const selection = await this.modelSelection(await this.load(), parsed.data)
+      try {
+        // Existing Provider serializers validate routing and parameters without resolving credentials or sending a request.
+        serializeModelPayload({ selection, messages: [{ role: 'user', content: 'Validate configured child route.' }],
+          tools: [{ name: 'configured_child', description: 'Validate tool route.', inputSchema: { type: 'object', properties: {} } }] })
+      } catch (error) {
+        const reason = error instanceof Error && /^[a-z-]+$/.test(error.message) ? error.message : 'invalid-model-parameters'
+        throw new ExecutionSettingsError('delegation-model-unavailable', `指定子任务模型无法执行：${reason}。请调整连接或参数；未改用父模型。`)
+      }
+      return freeze(structuredClone(selection))
+    })
+  }
+  /** Uses saved directories and selections; discovery never probes or decrypts credentials. */
+  availableDelegationModels(): Promise<AvailableDelegationModel[]> {
+    return this.serial(async () => {
+      const state = await this.load(), latest = new Map<string, StoredRevision>()
+      if (!(await this.available())) return []
+      for (const entry of state.revisions) latest.set(entry.connection.id, entry)
+      const result: AvailableDelegationModel[] = []
+      for (const entry of latest.values()) {
+        if (!hasCredential(state, entry)) continue
+        const catalog = state.modelCatalogs.find(value => value.connectionId === entry.connection.id && value.connectionRevision === entry.connection.revision)
+        const selected = Object.entries(state.profile.roles).filter(([role, value]) => !['imageGenerate', 'imageEdit'].includes(role) && value?.connectionId === entry.connection.id)
+          .map(([, value]) => value!)
+        const favorites = state.modelFavorites.filter(value => value.connectionId === entry.connection.id)
+        const observed = state.capabilityRecords.filter(value => value.connectionId === entry.connection.id && value.connectionRevision === entry.connection.revision)
+          .flatMap(value => { const selection = modelCapabilitySelection(value, entry.connection); return selection ? [{ connectionId: entry.connection.id, ...selection }] : [] })
+        const candidates: ExecutionRoleSelection[] = [...selected, ...favorites, ...observed, ...(catalog?.models ?? []).map(model => ({ connectionId: entry.connection.id, model: model.id }))]
+        const seen = new Set<string>()
+        for (const candidate of candidates) {
+          const key = JSON.stringify(candidate)
+          if (seen.has(key) || /^gpt-image(?:-|$)/i.test(candidate.model)) continue
+          seen.add(key)
+          const model = (await this.modelKnowledge.enrich(entry.connection, [catalog?.models.find(value => value.id === candidate.model) ?? { id: candidate.model }]))[0]!
+          if (candidate.capabilityModel) model.metadata = await this.modelKnowledge.find(entry.connection, candidate.capabilityModel, true)
+          if (model.metadata?.outputModalities?.length && !model.metadata.outputModalities.includes('text')) continue
+          const facts = modelCapabilityRecord(state.capabilityRecords, { connection: entry.connection, model: candidate.model, parameters: candidate.parameters, capabilityModel: candidate.capabilityModel })
+          if ((facts?.facts.tools?.status ?? entry.connection.capabilities.tools) === 'unsupported'
+            || (facts?.facts.stream?.status ?? entry.connection.capabilities.stream) === 'unsupported') continue
+          result.push({ ...structuredClone(candidate), provider: entry.connection.provider,
+            protocol: resolveModelProtocol(entry.connection, model.metadata?.id ?? candidate.capabilityModel ?? candidate.model), reasoning: resolveModelReasoning(entry.connection, model) })
+        }
+      }
+      return result
+    })
+  }
+  private async modelSelection(state: StoredState, selected: ExecutionRoleSelection): Promise<ModelSelection> {
       const entry = this.current(state, selected.connectionId)
       if (!entry || !hasCredential(state, entry)) throw new ExecutionSettingsError('credential-unavailable', '此角色的连接尚未接通或已撤销。')
       await this.requireEncryption()
@@ -464,11 +534,10 @@ export class ExecutionSettingsStore {
         ...(selected.capabilityModel ? { capabilityModel: selected.capabilityModel } : {}),
         ...(metadata?.contextWindow ? { contextWindow: metadata.contextWindow } : {}),
         ...(metadata?.outputLimit ? { outputLimit: metadata.outputLimit } : {}),
-        ...(selected.parameters ? { parameters: selected.parameters } : {}) }
+        ...(selected.parameters ? { parameters: normalizeModelOutputParameters(resolveModelProtocol(entry.connection, metadata?.id ?? selected.capabilityModel ?? selected.model), selected.parameters) } : {}) }
       const verified = modelCapabilityRecord(state.capabilityRecords, selection)
       for (const [name, fact] of Object.entries(verified?.facts ?? {})) if (Object.hasOwn(selection.connection.capabilities, name)) selection.connection.capabilities[name as keyof ModelConnectionSnapshot['capabilities']] = fact.status
-      return freeze(structuredClone({ role, profileRevision: state.profile.revision, profileUpdatedAt: state.profile.updatedAt, ...selection }))
-    })
+      return selection
   }
   resolveCredential(connection: Readonly<ModelConnectionSnapshot>): Promise<string> {
     const frozen = structuredClone(connection)

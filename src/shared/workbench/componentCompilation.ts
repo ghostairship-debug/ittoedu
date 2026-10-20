@@ -11,6 +11,6 @@ export const componentCompilationInputSchema: z.ZodType<ComponentCompilationInpu
   htmlModuleDocuments: z.array(z.object({ namespace: z.string(), entries: z.array(z.string()), bindings: ownRecordSchema(z.string(), z.string()) }).strict()).optional(),
   dependencies: ownRecordSchema(z.string(), z.object({ version: z.string(), entry: z.string().min(1), entryLanguage, files, binaryFiles,
     moduleBindings: ownRecordSchema(z.string(), z.string()).optional() }).strict()).optional(),
-  options: z.object({ preserveModules: z.boolean().optional(), target: z.string().optional(), jsx: z.enum(['transform', 'automatic', 'preserve']).optional(),
+  options: z.object({ preserveModules: z.boolean().optional(), preserveScript: z.boolean().optional(), target: z.string().optional(), jsx: z.enum(['transform', 'automatic', 'preserve']).optional(),
     jsxImportSource: z.string().optional(), minify: z.boolean().optional(), sourceMap: z.boolean().optional() }).strict().optional(),
 }).strict()

@@ -50,7 +50,9 @@ async function verify() {
   const exact = readProgrammaticResult({ callId: 'aggregate:ptc:2', path: ['data', 'text'] }, records)
   assert.equal((exact as { data: { value: string } }).data.value, sources[1])
   const page = readProgrammaticResult({ callId: 'aggregate:ptc:2', path: ['data', 'text'], offset: 5, limit: 11 }, records)
-  assert.deepEqual((page as { data: unknown }).data, { callId: 'aggregate:ptc:2', path: ['data', 'text'], value: sources[1].slice(5, 16), offset: 5, total: sources[1].length, nextOffset: 16 })
+  const { callId, path: resultPath, value, offset, total, nextOffset, complete } = (page as any).data
+  assert.deepEqual({ callId, path: resultPath, value, offset, total, nextOffset }, { callId: 'aggregate:ptc:2', path: ['data', 'text'], value: sources[1].slice(5, 16), offset: 5, total: sources[1].length, nextOffset: 16 })
+  assert.equal(complete, false)
 
   const partial = await execute('partial', `
     await tools.call('text.replace', {target:${JSON.stringify(editHandles[0])}, content:'first committed'});

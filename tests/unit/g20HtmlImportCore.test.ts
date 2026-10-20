@@ -24,14 +24,13 @@ describe('extractHtmlResources', () => {
   it.each([
     'class Lesson{constructor(){this.x=1}}',
     'const opts=document.querySelectorAll("button");for(let i=0;i<opts.length;i++){opts[i].onclick=()=>{opts[i].textContent="answered"}}',
-  ])('preserves the whole unproven script while still importing independent HTML media: %s', body => {
+  ])('preserves unproven statements while localizing an independent static media sink: %s', body => {
     const code = `${body};document.querySelector('img').src=${JSON.stringify(dataUri(png, 'image/png'))};`
     const result = extractHtmlResources({ html: `<img src="pic.png"><script>${code}</script>`, siblingFiles: files([['pic.png', png]]) })
     expect(validateHtmlImport(result).filter(item => item.level === 'error')).toEqual([])
     expect(result.diagnostics).toContainEqual(expect.objectContaining({ level: 'warning', code: 'unsupported-dynamic-url-sink' }))
-    expect(scriptBody(result.html)).toBe(code)
-    expect(scriptBody(result.html)).not.toContain('cw-resource:')
     expect(result.resources).toHaveLength(1)
+    expect(scriptBody(result.html)).toBe(code.replace(JSON.stringify(dataUri(png, 'image/png')), JSON.stringify(`cw-resource:${result.resources[0]!.key}`)))
     expect(result.html).toContain('<img src="cw-resource:')
   })
 

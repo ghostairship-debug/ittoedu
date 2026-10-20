@@ -10,8 +10,8 @@ const schemas = { 'programmatic.execute': programmaticExecuteInputSchema, 'progr
 export const programmaticToolRegistrations = (Object.keys(schemas) as Array<keyof typeof schemas>).map(name => register({
   name, inputSchema: schemas[name],
   description: name === 'programmatic.execute'
-    ? '内置任务执行引擎的代码编排入口，用异步JavaScript整理多步数据或工具流程。await tools.describe(names?)按需读取实际工具定义；await tools.call(name,input)执行本任务已有授权工具并返回完整回执，错误抛出且可catch，真实失败仍记录于父失败列表。仅显式return的值进入模型；完整子调用回执可用programmatic.read读取。无Node、shell、网络或原始宿主对象。多次调用不组成原子事务，需一次事务时使用已有batch。'
-    : '内置任务执行引擎中读取本任务programmatic执行所保留的完整子调用回执。runId省略时用当前运行；给定时仅可读同任务续接来源。callId沿用实际回执引用，path从完整ToolResult根选择具体字段；字符串或数组可用offset/limit局部读取，省略可完整读取。字符串offset按UTF-16单位，数组按项目数。',
+    ? '内置任务执行引擎的代码编排入口，用异步JavaScript整理多步数据或工具流程。await tools.describe(names?)按需读取实际工具定义；await tools.call(name,input)沿已有授权执行，写调用返回公开提交事实，读调用供程序内部消费。错误可catch，真实失败仍记录。仅显式return进入模型且大值按来源有界；programmatic.read可按原引用接续，脚本内可完整计算。脚本结束时未启动子项取消，已开始未知写保原身份不能重放；要采用结果应await。无Node/shell/网络或原始宿主。多调用非原子，一次事务仍用batch。'
+    : '读取本任务或同任务续接原结果，runId省略取当前运行，callId沿用软件回执引用。path从完整ToolResult根选择字段；字符串按UTF-16、数组按项、对象按键用offset/limit续读。默认有界，大单项仍递归分段，complete/omitted/read说明未交付内容与原来源；程序内部可完整运算，不能用模型raw参数绕过交付预算。',
   manual: { label: name, group: name === 'programmatic.execute' ? 'edit' : 'read', targetKinds: [] },
 }, {
   capability: name === 'programmatic.execute' ? 'resource' : 'read', effect: name === 'programmatic.execute' ? 'programmatic-execute' : null,

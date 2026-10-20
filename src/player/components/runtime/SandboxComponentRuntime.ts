@@ -17,6 +17,8 @@ import { isMeasuredWebFragmentBox, measuredFragmentExtent } from '../../../compo
 import { authoredDocumentBootstrap, authoredDocumentProgramsSource } from '../../../components/web/authoredDocumentBootstrap'
 import { webRuntimeTargetProfile, type RuntimeTargetProfile, type WebRuntimeData } from '../../../components/web/moduleGraph'
 import { refreshWebResourceReferences } from '../../../components/web/resources'
+import { createWebResourceUrlLease } from '../../../components/web/resourceUrlLease'
+import { installCourseNavigationReady } from '../../../components/web/courseNavigation'
 import { createDomAuthoring } from '../../../components/web/authoringDom'
 import { installOwnedDocumentAuthoring } from '../../../components/web/ownedDocumentAuthoring'
 import { ownedDocumentExecutionSource } from '../../../components/web/ownedDocumentIdentity'
@@ -100,7 +102,10 @@ export function componentAuthorPaintAtPoint(root: Element, x: number, y: number)
 }
 
 /** Serialized trusted bridge only. Author code arrives through its dedicated port. */
-function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences; fragments: typeof createComponentFragmentProjection; authoring: typeof createDomAuthoring; paintAt: typeof componentAuthorPaintAtPoint; ownedAuthoring: typeof installOwnedDocumentAuthoring; textOverrides(roots: readonly Node[], rules: readonly LightEditTextOverride[]): DomTextOverrideController }, authoredDocument?: { release(): void; transportFragment?: boolean; setActivity?(value: { active: boolean; visible: boolean; playing: boolean }): void; onDiagnostic?(listener: (message: string) => void): () => void }) {
+function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeof createWebResourceUrlLease; navigationReady: typeof installCourseNavigationReady; isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences; fragments: typeof createComponentFragmentProjection; authoring: typeof createDomAuthoring; paintAt: typeof componentAuthorPaintAtPoint; ownedAuthoring: typeof installOwnedDocumentAuthoring; textOverrides(roots: readonly Node[], rules: readonly LightEditTextOverride[]): DomTextOverrideController }, authoredDocument?: { release(): void; resourceLease?: ReturnType<typeof createWebResourceUrlLease>; transportFragment?: boolean; setActivity?(value: { active: boolean; visible: boolean; playing: boolean }): void; onDiagnostic?(listener: (message: string) => void): () => void }) {
+  const resourceLease = authoredDocument?.resourceLease ?? fragmentBox.resourceFactory(window)
+  const navigationReady = fragmentBox.navigationReady(window)
+  const runtimeInstance = (value: ComponentInstance): ComponentInstance => ({ ...value, data: JSON.parse(resourceLease.project(JSON.stringify(value.data))) })
   // This fixed loader is created only inside the content realm. Keeping import's
   // syntax in its string prevents Vite from inserting a parent lexical helper.
   const importModule = new Function('url', 'return import(url)') as (url: string) => Promise<Record<string, any>>
@@ -303,6 +308,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
     for (const resolve of serviceRequests.values()) resolve(false)
     serviceRequests.clear(); mediaCommands.clear(); interactionListeners.clear()
     authorPreviewCallbacks.clear()
+    resourceLease.release(); navigationReady.dispose()
     authoredDocument?.release()
     if (!authoredDocument && Object.getOwnPropertyDescriptor(window, '__guolingRuntimeActivity')?.get === activitySnapshot)
       Reflect.deleteProperty(window, '__guolingRuntimeActivity')
@@ -385,8 +391,9 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
   const receive = async (message: Message) => {
     try {
       if (message.type === 'prepare') {
+        resourceUrls = resourceLease.update(message.resources as Record<string, string> ?? {})
         const artifact = message.artifact as CompiledComponentModule
-        sourceStyle = document.createElement('style'); sourceStyle.textContent = artifact.css; document.head.append(sourceStyle)
+        sourceStyle = document.createElement('style'); sourceStyle.textContent = resourceLease.project(artifact.css); document.head.append(sourceStyle)
         const url = URL.createObjectURL(new Blob([artifact.code], { type: 'text/javascript' }))
         try {
           const module = await importModule(url)
@@ -412,11 +419,11 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
       } else if (message.type === 'mount') {
         if (authoredDocument && document.readyState === 'loading') await new Promise<void>(resolve => document.addEventListener('DOMContentLoaded', () => resolve(), { once: true }))
         document.querySelector('style[data-component-initial-theme]')?.remove()
-        resourceUrls = message.resources as Record<string, string> ?? {}
+        resourceUrls = resourceLease.update(message.resources as Record<string, string> ?? {})
         resourceBindings = message.resourceBindings as Record<string, string> ?? {}
         layoutInput = message.layout as ComponentLayoutInput | undefined
         sourceViewport = message.sourceViewport as typeof sourceViewport
-        instance = message.instance as ComponentInstance
+        instance = runtimeInstance(message.instance as ComponentInstance)
         applyFragmentLayout()
         webContent = ['guoling.web', 'guoling.html-program'].includes(String(message.builtinKey))
         fragmentThemeCanvas = Boolean(message.visual && message.documentKind === 'fragment' && message.builtinKey === 'guoling.web' && instance.frame)
@@ -488,6 +495,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
           setZoom: (value: number) => { void teacherRequest('setZoom', { value }).catch(() => {}) },
           resetView: () => { void teacherRequest('resetView').catch(() => {}) },
         } : undefined
+        navigationReady.connect(teacherController)
         hitAuthor = (x, y) => {
           const top = document.elementsFromPoint(x, y)[0]
           if (!root || !top || !root.contains(top)) return undefined
@@ -545,9 +553,9 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
           subscribe: (listener: (layout: ComponentLayoutInput) => void) => { layoutListeners.add(listener); return () => layoutListeners.delete(listener) },
           reportSize: (report: { inlineSize: number; blockSize: number }) => send({ type: 'layout.size', report }),
         } : undefined
-        const runtimeContext = { instance, scope, root, teacherController, authoring, layout, authoredDocument: Boolean(authoredDocument), builtinKey: message.builtinKey, resourceCss: message.resourceCss, resources: { url: (name: string) => resourceUrls[currentBindings()[name] ?? name] },
+        const runtimeContext = { instance, scope, root, teacherController, authoring, layout, authoredDocument: Boolean(authoredDocument), builtinKey: message.builtinKey, resourceCss: typeof message.resourceCss === 'string' ? resourceLease.project(message.resourceCss) : message.resourceCss, resources: { url: (name: string) => resourceUrls[currentBindings()[name] ?? name] },
           media: message.media === true ? media : undefined, interactions: interaction ? interactions : undefined }
-        updateResourceCss = value => { runtimeContext.resourceCss = value }
+        updateResourceCss = value => { runtimeContext.resourceCss = typeof value === 'string' ? resourceLease.project(value) : value }
         mounted = await implementation.mount(runtimeContext) as typeof mounted
         mountedHtml = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && typeof instance.data.html === 'string' ? instance.data.html : undefined
         if (!active) { await mounted?.dispose(); mounted = undefined; return }
@@ -560,19 +568,50 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
         mountedRunning = true
         await applyMountedActivity()
         if (!mounted || typeof mounted.update !== 'function' || typeof mounted.dispose !== 'function') throw new Error('mount 必须返回 update/dispose 生命周期')
-        if (sourceViewport && root) {
+        if ((sourceViewport || webContent && message.visual && instance.frame) && root) {
           let queued = false, previous = ''
+          const followedAnimations = new WeakSet<Animation>()
           const measurePaint = () => {
-            if (!active || !sourceViewport || !root.isConnected || activity?.visible === false) return
+            if (!active || !root.isConnected || activity?.visible === false) return
+            const viewport = sourceViewport ?? { left: 0, top: 0, right: innerWidth, bottom: innerHeight, width: innerWidth, height: innerHeight }
             // A hidden surface can temporarily have no layout; that is not empty author content.
-            if (innerWidth <= 0 || innerHeight <= 0 || sourceViewport.right <= sourceViewport.left
-              || sourceViewport.bottom <= sourceViewport.top || sourceViewport.width <= 0
+            if (innerWidth <= 0 || innerHeight <= 0 || viewport.right <= viewport.left
+              || viewport.bottom <= viewport.top || viewport.width <= 0
               || (root.offsetWidth <= 0 && getComputedStyle(root).display !== 'none')) return
             const rects: DOMRect[] = []
+            const paintsOutsideBox = (element: Element, css: CSSStyleDeclaration) =>
+              css.boxShadow !== 'none' || css.textShadow !== 'none'
+              || ['filter', 'backdrop-filter', 'mask-image', 'border-image-source'].some(name => {
+                const value = css.getPropertyValue(name); return value !== '' && value !== 'none'
+              }) || ['::before', '::after'].some(pseudo => {
+                const content = getComputedStyle(element, pseudo).content
+                return content !== '' && content !== 'none' && content !== 'normal'
+              })
+            // An authored document canvas paints the viewport through html/body.
+            // Transparent carrier boxes themselves must not intercept scene input.
+            const paintsCanvas = [document.documentElement, document.body].some(element => {
+              const css = getComputedStyle(element)
+              return css.backgroundImage !== 'none' || !/^(?:transparent|rgba\(0, 0, 0, 0\))$/.test(css.backgroundColor)
+                || paintsOutsideBox(element, css)
+            })
+            if (webContent && paintsCanvas) rects.push(new DOMRect(0, 0, innerWidth, innerHeight))
+            // CSS animation can move paint without a DOM mutation. Keep its
+            // canvas intact until the browser reports the final geometry.
+            if (webContent) {
+              const animations = document.getAnimations()
+              for (const animation of animations) if (!followedAnimations.has(animation) && !['finished', 'idle'].includes(animation.playState)) {
+                followedAnimations.add(animation)
+                const finished = () => { followedAnimations.delete(animation); enqueue() }
+                void animation.finished.then(finished, finished)
+              }
+              if (animations.some(animation => !['finished', 'idle'].includes(animation.playState)))
+                rects.push(new DOMRect(0, 0, innerWidth, innerHeight))
+            }
             for (const element of document.body.querySelectorAll<HTMLElement>('*')) {
               if (['style', 'script', 'template'].includes(element.localName)) continue
               const css = getComputedStyle(element)
               if (css.display === 'none' || css.visibility === 'hidden' || css.visibility === 'collapse' || Number(css.opacity) === 0) continue
+              if (webContent && paintsOutsideBox(element, css)) { rects.push(new DOMRect(0, 0, innerWidth, innerHeight)); continue }
               const painted = [...element.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())
                 || /^(?:button|input|select|textarea|img|video|canvas|iframe|svg|summary)$/.test(element.localName)
                 || css.backgroundImage !== 'none' || !/^(?:transparent|rgba\(0, 0, 0, 0\))$/.test(css.backgroundColor)
@@ -584,11 +623,22 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
             if (signature !== previous) { previous = signature; send({ type: 'source.paint', bounds }) }
           }
           const enqueue = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; measurePaint() }) } }
+          // Native WAAPI has no CSS animation events. Notify the same paint
+          // owner at its real start/finish instead of sampling every frame.
+          const originalAnimate = Element.prototype.animate
+          const trackedAnimate = function(this: Element, ...args: Parameters<Element['animate']>) {
+            const animation = originalAnimate.apply(this, args); enqueue(); return animation
+          }
+          if (webContent) Element.prototype.animate = trackedAnimate
           const observer = new MutationObserver(enqueue); observer.observe(document.body, { childList: true, attributes: true, characterData: true, subtree: true })
           const resize = new ResizeObserver(enqueue); resize.observe(root)
           window.addEventListener('resize', enqueue); root.addEventListener('load', enqueue, true)
+          const paintEvents = ['animationstart', 'animationend', 'animationcancel', 'transitionrun', 'transitionend', 'transitioncancel']
+          for (const name of paintEvents) root.addEventListener(name, enqueue, true)
           refreshSourcePaint = enqueue
           cleanups.add(() => { observer.disconnect(); resize.disconnect(); window.removeEventListener('resize', enqueue); root.removeEventListener('load', enqueue, true)
+            if (webContent && Element.prototype.animate === trackedAnimate) Element.prototype.animate = originalAnimate
+            for (const name of paintEvents) root.removeEventListener(name, enqueue, true)
             if (refreshSourcePaint === enqueue) refreshSourcePaint = undefined })
           measurePaint()
         }
@@ -607,7 +657,10 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
         // consumers. Editor target observation below is a separate concern.
         if (root) {
           ownedAuthoring = fragmentBox.ownedAuthoring(`__guoling_parser_${nonce.replace(/-/g, '_')}`, '', fragmentBox.authoring, {
-            records: () => instance.authoring?.records ?? {}, resources: () => resourceUrls, bindings: currentBindings,
+            records: () => instance.authoring?.records ?? {}, resources: () => resourceLease.sources, bindings: currentBindings,
+            runtimeResources: () => resourceUrls,
+            resolveResource: (reference, bindings) => resourceLease.resolve(reference, bindings),
+            matchesResource: (reference, liveUrl, bindings) => resourceLease.matches(reference, liveUrl, bindings),
             activity: () => authoredDocument ? undefined : activitySnapshot(),
             observe: observeHtml, onChange: () => collectHtml(),
             report: (authorKey, status) => {
@@ -622,9 +675,11 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
             records: () => Object.fromEntries(Object.entries(instance.authoring?.records ?? {}).filter(([, record]) => !record.scope?.['document:path'])),
             originalText: node => (sourcePageText ?? (window as Window & { __cwPageTextOverrides?: DomTextOverrideController }).__cwPageTextOverrides)?.originalText(node),
             claimText: (node, text) => (sourcePageText ?? (window as Window & { __cwPageTextOverrides?: DomTextOverrideController }).__cwPageTextOverrides)?.setLocalText(node, text),
-            resolveResource: reference => resourceUrls[currentBindings()[reference] ?? reference] ?? reference,
+            resolveResource: reference => resourceLease.resolve(reference, currentBindings()) ?? reference,
+            matchesResource: (reference, liveUrl) => resourceLease.matches(reference, liveUrl, currentBindings()),
             resourceReference: url => Object.entries(currentBindings())
-              .find(([, id]) => resourceUrls[id] === url)?.[0],
+              .find(([, id]) => resourceUrls[id] === url)?.[0]
+              ?? Object.entries(resourceUrls).find(([, value]) => value === url)?.[0],
             report: (authorKey, status) => {
               if (status === 'unresolved') scope.events.emit('component.diagnostic', { instanceId: instance.id, authorKey,
                 message: '内部作者对象当前无法唯一重绑定；原内容与作者修改已保留，尚未应用' })
@@ -777,8 +832,8 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
       } else if (message.type === 'update') {
         if (!active) return
         writeCourseTheme(message.themeCss)
-        resourceUrls = message.resources as Record<string, string> ?? {}
-        instance = message.instance as ComponentInstance
+        resourceUrls = resourceLease.update(message.resources as Record<string, string> ?? {})
+        instance = runtimeInstance(message.instance as ComponentInstance)
         updateResourceCss(message.resourceCss)
         originalHtml = typeof message.authorHtml === 'string' ? message.authorHtml : undefined
         targets = message.targets as RuntimeTargetSnapshot[]
@@ -846,12 +901,12 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
         if (kind === 'event' && name === '__runtime.activity') setActivity(message.value)
         if (kind === 'event' && name === '__runtime.theme') writeCourseTheme(message.value)
         if (kind === 'event' && name === '__runtime.resources') {
-          resourceUrls = message.value as Record<string, string> ?? {}
+          resourceUrls = resourceLease.update(message.value as Record<string, string> ?? {})
           refreshCurrentResources()
           contentAuthoring?.refresh()
           ownedAuthoring?.update()
           for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]')) frame.contentWindow?.postMessage({
-            type: 'guoling.resources.refresh', token: `__guoling_parser_${nonce.replace(/-/g, '_')}`, resources: resourceUrls,
+            type: 'guoling.resources.refresh', token: `__guoling_parser_${nonce.replace(/-/g, '_')}`, resources: message.value,
           }, '*')
         }
         if (kind === 'event' && name === '__runtime.state') {
@@ -944,7 +999,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
   // parent's CSP or Blob storage key. Standalone HTML owns this inline document.
   // The author module still arrives over a dedicated port and is loaded by the child.
   const bridge = (programs?: import('../../../components/web/authoredDocumentBootstrap').AuthoredDocumentPrograms) =>
-    `(function(){${programs ? `const authored=${authoredDocumentProgramsSource(programs)};` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),fragments:(${createComponentFragmentProjection.toString()}),refreshResources:(${refreshWebResourceReferences.toString()}),authoring:(${createDomAuthoring.toString()}),paintAt:(${componentAuthorPaintAtPoint.toString()}),ownedAuthoring:(${installOwnedDocumentAuthoring.toString()}),textOverrides:(roots,rules)=>{${domTextOverrideRealmSource()}return createPageTextOverrides(roots,rules)}}${programs ? ',authored' : ''})})()`
+    `(function(){${programs ? `const authored=${authoredDocumentProgramsSource(programs)};` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {resourceFactory:(${createWebResourceUrlLease.toString()}),navigationReady:(${installCourseNavigationReady.toString()}),isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),fragments:(${createComponentFragmentProjection.toString()}),refreshResources:(${refreshWebResourceReferences.toString()}),authoring:(${createDomAuthoring.toString()}),paintAt:(${componentAuthorPaintAtPoint.toString()}),ownedAuthoring:(${installOwnedDocumentAuthoring.toString()}),textOverrides:(roots,rules)=>{${domTextOverrideRealmSource()}return createPageTextOverrides(roots,rules)}}${programs ? ',authored' : ''})})()`
   let runtimeBuiltinKey = snapshots.builtinKey, sourceWebDocument = false
   const pendingDocumentKeys: Record<string, string> = {}
   const readAuthorHtml = (instance: ComponentInstance | undefined): string | undefined => {
@@ -1124,7 +1179,8 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
       return
     }
     if (!scope?.isActive() || message?.generation !== scope.generation) return
-    if (message.type === 'source.paint' && sourceViewport) {
+    if (message.type === 'source.paint' && (sourceViewport || authorRoot && authorInstance?.frame
+      && ['guoling.web', 'guoling.html-program'].includes(runtimeBuiltinKey ?? ''))) {
       const bounds = message.bounds
       if (bounds === null) iframe.style.clipPath = 'polygon(0 0,0 0,0 0)'
       else if (bounds && ['left', 'top', 'right', 'bottom'].every(key => Number.isFinite(bounds[key]))
@@ -1480,6 +1536,10 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
         // Classify author syntax independently of editor target observation.
         const data = context.instance.data && typeof context.instance.data === 'object' && !Array.isArray(context.instance.data) ? context.instance.data : undefined
         let web = ['guoling.web', 'guoling.html-program'].includes(runtimeBuiltinKey ?? '')
+        const updateFramePointer = (instance: ComponentInstance) => {
+          iframe.style.pointerEvents = (instance.style?.pointerEvents ?? instance.style?.['pointer-events']) === 'none' ? 'none' : 'auto'
+        }
+        updateFramePointer(context.instance)
         let authorDocumentKind = web && typeof data?.html === 'string' ? htmlDocumentKind(data.html) : undefined
         let documentKind = snapshots.nativeDocument && authorDocumentKind ? 'document' : authorDocumentKind
         let projected = await projectInstance(context.instance)
@@ -1508,7 +1568,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
         } else { iframe.hidden = true; document.body.append(iframe) }
         iframe.src = htmlUrl
         await ready
-        const prepared = await request('prepare', { artifact })
+        const prepared = await request('prepare', { artifact, resources: snapshots.resources?.() })
         sourceWebDocument = prepared?.document === 'web'
         if (signal.aborted || !scope.isActive()) throw new Error('组件挂载已取消')
         if (!web && prepared?.document === 'web' && hasWebContentData(data)) {
@@ -1551,7 +1611,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
           const preserveHtml = (sourceWebDocument || ['guoling.web', 'guoling.html-program'].includes(runtimeBuiltinKey ?? ''))
             && hasWebContentData(previousData) && hasWebContentData(nextData)
             && ownedDocumentExecutionSource(previousData.html) === ownedDocumentExecutionSource(nextData.html)
-          authorInstance = instance; const projected = await projectInstance(instance); return request('update', { instance: projected, preserveHtml, state: snapshots.state(), targets: targetsFor(projected), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), interaction: interactionSnapshot(),
+          authorInstance = instance; updateFramePointer(instance); const projected = await projectInstance(instance); return request('update', { instance: projected, preserveHtml, state: snapshots.state(), targets: targetsFor(projected), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), interaction: interactionSnapshot(),
             resourceCss: instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && typeof instance.data.css === 'string' ? instance.data.css : undefined,
             authorHtml: readAuthorHtml(instance) }).then(() => undefined) },
           updatePlacement: frame => {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import type { ExecutionConnectionView, ExecutionProfile, ExecutionRole, ExecutionRoleSelection, ExecutionSettingsView } from '../../shared/workbench/executionSettings'
-import { executionRoles } from '../../shared/workbench/executionSettings'
-import { executionSettingsConnectionSchema, executionSettingsRolesSchema, type DiscoveredModels, type DiscoveredReasoningEffort, type ExecutionSettingsAPI, type SaveExecutionConnectionDesktop } from '../../shared/workbench/executionSettingsDesktop'
+import { DEFAULT_NATIVE_CONCURRENCY_LIMIT, MAX_NATIVE_CONCURRENCY_LIMIT, executionRoles } from '../../shared/workbench/executionSettings'
+import { executionNativeConcurrencySchema, executionSettingsConnectionSchema, executionSettingsRolesSchema, type DiscoveredModels, type DiscoveredReasoningEffort, type ExecutionSettingsAPI, type SaveExecutionConnectionDesktop } from '../../shared/workbench/executionSettingsDesktop'
 import { findModelKnowledgeReference, type ModelKnowledgeEntry } from '../../shared/workbench/modelKnowledge'
 import type { ModelJsonObject } from '../../shared/workbench/modelProvider'
 import { resolveModelProtocol } from '../../shared/workbench/modelRouting'
@@ -10,6 +10,7 @@ import { readModelReasoningEffort, resolveModelReasoning, withModelReasoning, wi
 import { ModelThinkingBudgetControl } from './ModelThinkingBudgetControl'
 import { ModelReferencePicker } from './ModelReferencePicker'
 import { SearchSettingsSection } from './SearchSettingsSection'
+import { SpeechSettingsSection } from './SpeechSettingsSection'
 import { PixabaySettingsSection } from './PixabaySettingsSection'
 import { modelCapabilityIdentity, modelCapabilityRecord, modelCapabilitySelection, type ProbedModelCapability } from '../../shared/workbench/modelCapabilities'
 import { CHATGPT_IMAGE_MODEL_PREFERENCES, DEFAULT_CHATGPT_IMAGE_MODEL, openAIImagesEndpoint, supportsChatGPTOAuthImages, supportsOpenAIImages } from '../../shared/workbench/images'
@@ -87,6 +88,7 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
   const [apiKey, setApiKey] = useState('')
   const [roles, setRoles] = useState(roleDrafts)
   const [profileRevision, setProfileRevision] = useState(0)
+  const [nativeConcurrency, setNativeConcurrency] = useState(String(DEFAULT_NATIVE_CONCURRENCY_LIMIT))
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [status, setStatus] = useState('')
   const [models, setModels] = useState<string[]>([])
   const [catalogs, setCatalogs] = useState<Record<string, DiscoveredModels>>({})
@@ -129,6 +131,7 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
     void api.read().then(value => {
       if (generation.current !== ticket) return
       setSettings(value); setRoles(roleDrafts(value.profile)); setProfileRevision(value.profile.revision)
+      setNativeConcurrency(String(value.profile.nativeConcurrencyLimit ?? DEFAULT_NATIVE_CONCURRENCY_LIMIT))
       const generate = value.profile.roles.imageGenerate, edit = value.profile.roles.imageEdit
       if (generate && edit && generate.connectionId === edit.connectionId && generate.model === edit.model) {
         setImageConnectionId(generate.connectionId); setImageModel(generate.model)
@@ -256,6 +259,14 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
     const saved = await api!.saveProfile({ roles: parsed, expectedRevision: profileRevision })
     setProfileRevision(saved.revision); setRoles(roleDrafts(saved)); await refresh()
     setStatus('模型角色已保存，将用于下次任务。正在进行的任务保持原配置。')
+  })
+  const saveNativeConcurrency = () => perform(async () => {
+    const parsed = executionNativeConcurrencySchema.safeParse(Number(nativeConcurrency))
+    if (!parsed.success) throw new Error(`子任务并发上限必须是 1–${MAX_NATIVE_CONCURRENCY_LIMIT} 的整数。`)
+    const saved = await api!.saveProfile({ expectedRevision: settings!.profile.revision,
+      roles: settings!.profile.roles, nativeConcurrencyLimit: parsed.data })
+    setProfileRevision(saved.revision); setNativeConcurrency(String(saved.nativeConcurrencyLimit ?? parsed.data)); await refresh()
+    setStatus('子任务并发上限已保存，新任务生效；正在运行的任务保持原配置。')
   })
   const readCatalog = async (target: ExecutionConnectionView, showList = false) => {
     const result = await api!.discoverModels(target.connection.id, target.connection.revision)
@@ -528,6 +539,13 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
       {status && <p role="status" style={{ margin: 0 }}>{status}</p>}
       {loginId && <button type="button" className="secondary-button" onClick={() => void cancelLogin()} style={{ justifySelf: 'start' }}>取消 ChatGPT 登录</button>}
       {settings && !settings.secureStorageAvailable && <p role="alert">系统安全凭据存储不可用，无法修改模型角色或读取密钥；免 Key 搜索设置仍可保存，原配置保留。</p>}
+      {entry === 'default' && <fieldset disabled={busy || !settings} style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 8 }}>
+        <legend style={{ fontWeight: 600 }}>子任务协作</legend>
+        <label style={field}>子任务并发上限<input type="number" min={1} max={MAX_NATIVE_CONCURRENCY_LIMIT} step={1}
+          value={nativeConcurrency} onChange={event => setNativeConcurrency(event.target.value)} /></label>
+        <small>默认 10，可设为 1–32；新任务生效。同一任务树共享上限，超出的子任务排队。</small>
+        <button type="button" className="secondary-button" onClick={() => void saveNativeConcurrency()} style={{ justifySelf: 'start' }}>保存子任务设置</button>
+      </fieldset>}
       <fieldset disabled={busy || !settings || !settings.secureStorageAvailable} style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 12 }}>
         <legend style={{ fontWeight: 600, marginBottom: 10 }}>下次任务使用的模型</legend>
         <div className="execution-settings-primary-models" role="group" aria-label="默认模型配置" style={grid}>
@@ -620,6 +638,8 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
         {models.length > 0 && <details open><summary>模型目录</summary><div style={{ maxHeight: 140, overflow: 'auto' }}>{models.map(model => <div key={model}><code>{model}</code></div>)}</div></details>}
       </fieldset>
       </details>}
+      {entry === 'default' && settings && api && <SpeechSettingsSection settings={settings} api={api} disabled={busy}
+        onSaved={value => { setSettings(value); setProfileRevision(value.profile.revision); onSaved?.(value) }} />}
       {entry === 'default' && settings && api && <SearchSettingsSection settings={settings} api={api} onSaved={value => { setSettings(value); setProfileRevision(value.profile.revision); onSaved?.(value) }} />}
       {entry === 'default' && <details><summary>可选：Pixabay 图库</summary><PixabaySettingsSection /></details>}
       </div>

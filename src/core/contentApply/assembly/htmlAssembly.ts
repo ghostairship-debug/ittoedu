@@ -49,6 +49,8 @@ export interface HtmlDesignCapture {
   /** Font faces and keyframes needed by retained internal content, without page layout rules. */
   sourceCss?: string
   supportCss?: string
+  /** Inert head data has no measured body box, but remains authored source. */
+  documentData?: string[]
   /** Actual DOM relationships, resolved before descendants can become separate objects. */
   sourceScopes?: { index: number; reason: string; html?: string }[]
   elements: MeasuredHtmlElement[]
@@ -213,12 +215,20 @@ export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAss
     message: '片段没有可测的初始内容边界；保留设计视口及源码。' })
   const root: HtmlAssemblyObject = { kind: 'group', label: framing === 'content' ? '内容' : '页面', sourcePath: [],
     frame: rootFrame, sourceStyle:capture.elements[capture.body]?.sourceStyle?htmlObjectStyle(capture.elements[capture.body]!.sourceStyle!,true):undefined,inheritedStyle:capture.elements[capture.body]?.inheritedStyle, style: htmlObjectStyle(capture.pageStyle, true),
-    pseudoElements: element(capture.body).pseudoElements, children: [], decorations: [], sourceRegions: [] }
+    pseudoElements: element(capture.body).pseudoElements, children: [], decorations: [],
+    sourceRegions: (capture.documentData ?? []).map(html => ({ sourcePath: [], html, reason: 'inert-data' })) }
   const bodyContent = contentOf(capture.body, true)
   if (bodyContent.kind === 'element') root.content = { ...bodyContent, children: [], style: root.style }
 
   const append = (index: number, parent: HtmlAssemblyObject, parentToViewport: AffineFrame['transform']): void => {
     const value = element(index)
+    // Inert data is author content even without a visible geometry box. Keep it
+    // in its existing parent shell; it must not turn the page into a program.
+    if (value.tagName === 'script' && /^application\/(?:ld\+)?json(?:\s*;|\s*$)/i.test(value.attributes.type ?? '')) {
+      parent.sourceRegions.push({ sourcePath: value.sourcePath, html: value.sourceHtml, reason: 'inert-data' })
+      diagnostics.push({ level: 'info', code: 'html-inert-data-retained', message: 'JSON 数据保留在当前 Web 外壳，未作为执行脚本或可见内容拆分。', sourcePath: value.sourcePath })
+      return
+    }
     if (NON_CONTENT.has(value.tagName)) return
     if (!value.frame || value.geometryIssue) {
       parent.sourceRegions.push({ sourcePath: value.sourcePath, html: value.sourceHtml, reason: value.geometryIssue ?? 'not-laid-out' })

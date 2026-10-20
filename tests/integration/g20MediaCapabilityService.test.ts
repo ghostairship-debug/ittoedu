@@ -7,7 +7,8 @@ describe('M29 media capability boundary', () => {
     const service = new MediaCapabilityService([{ kind: 'speech', submit, cancelRun: vi.fn() }])
     service.beginRun('run', { writable: true })
     expect(service.discover('run')).toEqual([
-      { kind: 'speech', status: 'not-configured', reason: expect.any(String) },
+      { kind: 'speech', engine: 'local', status: 'not-configured', reason: expect.any(String) },
+      { kind: 'speech', engine: 'remote', status: 'not-configured', reason: expect.any(String) },
       { kind: 'video', status: 'not-configured', reason: expect.any(String) },
       { kind: 'music', status: 'not-configured', reason: expect.any(String) },
     ])
@@ -19,7 +20,8 @@ describe('M29 media capability boundary', () => {
 
   it('rejects invalid parameters and read-only or stopped tasks before provider submission', async () => {
     const adapter: MediaJobAdapter = { kind: 'speech', submit: vi.fn().mockResolvedValue({ jobId: 'job', status: 'submitted' }), cancelRun: vi.fn().mockResolvedValue(undefined) }
-    const capability = { kind: 'speech' as const, connectionId: 'connection', connectionRevision: 1, model: 'verified-speech', verified: true, billing: 'unknown' as const }
+    const capability = { kind: 'speech' as const, connectionId: 'connection', connectionRevision: 1, model: 'verified-speech', verified: true, billing: 'unknown' as const,
+      speech: { voices: ['fixture-voice'], defaultVoice: 'fixture-voice', formats: ['wav' as const], defaultFormat: 'wav' as const } }
     const service = new MediaCapabilityService([adapter])
     service.beginRun('read-only', { writable: false, capabilities: [capability] })
     expect((await service.start('read-only', { kind: 'speech', prompt: 'Hi' })).status).toBe('rejected')
@@ -35,8 +37,9 @@ describe('M29 media capability boundary', () => {
     const adapter: MediaJobAdapter = { kind: 'speech', submit: () => new Promise(resolve => { finish = resolve }), cancelRun: vi.fn().mockResolvedValue(undefined) }
     const service = new MediaCapabilityService([adapter])
     service.beginRun('run', { writable: true, capabilities: [{ kind: 'speech', connectionId: 'connection', connectionRevision: 1,
-      model: 'verified-speech', verified: true, billing: 'unknown' }] })
-    const pending = service.start('run', { kind: 'speech', prompt: 'Hi' })
+      model: 'verified-speech', verified: true, billing: 'unknown',
+      speech: { voices: ['fixture-voice'], defaultVoice: 'fixture-voice', formats: ['wav'], defaultFormat: 'wav' } }] })
+    const pending = service.start('run', { kind: 'speech', engine: 'remote', prompt: 'Hi' })
     await service.stopRun('run')
     finish({ jobId: 'late-job', status: 'ready' })
     expect(await pending).toMatchObject({ status: 'unknown', kind: 'speech' })

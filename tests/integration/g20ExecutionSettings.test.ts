@@ -52,6 +52,56 @@ function roles(connectionId: string): ExecutionProfile['roles'] {
     vision: { connectionId, model: 'vision-model' }, imageGenerate: null, imageEdit: null }
 }
 
+it('D1 persists the 1–32 child capacity and freezes the setting with a new task selection', async () => {
+  const { store, options } = await setup()
+  expect((await store.read()).profile.nativeConcurrencyLimit).toBe(10)
+  const entry = await store.saveConnection({ connection: config(), apiKey: 'fixture' })
+  await store.saveProfile({ roles: roles(entry.connection.id), nativeConcurrencyLimit: 12 })
+  const acceptedTask = await store.snapshot('conversation')
+  await store.saveProfile({ roles: roles(entry.connection.id), nativeConcurrencyLimit: 32 })
+  // Existing profile callers preserve the separately saved concurrency setting.
+  await store.saveProfile({ roles: roles(entry.connection.id) })
+  const reopened = new ExecutionSettingsStore(options)
+  expect((await reopened.read()).profile.nativeConcurrencyLimit).toBe(32)
+  expect((await reopened.snapshot('conversation')).nativeConcurrencyLimit).toBe(32)
+  expect(acceptedTask.nativeConcurrencyLimit).toBe(12)
+  for (const nativeConcurrencyLimit of [0, 33, 1.5]) await expect(reopened.saveProfile({
+    roles: roles(entry.connection.id), nativeConcurrencyLimit,
+  })).rejects.toMatchObject({ code: 'invalid-profile' })
+  expect((await reopened.read()).profile.nativeConcurrencyLimit).toBe(32)
+})
+
+it('D2 resolves explicit child routes, preserves inheritance, and discovers configured models without credentials', async () => {
+  const { store, options } = await setup()
+  const parentConnection = await store.saveConnection({ connection: config(), apiKey: 'parent-private-fixture' })
+  const childConnection = await store.saveConnection({ connection: { ...config('child'), provider: 'teamorouter',
+    baseURL: 'https://api.teamorouter.com/v1' }, apiKey: 'child-private-fixture' })
+  await store.saveProfile({ roles: roles(parentConnection.connection.id) })
+  await store.recordModelCatalog({ connectionId: childConnection.connection.id, connectionRevision: 1,
+    checkedAt: '2026-10-20T00:00:00.000Z', source: 'live', capabilitiesVerified: false,
+    models: [{ id: 'gpt-6-luna', reasoningEfforts: [{ effort: 'low' }, { effort: 'high' }] }, { id: 'gpt-image-2' }] })
+  const parent = await store.snapshot('conversation')
+  expect(await store.captureDelegationSelection(undefined, parent)).toEqual(parent)
+  const selected = await store.captureDelegationSelection({ connectionId: childConnection.connection.id,
+    model: 'gpt-6-luna', parameters: { max_tokens: 2400, reasoning_effort: 'low' } }, parent)
+  expect(selected).toMatchObject({ connection: { id: childConnection.connection.id }, model: 'gpt-6-luna',
+    apiProtocol: 'openai-responses', parameters: { max_output_tokens: 2400, reasoning_effort: 'low' } })
+  expect(Object.isFrozen(selected.connection)).toBe(true)
+  await expect(store.captureDelegationSelection({ connectionId: childConnection.connection.id,
+    model: 'gpt-6-luna', parameters: { headers: { Authorization: 'forbidden' } } }, parent))
+    .rejects.toMatchObject({ code: 'delegation-model-unavailable', message: expect.stringContaining('reserved-parameter') })
+  const models = await new ExecutionSettingsStore(options).availableDelegationModels()
+  expect(models).toContainEqual(expect.objectContaining({ connectionId: childConnection.connection.id,
+    model: 'gpt-6-luna', reasoning: expect.objectContaining({ choices: [{ effort: 'low' }, { effort: 'high' }] }) }))
+  const publicJSON = JSON.stringify(models)
+  for (const forbidden of ['parent-private-fixture', 'child-private-fixture', 'credentialRef', 'encrypted', 'gpt-image-2']) expect(publicJSON).not.toContain(forbidden)
+  await store.revokeConnection(childConnection.connection.id)
+  await expect(store.captureDelegationSelection({ connectionId: childConnection.connection.id, model: 'gpt-6-luna' }, parent))
+    .rejects.toMatchObject({ code: 'credential-unavailable' })
+  expect((await store.availableDelegationModels()).some(model => model.connectionId === childConnection.connection.id)).toBe(false)
+  expect(selected.connection.revision).toBe(1)
+})
+
 it('R01 protocol changes preserve explicit caps, clear stale managed reasoning and revise the profile once', async () => {
   const { store, options } = await setup()
   const entry = await store.saveConnection({ connection: config(), apiKey: 'fixture' })
@@ -214,7 +264,7 @@ it('preserves prior settings when secure storage/encryption/disk writes fail, wh
   expect((await store.read()).secureStorageAvailable).toBe(false)
   await expect(store.saveConnection({ id: first.connection.id, connection: config(), apiKey: 'fixture-not-stored' })).rejects.toMatchObject({ code: 'secure-storage-unavailable' })
   await expect(store.resolveCredential(first.connection)).rejects.toMatchObject({ code: 'secure-storage-unavailable' })
-  await expect(store.saveProfile({ roles: roles(first.connection.id) })).rejects.toMatchObject({ code: 'secure-storage-unavailable' })
+  await expect(store.saveProfile({ roles: { ...roles(first.connection.id), conversation: { connectionId: first.connection.id, model: 'changed-model' } } })).rejects.toMatchObject({ code: 'secure-storage-unavailable' })
   expect(await fs.readFile(filename, 'utf8')).toBe(before)
   cipher.state.available = true; cipher.state.failEncrypt = true
   await expect(store.saveConnection({ id: first.connection.id, connection: config(), apiKey: 'fixture-not-echoed' })).rejects.toThrow('凭据加密失败')

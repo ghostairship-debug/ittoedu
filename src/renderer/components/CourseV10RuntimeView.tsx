@@ -13,6 +13,7 @@ import { webContentRealmSource } from '../../components/web/contentRealmImplemen
 import { projectWebModuleGraph, type WebRuntimeData } from '../../components/web/moduleGraph'
 import { hasWebContentData } from '../../components/web/sourcePreparation'
 import { resolveWebResourceBindings } from '../../components/web/resources'
+import { webRuntimeResourceAddress } from '../../components/web/resourceUrlLease'
 import { ComponentNavigationOwner, type ComponentCameraBinding, type ComponentObservationBinding } from './ComponentNavigationOwner'
 import { installedBundledFontFaceCss } from '../../shared/fonts/installedBundledFontFaceCss'
 import { resolveComponentPresentation, componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform'
@@ -113,7 +114,7 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
         const graph = (projected.data as unknown as WebRuntimeData).moduleGraph
         if (signal.aborted) throw new Error('组件源码准备已取消')
         const prepared = await prepareSandboxComponent({ format: 'esm', code: webContentRealmSource(), css: '', diagnostics: [] }, signal,
-        { builtinKey: _key, state: () => runtime.stateSnapshot(), targets: profile => runtime.targetSnapshots(profile), instance: async value => resolveWebResourceBindings((value.data as unknown as WebRuntimeData).moduleGraph ? value : await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id), message => callbacks.current.report(message)), htmlAuthoring: true, teacherController,
+        { builtinKey: _key, state: () => runtime.stateSnapshot(), targets: profile => runtime.targetSnapshots(profile), instance: async value => resolveWebResourceBindings((value.data as unknown as WebRuntimeData).moduleGraph ? value : await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id) ? webRuntimeResourceAddress(id) : undefined, message => callbacks.current.report(message)), htmlAuthoring: true, teacherController,
           connectOrigins: () => current.current.project.logic?.network?.connectOrigins ?? [], themeCss: () => runtime.themeCss(), resources: () => runtime.resourceUrls() })
         return { ...prepared, webModuleGraph: graph }
       },
@@ -123,7 +124,7 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
         if (signal.aborted) throw new Error('组件源码准备已取消')
         if (compilation.status === 'failed') throw new Error(compilation.diagnostics.map(value => `${value.file ?? ''}:${value.line ?? ''} ${value.message}`).join('\n'))
         return prepareSandboxComponent(compilation.artifact, signal, { htmlAuthoring: true,
-          webInstance: async value => hasWebContentData(value.data) ? resolveWebResourceBindings(value.data.moduleGraph ? value : await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id), message => callbacks.current.report(message), implementation.resourceBindings) : value, state: () => runtime.stateSnapshot(), targets: () => runtime.targetSnapshots('full'), teacherController,
+          webInstance: async value => hasWebContentData(value.data) ? resolveWebResourceBindings(value.data.moduleGraph ? value : await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id) ? webRuntimeResourceAddress(id) : undefined, message => callbacks.current.report(message), implementation.resourceBindings) : value, state: () => runtime.stateSnapshot(), targets: () => runtime.targetSnapshots('full'), teacherController,
           authorHtml: instance => {
             const key = componentDefinitionBuiltinKey(current.current.project.definitions[instance.definitionId]), data = instance.data
             return ['guoling.web', 'guoling.html-program'].includes(key ?? '') && data && typeof data === 'object' && !Array.isArray(data) && typeof data.html === 'string' ? data.html : undefined

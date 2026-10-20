@@ -22,7 +22,7 @@
     }
   },
   "scope": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
-  "semanticVersion": "84a96da89eba5d7424d579180e1f89a804418cacf22994c11b82e9db118db451",
+  "semanticVersion": "2a4c0a05fa39a7d498cfd92ad416985652b1925a3f62ece2e01aed710f85b5a8",
   "skills": "skills/manifest.json",
   "surfaces": [
     "slide",
@@ -97,6 +97,10 @@
     {
       "id": "delegate.message",
       "path": "tools/delegate.message.json"
+    },
+    {
+      "id": "delegate.models",
+      "path": "tools/delegate.models.json"
     },
     {
       "id": "delegate.read",

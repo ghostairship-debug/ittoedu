@@ -4,6 +4,8 @@
 
 在现有策划中说明动作改变什么、结果怎样展开下一段或进入哪里、何时需要返回；不套统一闯关、逐页登记或每页按钮模板。采用目录时才将真实场景/状态/标题/镜头组织为必要入口；按用户当前指令继续，不固定策划/框架确认。
 
+持续导航默认只在全局层设计一个实例，外观、位置、目录分组、文案与状态样式在整作策划中确定一次。通过 `project.list` 取得实际 `global/overlay.json` 结构路径后，可用 `project.apply {path:"global/overlay.json",intent:"insert",region:实际导航区域,content:导航HTML}` 直接装配；区域按本作真实构图，不用整页透明壳吞掉正文点击。每次跳页更新同一导航的当前状态，不向各页复制一套目录或监听。软件维护正式场景列表、目标引用、键盘语义和清理，模型不维护第二套页序、页码和键盘脚本。
+
 常用操作在课内保持稳定、容易发现，不能频繁拖走/展开/收起控制台才能阅读主要内容。可减少无关控件、把入口融入页面布局；不为兜底台规定统一安全区或开发智能避让。拖动、固定视口、收展是选用能力，不因组件承担导航就自动附加。
 
 完整台保留人工添加、用户明确要求及既有作品的合法使用。修改旧工程保留未要求改动的导航；仅实际选择/修改完整台时，才通过 `project.list` 找到 `global/overlay/` 中该实例 `.data.json` 和源码路径并 `project.read`。实例源码只影响当前实例，`components/` 的共享定义影响引用者，应按授权范围处理。AI 新作工厂不再自动插入可见完整台属于软件修复，不是要求模型逐课重复删除的长期步骤。
@@ -16,7 +18,9 @@
 
 沿现 `mount`、`update`、`dispose` 生命周期使用实际端口，不从页面 DOM 或全局变量猜课程状态；几何、资源、身份由软件维护，不访问未开放文件、凭据或系统接口。
 
-这些端口属于 API5 源码实现的 `mount(context)` 参数，普通 HTML 内的 `<script>` 没有 `window.runtimeContext`、`teacherController` 或 `courseState` 全局。新建独立内容链接时，可在 `object.insert` 一并带 `click:{action:"location-go",value:"已观察的目的页面句柄"}`，跨页已有目的地的入口同批创建；软件生成绑定，不另写导航程序。独立对象只需点击跳到已知页面时，可直接用 `interaction.update {target:"已观察的独立对象句柄",change:{kind:"click",action:"location-go",value:"已观察的目的页面句柄"}}` 绑定正式动作，不必改成 Source。同一 HTML 实例内部多个按钮要执行不同动作，或程序需要共享课程结果时，才沿实际局部程序入口使用宿主端口：先 `project.list` 找该实例实际 `.view.js/.view.ts` 和内容/数据文件，再读写短作者入口，保留其实际 import；入口回执note已提供常用API事实，普通接线不先翻完整框架依赖；软件维护工程共享依赖，完整源码按需从 `.dependencies/` 读取。复用 Web 时保留导入实现的 `document:'web'` 声明，并在 `await implementation.mount(context)` 后接所需局部行为；写回形成实例私有实现，其他实例及共享定义保持原有内容。沿 `context.scope.state.get/set/subscribe` 或 `context.interactions?.courseState` 使用实际课程状态，沿 `context.teacherController` 导航，不猜另页 DOM 或全局桥。
+这些端口属于 API5 源码实现的 `mount(context)` 参数，普通 HTML 内的 `<script>` 没有 `window.runtimeContext`、`teacherController` 或 `courseState` 全局。普通 HTML 的定制导航用 `const navigation = await window.courseNavigationReady` 取得软件注入的正式导航子集：`read()`、`readLocation()`、`subscribe(sync)`、`canExecute(action)` 和 `execute(action)`。从 `read().scenes` 取得真实场景与显示名称，调用 `{type:"step.next"}`、`{type:"step.previous"}` 或 `{type:"scene.go",sceneId:实际场景id}`；首次显示读取当前值，再订阅后续变化。订阅由宿主生命周期清理，局部提前退出或替换界面时也调用返回的取消函数。端口尚未接通时保留实际错误，不叠加默认教师台或退回自写翻页脚本。
+
+新建独立内容链接时，可在 `object.insert` 一并带 `click:{action:"location-go",value:"已观察的目的页面句柄"}`，跨页已有目的地的入口同批创建；软件生成绑定，不另写导航程序。独立对象只需点击跳到已知页面时，可直接用 `interaction.update {target:"已观察的独立对象句柄",change:{kind:"click",action:"location-go",value:"已观察的目的页面句柄"}}` 绑定正式动作，不必改成 Source。程序需要共享课程结果或其他源码端口时，再沿实际局部程序入口使用宿主能力：先 `project.list` 找该实例实际 `.view.js/.view.ts` 和内容/数据文件，再读写短作者入口，保留其实际 import；入口回执note已提供常用API事实，普通接线不先翻完整框架依赖；软件维护工程共享依赖，完整源码按需从 `.dependencies/` 读取。复用 Web 时保留导入实现的 `document:'web'` 声明，并在 `await implementation.mount(context)` 后接所需局部行为；写回形成实例私有实现，其他实例及共享定义保持原有内容。沿 `context.scope.state.get/set/subscribe` 或 `context.interactions?.courseState` 使用实际课程状态，沿 `context.teacherController` 导航，不猜另页 DOM 或全局桥。
 
 | 入口 | 用途 |
 |---|---|

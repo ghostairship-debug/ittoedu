@@ -19,6 +19,7 @@ export function registerPrivilegedSchemes(): void {
         secure: true,
         supportFetchAPI: true,
         corsEnabled: true,
+        stream: true,
       },
     },
     {
@@ -53,14 +54,15 @@ function safeRendererPath(pathname: string): string | null {
   return target
 }
 
-export function installEditorProtocol(electronSession: Session, resource?: (url: URL) => Response | undefined): void {
+export function installEditorProtocol(electronSession: Session,
+  resource?: (url: URL, request: Request) => Response | undefined | Promise<Response | undefined>): void {
   if (configuredEditorSessions.has(electronSession)) return
   configuredEditorSessions.add(electronSession)
   electronSession.protocol.handle(EDITOR_SCHEME, async (request) => {
     const url = new URL(request.url)
     if (url.hostname !== 'app') return new Response('Not found', { status: 404 })
-    const supplied = resource?.(url)
-    if (supplied) return supplied
+    const supplied = await resource?.(url, request)
+    if (supplied !== undefined) return supplied
     const target = safeRendererPath(url.pathname)
     if (!target) return new Response('Forbidden', { status: 403 })
     try {

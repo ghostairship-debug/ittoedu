@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import { BUILTIN_SOURCE_ENTRIES } from '../src/components/builtin-source/entries'
 import type { ComponentImplementation } from '../src/shared/contracts/component-platform/project'
+import compatibility from '../src/shared/browser/compatibilityTarget.json'
 
 type SourceImplementation = Extract<ComponentImplementation, { kind: 'source' }>
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -19,7 +20,7 @@ export async function generateComponentBuiltinSources(root = projectRoot): Promi
         absWorkingDir: root,
         entryPoints: [path.join(root, 'src/components/builtin-source', entry)],
         outfile: 'component.js',
-        bundle: true, platform: 'browser', format: 'esm', target: 'es2022',
+        bundle: true, platform: 'browser', format: 'esm', target: compatibility.target,
         write: false, minify: false, treeShaking: true, sourcemap: false,
         charset: 'utf8', legalComments: 'inline',
         // Resolve existing Vite raw imports while building the real module;

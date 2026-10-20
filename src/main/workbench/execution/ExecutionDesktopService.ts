@@ -49,6 +49,7 @@ import { emptyExecutionProjection } from '../../../shared/workbench/executionEve
 import { modelToolResult } from '../../../core/tools/modelToolResult'
 import { taskTargetDeclaration } from '../../../shared/workbench/taskTargetContext'
 import { componentFrameSchema } from '../../../shared/contracts/component-platform'
+import { freezeSpeechSelection } from '../speechSelection'
 
 export interface ExecutionDesktopServiceOptions {
   directory: string
@@ -599,6 +600,8 @@ export class ExecutionDesktopService {
       throw error
     })
     let selection = await select('conversation')
+    const speechSelection = freezeSpeechSelection(await this.options.settings.read())
+    const nativeConcurrencyLimit = selection.nativeConcurrencyLimit
     if (input.disclosedSettings && !matchesDisclosedSelection(input.disclosedSettings, selection)) throw executionInputError('disclosed-settings-changed')
     let selectionReason = '使用接受提交时配置的会话角色'
     if (explicitImages && selection.connection.capabilities.vision !== 'supported') {
@@ -639,6 +642,7 @@ export class ExecutionDesktopService {
       model: { provider: selection.connection.provider, model: selection.model, accountId: selection.connection.accountId, billing: selection.connection.billing.kind },
       createdAt: now, updatedAt: now, digest, attachmentIds,
       start: { conversationId: current.conversationId, taskId: input.submissionId, instruction: input.text, advancementMode: input.advancementMode, selection, documents,
+        nativeConcurrencyLimit, speechSelection,
         ...(compressionSelection ? { compressionSelection } : {}), ...(compressionUnavailableReason ? { compressionUnavailableReason } : {}),
         ...(contentOutput ? { contentOutput: structuredClone(contentOutput) } : {}),
         ...(input.materials ? { materials: structuredClone(input.materials) } : {}),
@@ -863,6 +867,7 @@ export class ExecutionDesktopService {
         if (previous.input.inputContext && record.start.inputContext)
           record.start.inputContext.context = structuredClone(previous.input.inputContext.context)
         record.start.workspaceRoot = previous.input.workspaceRoot
+        record.start.speechSelection = structuredClone(previous.input.speechSelection ?? { unavailableReason: '任务接受时未配置GPT语音' })
         record.start.boundReadPaths = [...new Set([...(record.start.boundReadPaths ?? []), ...(previous.input.boundReadPaths ?? [])])]
         record.start.conversationHome = previous.input.conversationHome
         record.start.conversationHomeRoot = previous.input.conversationHomeRoot

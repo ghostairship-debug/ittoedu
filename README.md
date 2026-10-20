@@ -26,9 +26,10 @@ npm run --silent mcp:server -- --workspace "<绝对目录>" --ready-json
 |---|---|
 | 操作和创作 | [用户指南](docs/USER_GUIDE.md) |
 | 开发定位、当前剩余与验证 | [开发入口](docs/development-plan/README.md)、[当前状态](docs/development-plan/CURRENT_STATUS.md) |
+| 已收口方案与修复结果 | [原软件方案](docs/archive/联网搜索解耦与多后端接入方案-2026-10-12.md)、[创作方案](docs/archive/互动演示创作方案-2026-10-12.md)、[整合结果](docs/development-plan/SOFTWARE_AUTHORING_RESULT.md) |
 | 架构与执行规则 | [架构合同](docs/development-plan/ARCHITECTURE_CONTRACT.md)、[工作协议](docs/development-plan/WORKING_PROTOCOL.md)、[AGENTS.md](AGENTS.md) |
 | 工程、组件和输出格式 | [文档导航](docs/README.md)、[组件指南](docs/COMPONENT_AUTHORING.md)、[输出指南](docs/PUBLISHED_LESSON_V1.md) |
-| 阶段变化 | [路线图](ROADMAP.md)、[变更记录](CHANGELOG.md) |
+| 阶段变化 | [当前进度与剩余](docs/development-plan/CURRENT_STATUS.md)、[变更记录](CHANGELOG.md) |
 | 历史原文与证据 | [归档索引](docs/archive/README.md) |
 
 开发验证按变更选择最小有效检查；`typecheck`、测试和发行脚本的当前限制见状态页，不以全量命令代替具体行为证据。

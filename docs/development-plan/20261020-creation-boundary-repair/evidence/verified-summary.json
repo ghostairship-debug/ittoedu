@@ -1,0 +1,80 @@
+{
+  "evidence_location": "D:\\果铃工作台\\output\\repair-plan-deepening-20261020",
+  "kind": "Summary transcribed from current remote production-function outputs, not the full original test log",
+  "head": "a8882691eefd1f24853571296d5a3a90d45f90b5",
+  "probes": {
+    "sourceEcho": {
+      "rawBytes": 2000423,
+      "publicBytes": 2000405
+    },
+    "jobDiagnostic": {
+      "rawBytes": 2000134,
+      "publicBytes": 2000134
+    },
+    "objectRead": {
+      "projectedBytes": 475,
+      "readBytes": 2000083
+    },
+    "readScheduler": {
+      "at80msAfterAbort": {
+        "finished": false,
+        "fastFinished": true,
+        "committed": []
+      },
+      "afterRelease": {
+        "finished": true,
+        "committed": [
+          0,
+          1
+        ]
+      }
+    },
+    "errorEcho": {
+      "rawBytes": 2000144,
+      "publicBytes": 2000144
+    }
+  },
+  "mediaProbe": {
+    "direct": {
+      "inputChars": 10781,
+      "outputChars": 107,
+      "resources": 1,
+      "resourceBytes": 8044
+    },
+    "relative": {
+      "inputChars": 40,
+      "outputChars": 107,
+      "resources": 1,
+      "resourceBytes": 8044
+    },
+    "scriptConcatenation": {
+      "inputChars": 10837,
+      "outputChars": 10837,
+      "resources": 0,
+      "diagnostic": "unsupported-dynamic-url-sink"
+    }
+  },
+  "focusedTests": {
+    "total": 24,
+    "passed": 24,
+    "failed": 0,
+    "pending": 0,
+    "files": [
+      "tests/integration/g20ReadOnlyParallel.test.ts",
+      "tests/integration/programmaticToolRunner20261019.test.ts",
+      "tests/unit/g20ContextProjection.test.ts"
+    ]
+  },
+  "originalEvidenceSha256": {
+    "boundary-probes.ts": "b5c2c5437897a9aad7b5f2e6d19f463a91aaa27e902f2e30ea6a4736a388cb0d",
+    "boundary-probes.json": "cf0092ec1841091e1c9cc28e82b0a52b9869e5f9394e53d7d2d7286749ac3e59",
+    "additional-boundary-probes.ts": "39653c63a8390c6e7fc15ddbae8aac34521b52c01ed6da2458a84db001c676a1",
+    "additional-boundary-probes.json": "2a3bc5070f8d979f5332bb259ab6a690b1d244f9cbf5e47f3ca2e650eee6adaf",
+    "baseline-focused-tests.json": "725c43c287bc0e7fa0009bf961748fd3e852c9334088e2acfe0f30e96b613bb1"
+  },
+  "limitations": [
+    "Synthetic production-function probes are not a new live authoring run.",
+    "The 80ms checkpoint does not establish real UI Stop is permanently hung.",
+    "Passing tests do not cover the newly identified counterexamples."
+  ]
+}

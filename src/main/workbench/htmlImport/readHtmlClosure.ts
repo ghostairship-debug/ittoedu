@@ -1,4 +1,4 @@
-import { readFile, realpath } from 'node:fs/promises'
+import { readFile, realpath, readdir } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { extractHtmlResources } from './extractHtmlResources'
 import { validateHtmlImport } from './validateHtmlImport'
@@ -18,6 +18,22 @@ export interface ReadHtmlClosureResult extends ExtractHtmlResourcesResult {
 function confined(root: string, target: string): boolean {
   const path = relative(root, target)
   return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path))
+}
+
+/** Only a concrete image directory already named by a resource expression is
+ * expanded. Each file stays inside the same authorized realpath closure. */
+export async function readHtmlMediaDirectory(base: string, root: string, reference: string): Promise<ReadonlyMap<string, Uint8Array>> {
+  const requested = resolve(base, reference)
+  if (!confined(root, requested)) return new Map()
+  const directory = await realpath(requested)
+  if (!confined(root, directory)) return new Map()
+  const files = new Map<string, Uint8Array>()
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (!entry.isFile() || !/\.(?:png|jpe?g|gif|webp|svg|ico|bmp|avif|apng)$/i.test(entry.name)) continue
+    const filename = await realpath(resolve(directory, entry.name))
+    if (confined(root, filename)) files.set(`${reference}/${entry.name}`, new Uint8Array(await readFile(filename)))
+  }
+  return files
 }
 
 /** A missing open source keeps its real binding. Resolve surviving ancestors so
@@ -47,14 +63,31 @@ export async function captureHtmlClosure(input: {
   html: string
   siblingFiles?: ReadonlyMap<string, Uint8Array>
   readRelative?(reference: string): Promise<Uint8Array | undefined>
+  readRelativeDirectory?(reference: string): Promise<ReadonlyMap<string, Uint8Array>>
 }): Promise<ReadHtmlClosureResult> {
   const files = new Map(input.siblingFiles)
   const unreadable = new Map<string, string>()
   const attempted = new Set<string>()
-  let result = extractHtmlResources({ html: input.html, siblingFiles: files })
+  const closedDirectories = new Set<string>()
+  let result = extractHtmlResources({ html: input.html, siblingFiles: files, closedDirectories })
   for (;;) {
     const missing = result.diagnostics.filter(diagnostic => diagnostic.code === 'missing-relative-resource' && diagnostic.reference)
     let added = false
+    for (const diagnostic of result.diagnostics) if (diagnostic.code === 'missing-relative-directory' && diagnostic.reference) {
+      const key = diagnostic.reference
+      if (attempted.has(`directory:${key}`)) continue
+      attempted.add(`directory:${key}`)
+      try {
+        if (!input.readRelativeDirectory) continue
+        for (const [name, bytes] of await input.readRelativeDirectory(key)) {
+          if (!files.has(name)) { files.set(name, bytes); added = true }
+        }
+        closedDirectories.add(key); added = true
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') throw error
+        unreadable.set(key, error instanceof Error ? error.message : String(error))
+      }
+    }
     for (const diagnostic of missing) {
       const key = diagnostic.reference!
       if (files.has(key) || attempted.has(key)) continue
@@ -70,7 +103,7 @@ export async function captureHtmlClosure(input: {
       }
     }
     if (!added) break
-    result = extractHtmlResources({ html: input.html, siblingFiles: files })
+    result = extractHtmlResources({ html: input.html, siblingFiles: files, closedDirectories })
   }
   for (const [reference, message] of unreadable) result.diagnostics.push({ level: 'warning', code: 'resource-read', reference, message: `无法读取相对资源 ${reference}：${message}；原引用与其他可用内容已保留` })
   const references = new Set(result.localReferences)
@@ -92,7 +125,7 @@ export async function readHtmlClosure(input: ReadHtmlClosureInput): Promise<Read
   // An explicit body is content, not proof that a missing path is an open source.
   if (selected.missing && current === undefined) throw selected.missing
   const html = input.sourceHtml ?? current ?? (await readFile(htmlFile)).toString('utf8')
-  return captureHtmlClosure({ html, readRelative: async reference => {
+  return captureHtmlClosure({ html, readRelativeDirectory: reference => readHtmlMediaDirectory(base, root, reference), readRelative: async reference => {
     const filename = resolve(base, reference)
     if (!confined(root, filename)) return undefined
     const target = await resolveSourceInputPath(filename)

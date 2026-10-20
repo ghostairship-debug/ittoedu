@@ -91,18 +91,22 @@ export function retireSupersededObservationMessages(runId: string, messages: rea
   // arrival must never make a spent generation actionable again.
   const latest = ordered.reduce<WorkingObservation | undefined>(successor, undefined)
   if (!latest) return [...messages]
-  const latestForDocument = new Map<string, WorkingObservation>()
+  // Freeze each retired receipt against its first actual successor. Comparing
+  // it with every latest capture rewrote the entire old prefix on every turn.
+  const firstSuccessor = new Map<WorkingObservation, WorkingObservation>()
   for (const observation of ordered) {
-    const documentId = String(observation.identity.documentId)
-    latestForDocument.set(documentId, successor(latestForDocument.get(documentId), observation))
+    const origin = ordered.find(candidate => sameCapture(candidate, observation))!
+    const next = ordered.find(candidate => candidate.index > origin.index
+      && !sameCapture(candidate, observation) && successor(observation, candidate) === candidate)
+    if (next) firstSuccessor.set(observation, next)
   }
   const sourceId = (index: number) => `run:${runId}:${index}`
   return messages.map((message, index) => {
     if (index >= protectedStart) return message
     const observation = observations.get(index)
     if (observation && !sameCapture(observation, latest)) {
-      const successor = latestForDocument.get(String(observation.identity.documentId))!
-      const retiredRevision = observation !== successor && (observation.identity.epoch !== successor.identity.epoch
+      const successor = firstSuccessor.get(observation) ?? observation
+      const retiredRevision = observation.identity.documentId === successor.identity.documentId && observation !== successor && (observation.identity.epoch !== successor.identity.epoch
         || observation.identity.revision !== successor.identity.revision)
       const { elements, structure, elementsPage: _page, ...facts } = observation.data
       // Unique earlier feedback is still task evidence, but its old geometry and
@@ -122,7 +126,7 @@ export function retireSupersededObservationMessages(runId: string, messages: rea
       return { ...message, content: JSON.stringify({ ...observation.result, data: { ...facts,
         observationStatus: 'historical', archivedContext: sourceId(index),
         ...(historicalText.length ? { historicalText } : {}), ...(historicalElements.length ? { historicalElements } : {}),
-        supersededBy: { toolCallId: latest.callId, identity: latest.identity, generation: latest.data.generation },
+        ...(successor !== observation ? { supersededBy: { toolCallId: successor.callId, identity: successor.identity, generation: successor.data.generation } } : {}),
         notice: '历史观察的结构和元素句柄已退役；保留的文字仅为当时独有反馈。完整原回执可用 context.read 按 archivedContext 回读，当前操作使用最新观察。' } }) }
     }
     if (message.role !== 'user' || !Array.isArray(message.content)) return message

@@ -53,6 +53,7 @@ export type EditorState = EditorOwnedState
     openCourseDocument(path: string): Promise<void>
     drainCourseDocument(documentId?: string): Promise<DocumentSnapshot>
     drainAllCourseDocuments(documentIds?: readonly string[]): Promise<DocumentSnapshot[]>
+    flushAllCourseDocuments(documentIds?: readonly string[]): Promise<void>
     undoLatestAgentCourseDocument(): Promise<boolean>
     saveCourseDocument(saveAs?: boolean, directory?: SaveDirectoryContext, documentId?: string): Promise<DocumentSnapshot | null>
     restoreCourseDocument(documentId: string): Promise<void>
@@ -116,6 +117,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
   const retainBeforeNavigation = async (documentId: string) => {
     if (!await courseInputs.prepare([documentId])) throw new Error('当前输入尚未保全，已保留原文档')
   }
+  const flushDocumentDrafts = async (documentIds?: readonly string[]) => {
+    const targets = documentIds ?? courseBridge.read().documents.map(snapshot => snapshot.documentId)
+    for (const id of targets) { await courseInputs.restore(id); await flushDrafts(id) }
+    return targets
+  }
   const drainActive = async (documentId?: string): Promise<DocumentSnapshot> => {
     const id = documentId ?? courseBridge.read().activeDocumentId
     if (!id) throw new Error('当前没有已打开的课件')
@@ -172,10 +178,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
     drainCourseDocument: drainActive,
     async drainAllCourseDocuments(ids) {
-      const targets = ids ?? courseBridge.read().documents.map(snapshot => snapshot.documentId)
-      for (const id of targets) { await courseInputs.restore(id); await flushDrafts(id) }
+      const targets = await flushDocumentDrafts(ids)
       return courseBridge.drain(targets)
     },
+    async flushAllCourseDocuments(ids) { await courseBridge.flushInput(await flushDocumentDrafts(ids)) },
     async undoLatestAgentCourseDocument() {
       const target = courseBridge.captureLatestAgentUndoTarget()
       if (!target) return false

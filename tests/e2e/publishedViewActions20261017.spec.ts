@@ -25,7 +25,7 @@ test('Published observation uses trusted click/fill/range in one persistent task
       returned: 'State: clicks=1; answer=actual input; power=7; trusted=true/true/true',
       secondLocation: 'second', returnedLocation: 'first', sameWorker: true, oneWindowForPages: true,
       repeatedOnlyOnce: true, paintedPower7: true, returnedPaintedPower7: true, newWorkerAfterClose: true, closedTargetRejected: true, spentRejected: true, stopRejected: true,
-      emptyFrameSkipped: true, hostBootstrapWithHtml: true,
+      emptyFrameSkipped: true, hostBootstrapShortUrl: true,
       windowsRestored: true, document: { revision: 0, undoDepth: 0, data: {} } })
     for (const [name, design, image] of [
       ['first', { width: 800, height: 500 }, facts.firstImage],

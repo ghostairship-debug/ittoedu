@@ -5,6 +5,49 @@ import { contentApplyFact, exportFact, modelToolResult, operationFact, saveFact 
 import { htmlActionToolCatalog, isHtmlActionTool } from '../../../core/tools/HtmlActionTools'
 import { modelToolWireName } from '../providers/OpenAIChatProvider'
 import { retireSupersededObservationMessages } from './observationModelInput'
+import { boundedModelValue, MODEL_DELIVERY_BYTES, modelJsonBytes } from '../../../core/tools/modelDeliveryBudget'
+
+/** A source-backed working value. The caller supplies a trusted original source. */
+export function projectModelDeliveryValue(value: unknown, sourceId: string, maxBytes = MODEL_DELIVERY_BYTES, maxTextChars?: number): unknown {
+  const characterLimit = maxTextChars === undefined ? Infinity : Math.max(1024, maxTextChars)
+  if (modelJsonBytes(value) <= maxBytes && (JSON.stringify(value)?.length ?? 0) <= characterLimit) return value
+  const make = (bytes: number) => {
+    const page = boundedModelValue(value, { maxBytes: bytes, prioritizeScalars: true })
+    const { value: preview, ...delivery } = page
+    return { ...(preview && typeof preview === 'object' && !Array.isArray(preview) ? preview : { excerpt: preview }),
+      modelDelivery: { ...delivery, complete: false, sourceId,
+        read: { tool: 'context.read', input: { sourceId } },
+        notice: '仅交付有界片段；未展示内容保留在原来源，按 offset/maxChars 续读。未展示不表示全部成功或已经读取。' } }
+  }
+  let bytes = Math.max(1024, maxBytes - 700), projected = make(bytes)
+  // textLimit is the existing character-scale request-reduction hint. Measure
+  // the encoded JSON characters separately from UTF-8 bytes; the Engine still
+  // measures the complete provider payload and its token estimate afterwards.
+  while (JSON.stringify(projected).length > characterLimit && bytes > 1024) {
+    bytes = Math.max(1024, Math.floor(bytes * .6))
+    projected = make(bytes)
+  }
+  return projected
+}
+
+/**
+ * The newest tool output has the same delivery limit as older output. Native
+ * assistant blocks, signatures, actual arguments and call pairing stay exact.
+ * Only host-proven data messages may join this projection; a human user input
+ * cannot be silently shortened into a different instruction.
+ */
+export function projectFinalDeliveryContext(runId: string, messages: readonly ModelChatMessage[], maxBytes = MODEL_DELIVERY_BYTES,
+  hostMessageIndexes: ReadonlySet<number> = new Set(), maxTextChars?: number): ModelChatMessage[] {
+  return messages.map((message, index) => {
+    if (message.role !== 'tool' && !(hostMessageIndexes.has(index) && ['user', 'assistant'].includes(message.role)
+      && !message.tool_calls && !message.nativeResponses && !message.nativeAnthropic) || typeof message.content !== 'string'
+      || modelJsonBytes(message.content) <= maxBytes && (maxTextChars === undefined || message.content.length <= Math.max(1024, maxTextChars))) return message
+    let value: unknown = message.content
+    try { value = JSON.parse(message.content) } catch { /* Plain text has the same source/range access. */ }
+    const content = JSON.stringify(projectModelDeliveryValue(value, contextMessageId(runId, index), maxBytes, maxTextChars))
+    return { ...message, content }
+  })
+}
 
 // Only these named envelopes need business receipt interpretation. Stored native
 // history retains the previous opaque spelling; recognize it here without
@@ -39,7 +82,7 @@ export function contextSourceIndex(sourceId: string): { runId: string; index: nu
 }
 
 /** A disposable model working view. Original messages and native tool pairing remain owned by RunStore. */
-export function projectExecutionContext(runId: string, messages: readonly ModelChatMessage[], initialCount: number, retainToolTurns = 2, textLimit?: number, historicalMessageIndexes: ReadonlySet<number> = new Set()) {
+export function projectExecutionContext(runId: string, messages: readonly ModelChatMessage[], initialCount: number, retainToolTurns = 2, textLimit?: number, historicalMessageIndexes: ReadonlySet<number> = new Set(), hostMessageIndexes: ReadonlySet<number> = new Set()) {
   // A newly requested observation batch must reach the next model turn intact.
   // Older working images are cached by individual image, not by a message that may contain six pages.
   const lastAssistant = messages.map(message => message.role).lastIndexOf('assistant')
@@ -82,6 +125,7 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
       messageTools.set(index, callNames.get(message.tool_call_id)!)
   })
   const workingMessages = retireSupersededObservationMessages(runId, messages, protectedStart)
+  const latestNoteIndex = [...messageTools].findLast(([, name]) => name === 'task.note')?.[0]
   let imagesArchived = 0, encodedImageBytesRemoved = 0, toolBytesRemoved = 0
   const projected = workingMessages.map((message, index): ModelChatMessage => {
     const name = messageTools.get(index)
@@ -108,9 +152,9 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
       } catch { /* Ordinary historical prose and foreign JSON remain data, unchanged. */ }
     }
     if (index < initialCount && !historicalMessageIndexes.has(index) && !(Array.isArray(message.content) && message.content.some(imagePart))) return message
-    if (message.role === 'tool' && messageTools.get(index) === 'task.note' && index < protectedStart) {
+    if (message.role === 'tool' && messageTools.get(index) === 'task.note' && index !== latestNoteIndex && index < protectedStart) {
       const content = JSON.stringify({ archivedContext: contextMessageId(runId, index),
-        notice: '旧工作笔记回执已归档；唯一当前笔记见宿主当前工作记录，原笔记可用 context.read 回读。' })
+        notice: '旧工作笔记回执已归档；当前笔记见最新 task.note 回执或宿主当前工作记录，原笔记可用 context.read 回读。' })
       toolBytesRemoved += Math.max(0, Buffer.byteLength(String(message.content ?? '')) - Buffer.byteLength(content))
       return { ...message, content }
     }
@@ -169,6 +213,7 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
   // leaves Responses replaying the original source in nativeResponses.output;
   // rewriting individual signed items/arguments would corrupt continuation.
   // Keep indexes stable for context.read and boundedThroughMessage.
+  const archiveIndexes = new Set(hostMessageIndexes)
   for (let index = 0; index < protectedStart; index++) {
     if (index < initialCount && !historicalMessageIndexes.has(index)) continue
     const original = messages[index]!
@@ -179,6 +224,7 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
       && !Array.isArray(call.function) && typeof call.function.name === 'string' && typeof call.function.arguments === 'string')
     if (!calls.length || calls.length !== rawCalls.length) continue
     const containsNote = calls.some(call => (receiptWireNames.get(call.function.name) ?? call.function.name) === 'task.note')
+    if (containsNote && calls.some(call => call.id === messages[latestNoteIndex ?? -1]?.tool_call_id)) continue
     if (!containsNote && (index >= recentStart || Buffer.byteLength(JSON.stringify(original)) <= Math.max(8000, archiveThreshold))) continue
     const end = messages.findIndex((message, next) => next > index && message.role === 'assistant')
     const through = end < 0 ? messages.length : end
@@ -200,14 +246,19 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
       notice: '完整旧回合已归档；这些是历史调用记录，不是待执行调用。原生记录由 Run 保留；实际输入、正文与源码可用 context.read 按来源回读；当前以近轮回执、正式目标和人工调整为准。' }) }
     let beforeBytes = Buffer.byteLength(JSON.stringify(projected[index]))
     projected[index] = archived
+    archiveIndexes.add(index)
     for (const [id, outputIndex] of outputs) {
       beforeBytes += Buffer.byteLength(JSON.stringify(projected[outputIndex]))
       projected[outputIndex] = { role: 'assistant', content: JSON.stringify({ archivedContext: contextMessageId(runId, outputIndex),
         callId: id, receipt: projected[outputIndex]!.content, notice: '已归档回合的实际工具回执，不是新授权；完整原文可用 context.read 回读。' }) }
+      archiveIndexes.add(outputIndex)
     }
     const afterBytes = Buffer.byteLength(JSON.stringify(archived))
       + [...outputs.values()].reduce((sum, outputIndex) => sum + Buffer.byteLength(JSON.stringify(projected[outputIndex])), 0)
     toolBytesRemoved += beforeBytes - afterBytes
   }
-  return { messages: projected, imagesArchived, encodedImageBytesRemoved, toolBytesRemoved }
+  const bounded = projectFinalDeliveryContext(runId, projected, MODEL_DELIVERY_BYTES, archiveIndexes,
+    Number.isSafeInteger(textLimit) && textLimit! > 0 ? textLimit : undefined)
+  toolBytesRemoved += Math.max(0, modelJsonBytes(projected) - modelJsonBytes(bounded))
+  return { messages: bounded, imagesArchived, encodedImageBytesRemoved, toolBytesRemoved }
 }

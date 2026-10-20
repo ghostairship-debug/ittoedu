@@ -13,6 +13,7 @@ import type { PrepareMediaResourcePort } from './mediaResource'
 import type { AssetSource } from '../../shared/contracts/media-v1/types'
 import type { ImageAssetResource } from './imageAssetMetadata'
 import { z } from 'zod'
+import { publicWriteToolResult } from './publicWriteReceipt'
 import { compactToolInputError } from './ToolInputDiagnostic'
 import { componentContainerSchema, componentFrameSchema } from '../../shared/contracts/component-platform/schema'
 import { isSourceDocumentModel, type DocumentCommand, type DocumentDriver, type DocumentSnapshot, type DocumentModel } from '../../shared/workbench/document'
@@ -21,6 +22,7 @@ import type { LocalToolRunIntent, LocalToolRunPreview } from '../../shared/workb
 import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
 import { batchInputSchema, batchInputSchemaFor, canonicalToolRegistration, describeToolFamily, describeTools, familyOfTool, gatewayToolRegistration, mutationCallSchema, mutationNamesIn, selectRunToolNames, toolCatalog, toolEffectTargets, toolFamilies, toolRegistration, visibleRunToolNames, type BatchMutationCall, type InitialToolProfile, type RunToolScope, type ToolFamily } from './ToolCatalog'
+import { viewObserveInputSchema } from '../../shared/workbench/viewObservation'
 import { childTargets, containsTarget, courseAuthorFieldReadPaths, replaceCourseAuthorField, courseInstanceContext, courseInstanceTextTarget, mapMarkdownRange, readTarget, readSemanticTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent, recoverEditableTargetAfterReplacement, prepareHtmlAuthorFieldEdit, mapHtmlAuthorFieldTarget, planTextSelectionReplacement, mapExternalCourseTextTarget } from './ToolTargets'
 import { courseInstancePropertyEdits, courseInstanceConversionEdits, courseInstanceAppearanceEdits, readCourseInstanceAppearance } from './courseInstanceEdits'
 import { formatCourseInstanceText } from './ToolTargets'
@@ -74,6 +76,7 @@ interface Run {
   courseAuthoring?: boolean
   currentCourseDocumentId?: string
   currentHtmlDocumentId?: string
+  currentObservationCarrier?: 'html' | 'course'
   currentDocumentId?: string
   contentTarget?: string
   contentReads: Map<string, { epoch: string; expected: Map<string, ComponentExpectation>; pending?: ComponentExpectation[];
@@ -476,12 +479,21 @@ export class DocumentToolGateway implements ToolGateway {
       && run.grant.fileAccess.permission !== 'read-only'
     const projectFiles = run.grant.fileAccess?.workspaceRoot && this.hostTools.projectFileServices()
       ? run.grant.fileAccess.permission === 'read-only' ? 'read' as const : 'write' as const : undefined
-    const allowed = selectRunToolNames(scopes, { standaloneImage, projectFiles }, {
+    const support = {
       ...this.hostTools.supportContext(), componentContent: !!this.options.componentContent,
       courseAuthoring: run.courseAuthoring, workbenchServices: !!run.grant.fileAccess,
-      fileAccess: run.grant.fileAccess?.permission === 'read-only' ? 'read' : 'write',
-    })
+      fileAccess: run.grant.fileAccess?.permission === 'read-only' ? 'read' as const : 'write' as const,
+    }
+    // Readiness and the current document shape select the initial disclosure only.
+    // Explicit discovery and execution use the registered, connected catalog; the
+    // target/service owners still enforce the frozen grants at actual dispatch.
+    const allowed = toolCatalog.filter(tool => tool.supports(support)).map(tool => tool.name)
+    const initial = new Set(visibleRunToolNames(selectRunToolNames(scopes, { standaloneImage, projectFiles }, support),
+      new Set(), run.initialToolProfile))
     const names = visibleRunToolNames(allowed, run.loadedFamilies, run.initialToolProfile, run.loadedNames)
+      .filter(name => initial.has(name) || run.loadedNames.has(name)
+        || !!familyOfTool(name) && run.loadedFamilies.has(familyOfTool(name)!))
+      .filter(name => name !== 'image.status' || !support.jobs || run.loadedNames.has(name))
     const batchMutationNames = mutationNamesIn(names)
     run.toolScopes = scopes
     const imageRoles = this.hostTools.describeImages(runId)
@@ -524,16 +536,14 @@ export class DocumentToolGateway implements ToolGateway {
     const run = this.run(runId)
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
     const available = await this.availableToolFamilies(runId)
-    for (const name of names) if (!run.advertised!.allowed.has(name))
-      throw new ToolError('not-authorized', `工具 ${name} 不在当前任务的已授权目录中`)
     let changed = false
     // Keep this run's disclosure request when its document has not been created yet.
-    // describeRun still intersects it with the current allowed catalog and grants.
+    // describeRun still intersects it with the connected canonical catalog.
     for (const family of families) if (!run.loadedFamilies.has(family)) {
       run.loadedFamilies.add(family)
       if (available.some(item => item.family === family)) changed = true
     }
-    for (const name of names) if (!run.loadedNames.has(name)) {
+    for (const name of names) if (run.advertised!.allowed.has(name) && !run.loadedNames.has(name)) {
       run.loadedNames.add(name)
       changed = true
     }
@@ -1290,6 +1300,7 @@ export class DocumentToolGateway implements ToolGateway {
     })
   }
   private capture(runId: string, snapshot: DocumentSnapshot, target: ToolTarget, writable: boolean, readOnly?: boolean): string {
+    if (this.run(runId).stopped) throw new ToolError('run-stopped', '任务已停止，不再分配新的读取句柄')
     const value = this.createId()
     // Encode every UUID byte; opaque references need not carry its verbose display format.
     const token = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(value)
@@ -1595,9 +1606,10 @@ export class DocumentToolGateway implements ToolGateway {
       }
       if (input.name === 'file.save' || input.name === 'document.export' || input.name === 'project.save') {
         const imported = await this.hostTools.lookup(runId, operationId, digest, input.name === 'project.save' ? 'file.save' : input.name)
-        if (imported) return imported
+        if (imported) return publicWriteToolResult(input.name, imported)
       }
-      return this.findReceipt(runId, operationId, digest) ?? await this.hostTools.lookup(runId, operationId, digest, input.name)
+      const found = this.findReceipt(runId, operationId, digest) ?? await this.hostTools.lookup(runId, operationId, digest, input.name)
+      return found && publicWriteToolResult(input.name, found)
     } catch (error) { return this.error(error) }
   }
 
@@ -2020,7 +2032,8 @@ export class DocumentToolGateway implements ToolGateway {
       if (!this.run(runId).stopped) this.callDigests.set(key, { runId, digest, retain: toolRegistration(input.name)?.effect !== null })
       const pending = this.pending.get(key)
       if (pending) return pending.digest === digest ? pending.result : Promise.resolve({ kind: 'error', code: 'operation-payload-mismatch', message: '同一调用编号不能提交不同内容' })
-      const result = (perform ? perform(operationId, digest, call) : this.invoke(runId, operationId, digest, call, input)).catch(error => this.error(error, call))
+      const result = (perform ? perform(operationId, digest, call) : this.invoke(runId, operationId, digest, call, input))
+        .catch(error => this.error(error, call)).then(value => publicWriteToolResult(input.name, value))
       this.pending.set(key, { digest, result })
       void result.finally(() => {
         this.pending.delete(key)
@@ -2033,14 +2046,15 @@ export class DocumentToolGateway implements ToolGateway {
     if (error instanceof z.ZodError) return compactToolInputError(error, call)
     // Renderer / VM rejections can carry a real Error from another realm.
     // Preserve its diagnostic fields without serializing the unknown payload.
-    const foreign = error && typeof error === 'object' ? error as { message?: unknown; code?: unknown } : undefined
+    const foreign = error && typeof error === 'object' ? error as { message?: unknown; code?: unknown; actionReceipt?: unknown } : undefined
     const foreignMessage = typeof foreign?.message === 'string' && foreign.message.trim() ? foreign.message : undefined
     const message = error instanceof Error ? error.message
       : typeof error === 'string' && error.trim() ? error : foreignMessage ?? '工具操作失败'
     const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code
         : foreignMessage && typeof foreign?.code === 'string' ? foreign.code : 'invalid-operation'
     return { kind: 'error', code, message,
-      ...(error instanceof ToolError && error.data !== undefined ? { data: error.data } : {}) }
+      ...(error instanceof ToolError && error.data !== undefined ? { data: error.data }
+        : foreign?.actionReceipt ? { data: { actionReceipt: foreign.actionReceipt } } : {}) }
   }
 
   /** Host-only task facts; old task handles are never reused as current authorization. */
@@ -2131,15 +2145,14 @@ export class DocumentToolGateway implements ToolGateway {
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
     if (!run.advertised) await this.describeRun(runId)
     const advertised = run.advertised!
-    if (!advertised.allowed.has(call.name)) throw new ToolError('not-authorized', '此工具不在当前任务的授权或已配置能力中')
+    const definition = toolCatalog.find(tool => tool.name === call.name)
+    if (!definition) throw new ToolError('unsupported-tool', `未注册工具 ${call.name}；请使用工具目录中的名称`)
+    if (!advertised.allowed.has(call.name)) throw new ToolError('service-unavailable', `工具 ${call.name} 的宿主服务未接通或当前文件授权不支持此服务`)
     if (call.name === 'batch') this.parseAllowedBatch(run, call.input)
-    const family = familyOfTool(call.name)
-    if (family && !advertised.names.has(call.name)) {
-      run.loadedFamilies.add(family)
+    if (!advertised.names.has(call.name)) {
+      run.loadedNames.add(call.name)
       this.catalogChanged(runId)
     }
-    const definition = toolCatalog.find(tool => tool.name === call.name)
-    if (!definition) throw new ToolError('unsupported-tool', '此工具尚未接入正式 Gateway')
     if (call.name === 'course.importPptx') return pptxImportRegistration.handler({ import: async input => {
       const result = await this.hostTools.importPptx(runId, operationId, requestDigest, input)
       if (result.kind !== 'read' || !result.data || typeof result.data !== 'object') return result
@@ -2152,6 +2165,11 @@ export class DocumentToolGateway implements ToolGateway {
     } }, call.input)
     const viewAction = viewActionToolRegistration(call.name)
     if (viewAction) return viewAction.handler({ execute: async (name, input) => {
+      if (run.currentHtmlDocumentId && run.currentObservationCarrier === 'html') {
+        const snapshot = await this.registry.get(run.currentHtmlDocumentId).drain()
+        this.authorizeDocument(run, snapshot)
+        return this.hostTools.executeHtmlAction(runId, snapshot, { name: name === 'view.click' ? 'html.click' : 'html.input', input, operationId })
+      }
       const identity = this.hostTools.viewActionIdentity(runId)
       if (!identity) throw new ToolError('observation-required', '请先观察当前课件页面，再操作返回的元素句柄')
       const snapshot = await this.registry.get(identity.documentId).drain()
@@ -2169,8 +2187,44 @@ export class DocumentToolGateway implements ToolGateway {
         ?? candidates.find(value => value.documentId === run.grant.contentOutput?.documentId) ?? (candidates.length === 1 ? candidates[0] : undefined)
       if (!snapshot) throw new ToolError('html-target-required', '请先通过 file.open 明确本任务要观察的 HTML 文件')
       this.authorizeDocument(run, snapshot)
-      return this.hostTools.executeHtmlAction(runId, snapshot, { name, input, operationId })
+      const result = await this.hostTools.executeHtmlAction(runId, snapshot, { name, input, operationId })
+      if (result.kind === 'read' && name !== 'html.errors') {
+        run.currentHtmlDocumentId = snapshot.documentId
+        run.currentObservationCarrier = 'html'
+      }
+      return result
     } }, call.input)
+    if (call.name === 'view.observe') {
+      const input = viewObserveInputSchema.parse(call.input)
+      let snapshot: DocumentSnapshot | undefined
+      if ('target' in input) {
+        const target = await this.resolveObservationTarget(runId, input.target)
+        snapshot = await this.registry.get(target.documentId).drain()
+      } else {
+        const documents = await Promise.all(run.grant.documents.map(document => this.registry.get(document.documentId).drain()))
+        const html = documents.filter(document => isSourceDocumentModel(document.model)
+          && document.binding.kind === 'file' && /\.html?$/i.test(document.binding.path))
+        if ('path' in input && !input.project) {
+          const normalized = (path: string) => path.replace(/\\/g, '/').toLowerCase()
+          snapshot = html.find(document => document.binding.kind === 'file' && normalized(document.binding.path) === normalized(input.path))
+        } else if (!('path' in input)) snapshot = html.find(document => document.documentId === run.currentHtmlDocumentId)
+          ?? (documents.length === 1 ? html[0] : undefined)
+      }
+      if (snapshot && isSourceDocumentModel(snapshot.model) && snapshot.binding.kind === 'file' && /\.html?$/i.test(snapshot.binding.path)) {
+        this.authorizeDocument(run, snapshot)
+        const { query, offset, limit, cursor, purpose, detail, clip } = input
+        if (clip) throw new ToolError('unsupported-clip', 'HTML 观察当前不接受 clip；省略 clip 获取实际 viewport 画面')
+        const result = await this.hostTools.executeHtmlAction(runId, snapshot, { name: 'html.observe', operationId,
+          input: { query, offset, limit, cursor, purpose, detail: detail === 'high' ? 'full' : 'overview' } })
+        if (result.kind === 'read') {
+          run.currentHtmlDocumentId = snapshot.documentId
+          run.currentObservationCarrier = 'html'
+        }
+        return result
+      }
+      if (!('target' in input) && !('path' in input))
+        throw new ToolError('observation-target-required', '请提供页面 target/path，或先 file.open 明确要观察的 HTML 文件')
+    }
     const office = officeToolRegistration(call.name)
     if (office) return office.handler({ runId, operationId, host: this.hostTools }, call.input)
     const material = materialToolRegistration(call.name)
@@ -2200,7 +2254,8 @@ export class DocumentToolGateway implements ToolGateway {
       return result
     } }, call.input)
     const service = workbenchServiceRegistration(call.name)
-    if (service) return service.handler({
+    if (service) {
+      const result = await service.handler({
       runId, operationId, host: this.hostTools,
       fetchImage: input => this.fetchOpenImage(runId, operationId, requestDigest, input),
       useAsset: input => this.useLibraryComponent(runId, operationId, requestDigest, input),
@@ -2208,7 +2263,20 @@ export class DocumentToolGateway implements ToolGateway {
       importAsset: input => this.hostTools.changeLibrary(runId, operationId, { kind: 'import', ...input }),
       deleteAsset: input => this.hostTools.changeLibrary(runId, operationId, { kind: 'delete', ...input }),
       updateAsset: input => this.updateLibraryComponent(runId, operationId, requestDigest, input),
-    }, call.input)
+      }, call.input)
+      const job = (call.input as { job?: string } | null)?.job
+      if ((call.name === 'job.status' || call.name === 'job.wait') && job && this.imageApplications.has(job)
+        && result.kind === 'read' && result.data && typeof result.data === 'object') {
+        const image = await this.invokeImageTool(runId, operationId + ':image-status', requestDigest,
+          { name: 'image.status', input: { job } })
+        if (image.kind === 'read' && image.data && typeof image.data === 'object') {
+          const { generation, application, save } = image.data as Record<string, unknown>
+          const data = result.data as Record<string, unknown>
+          return { ...result, data: { ...data, snapshot: { ...(data.snapshot as object), generation, application, save } } }
+        }
+      }
+      return result
+    }
     const gateway = gatewayToolRegistration(call.name)
     if (gateway) return gateway.handler({
       readTarget: (name, input) => this.read(runId, name, input),
@@ -2239,7 +2307,8 @@ export class DocumentToolGateway implements ToolGateway {
         return result
       },
       listSkills: input => this.hostTools.listSkills(runId, input),
-      observe: input => this.hostTools.observePage({ runId, operationId,
+      observe: async input => {
+        const result = await this.hostTools.observePage({ runId, operationId,
       resolveFileTarget: async (selector, path) => {
         const snapshot = await this.componentProjectDocument(runId, selector, 'read')
         const project = snapshot.model.project
@@ -2273,7 +2342,10 @@ export class DocumentToolGateway implements ToolGateway {
             projectId: project.id, locationId: surface.id, stateId }
         }
         return null
-      } }, input),
+        } }, input)
+        if (result.kind === 'read') run.currentObservationCarrier = 'course'
+        return result
+      },
       deliverDocument: (name, input) => this.hostTools.deliverDocument({ runId, operationId, requestDigest,
         resolveHandle: handle => this.currentDeliveryDocument(runId, handle) }, name, input),
       batch: mutations => this.dispatchCanonicalMutations(runId, operationId, requestDigest, mutations, originalCall.input),
@@ -3109,7 +3181,7 @@ export class DocumentToolGateway implements ToolGateway {
       const cursor = this.cursors.get(input.cursor)
       const identity = this.readIdentity(runId, snapshot, target)
       if (!cursor || cursor.runId !== identity.runId || cursor.documentId !== identity.documentId || cursor.epoch !== identity.epoch
-        || cursor.revision !== identity.revision || cursor.target !== identity.target || cursor.method !== method || cursor.digest !== digest) throw new ToolError('stale-cursor', '分页内容已改变，请从首页重新读取')
+        || cursor.revision !== identity.revision || cursor.target !== identity.target || cursor.method !== method || cursor.digest !== digest) throw new ToolError('stale-cursor', 'cursor 无效或内容已改变；省略 cursor 从首页读取，续读使用该回执的 nextCursor')
       offset = cursor.offset
     }
     const refreshed = this.refreshReadHandle(handle, snapshot, target)

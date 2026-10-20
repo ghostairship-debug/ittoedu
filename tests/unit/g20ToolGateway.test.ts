@@ -34,7 +34,11 @@ describe('G20 tool catalog and target mapping', () => {
     expect(describeTools(['component.package'])).toEqual([])
     expect(describeTools(['object.insert'])).toHaveLength(1)
     const insertion = describeTools(['object.insert'])[0].schema
-    expect(insertion.properties).toMatchObject({ target: { type: 'string' }, kind: { enum: expect.arrayContaining(['text', 'table', 'chart', 'input']) } })
+    const variants = insertion.anyOf as Record<string, any>[]
+    const handleVariant = variants[0]!.$ref ? (insertion.$defs as Record<string, any>)[variants[0]!.$ref.slice('#/$defs/'.length)] : variants[0]
+    const resolve = (field: any) => field.$ref ? (insertion.$defs as Record<string, any>)[field.$ref.slice('#/$defs/'.length)] : field
+    expect(resolve(handleVariant.properties.target)).toMatchObject({ type: 'string' })
+    expect(resolve(handleVariant.properties.kind)).toMatchObject({ enum: expect.arrayContaining(['text', 'table', 'chart', 'input']) })
     expect(Object.keys(insertion.properties ?? {})).not.toContain('id')
     const surface = { kind: 'course-surface' as const, surfaceId: 'flow', stateId: 'current' }
     expect(containsTarget(surface, { ...surface, surfaceId: 'other' })).toBe(false)

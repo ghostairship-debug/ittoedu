@@ -14,6 +14,7 @@ import { hasWebContentData } from '../../../components/web/sourcePreparation'
 import type { WebData } from '../../../components/web/data'
 import { collectWebNetworkResourceFacts } from '../../../components/web/resources'
 import type { ComponentCompilationDiagnostic, ComponentCompilationInput, ComponentCompilationResult } from '../../components/compilation/types'
+import { prepareBrowserScripts } from './prepareBrowserScripts'
 
 export interface ComponentPublishDiagnostic {
   code: 'asset-bytes-missing' | 'asset-url-unusable' | 'source-not-compiled' | 'source-compile-failed' | 'source-compile-warning' | 'online-remote-asset' | 'network-dependency' | 'asset-encoding-warning'
@@ -173,6 +174,10 @@ export async function buildPublishedCourseV3(
           runtimeInstance = { ...runtimeInstance, data: { ...data,
             ...(publishedModuleBundle ? { publishedModuleBundle } : {}),
             ...(Object.keys(publishedDocumentBundles).length ? { publishedDocumentBundles } : {}),
+          } as unknown as JsonObject }
+          const preparedData = runtimeInstance.data as unknown as WebRuntimeData
+          runtimeInstance = { ...runtimeInstance, data: { ...preparedData,
+            html: await prepareBrowserScripts(preparedData.html, input => compilation.compile(input, options.signal, options.onProgress), issue => { note(issue) }),
           } as unknown as JsonObject }
         }
         else if (webModuleCompilationInput(instance.data as WebData)) diagnostics.push({

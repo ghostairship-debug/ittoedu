@@ -120,6 +120,7 @@ describe('G20 acknowledged document projection', () => {
     expect((await first).status).toBe('conflict')
     expect(await second).toBeInstanceOf(Error)
     await expect(projection.drain()).rejects.toThrow()
+    await expect(projection.flushInput()).rejects.toThrow()
     await projection.reattach()
     expect(projection.read().pending).toHaveLength(2)
     expect(source(projection.read().draft)).toBe('local final')

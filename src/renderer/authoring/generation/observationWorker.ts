@@ -78,8 +78,16 @@ export async function renderObservationSnapshot(input: ObservationWorkerInput): 
     fontFaceCss: installedBundledFontFaceCss(document),
     initialSurfaceId: input.locationId, initialStateId: input.stateId ?? null, report: message => diagnostics.push(message),
     componentBootstrap: input.bootstrapBaseUrl ? {
-      async createComponentBootstrap({ leaseId, html }) { const url = new URL(encodeURIComponent(leaseId), input.bootstrapBaseUrl); url.searchParams.set('html', html); return { leaseId, url: url.href } },
-      async releaseComponentBootstrap() {},
+      async createComponentBootstrap({ leaseId, html }) {
+        const url = new URL(encodeURIComponent(leaseId), input.bootstrapBaseUrl)
+        const response = await fetch(url, { method: 'POST', body: html, credentials: 'omit', headers: { 'Content-Type': 'text/plain;charset=UTF-8' } })
+        if (!response.ok) throw new Error(`组件观察内容准备失败（${response.status}）`)
+        return { leaseId, url: url.href }
+      },
+      async releaseComponentBootstrap({ leaseId }) {
+        const response = await fetch(new URL(encodeURIComponent(leaseId), input.bootstrapBaseUrl), { method: 'DELETE', credentials: 'omit' })
+        if (!response.ok) throw new Error(`组件观察内容清理失败（${response.status}）`)
+      },
     } : undefined })
   try {
     if (input.interactive) {

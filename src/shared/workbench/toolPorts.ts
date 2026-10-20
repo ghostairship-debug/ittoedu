@@ -60,6 +60,8 @@ export interface NativeDelegationIntent {
   sharedBrief?: string
   /** A context preference, never a separate permission or permanent tool restriction. */
   role?: string
+  /** Omit to inherit the parent's frozen selection. Main resolves only configured connections. */
+  model?: import('./executionSettings').ExecutionRoleSelection
   outputs: string[]
 }
 /** Explicit continuation uses the child's own history; the job owner is resolved by the host. */
@@ -168,7 +170,16 @@ export interface ObservationServicePort {
   readResource(input: { runId: string; resourceId: string }): Promise<{ mimeType: string; bytes: Uint8Array }>
 }
 
+export interface ActionReceiptFacts {
+  operationId?: string
+  dispatch: 'not_dispatched' | 'dispatched'
+  application: 'not_applied' | 'applied' | 'unknown'
+  goal: 'achieved' | 'mismatch' | 'unverified'
+  observation: 'not_requested' | 'complete' | 'failed'
+}
+
 export type ObservationResult = {
+  actionReceipt?: ActionReceiptFacts
   source: 'live' | 'isolated-published'
   identity: { documentId: string; epoch: string; revision: number; locationId: string; stateId?: string | null; viewGeneration?: string }
   coverage: { width: number; height: number; viewport?: { width: number; height: number };

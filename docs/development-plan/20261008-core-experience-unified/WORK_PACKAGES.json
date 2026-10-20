@@ -1383,8 +1383,8 @@
       "preserve_current_task_state": true,
       "preserve_fee_host_release_pauses": true,
       "reports": [
-        "AI创作与修改核心链路审查汇总报告-2026-10-08.md",
-        "果铃_全会话综合评估与优先级建议_2026-10-08_GPT.md"
+        "docs/archive/AI创作与修改核心链路审查汇总报告-2026-10-08.md",
+        "docs/archive/果铃_全会话综合评估与优先级建议_2026-10-08_GPT.md"
       ],
       "evidence_boundary": "Reports and current plan read in full; selected direct source owners statically checked. No product edits, product tests, paid model calls, GUI restart or independent new product review in this planning turn.",
       "deferred_office_only": [

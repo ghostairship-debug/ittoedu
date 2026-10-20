@@ -9,6 +9,7 @@ import { spatialSemanticVisible } from '../../surfaces/spatial/componentPlatform
 import type { ComponentMotionPort, ComponentMotionTask } from '../../../shared/contracts/component-platform/motion'
 import { isGlobalTeacherController } from '../../../shared/teacherControllerViewportGeometry'
 import { componentAudioSounds } from '../../../shared/componentAudioSounds'
+import { resolveComponentEase } from './componentEasing'
 
 type ActionContext = Parameters<ComponentInteractionPorts['executeAction']>[1]
 type TriggerListener = Parameters<ComponentInteractionPorts['subscribeTrigger']>[1]
@@ -433,7 +434,7 @@ export class ComponentWorldInteractions {
           let easing = action.transition?.ease
           const css = world.document()?.defaultView?.CSS
           if (duration > 0 && easing && !css?.supports('animation-timing-function', easing)) {
-            const Phaser = await import('phaser'), curve = Phaser.Tweens.Builders.GetEaseFunction(easing)
+            const curve = resolveComponentEase(easing)
             easing = `linear(${Array.from({ length: 101 }, (_, index) => curve(index / 100)).join(',')})`
           }
           if (actionContext.signal.aborted || !active()) return false

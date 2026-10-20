@@ -11,6 +11,8 @@ let bundled: Promise<string> | undefined
 async function fixture() {
   bundled ??= build({ stdin: { contents: `
     export {preparePublishedNativeComponent} from './src/player/components/runtime/SandboxComponentRuntime';
+    export {resolveWebResourceBindings} from './src/components/web/resources';
+    export {webRuntimeResourceAddress} from './src/components/web/resourceUrlLease';
     export {webContentRealmSource} from './src/components/web/contentRealmImplementation';`, resolveDir: process.cwd(), loader: 'ts' },
     bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'OffscreenSandbox', target: 'es2022',
     plugins: [{ name: 'raw', setup(plugin) {
@@ -57,6 +59,108 @@ async function record(name: string, value: unknown) {
   const directory = resolve('output/repair-offscreen-20261013/sandbox')
   await mkdir(directory, { recursive: true }); await writeFile(join(directory, `${name}.json`), JSON.stringify(value, null, 2))
 }
+
+it('prepares opaque parser resource URLs once, preserves parser scripts and exposes the formal navigation promise', async () => {
+  const f = await fixture()
+  try {
+    await f.page.evaluate(async () => {
+      const q = (window as any).__offscreenSandbox, api = (window as any).OffscreenSandbox
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 8
+      const paint = canvas.getContext('2d')!; paint.fillStyle = '#e24432'; paint.fillRect(0, 0, 8, 8)
+      q.resources = { picture: canvas.toDataURL('image/png') }
+      q.instance = { id: 'source', definitionId: 'web', data: {
+        html: '<!doctype html><html><head><script>window.navigationPromiseEarly=courseNavigationReady instanceof Promise;courseNavigationReady.then(port=>window.formalNavigation=port);window.scriptImage=new Image();scriptImage.src="cw-resource:picture";</script></head><body><img id="picture" src="cw-resource:picture"><button onclick="this.textContent=\'clicked\'">click</button></body></html>',
+        css: 'body{background:#fff}', resourceBindings: { 'cw-resource:picture': 'picture' },
+      } }
+      const nested = '<!doctype html><html><head><script>window.scriptImage=new Image();scriptImage.src="cw-resource:picture";</script></head><body><img id="picture" src="cw-resource:picture"></body></html>'
+      q.instance.data.html = q.instance.data.html.replace('</body>', `<iframe id="nested" srcdoc="${nested.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></iframe></body>`)
+      q.prepared = await api.preparePublishedNativeComponent({ format: 'esm', code: api.webContentRealmSource(), css: '', diagnostics: [] }, q.abort.signal,
+        { state: () => ({}), targets: () => [], builtinKey: 'guoling.web', nativeDocument: true, teacherController: q.teacher,
+          resources: () => q.resources, instance: (value: any) => api.resolveWebResourceBindings(value, api.webRuntimeResourceAddress) })
+      q.mounted = await q.prepared.implementation.mount({ root: document.getElementById('source'), instance: q.instance, scope: q.scope, teacherController: q.teacher })
+    })
+    const child = f.page.frameLocator('#source iframe')
+    await expect.poll(() => child.locator('#picture').evaluate((node: HTMLImageElement) => node.naturalWidth)).toBe(8)
+    const first = await child.locator('#picture').evaluate(async (node: HTMLImageElement) => {
+      const scope = window as any
+      if (!scope.scriptImage.complete) await new Promise(done => scope.scriptImage.onload = done)
+      return { url: node.src, scriptUrl: scope.scriptImage.src, scriptWidth: scope.scriptImage.naturalWidth,
+        marker: node.getAttribute('data-component-resource-bindings'), early: scope.navigationPromiseEarly,
+        navigation: await scope.formalNavigation.execute({ type: 'scene.go', sceneId: 'B' }) }
+    })
+    expect(first.url).toMatch(/^blob:/); expect(first.scriptUrl).toBe(first.url); expect(first.scriptWidth).toBe(8)
+    expect(first.marker).not.toContain('data:image'); expect(first.early).toBe(true); expect(first.navigation).toBe(true)
+    const nested = child.frameLocator('#nested')
+    await expect.poll(() => nested.locator('#picture').evaluate((node: HTMLImageElement) => node.naturalWidth)).toBe(8)
+    const firstNested = await nested.locator('#picture').evaluate((node: HTMLImageElement) => ({ url: node.src, scriptUrl: (window as any).scriptImage.src }))
+    expect(firstNested.url).toMatch(/^blob:/); expect(firstNested.scriptUrl, JSON.stringify({ first, firstNested })).toBe(firstNested.url); expect(firstNested.url).not.toBe(first.url)
+    await child.getByRole('button', { name: 'click', exact: true }).click()
+    expect(await child.getByRole('button').textContent()).toBe('clicked')
+    await f.page.evaluate(() => {
+      const q = (window as any).__offscreenSandbox, canvas = document.createElement('canvas'); canvas.width = canvas.height = 10
+      const paint = canvas.getContext('2d')!; paint.fillStyle = '#2385c4'; paint.fillRect(0, 0, 10, 10)
+      q.resources = { picture: canvas.toDataURL('image/png') }
+      for (const listener of q.events.get('__runtime.resources') ?? []) listener(q.resources)
+    })
+    await expect.poll(() => child.locator('#picture').evaluate((node: HTMLImageElement) => node.naturalWidth)).toBe(10)
+    await expect.poll(() => nested.locator('#picture').evaluate((node: HTMLImageElement) => node.naturalWidth)).toBe(10)
+    const changedNested = await nested.locator('#picture').evaluate((node: HTMLImageElement) => node.src)
+    const changedRoot = await child.locator('#picture').evaluate((node: HTMLImageElement) => node.src)
+    expect(changedNested).not.toBe(firstNested.url)
+    expect(changedNested).not.toBe(changedRoot)
+    await f.page.evaluate(async () => { const q = (window as any).__offscreenSandbox; await q.mounted.update(q.instance) })
+    expect(await child.locator('#picture').evaluate((node: HTMLImageElement) => node.src)).toBe(changedRoot)
+    expect(await child.getByRole('button').textContent()).toBe('clicked')
+    expect(f.errors).toEqual([])
+  } finally { await f.close() }
+})
+
+it('restores a Source image edit after a fresh realm when resources.url used an asset ID without token bindings', async () => {
+  const f = await fixture()
+  try {
+    await f.page.evaluate(async () => {
+      const q = (window as any).__offscreenSandbox, api = (window as any).OffscreenSandbox
+      const canvas = document.createElement('canvas'), paint = canvas.getContext('2d')!
+      canvas.width = canvas.height = 8; paint.fillStyle = '#c43'; paint.fillRect(0, 0, 8, 8)
+      const first = canvas.toDataURL('image/png')
+      canvas.width = canvas.height = 10; paint.fillStyle = '#38c'; paint.fillRect(0, 0, 10, 10)
+      q.resources = { first, picture: first, replacement: canvas.toDataURL('image/png') }; q.spots = []
+      q.authoring = { register(input: any) { q.spots.push(input); return () => {} } }
+      q.instance = { id: 'source', definitionId: 'source', data: {} }
+      q.artifact = { format: 'esm', css: '', diagnostics: [], code: 'export default {mount({root,resources}){const image=document.createElement("img");image.id="source-image";image.src=resources.url("picture");root.append(image);return{update(){},dispose(){}}}}' }
+      q.prepare = () => api.preparePublishedNativeComponent(q.artifact, q.abort.signal, { state: () => ({}), targets: () => [], resources: () => q.resources, htmlAuthoring: true })
+      q.prepared = await q.prepare()
+      q.mounted = await q.prepared.implementation.mount({ root: document.getElementById('source'), instance: q.instance, scope: q.scope, authoring: q.authoring })
+    })
+    const child = f.page.frameLocator('#source iframe')
+    await expect.poll(() => child.locator('#source-image').evaluate((node: HTMLImageElement) => node.naturalWidth)).toBe(8)
+    await expect.poll(() => f.page.evaluate(() => (window as any).__offscreenSandbox.spots.some((spot: any) => spot.kind === 'image'))).toBe(true)
+    const baseline = await f.page.evaluate(() => (window as any).__offscreenSandbox.spots.find((spot: any) => spot.kind === 'image').binding.baseline)
+    expect(baseline).toBe('picture')
+    await f.page.evaluate(async () => {
+      const q = (window as any).__offscreenSandbox, spot = q.spots.find((spot: any) => spot.kind === 'image')
+      q.instance.authoring = JSON.parse(JSON.stringify({ records: { [spot.authorKey]: { kind: 'image', binding: spot.binding, overrides: { src: 'replacement' } } } }))
+      await q.mounted.dispose(); await q.prepared.release(); q.spots = []
+      q.prepared = await q.prepare()
+      q.mounted = await q.prepared.implementation.mount({ root: document.getElementById('source'), instance: q.instance, scope: q.scope, authoring: q.authoring })
+    })
+    await expect.poll(() => child.locator('#source-image').evaluate((node: HTMLImageElement) => node.naturalWidth)).toBe(10)
+    // Existing supported records saved before short runtime URLs used the
+    // original data URL as both baseline and resource override.
+    await f.page.evaluate(async () => {
+      const q = (window as any).__offscreenSandbox
+      const records = JSON.parse(JSON.stringify(q.instance.authoring.records))
+      const record = records[Object.keys(records)[0]]
+      record.binding.baseline = q.resources.picture; record.overrides.src = q.resources.replacement
+      q.instance.authoring = { records }
+      await q.mounted.dispose(); await q.prepared.release(); q.spots = []
+      q.prepared = await q.prepare()
+      q.mounted = await q.prepared.implementation.mount({ root: document.getElementById('source'), instance: q.instance, scope: q.scope, authoring: q.authoring })
+    })
+    await expect.poll(() => child.locator('#source-image').evaluate((node: HTMLImageElement) => node.naturalWidth)).toBe(10)
+    expect(f.errors).toEqual([])
+  } finally { await f.close() }
+})
 
 it('retains the Source realm across cooperative suspend/resume, replays activity during async mount, and rejects sleeping teacher commands', async () => {
   const f = await fixture()

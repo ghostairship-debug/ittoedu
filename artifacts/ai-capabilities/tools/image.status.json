@@ -1,5 +1,5 @@
 {
-  "description": "查询本任务图片状态；ready 返回已校验的本任务图片资源身份，不返回 base64 或临时 URL。",
+  "description": "读取已有图片任务的兼容入口；新流程使用 job.status/job.wait。ready 返回可应用的图片资源引用，不返回 base64 或临时 URL。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,

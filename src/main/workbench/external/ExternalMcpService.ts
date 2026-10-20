@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { boundedModelValue, MODEL_DELIVERY_BYTES, modelJsonBytes } from '../../../core/tools/modelDeliveryBudget'
 import path from 'node:path'
 import { z } from 'zod'
 import type { DocumentRegistry } from '../../../core/documents/DocumentRegistry'
@@ -8,20 +9,25 @@ import { applicationEventFacts, committedFact, contentApplyFact, currentSave, mo
 import { AgentFileMissingParent, agentFileMutationNames, agentFileTools, isAgentFileTool, type AgentFileContext, type AgentFileMutationName,
   type AgentFileOutcome, type AgentFileToolName } from '../../../core/tools/AgentFileTools'
 import { createCourseFromHtmlInputSchema, createCourseFromHtmlTool } from '../../../core/tools/HtmlImportTools'
-import { toolFamilies, toolRegistration } from '../../../core/tools/ToolCatalog'
+import { familyOfTool, toolRegistration } from '../../../core/tools/ToolCatalog'
+import { workbenchServiceSchemas } from '../../../core/tools/WorkbenchServiceTools'
 import { isInsideRoot, permissionLabels, type ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
 import type { ExecutionEventInput } from '../../../shared/workbench/executionEvents'
 import { externalMcpEndpoint, type ExternalMcpSettings, type ExternalMcpState, type ExternalMcpStatus,
   type ExternalSessionView, type ExternalUiState } from '../../../shared/workbench/external'
 import type { ModelToolCall, ToolResult } from '../../../shared/workbench/tools'
+import type { LocalToolRunIntent, LocalToolRunPreview } from '../../../shared/workbench/toolPorts'
 import type { ConversationStore } from '../conversations/ConversationStore'
-import { loadToolsDefinition } from '../execution/ExecutionEngine'
+import { loadToolsDefinition, loadToolsSchema } from '../execution/ExecutionEngine'
 import { createCourseFromHtml } from '../htmlImport/CreateCourseFromHtml'
 import { McpProtocolError, ResidentMcpServer, type ResidentMcpCall, type ResidentMcpClientInfo, type ResidentMcpHandler } from './ResidentMcpServer'
 import type { ResidentMcpSettingsStore } from './ResidentMcpSettings'
 import type { ExecutionEventPendingState } from '../execution/ExecutionEventStore'
 
-export interface ExternalApproval { clientName: string; label: string; reason: 'ask' | 'outside-workspace'; paths?: readonly string[] }
+export interface ExternalApproval {
+  clientName: string; label: string; reason: 'ask' | 'outside-workspace'; paths?: readonly string[]
+  local?: LocalToolRunPreview & Pick<LocalToolRunIntent, 'stdin' | 'timeoutMs'>
+}
 export interface ExternalFilePort {
   execute(context: AgentFileContext, name: AgentFileToolName, raw: unknown, operationId: string): Promise<AgentFileOutcome>
   preflightMutation(context: AgentFileContext, name: AgentFileMutationName, raw: unknown): Promise<{ paths: string[]; outside: boolean }>
@@ -78,18 +84,20 @@ interface Session {
 }
 
 const STOPPED = '此外部会话已被用户在果铃中停止，后续调用不会执行。如需继续，请在客户端重新连接（重新初始化 MCP 会话）。'
-const loadToolsSchema = z.object({ families: z.array(z.enum(toolFamilies)).min(1) }).strict()
 const serviceSchemas = {
   'workspace.list': z.object({}).strict(),
   'workspace.switch': z.object({ workspaceId: z.string().min(1) }).strict(),
   'workbench.state': z.object({}).strict(),
   'operation.recent': z.object({ limit: z.number().int().min(1).optional() }).strict(),
+  'operation.read': z.object({ ticket: z.string().min(1), path: z.array(z.union([z.string(), z.number().int().nonnegative()])).optional(),
+    offset: z.number().int().nonnegative().optional(), limit: z.number().int().positive().optional() }).strict(),
 }
 const serviceTools: HostTool[] = [
   { name: 'workspace.list', label: '列出工作空间', description: '列出果铃中已登记的工作空间及本会话当前绑定的空间。', read: true },
   { name: 'workspace.switch', label: '切换工作空间', description: '把本会话切换到另一个已登记的工作空间。之前打开的文档句柄随之失效，需在新空间按路径重新打开。', read: true },
   { name: 'workbench.state', label: '查看当前界面', description: '只读：用户在果铃中当前打开的文档、前台文档和选中内容。选中内容带可用的目标句柄，不修改任何内容。', read: true },
   { name: 'operation.recent', label: '最近操作结果', description: '只读：本会话最近的修改、资源获取和新发起任务的正式结果及回复是否送达。用于连接中断后核对，不会执行或重放工具。', read: true },
+  { name: 'operation.read', label: '读取原操作结果', description: '只读当前授权范围内的原票据结果；path选择JSON字段，offset/limit按字符串、数组或对象键续页。来源冻结，不重新执行原调用，大单项也有界。', read: true },
 ].map(tool => ({ ...tool, kind: 'service' as const, schema: z.toJSONSchema(serviceSchemas[tool.name as keyof typeof serviceSchemas]) as Record<string, unknown> }))
 const fileLabels: Record<AgentFileToolName, string> = { 'file.list': '列出文件', 'file.search': '搜索文件', 'file.open': '打开文件', 'file.create': '新建文件',
   'file.observe': '比较磁盘版本', 'file.reconcile': '处理文件变化',
@@ -408,7 +416,17 @@ export class ExternalMcpService implements ResidentMcpHandler {
     }
     if (!effectful) {
       const ticket = randomUUID()
-      return this.reply(session, await this.traced(session, scope, tool, ticket, input, () => this.execute(session, scope, tool, ticket, input)), ticket, false, tool.name, scope.runId)
+      const result = await this.traced(session, scope, tool, ticket, input, () => this.execute(session, scope, tool, ticket, input))
+      // Retain only a large query that actually needs a frozen continuation, in
+      // this existing operation owner rather than a second query store.
+      if (tool.name !== 'operation.read' && modelJsonBytes(result) > MODEL_DELIVERY_BYTES) {
+        const operation: Operation = { ticket, runId: scope.runId, workspaceId: scope.workspaceId, workspaceRoot: scope.workspaceRoot,
+          tool: tool.name, label: tool.label, digest: callDigest(tool.name, input), time: this.now(), result: Promise.resolve(result), summary: summarize(tool.name, result) }
+        session.operations.push(operation)
+        this.track(operation, call.delivery)
+        return this.reply(session, result, ticket, false, tool.name, scope.runId, operation)
+      }
+      return this.reply(session, result, ticket, false, tool.name, scope.runId)
     }
     const digest = callDigest(tool.name, input)
     // The previous identical call's reply never reached the client: answer with its receipt instead of executing again.
@@ -438,7 +456,8 @@ export class ExternalMcpService implements ResidentMcpHandler {
     void delivery.then(delivered => { operation.delivered = delivered })
   }
   private async reply(session: Session, result: ToolResult, ticket?: string, replayed = false, toolName = '', runId = session.runId, operation?: OperationScope) {
-    const publicResult = modelToolResult(toolName, result)
+    const publicResult = modelToolResult(toolName, result,
+      operation && ticket ? { tool: 'operation.read', input: { ticket } } : undefined)
     const content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[] = [{ type: 'text', text: JSON.stringify(publicResult) }]
     if (replayed) content.push({ type: 'text', text: '这是原范围同一调用的正式回执，本次未重复执行。' })
     let imageMissing = false
@@ -471,12 +490,47 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const { runId } = scope
     try {
       this.assertActive(session, runId)
+      if (tool.kind === 'service' && tool.name === 'operation.read') {
+        const request = serviceSchemas['operation.read'].parse(input)
+        const prior = session.operations.find(item => item.ticket === request.ticket && item.runId === scope.runId
+          && item.workspaceId === scope.workspaceId && item.workspaceRoot === scope.workspaceRoot)
+        if (!prior?.result) return failure('unknown-operation', '本连接当前授权范围没有该原票据结果；未执行原调用。')
+        let value: unknown = await prior.result
+        this.assertActive(session, runId)
+        for (const key of request.path ?? []) {
+          if (!value || typeof value !== 'object' || !Object.hasOwn(value, key))
+            return failure('result-path-unavailable', '原结果没有该字段；请读取父路径目录。')
+          value = (value as Record<string | number, unknown>)[key]
+        }
+        return { kind: 'read', data: { ticket: prior.ticket,
+          ...boundedModelValue(value, { path: request.path, offset: request.offset, limit: request.limit,
+            maxBytes: MODEL_DELIVERY_BYTES - 2048 }), read: { tool: 'operation.read', input: { ticket: prior.ticket, path: request.path ?? [] } } } }
+      }
       if (tool.kind === 'service') return { kind: 'read', data: await this.service(session, scope, tool.name, input) }
       if (tool.kind === 'load') {
-        const families = loadToolsSchema.parse(input).families
-        const available = await this.options.gateway.loadToolFamilies(runId, families)
+        const request = loadToolsSchema.parse(input), families = request.families ?? []
+        if (!families.length && !request.names?.length) throw new Error('请提供实际需要的names或families')
+        const available = await this.options.gateway.loadToolFamilies(runId, families, request.names)
+        const tools = await this.catalog(scope)
+        const unavailable = (request.names ?? []).filter(name => !tools.some(item => item.name === name))
+          .map(name => ({ name, code: toolRegistration(name) ? 'service-unavailable' : 'unknown-tool',
+            message: toolRegistration(name) ? '当前宿主服务未接通；有效工具已展开' : '未注册此工具名；有效工具已展开' }))
         session.listChanged = true
-        return { kind: 'read', data: { loaded: families.filter(family => available.some(item => item.family === family)), available } }
+        return { kind: 'read', data: { loaded: families.filter(family => tools.some(item => familyOfTool(item.name) === family)),
+          ...(request.names ? { tools: tools.filter(item => request.names!.includes(item.name))
+            .map(item => ({ name: item.name, description: item.description, inputSchema: item.schema })), unavailable } : {}), available } }
+      }
+      const localIntent = tool.name === 'local.run' ? workbenchServiceSchemas['local.run'].parse(input) : undefined
+      const local = localIntent ? await this.options.gateway.prepareLocalRun(runId, ticket, localIntent) : undefined
+      this.assertActive(session, runId)
+      if (local && localIntent) {
+        if (scope.permission !== 'full' && !await this.options.confirm({ clientName: session.clientName, label: tool.label, reason: 'ask',
+          paths: [local.cwd, ...local.sources.map(source => source.name)],
+          local: { ...local, ...(localIntent.stdin !== undefined ? { stdin: localIntent.stdin } : {}),
+            ...(localIntent.timeoutMs !== undefined ? { timeoutMs: localIntent.timeoutMs } : {}) } }))
+          return failure('approval-denied', '用户未批准此次本地命令，未执行。')
+        this.assertActive(session, runId)
+        await this.options.gateway.authorizeLocalRun(runId, ticket, localIntent)
       }
       const artifact = tool.name === 'artifact.save' ? await this.options.gateway.preflightArtifactSave(runId, input) : undefined
       if (artifact?.approvalRequired) {
@@ -489,7 +543,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
       const registration = toolRegistration(tool.name)
       const effect = registration && (typeof registration.effect === 'function' ? registration.effect(input) : registration.effect)
       const modifies = registration ? registration.capability === 'write' || registration.capability === 'save' || effect === 'document-edit' : !tool.read
-      if (!artifact && modifies && scope.permission === 'ask' && tool.kind !== 'file' && tool.kind !== 'course'
+      if (!local && !artifact && modifies && scope.permission === 'ask' && tool.kind !== 'file' && tool.kind !== 'course'
         && !await this.options.confirm({ clientName: session.clientName, label: tool.label, reason: 'ask' })) return failure('approval-denied', '用户未批准此次修改，未执行。')
       this.assertActive(session, runId)
       if (tool.kind === 'gateway') return await this.options.gateway.execute(runId, ticket, { name: tool.name, input })

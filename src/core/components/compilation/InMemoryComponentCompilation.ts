@@ -3,6 +3,7 @@ import type {
   ComponentCompilerResult, ComponentModuleLoadPort, ComponentModuleLoadResult,
 } from './types'
 import { createHash } from 'node:crypto'
+import { browserCompatibilityTarget } from '../../../shared/browser/browserCompatibility'
 
 function sortedFiles(files: Readonly<Record<string, string>>): Record<string, string> {
   return Object.fromEntries(Object.keys(files).sort().map(name => [name, files[name]]))
@@ -28,7 +29,8 @@ function snapshot(input: ComponentCompilationInput): ComponentCompilationInput {
     }])),
     options: {
       preserveModules: input.options?.preserveModules ?? false,
-      target: input.options?.target ?? 'es2022',
+      preserveScript: input.options?.preserveScript ?? false,
+      target: input.options?.target ?? browserCompatibilityTarget,
       jsx: input.options?.jsx ?? 'automatic',
       jsxImportSource: input.options?.jsxImportSource ?? 'react',
       minify: input.options?.minify ?? false,

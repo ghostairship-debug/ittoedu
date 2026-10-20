@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { ModelChatMessage, ModelToolDefinition } from '../../../shared/workbench/modelProvider'
+import { MODEL_DELIVERY_BYTES, modelTextEnd } from '../../../core/tools/modelDeliveryBudget'
 
 export const contextReadSchema = z.object({ sourceId: z.string().min(1), offset: z.number().int().nonnegative().default(0),
   maxChars: z.number().int().min(1).default(12_000), imageIndexes: z.array(z.number().int().nonnegative()).optional() }).strict()
@@ -23,7 +24,7 @@ export function readContextMessage(message: ModelChatMessage, input: z.infer<typ
   if (new Set(selected).size !== selected.length || selected.some(index => index >= images.length)) throw new Error('图片索引无效或重复')
   const available = (index: number) => /^data:image\/(?:png|jpeg|webp|gif);base64,/.test(images[index]!.image_url.url)
   if (selected.some(index => !available(index))) throw new Error('该存档图片没有可回读的内联字节；未尝试访问外部地址')
-  let end = Math.min(text.length, input.offset + input.maxChars)
+  let end = modelTextEnd(text, input.offset, Math.min(text.length, input.offset + input.maxChars), MODEL_DELIVERY_BYTES - 1500)
   if (end < text.length && end > input.offset && /[\uD800-\uDBFF]/.test(text[end - 1]!)
     && /[\uDC00-\uDFFF]/.test(text[end]!)) end--
   if (end === input.offset && end < text.length) end = Math.min(text.length, end + 2)

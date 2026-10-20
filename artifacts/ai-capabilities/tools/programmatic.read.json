@@ -1,5 +1,5 @@
 {
-  "description": "内置任务执行引擎中读取本任务programmatic执行所保留的完整子调用回执。runId省略时用当前运行；给定时仅可读同任务续接来源。callId沿用实际回执引用，path从完整ToolResult根选择具体字段；字符串或数组可用offset/limit局部读取，省略可完整读取。字符串offset按UTF-16单位，数组按项目数。",
+  "description": "读取本任务或同任务续接原结果，runId省略取当前运行，callId沿用软件回执引用。path从完整ToolResult根选择字段；字符串按UTF-16、数组按项、对象按键用offset/limit续读。默认有界，大单项仍递归分段，complete/omitted/read说明未交付内容与原来源；程序内部可完整运算，不能用模型raw参数绕过交付预算。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,

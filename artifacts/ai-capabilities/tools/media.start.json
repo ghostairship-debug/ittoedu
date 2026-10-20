@@ -1,5 +1,5 @@
 {
-  "description": "仅通过已验证的媒体连接启动语音、视频或音乐作业；无可用模型时明确未配置，不启动虚假作业。",
+  "description": "使用 discover 返回的可用引擎生成音频文件。AI 对普通朗读优先选本机 engine:local；剧情、角色或情绪需要且所配置 API 支持时选 engine:remote，并按能力传 instructions/speed。省略 engine 仅选本机；prompt 只填台词，voice/format 取自对应引擎。返回 job.status 为 ready 时音频已生成，无需调用 job.status/wait；job.jobId 是媒体回执，不是通用作业引用。直接把 job.resources[].source 原样交给 media.insert/apply 或 artifact.save，不当作 compute 输入路径。失败不自动换引擎；所需表现能力不可用时如实说明，不把普通朗读当成已交付角色表演。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -7,6 +7,26 @@
       "durationSeconds": {
         "exclusiveMinimum": 0,
         "type": "number"
+      },
+      "engine": {
+        "enum": [
+          "local",
+          "remote"
+        ],
+        "type": "string"
+      },
+      "format": {
+        "enum": [
+          "mp3",
+          "wav"
+        ],
+        "type": "string"
+      },
+      "instructions": {
+        "description": "仅声明支持该能力的语音 API 使用：情绪、语调、角色表演等要求，不是要朗读的台词。",
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
       },
       "kind": {
         "enum": [
@@ -21,6 +41,7 @@
         "type": "string"
       },
       "prompt": {
+        "description": "语音填写需要实际朗读的台词原文，不填写朗读指令；视频或音乐填写生成说明。",
         "minLength": 1,
         "type": "string"
       },
@@ -30,6 +51,16 @@
           "type": "string"
         },
         "type": "array"
+      },
+      "speed": {
+        "maximum": 4,
+        "minimum": 0.25,
+        "type": "number"
+      },
+      "voice": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
       }
     },
     "required": [

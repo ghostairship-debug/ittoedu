@@ -5,7 +5,7 @@ import {allDocumentTextSlots,inlineComponentIds} from '../../../shared/document/
 import type { PublishedCourseV3, PublishedInstance, PublishedImplementation } from '../../../shared/contracts/component-platform/published'
 import type { ComponentRuntimeContext, CourseProjectV10 } from '../../../shared/contracts/component-platform'
 import { resolveComponentPresentation, componentDefinitionBuiltinKey } from '../../../shared/contracts/component-platform'
-import { resolveComponentOuterPresentation } from '../../../shared/componentPresentation'
+import { resolveComponentOuterPresentation, isGlobalFramedWebDocument } from '../../../shared/componentPresentation'
 import { componentPaintStyle } from '../../../player/components/componentPlacementStyle'
 import { FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, FLOW_BODY_FONT_FAMILY, flowPaperMaxWidth } from '../../../shared/flowBodyPresentation'
 import { renderDocumentText } from '../../../shared/document/render'
@@ -55,7 +55,7 @@ export async function compileCoursePlayback(payload:PublishedCourseV3,options:{d
    if(!programs.some(value=>value.signature===signature)) {
     const data=instance.data as unknown as WebRuntimeData
     const program=compilePublishedWebProgram(data,{routing:true})
-    if(webProgramRequiresNativeDocument(data,program)){
+    if(isGlobalFramedWebDocument(version,instance)||webProgramRequiresNativeDocument(data,program)){
      const empty=compilePublishedWebProgram({html:'',css:''})
      programs.push({signature,program:{...empty,nativeData:{...data,html:tokenize(data.html),css:tokenize(data.css??'')},fixedViewport:webUsesFixedViewport(data.html,data.css??''),fragment:htmlDocumentKind(data.html)==='fragment'}})
     }else{
@@ -78,7 +78,7 @@ export async function compileCoursePlayback(payload:PublishedCourseV3,options:{d
    const presentation=resolveComponentOuterPresentation(model,instance,{placement:flow?'flow':'free',purpose:'playback',inlineSize:layout?.readingWidth??instance.frame?.width??1280,flowLayout:layout})
    const outer=dom.createElement('div'),stage=dom.createElement(presentation.section?'details':'div'),content=dom.createElement(presentation.section?'summary':'div'),children=dom.createElement('div')
    outer.dataset.componentObject=id;outer.dataset.compiledNode=id;content.dataset.compiledRuntimeRoot=id;children.dataset.compiledChildren=id;stage.dataset.compiledStage=id;outer.dataset.compiledPlacement=flow?'flow':'free';outer.dataset.componentPlacement=flow?'flow':'free'
-   Object.assign(outer.style,componentPaintStyle(instance,definition),presentation.outerStyle,{pointerEvents:instance.style?.pointerEvents==='none'?'none':'auto'});Object.assign(stage.style,presentation.stageStyle);Object.assign(content.style,presentation.contentStyle);Object.assign(children.style,presentation.childrenStyle)
+   Object.assign(outer.style,componentPaintStyle(instance,definition),presentation.outerStyle);Object.assign(stage.style,presentation.stageStyle);Object.assign(content.style,presentation.contentStyle);Object.assign(children.style,presentation.childrenStyle)
    if(presentation.section)(stage as HTMLDetailsElement).open=presentation.section.open
    const signature=compiledViewSignature(instance),markup=artifact.staticViews[id]?.find(view=>view.signature===signature)?.html;if(markup)content.innerHTML=markup
    stage.append(content,children);outer.append(stage);parent.append(outer);render(children,instance.childIds??[],presentation.childrenPlacement==='flow',model,layout)

@@ -2,7 +2,7 @@
 
 状态：**未签署**。签署点为 [`r20-050-owner-acceptance`](../roadmap/2.0/r20-050-owner-acceptance.md)，随后由 [`r20-060-release`](../roadmap/2.0/r20-060-release.md) 发布同一候选的 `v2.0.0` 源码与固定课例离线 HTML（[2.0 路线](../roadmap/2.0/README.md) `:19`、`:35-36`）。按[工作协议](../WORKING_PROTOCOL.md) `:75`，无后缀 `vX.Y.Z` 只在四个既定 Owner 签署点写入，保全矩阵随签署点一并晋升。截至 2026-09-21 本清单未执行：[当前验收记录](../../archive/README.md#历史原文) 第四节记录"050 Owner S4 签署只能由 Owner 本人复核并签署，非自动化可代""**未创建任何 `v2.0.0` 标签**；最新标签仍是 `v1.9.0-rc.1`（`git tag --list` 共 15 个标签）"。本清单只作签署点待执行清单，**不预填通过**。
 
-真实自动化最多证明 `engineering candidate`；`accepted` 只能来自 Owner 对内部全链条、速度/质量和 PPTX 当前候选的实际复核（[工作协议](../WORKING_PROTOCOL.md) `:75`、[开发总纲](../../../COURSEWARE_DEVELOPMENT_PLAN.md)）。
+真实自动化最多证明 `engineering candidate`；`accepted` 只能来自 Owner 对内部全链条、速度/质量和 PPTX 当前候选的实际复核（[工作协议](../WORKING_PROTOCOL.md) `:75`、[开发总纲](../README.md)）。
 
 ## 签署点复核
 

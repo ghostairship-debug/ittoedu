@@ -115,7 +115,7 @@ const TimelineItem = memo(function TimelineItem({ item, projection, readBlob, on
   const end = executionTimelineIndex(projection).ends.get(item.runId)
   if (item.type === 'tool' && item.source === 'builtin' && item.data.question) return <QuestionRecord item={item} ended={Boolean(end)} />
   const incompleteAfterEnd = Boolean(end && ['running', 'executing', 'pending', 'queued', 'stopping', 'waiting', 'approval'].includes(item.data.status ?? ''))
-  const displayedStatus = ['run.state', 'run.end'].includes(item.type) && (end?.data.status ?? item.data.status) === 'completed' ? '本轮已结束'
+  const displayedStatus = item.type === 'text' ? '' : ['run.state', 'run.end'].includes(item.type) && (end?.data.status ?? item.data.status) === 'completed' ? '本轮已结束'
     : item.type === 'run.state' && end && !item.data.label ? statusLabel(end.data.status) : incompleteAfterEnd ? '任务已结束' : statusLabel(item.data.status)
   const operationItem = item.type === 'tool' || item.type === 'document.commit' || item.type === 'document.save'
   const application = ({ applied: '已应用', unchanged: '内容未变化', conflict: '应用冲突', denied: '未获应用授权', cancelled: '未应用（已取消）', failed: '应用失败' } as Record<string, string>)[facts.application ?? ''] ?? '未确认应用'
@@ -152,7 +152,7 @@ const TimelineItem = memo(function TimelineItem({ item, projection, readBlob, on
     })}
     {item.parentItemId && <small>上游提供的子项{(() => { const parent = executionTimelineIndex(projection).items.get(JSON.stringify([item.runId, item.parentItemId])); return parent ? ` · ${readableExecutionData(parent.data.label || titles[parent.type])}` : '' })()}</small>}
   </>
-  const isCollapsible = !['text', 'run.end', 'run.state'].includes(item.type)
+  const isCollapsible = item.type !== 'text'
   return <article data-execution-item={`${item.runId}:${item.itemId}`} className={`execution-timeline__card execution-timeline__card--${item.type.replace('.', '-')}`} aria-label={titles[item.type]}>
     {isCollapsible ? <details open={expanded} onToggle={event => { if (event.currentTarget.open !== expanded) onExpanded(event.currentTarget.open) }}>
       <summary><strong>{heading}</strong>{displayedStatus && <span> · {savedFile ? '已保存' : displayedStatus}</span>}</summary>
@@ -332,11 +332,6 @@ function TimelineBody({ projection, readBlob, onLocateDocument, onOpenSavedFile,
   return <section ref={region} className="execution-timeline" aria-label="任务过程" aria-busy={activity.busy}>
     {searchEvents && historySearchOpen === undefined && !localSearchOpen && <button type="button" className="execution-timeline__search-open" onClick={() => setLocalSearchOpen(true)}>搜索历史</button>}
     {searchEvents && (historySearchOpen ?? localSearchOpen) && <HistorySearch searchEvents={searchEvents} readBlob={readBlob} onClose={historySearchOpen === undefined ? () => setLocalSearchOpen(false) : onHistorySearchClose ?? (() => {})} />}
-    {(activity.busy || activity.waitingRuns > 0) && <p className="execution-timeline__activity" role="status" aria-live="polite" aria-atomic="true">
-      {currentExecutionStatus(projection)} · 
-      {[activity.activeRuns ? `${activity.activeRuns} 个任务进行中` : '', activity.waitingRuns ? `${activity.waitingRuns} 个任务等待你的选择` : '',
-        activity.externalTools ? `${activity.externalTools} 个外部工具执行中` : ''].filter(Boolean).join(' · ')}
-    </p>}
     {windowRange.start > 0 && <button type="button" className="execution-timeline__page" onClick={earlier}>读取更早记录（前面还有 {windowRange.start} 条）</button>}
     {projection.items.length === 0 && userMessages.length === 0 && <p className="execution-timeline__empty">这段会话还没有执行记录。</p>}
     {visibleEntries.map(entry => {
@@ -352,6 +347,11 @@ function TimelineBody({ projection, readBlob, onLocateDocument, onOpenSavedFile,
       return <TimelineItem key={key} item={item} projection={projection} readBlob={readBlob} onLocateDocument={onLocateDocument} onOpenSavedFile={onOpenSavedFile} imageResults={imageResults} workspaceId={workspaceId} expanded={expanded.has(key)}
         onExpanded={open => setExpanded(value => { const next = new Set(value); if (open) next.add(key); else next.delete(key); return next })} />
     })}
+    {windowRange.end === collapsedItems.length && (activity.busy || activity.waitingRuns > 0) && <p className="execution-timeline__activity" role="status" aria-live="polite" aria-atomic="true">
+      {currentExecutionStatus(projection)} ·
+      {[activity.activeRuns ? `${activity.activeRuns} 个任务进行中` : '', activity.waitingRuns ? `${activity.waitingRuns} 个任务等待你的选择` : '',
+        activity.externalTools ? `${activity.externalTools} 个外部工具执行中` : ''].filter(Boolean).join(' · ')}
+    </p>}
     {windowRange.end < collapsedItems.length && <button type="button" onClick={() => { follow.current = false; setFollowing(false); setWindowRange(value => ({ start: value.end, end: Math.min(collapsedItems.length, value.end + PAGE_SIZE) })) }}>读取更后记录</button>}
     {!following && <button type="button" className="execution-timeline__latest" onClick={latest}>回到最新{collapsedItems.length > windowRange.end ? `（${collapsedItems.length - windowRange.end} 条新记录）` : ''}</button>}
   </section>

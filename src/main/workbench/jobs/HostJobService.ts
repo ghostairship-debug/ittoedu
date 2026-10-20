@@ -5,7 +5,7 @@ import type { ComputeJobService } from '../compute/ComputeJobService'
 import type { DelegationJobService, DelegationJobSnapshot, DelegationJobLog } from '../delegation/DelegationJobService'
 
 /** A thin route to the durable owners. This service stores no second job state. */
-export type HostJobRef = { runId: string; kind: 'image' | 'compute' | 'delegation'; jobId: string }
+export type HostJobRef = { runId: string; kind: 'image' | 'compute' | 'delegation'; jobId: string; callerRunId?: string }
 export type HostJobSnapshot =
   | { kind: 'image'; jobId: string; status: ImageJobSnapshot['status']; terminal: boolean; snapshot: ImageJobSnapshot }
   | { kind: 'compute'; jobId: string; status: ComputeJobSnapshot['status']; terminal: boolean; snapshot: ComputeJobSnapshot }
@@ -58,7 +58,7 @@ export class HostJobService {
   async wait(ref: HostJobRef & { milliseconds: number; signal?: AbortSignal }): Promise<HostJobSnapshot> {
     if (ref.kind === 'image') return this.image(ref.runId, await this.owners.images.wait(ref.runId, ref.jobId, ref.milliseconds, ref.signal))
     if (ref.kind === 'compute') return this.compute(await this.computeOwner().wait(ref.runId, ref.jobId, ref.milliseconds, ref.signal))
-    return this.delegation(await this.delegationOwner().wait(ref.runId, ref.jobId, ref.milliseconds, ref.signal))
+    return this.delegation(await this.delegationOwner().wait(ref.runId, ref.jobId, ref.milliseconds, ref.signal, ref.callerRunId))
   }
 
   async logs(ref: HostJobRef & { after?: number; limit?: number }): Promise<HostJobLog> {

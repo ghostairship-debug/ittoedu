@@ -9,7 +9,41 @@
 | [前轮修复结果](20261006-前轮修复结果.md) | 本批之前的有效成果与证据边界 |
 | [native 与存量诊断依据](20261006-native与存量诊断依据.md) | 尚未完全验证的 native 根因及存量维护依据 |
 
-当前结果读[CURRENT_STATUS](../development-plan/CURRENT_STATUS.md)及[唯一结果](../development-plan/20261008-core-experience-unified/REVIEW_RESULT.md#brand-release-cleanup-20261009)，不重新派发归档方案。
+当前结果读[CURRENT_STATUS](../development-plan/CURRENT_STATUS.md)及[软件与创作修复结果](../development-plan/SOFTWARE_AUTHORING_RESULT.md)。[10月9日品牌/发行/清理结果](../development-plan/20261008-core-experience-unified/REVIEW_RESULT.md#brand-release-cleanup-20261009)保留为当时范围；不重新派发归档方案。
+
+## 2026-10-17 状态整合与历史导航
+
+[整理前开发状态、入口及三张任务卡全文](20261017-开发状态与任务交接快照.md)保留原写域、旧阻断及未完验收。当前入口已收敛，10月9日GUI阻断、旧active人员与PID不作为当前运行指令；未完成目标不因归档关闭。
+
+下列11份原根目录材料已实际迁入本目录，保留完整正文与原日期；正文内部链接、正式规格入链和机器工作包路径同步更新。重叠范围已由10月12日批次统一实施，后续新问题按当前状态接续，不再作为并列启动入口。首轮根路径与新位置见[迁移清单](../../output/hygiene-20261017/root-docs/migration-manifest.json)。
+
+多轮软件/创作结果全文保存在[阶段记录](20261017-软件与创作修复阶段记录.md)，根结果已整合为当前结论与未完范围。原ROADMAP、开发总纲及旧ENTRYPOINTS正文进入[旧入口快照](20261017-开发状态与任务交接快照.md#root-roadmap-snapshot)，实际入口统一到当前状态、开发入口和文档导航。
+
+| 历史范围 | 原规格、结果或依据 |
+|---|---|
+| 10月8日综合与链路审查 | [综合评估](果铃_全会话综合评估与优先级建议_2026-10-08_GPT.md)、[核心链路审查](AI创作与修改核心链路审查汇总报告-2026-10-08.md)；机器工作包已改为归档路径 |
+| 10月9日便携版问题 | [原问题报告](便携版AI创作与编辑问题汇总报告-2026-10-09.md) |
+| 代码审计与已实施修复 | [原审计正文](代码审计报告.md)、[10月11日接续结果](../development-plan/20261010-workbench-consolidated/IMPLEMENTATION_RESULT.md)；原文的“正在验收”只属该阶段 |
+| 10月10日W1—W4、界面/HTML原计划 | [方案包](../development-plan/20261010-workbench-consolidated/README.md)、[原方案 §14—15](../development-plan/20261010-workbench-consolidated/EXECUTION_PLAN.md)；§14.8余项见当前任务卡 |
+| 旧Portable诊断与制品 | [修复结果](../development-plan/20261010-portable-sharp-diagnosis/REPAIR_RESULT.md)、[10月10日构建交付](../development-plan/20261010-portable-sharp-diagnosis/BUILD_DELIVERY.md)；不是最新源码制品或发行签收 |
+| 10月12日v2／R01—R08 | [原方案](创作与播放链路独立修复方案-2026-10-12.md)、[原提示词](创作与播放链路修复-Codex执行提示词-2026-10-12.md)、[原结果](创作与播放链路修复结果-2026-10-12.md) |
+| 10月12日历史核查与第三方复审 | [落地核查](历史方案落地核查-2026-10-12.md)、[M2M修订提示词](两份方案第三方复审-M2M修订提示词-2026-10-12.md) |
+| 10月13—14日研究与根因 | [混合分流/SearXNG研究](组件混合分流与SearXNG研究方案-2026-10-13.md)、[创作根因与重设计](创作系统根因与重新设计-2026-10-14.md)；后续已实施与仍未签部分见当前结果 |
+| 核心体验旧目标与原证据 | [§9＋§10执行包](../development-plan/20261008-core-experience-unified/README.md)、[10月7日问题与决策](../development-plan/20261007-content-revision/README.md) |
+
+本轮清理的再生缓存、保留范围与核查记录见[卫生整理记录](../../output/hygiene-20261017/REPORT.md)。大型作品、profile、恢复材料和原始失败证据不随导航精简删除。
+
+
+
+<a id="已执行软件与创作方案"></a>
+## 已执行软件与创作方案
+
+2026-10-12批次已于10月13日按原目标完成规定实施、分发与最小充分验收，原goal为complete；以下是已执行历史依据，不是当前待执行清单。后续新增质量/效率问题与未签发行条件由[当前状态](../development-plan/CURRENT_STATUS.md)和[结果记录](../development-plan/SOFTWARE_AUTHORING_RESULT.md)承接，不倒写原批次状态。
+
+- [软件方案全部§1—28](联网搜索解耦与多后端接入方案-2026-10-12.md)
+- [互动演示创作方案](互动演示创作方案-2026-10-12.md)
+- [历史启动提示词](果铃软件与创作修复-Codex执行提示词-2026-10-12.md)
+- [原批次完成与逐项证据](20261017-软件与创作修复阶段记录.md#result-original-scope-20261013)
 
 ## 磁盘原始材料
 

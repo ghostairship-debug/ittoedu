@@ -41,3 +41,28 @@ it('keeps an old frozen API image snapshot without an explicit Images protocol u
   expect(() => roles.selection('suspended-old-run', 'edit')).toThrow('需要已接通的 GPT OAuth 或已启用 OpenAI Images API')
   expect(roles.selection('new-run', 'generate').connection.imageProtocol).toBe('openai-images')
 })
+
+it('native descendants reuse frozen parent routes after settings change, and missing lineage stays a scoped diagnostic', async () => {
+  const connection = { id: 'oauth', revision: 1, provider: 'openai', protocol: 'chatgpt-responses', baseURL: 'https://chatgpt.com/backend-api/codex',
+    auth: { kind: 'oauth', credentialRef: 'encrypted-reference' }, accountId: 'account', billing: { kind: 'unknown' },
+    capabilities: { stream: 'unknown', tools: 'unknown', vision: 'unknown', reasoning: 'unknown' } } as const
+  let model = 'old-image-model', reads = 0
+  const roles = frozenImageRoles(async role => {
+    reads++
+    if (role === 'imageEdit') throw new Error('edit not configured at root start')
+    return { role, profileRevision: 1, profileUpdatedAt: '', connection, model, parameters: {} } as ExecutionSelectionSnapshot
+  })
+  await roles.beginRun('root')
+  model = 'new-image-model'
+  await roles.beginRun('child', undefined, 'root')
+  await roles.beginRun('grandchild', undefined, 'child')
+  expect(reads).toBe(2)
+  expect(roles.selection('child', 'generate').imageModel).toBe('old-image-model')
+  expect(roles.selection('grandchild', 'generate').imageModel).toBe('old-image-model')
+  expect(() => roles.selection('child', 'edit')).toThrow('开始时图片连接')
+  await roles.beginRun('new-root')
+  expect(roles.selection('new-root', 'generate').imageModel).toBe('new-image-model')
+  await roles.beginRun('restored-child', undefined, 'unavailable-old-root')
+  expect(reads).toBe(4)
+  expect(roles.describe('restored-child')?.generate).toMatchObject({ status: 'unavailable', reason: expect.stringContaining('原父任务冻结的图片连接未保留') })
+})

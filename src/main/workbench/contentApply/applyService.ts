@@ -12,7 +12,7 @@ import { extractHtmlResources, htmlResourceSources } from '../htmlImport/extract
 import type { HtmlDesignMeasurementRequest } from './measurement/ElectronHtmlDesignMeasurement'
 import { prepareMeasurementDocument } from './measurement/prepareMeasurementDocument'
 import { assemblyContentDraft, htmlAssemblyFraming, htmlForAssembly, localHtmlInputs, preserveHtmlOuterStyle } from './application/html'
-import { NoContentTargetError, planContentApply } from './application/plan'
+import { contentTargetIds, NoContentTargetError, planContentApply } from './application/plan'
 import type { CanonicalContentApplyRequest, ContentApplyDiagnostic, ContentApplyPlan, ContentApplyRequest, ContentApplyResult, ContentApplySessionPort, ContentChangeRequest, ContentObjectDraft, SurfaceApplyRequest } from './application/types'
 import type { DocumentResources } from '../../../shared/workbench/document'
 import { extractHtmlAuthoringRecords, type HtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
@@ -46,14 +46,15 @@ function dataBindings(data: JsonObject): Record<string, string> {
     ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {}
 }
 /** Adopt source-owned records once; image overrides use the existing resource preparation. */
-async function prepareHtmlAuthoring(html: string, siblingFiles: ReadonlyMap<string, Uint8Array> | undefined, createId: () => string) {
+async function prepareHtmlAuthoring(html: string, siblingFiles: ReadonlyMap<string, Uint8Array> | undefined, createId: () => string,
+  resourceReferences?: ReadonlyMap<string, { bytes: Uint8Array; mediaType: string }>) {
   const extracted = extractHtmlAuthoringRecords(html)
-  const prepared = await prepareContentResources({ html: extracted.source, siblingFiles }, createId)
+  const prepared = await prepareContentResources({ html: extracted.source, siblingFiles, resourceReferences }, createId)
   const records: HtmlAuthoringRecords = structuredClone(extracted.authoringRecords)
   const reference = async (src: string) => {
-    if (!src || src.startsWith('cw-resource:')) return src
+    if (!src) return src
     const attr = src.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
-    const image = await prepareContentResources({ html: `<img src="${attr}">`, siblingFiles }, createId)
+    const image = await prepareContentResources({ html: `<img src="${attr}">`, siblingFiles, resourceReferences }, createId)
     prepared.resources.push(...image.resources); prepared.unresolvedResources.push(...image.unresolvedResources)
     prepared.diagnostics.push(...image.diagnostics); prepared.resourceSources.push(...image.resourceSources)
     return decodeHtmlEntities(/src="([^"]*)"/.exec(image.html)?.[1] ?? attr)
@@ -67,7 +68,8 @@ async function prepareHtmlAuthoring(html: string, siblingFiles: ReadonlyMap<stri
   return { prepared, records }
 }
 /** Fold only a source change whose existing local binding still names one object. */
-function reconcileSourceAuthoring(before: string, after: string, records: HtmlAuthoringRecords): { records: HtmlAuthoringRecords; unresolved: string[] } {
+function reconcileSourceAuthoring(before: string, after: string, records: HtmlAuthoringRecords,
+  imageIdentity: (reference: string) => string = reference => reference): { records: HtmlAuthoringRecords; unresolved: string[] } {
   type Element = DefaultTreeAdapterTypes.Element
   const root = (html: string) => parse(html).childNodes.find((node): node is Element => 'tagName' in node && node.tagName === 'html')!
   const roots = [root(before), root(after)]
@@ -97,7 +99,8 @@ function reconcileSourceAuthoring(before: string, after: string, records: HtmlAu
   for (const [key, record] of Object.entries(next)) {
     const old = value(roots[0]!, record), current = value(roots[1]!, record)
     if (old === undefined || current === undefined) { unresolved.push(key); continue }
-    if (old !== current && old === record.binding.baseline) {
+    const same = (left: string, right: string) => record.kind === 'image' ? imageIdentity(left) === imageIdentity(right) : left === right
+    if (!same(old, current) && same(old, record.binding.baseline)) {
       record.binding.baseline = current
       if (record.kind === 'text') delete record.overrides.text
       else delete record.overrides.src
@@ -105,17 +108,38 @@ function reconcileSourceAuthoring(before: string, after: string, records: HtmlAu
   }
   return { records: next, unresolved }
 }
-function resourceEdits(prepared: PreparedContentResources, createId: () => string): { edits: ComponentEdit[]; bindings: Record<string, string>; urls: Record<string, string> } {
+/** Static normalization of a known resource reference is not an author image change. */
+function authoringImageIdentity(project: CourseProjectV10, prepared: PreparedContentResources,
+  bindings: Record<string, string>, projectNamespace: boolean): (reference: string) => string {
+  const canonical = Object.keys(project.assets).map(id => [`cw-resource:${id}`, id] as const)
+  const local = Object.entries(bindings)
+  const identities = new Map(projectNamespace ? [...local, ...canonical] : [...canonical, ...local])
+  for (const resource of [...prepared.resources, ...prepared.unresolvedResources]) {
+    const existing = resource.origins.map(origin => identities.get(origin.reference)).find(Boolean)
+    if (existing) identities.set(`cw-resource:${resource.key}`, existing)
+  }
+  return reference => identities.has(reference) ? `asset:${identities.get(reference)}` : reference
+}
+function resourceEdits(prepared: PreparedContentResources, createId: () => string,
+  reuse?: (reference: string) => string | undefined): { edits: ComponentEdit[]; bindings: Record<string, string>; urls: Record<string, string> } {
   const edits: ComponentEdit[] = [], bindings: Record<string, string> = {}, urls: Record<string, string> = {}
   const admitted = new Set(prepared.resources)
   const retained: PreparedContentResources['resources'] = [...prepared.resources, ...prepared.unresolvedResources]
   for (const resource of retained) {
-    const id = resource.image?.id ?? createId()
+    const existing = resource.origins.map(origin => reuse?.(origin.reference)).find(Boolean)
+    const id = existing ?? resource.image?.id ?? createId()
     const reference = `cw-resource:${resource.key}`
     bindings[reference] = id
     const extension = resource.mediaType.split('/').at(-1)?.replace(/[^a-z0-9]/gi, '') || 'bin'
-    edits.push({ type: 'asset.add', asset: { ...resource.image, id, path: `assets/${id}.${extension}`, mimeType: resource.mediaType }, bytes: resource.bytes })
-    if (admitted.has(resource)) urls[reference] = `data:${resource.mediaType};base64,${Buffer.from(resource.bytes).toString('base64')}`
+    if (!existing) edits.push({ type: 'asset.add', asset: { ...resource.image, id, path: `assets/${id}.${extension}`, mimeType: resource.mediaType }, bytes: resource.bytes })
+    const url = admitted.has(resource) ? `data:${resource.mediaType};base64,${Buffer.from(resource.bytes).toString('base64')}` : undefined
+    if (url) urls[reference] = url
+    for (const origin of resource.origins) {
+      const existing = reuse?.(origin.reference)
+      if (!existing) continue
+      bindings[origin.reference] = existing
+      if (url) urls[origin.reference] = url
+    }
   }
   return { edits, bindings, urls }
 }
@@ -160,6 +184,18 @@ export class ContentApplyService {
     const measurementDependencies: string[][] = []
     let drafts: ContentObjectDraft[] | undefined, unverified = false, unusable = false, preserveLayout = false
     if (request.source.kind === 'html') {
+      const projectNamespace = request.source.resourceNamespace === 'project'
+      const projectResources = (bindings: Record<string, string> = {}) => {
+        const references = new Map(request.source.kind === 'html' ? request.source.resourceReferences : undefined)
+        const bytes = this.options.session.resources?.()?.assets ?? {}
+        const canonical = Object.values(project.assets).map(asset => [`cw-resource:${asset.id}`, asset.id])
+        const local = Object.entries(bindings)
+        for (const [reference, id] of projectNamespace ? [...local, ...canonical] : [...canonical, ...local]) {
+          const asset = project.assets[id!]
+          if (asset && bytes[id!]) references.set(reference!, { bytes: bytes[id!]!, mediaType: asset.mimeType ?? 'application/octet-stream' })
+        }
+        return references
+      }
       // Resolve content before admitting its original or resources. An empty
       // projection cannot turn an asset-only batch into content success.
       const inputs = request.intent === 'content' ? localHtmlInputs(project, request) : undefined
@@ -221,10 +257,11 @@ export class ContentApplyService {
             ? Object.entries(previous.modules).filter((entry): entry is [string, string] => typeof entry[1] === 'string') : []
           const siblingFiles = new Map(retainedModules.map(([name, source]) => [name, new TextEncoder().encode(source)]))
           request.source.siblingFiles?.forEach((bytes, name) => siblingFiles.set(name, Uint8Array.from(bytes)))
-          const { prepared, records } = await prepareHtmlAuthoring(html, siblingFiles, this.createId)
+          const { prepared, records } = await prepareHtmlAuthoring(html, siblingFiles, this.createId, projectResources(dataBindings(previous)))
           let authoringRecords = instance.authoring?.records
           if (authoringRecords && previous.html !== prepared.html) {
-            const reconciled = reconcileSourceAuthoring(previous.html as string, prepared.html, authoringRecords)
+            const reconciled = reconcileSourceAuthoring(previous.html as string, prepared.html, authoringRecords,
+              authoringImageIdentity(project, prepared, { ...dataBindings(previous), ...instance.authoring?.resourceBindings }, projectNamespace))
             authoringRecords = reconciled.records
             if (reconciled.unresolved.length) diagnostics.push({ level: 'warning', code: 'author-record-source-unmapped', instanceId: input.instanceId,
               message: '源码已保留；部分已有作者对象在源码中没有唯一对应，原作者值和几何保留，需通过该对象的正式目标续改。', repairable: true })
@@ -248,7 +285,11 @@ export class ContentApplyService {
           }).remoteReferences) : []
           prepared.resourceSources = [...new Map([...prepared.resourceSources, ...cssSources]
             .map(source => [`${source.usage}\0${source.url}`, source])).values()]
-          const resources = resourceEdits(prepared, this.createId)
+          const resources = resourceEdits(prepared, this.createId, reference => {
+            const canonicalId = reference.startsWith('cw-resource:') ? reference.slice('cw-resource:'.length) : undefined
+            const id = projectNamespace && canonicalId && project.assets[canonicalId] ? canonicalId : dataBindings(previous)[reference] ?? canonicalId
+            return id && project.assets[id] && this.options.session.resources?.()?.assets[id] ? id : undefined
+          })
           edits.push(...resources.edits)
           diagnostics.push(...resourceDiagnostics(prepared, input.instanceId))
           const add = (path: string[], value: JsonValue) => { if (!equalComponentValue(previous[path[0]!], value)) edits.push({ type: 'data.set', instanceId: input.instanceId, path, value }) }
@@ -268,8 +309,58 @@ export class ContentApplyService {
           }
         }
       } else {
-        const { prepared, records } = await prepareHtmlAuthoring(htmlForAssembly(request), request.source.siblingFiles, this.createId)
-        const resources = resourceEdits(prepared, this.createId)
+        const redoOwners = request.intent === 'redo' ? contentTargetIds(project, request).map(id => project.instances[id]!)
+          .filter(instance => Object.keys(instance.authoring?.records ?? {}).length) : []
+        const redoBindings: Record<string, string> = {}, authoringBindings: Record<string, string> = {}
+        for (const instance of redoOwners) {
+          const data = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data : {}
+          const bindings = { ...dataBindings(data), ...instance.authoring?.resourceBindings }
+          for (const [reference, id] of Object.entries(bindings)) {
+            if (redoBindings[reference] && redoBindings[reference] !== id) return {
+              command: captureComponentOperation(baseProject, []), input: originalRequest, insertedIds: [], usability: 'partial',
+              diagnostics: [...diagnostics, { level: 'warning', code: 'redo-authoring-source-retained', instanceId: instance.id, reference, repairable: true,
+                message: '所选范围的作者记录使用不同资源身份解释同一引用，原程序与记录保留，尚未替换结构。请缩小到各原对象分别重做。' }] }
+            redoBindings[reference] = id
+          }
+          Object.assign(authoringBindings, instance.authoring?.resourceBindings)
+        }
+        const { prepared, records } = await prepareHtmlAuthoring(htmlForAssembly(request), request.source.siblingFiles, this.createId, projectResources(redoBindings))
+        if (request.intent === 'redo') {
+          // Redo changes the selected structure, but is not permission to erase
+          // persisted human edits. Reuse the existing source reconciliation;
+          // ambiguous DOM/React bindings keep their original runnable owner.
+          const retained: HtmlAuthoringRecords = {}
+          for (const id of contentTargetIds(project, request)) {
+            const instance = project.instances[id]!, previousRecords = instance.authoring?.records
+            if (!previousRecords || !Object.keys(previousRecords).length) continue
+            const previous = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data : undefined
+            const reconciled = typeof previous?.html === 'string' ? reconcileSourceAuthoring(previous.html, prepared.html, previousRecords,
+              authoringImageIdentity(project, prepared, redoBindings, projectNamespace)) : undefined
+            const conflicting = Object.keys(previousRecords).filter(key => retained[key] && !equalComponentValue(retained[key], previousRecords[key]))
+            if (!reconciled || reconciled.unresolved.length || conflicting.length) {
+              const references = reconciled?.unresolved.length ? reconciled.unresolved : conflicting.length ? conflicting : Object.keys(previousRecords)
+              return { command: captureComponentOperation(baseProject, []), input: originalRequest, insertedIds: [], usability: 'partial',
+                diagnostics: [...diagnostics, { level: 'warning', code: 'redo-authoring-source-retained', instanceId: id,
+                  reference: references.slice(0, 5).join(', '), repairable: true,
+                  message: '本次重做无法把既有作者记录可靠对应到新源文，原程序、作者记录与本次输入均保留，尚未替换结构。请保留记录绑定的原元素后重做，或沿原对象使用 content 局改。' }] }
+            }
+            Object.assign(retained, reconciled.records)
+          }
+          if (Object.keys(retained).length) {
+            // A source wrapper can be older than the current human projection.
+            // Reconciled current records retain authority for existing keys;
+            // deliberate source text changes were already folded above.
+            Object.assign(records, { ...records, ...retained })
+            diagnostics.push({ level: 'info', code: 'redo-authoring-records-retained',
+              message: '既有作者记录已沿当前元素绑定保留；重做继续使用共同程序承载，未把记录拆散或清空。' })
+          }
+        }
+        const resources = resourceEdits(prepared, this.createId, reference => {
+          const canonicalId = reference.startsWith('cw-resource:') ? reference.slice('cw-resource:'.length) : undefined
+          const id = projectNamespace && canonicalId && project.assets[canonicalId] ? canonicalId : redoBindings[reference] ?? canonicalId
+          return id && project.assets[id] && this.options.session.resources?.()?.assets[id] ? id : undefined
+        })
+        for (const [reference, id] of Object.entries(redoBindings)) if (!Object.hasOwn(resources.bindings, reference)) resources.bindings[reference] = id
         edits.push(...resources.edits)
         diagnostics.push(...resourceDiagnostics(prepared))
         const viewport = this.designViewport(project, request)
@@ -339,7 +430,8 @@ export class ContentApplyService {
         })
         drafts = assembled.drafts ?? [assembled.draft]
         preserveLayout = assembled.pageLayout === true
-        if (Object.keys(records).length) for (const draft of drafts) draft.authoring = { records }
+        if (Object.keys(records).length) for (const draft of drafts) draft.authoring = { records,
+          ...(Object.keys(authoringBindings).length ? { resourceBindings: authoringBindings } : {}) }
         const persistSources = (draft: ContentObjectDraft): void => {
           const definition = assembled.definitions.find(value => value.id === draft.definitionId) ?? project.definitions[draft.definitionId]
           if (prepared.resourceSources.length && definition?.implementation.kind === 'builtin'

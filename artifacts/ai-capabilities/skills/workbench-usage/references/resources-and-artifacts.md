@@ -20,6 +20,8 @@
 
 用户需要独立成果文件时用 `artifact.save {source,destination}`，`source` 直接取创建、状态或等待回执，用户决定目的地；软件处理来源身份及保存，报告引用实际返回路径。无需保存中间缓存，不猜或拼 job/resource/name。采用和文件保存分别读真实回执；未返回成功保存时说明真实状态，结果未知沿原操作查证，不重发作业。
 
+`media.start` 返回 `job.status:"ready"` 时语音已生成；直接把 `job.resources[].source` 原样交给 `media.insert/apply` 使用，或 `artifact.save` 保存独立音频文件。这个 `job.jobId` 是媒体回执，不是 `job.status/wait` 接受的通用作业引用，无需再轮询，也不把媒体 source 当成计算输入文件路径。
+
 有实际信息依赖时，可用`delegate.message {job,text}`向同一协作任务中的具体同伴发送消息；接收表示消息已入队，不表示对方已执行或候选完成，终态续接沿`delegate.resume`。独立任务无需互聊，消息不授予文档writer或用户批准。用户可从父会话打开子任务详情、查看工具及候选，单独停止、补充或沿原记录续接。普通状态只给工作事实，计量保留内部。
 
 用户明确需要原始运行诊断时，可用`job.status {job,detail:"diagnostic"}`读取该作业内部账本；普通status/wait和聊天不显示这些计量。诊断是只读，不重启、取消或重新执行旧作业，也不把读到的旧失败变成新的工具失败。

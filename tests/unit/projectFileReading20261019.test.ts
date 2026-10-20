@@ -65,11 +65,19 @@ it('keeps observed identities on ordinary reads and permits explicit per-file na
   expect(context).toMatchObject({ path: h.path, target: { kind: 'instance', instanceId: 'b' }, regionStatus: 'current-object' })
 })
 
-it('preserves explicit full source reads and returns a local read repair for an absent captured page', async () => {
+it('pages an explicit full source request without losing the fixed source, and repairs an absent captured page', async () => {
   const html = `<p>${'内容'.repeat(60_000)}</p>`, h = await fixture(html)
   const result = await h.read({ full: true })
-  expect(result.content).toBe(html)
-  expect(result.nextOffset).toBeUndefined()
+  expect(result.content!.length).toBeLessThan(html.length)
+  expect(result).toMatchObject({ complete: false, requestedFull: true, revision: 0 })
+  let combined = result.content!, page = result
+  await h.human([{ type: 'data.set', instanceId: 'a', path: ['html'], value: '<p>new human source</p>' }])
+  while (page.nextOffset !== undefined) {
+    page = await h.read({ offset: page.nextOffset, full: true })
+    expect(page).toMatchObject({ basis: 'captured', revision: 0, currentRevision: 1, staleSnapshot: true })
+    combined += page.content
+  }
+  expect(combined).toBe(html)
   const missing = await h.coordinator.execute('new-run', 'page', 'page', 'project.read', { path: h.path, offset: 12, limit: 20 })
   expect(missing).toMatchObject({ kind: 'error', code: 'read-page-unavailable', data: { repair: { read: [
     { tool: 'project.read', input: { path: h.path, offset: 12, refresh: true } },

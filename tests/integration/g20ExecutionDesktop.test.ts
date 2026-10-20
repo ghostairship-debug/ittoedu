@@ -132,6 +132,10 @@ it('NI01 startNext retains accepted selection baseline through a preceding queue
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('server address')
   const h = await fixture(fetch)
   await configureConversation(h.settings, `http://127.0.0.1:${address.port}/v1`)
+  const initialSettings = await h.settings.read(), connectionId = initialSettings.profile.roles.conversation!.connectionId
+  await h.settings.saveProfile({ expectedRevision: initialSettings.profile.revision, roles: initialSettings.profile.roles,
+    speech: { connectionId, model: 'gpt-4o-mini-tts', voice: 'coral', format: 'mp3' } })
+  const grants = vi.spyOn(h.documents.tools, 'beginRun')
   const space = await h.service.operate({ type: 'workspace', root: h.workspace }) as { workspace: { workspaceId: string } }
   const current = await h.service.operate({ type: 'create-conversation', workspaceId: space.workspace.workspaceId }) as { conversationId: string; revision: number }
   const first = await h.service.operate({ type: 'send', workspaceId: space.workspace.workspaceId, conversationId: current.conversationId,
@@ -145,6 +149,14 @@ it('NI01 startNext retains accepted selection baseline through a preceding queue
     documents: [{ ...reference(h.document, [original]), selection: [original] }], mode: 'queue' }) as { submission: { start: ExecutionRunRecord['input'] } }
   const queued = await h.service.submissions.read('43333333-3333-4333-8333-222222222222')
   expect(queued!.start.documents[0]).toMatchObject({ epoch: h.document.epoch, revision: h.document.revision })
+  expect(queued!.start.speechSelection).toMatchObject({ selection: { model: 'gpt-4o-mini-tts' }, connection: { id: connectionId, revision: 1 } })
+  const currentSettings = await h.settings.read(), oldConnection = currentSettings.connections.find(value => value.connection.id === connectionId)!.connection
+  await h.settings.saveConnection({ id: connectionId, expectedRevision: oldConnection.revision, apiKey: 'fixture-secret-new', connection: {
+    provider: oldConnection.provider, protocol: oldConnection.protocol, baseURL: oldConnection.baseURL, accountId: oldConnection.accountId,
+    authKind: oldConnection.auth.kind, billing: oldConnection.billing, capabilities: oldConnection.capabilities,
+  } })
+  await h.settings.saveProfile({ expectedRevision: currentSettings.profile.revision, roles: currentSettings.profile.roles,
+    speech: { connectionId, model: 'gpt-4o-mini-tts-2025-03-20', voice: 'nova', format: 'wav' } })
   releaseFirst()
   expect((await waitForRun(h.service, first.run.runId)).status).toBe('completed')
   let next: { runId?: string; state: string } | undefined
@@ -154,7 +166,11 @@ it('NI01 startNext retains accepted selection baseline through a preceding queue
     await new Promise<void>(resolve => setTimeout(resolve, 10))
   }
   expect(next?.state).toBe('accepted')
-  expect((await waitForRun(h.service, next!.runId!)).status).toBe('completed')
+  const queuedRun = await waitForRun(h.service, next!.runId!)
+  expect(queuedRun.status).toBe('completed')
+  expect(queuedRun.input.speechSelection).toEqual(queued!.start.speechSelection)
+  expect(grants.mock.calls.find(([grant]) => grant.runId === queuedRun.runId)?.[0].speechSelection).toEqual(queued!.start.speechSelection)
+  expect((await h.settings.read()).connections.find(value => value.connection.id === connectionId)?.connection.revision).toBe(2)
   expect(queuedPreview).toBe('provider')
   expect((await h.documents.internalAPI.read(h.document.documentId)).model).toMatchObject({ source: '123 before DONE\n' })
 })

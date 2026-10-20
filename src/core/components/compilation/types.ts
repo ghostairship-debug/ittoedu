@@ -28,6 +28,8 @@ export interface ComponentCompilationInput extends ComponentModuleSource {
   options?: {
     /** Preserve local HTML module boundaries and native browser evaluation semantics. */
     preserveModules?: boolean
+    /** Transpile a classic HTML script without turning global declarations into module bindings. */
+    preserveScript?: boolean
     target?: string
     jsx?: 'transform' | 'automatic' | 'preserve'
     jsxImportSource?: string

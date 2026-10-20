@@ -25,6 +25,7 @@ import type { MaterialToolName } from './MaterialTools'
 import type { HtmlActionToolName } from './HtmlActionTools'
 import { viewActionToolSchemas, type ViewActionToolName } from './ViewActionTools'
 import { projectModelJobSnapshot, serviceToolOutcome } from './modelToolResult'
+import { taskTargetDeclaration } from '../../shared/workbench/taskTargetContext'
 
 /** Main supplies real services. Neither their implementations nor credentials enter core. */
 export interface HostToolServices {
@@ -82,6 +83,7 @@ export interface HostToolServices {
   }
   delegation?: {
     availability(): { ready: boolean; reason: string }
+    models?(runId: string): unknown | Promise<unknown>
     prepareLocal?(input: { runId: string; jobId: string; taskId: string; intent: LocalToolRunIntent } & HostTaskSourcePreparation): Promise<LocalToolRunPreview>
     authorizeLocal?(input: { runId: string; jobId: string; taskId: string; intent: LocalToolRunIntent }): void | Promise<void>
     startLocal?(input: { runId: string; jobId: string; taskId: string; intent: LocalToolRunIntent }): Promise<HostDelegationSnapshot>
@@ -91,7 +93,7 @@ export interface HostToolServices {
     resumeNative?(input: { runId: string; jobId: string; taskId: string; permission: 'workspace' | 'full'; sourceRunId: string; sourceJobId: string;
       intent: NativeDelegationIntent } & HostTaskSourcePreparation): Promise<HostDelegationSnapshot>
     message?(runId: string, jobId: string, submissionId: string, text: string): Promise<{
-      status: 'accepted'; job: string; submissionId: string; senderRunId: string; targetRunId: string }>
+      status: 'accepted'; job: string; submissionId: string; senderRunId: string; targetRunId?: string; delivery?: 'queued' | 'accepted' }>
     startManaged(input: { runId: string; jobId: string; taskId: string; goal: string; workspaceRoot: string;
       permission: 'workspace' | 'full'; materials?: readonly string[]; sourceVersion?: 'current' | 'disk'; expectedArtifacts: readonly string[] } & HostTaskSourcePreparation): Promise<HostDelegationSnapshot>
     readArtifact(runId: string, jobId: string, name: string): Promise<{
@@ -113,7 +115,8 @@ export interface HostToolServices {
   media?: {
     discover(runId: string): unknown
     start(runId: string, input: { kind: 'speech' | 'video' | 'music'; prompt: string; durationSeconds?: number; language?: string;
-      referenceResources?: readonly string[] }, options?: { signal?: AbortSignal }): Promise<unknown>
+      voice?: string; format?: 'mp3' | 'wav'; referenceResources?: readonly string[] }, options?: { signal?: AbortSignal }): Promise<unknown>
+    readResource?(runId: string, resourceId: string): Promise<HostMediaInput>
   }
   /** Open-license image libraries; candidates and previews belong to one run. */
   openImages?: {
@@ -151,7 +154,7 @@ export interface HostToolServices {
     readReadyResourceFromJob?(input: { jobId: string; sourceRunId: string; sourceDocumentId: string; resourceId: string }): Promise<HostImageInput>
   }
 }
-export type HostJobRef = { runId: string; kind: 'image' | 'compute' | 'delegation'; jobId: string }
+export type HostJobRef = { runId: string; kind: 'image' | 'compute' | 'delegation'; jobId: string; callerRunId?: string }
 export type HostJobView = { kind: HostJobRef['kind']; jobId: string; status: string; terminal: boolean; snapshot: unknown }
 export type ComputeRunInput = Omit<ComputeJobInput, 'runId' | 'jobId'> & { sources?: readonly string[] }
 export interface HostTaskSourcePreparation { sources?: readonly PreparedTaskSource[]; prepareSources?(signal: AbortSignal): Promise<readonly PreparedTaskSource[]> }
@@ -175,7 +178,7 @@ export type HostToolName = keyof typeof schema
 const descriptions: Record<HostToolName, string> = {
   'image.generate': '通过任务开始时冻结的 GPT OAuth 或已显式启用的 OpenAI Images API 连接生成图片。target 只绑定获授权文档，不代表应用；省略返回工作空间候选。用户明确生成并插入或替换时，传 application:{mode:insert|replace,target:已观察句柄}，软件冻结目标，生成后一次正式应用并返回独立 generation/application/save 结果；人工同目标变更或停止不覆盖，图片保留，无需再生成。候选可用 project.apply from 或 media.apply，也可将 htmlSource 用作局部 HTML 图片/CSS URL。当前请求 PNG、auto/low/medium/high 画质。',
   'image.edit': '编辑图片，或用一张/多张真实参考图创作下一幅。references 原样传已授权的 source/resource、材料或工程整张图片句柄；参考与 target 独立。省略 application 返回候选；用户明确编辑并插入/替换时传 application:{mode:insert|replace,target:已观察句柄}，软件冻结目标并正式应用，保全同期人工修改与晚到候选。宿主读取原字节并使用冻结图片连接，不承诺绝对一致，未知结果不自动重发。',
-  'image.status': '查询本任务图片状态；ready 返回已校验的本任务图片资源身份，不返回 base64 或临时 URL。',
+  'image.status': '读取已有图片任务的兼容入口；新流程使用 job.status/job.wait。ready 返回可应用的图片资源引用，不返回 base64 或临时 URL。',
 }
 interface HostImageToolHandler {
   run(name: HostToolName, input: z.infer<(typeof schema)[HostToolName]>): Promise<ToolResult>
@@ -184,7 +187,8 @@ const registerImage = toolRegistrationFor<HostImageToolHandler>()
 export const hostToolCatalog = (Object.keys(schema) as HostToolName[]).map(name => registerImage({ name, description: descriptions[name], inputSchema: schema[name],
   manual: { label: name, group: name === 'image.status' ? 'read' : 'edit', targetKinds: ['document', 'course-surface', 'course-instance'] },
 }, {
-  capability: name === 'image.status' ? 'read' : 'resource', effect: name === 'image.status' ? null : 'image-generation',
+  capability: name === 'image.status' ? 'read' : 'resource', effect: name === 'image.status' ? null : 'image-generation', family: 'media',
+  ...(name === 'image.status' ? {} : { exposure: 'direct' as const }),
   supports: context => context.images !== false && (context.standaloneImage === true || hasRunWrite(context, ['course-instance'], 'course-v10')),
   targets: (input, resolver) => 'application' in input && input.application ? handleToolTarget({ target: input.application.target }, resolver)
     : 'target' in input && input.target ? handleToolTarget({ target: input.target }, resolver) : [],
@@ -304,7 +308,8 @@ export class HostToolCoordinator {
     const previous = await service.lookup(runId, operationId)
     if (previous) return { kind: 'read', data: previous }
     const resolved = resolveArtifactSource(input)
-    const source = resolved.kind === 'image' ? await this.readGeneratedImageReference(runId, input.source)
+    const source = resolved.kind === 'media-resource' ? await this.readMediaSource(runId, resolved.resource)
+      : resolved.kind === 'image' ? await this.readGeneratedImageReference(runId, input.source)
       : resolved.kind === 'image-resource' ? await this.readImageReference(runId, resolved.resource)
       : resolved.kind === 'compute' ? await this.readComputeArtifact(runId, resolved.job, resolved.name)
         : await this.readDelegationArtifact(runId, resolved.job, resolved.name)
@@ -507,7 +512,7 @@ export class HostToolCoordinator {
   async jobWait(runId: string, input: Omit<HostJobRef, 'runId'> & { milliseconds: number }, signal?: AbortSignal): Promise<ToolResult> {
     this.builtInRun(runId)
     if (!this.services.jobs) return this.serviceUnavailable('通用作业服务尚未配置')
-    const data = this.jobResult(await this.services.jobs.wait({ ...input, ...await this.readableJobRef(runId, input), signal }))
+    const data = this.jobResult(await this.services.jobs.wait({ ...input, ...await this.readableJobRef(runId, input), callerRunId: runId, signal }))
     this.builtInRun(runId)
     return { kind: 'read', data }
   }
@@ -625,7 +630,7 @@ export class HostToolCoordinator {
       signal.throwIfAborted(); this.builtInRun(runId)
       const frozen = sources.length ? await this.services.taskInputs!.freeze(runId, sources, { signal, sourceVersion }) : []
       signal.throwIfAborted(); this.builtInRun(runId)
-      const context = await this.authority.taskTargetContext?.(runId, target, resumeContext)
+      const context = resumeContext === null && !target ? null : await this.authority.taskTargetContext?.(runId, target, resumeContext)
       signal.throwIfAborted(); this.builtInRun(runId)
       if (context === undefined || context === null) return frozen
       const text = JSON.stringify(context)
@@ -674,6 +679,13 @@ export class HostToolCoordinator {
     return this.startTaskJob(runId, this.services.delegation.startNative({ ...this.delegationIdentity(runId, operationId), permission, intent,
       prepareSources: this.taskSourcePreparation(runId, intent.sources ?? [], intent.sourceVersion, intent.target) }))
   }
+  async delegationModels(runId: string): Promise<ToolResult> {
+    this.builtInRun(runId)
+    if (!this.services.delegation?.models) return this.serviceUnavailable('子模型配置发现尚未接通；可沿用父任务已冻结模型')
+    const data = await this.services.delegation.models(runId)
+    this.builtInRun(runId)
+    return { kind: 'read', data }
+  }
   async resumeNativeDelegate(runId: string, operationId: string, input: NativeDelegationResumeIntent): Promise<ToolResult> {
     const permission = this.nativePermission(runId, operationId)
     if (!this.services.delegation?.resumeNative) return this.serviceUnavailable('原生子任务续接尚未接入')
@@ -685,7 +697,8 @@ export class HostToolCoordinator {
     // through the current target owner rather than preparing the editor's new focus.
     const inheritedTarget = source.runId === runId && previous.targetContext === undefined ? previous.target : undefined
     const intent = { ...requested, ...(!requested.target && inheritedTarget ? { target: inheritedTarget } : {}) }
-    const resumeContext = !requested.target && !inheritedTarget ? previous.targetContext ?? null : undefined
+    const resumeContext = !requested.target && !inheritedTarget
+      ? taskTargetDeclaration(previous.targetContext) ? previous.targetContext : null : undefined
     if (intent.sources?.length && !this.services.taskInputs) return this.serviceUnavailable('任务输入读取服务尚未接入')
     return this.startTaskJob(runId, this.services.delegation.resumeNative({ ...this.delegationIdentity(runId, operationId), permission,
       sourceRunId: source.runId, sourceJobId: source.jobId, intent,
@@ -812,6 +825,7 @@ export class HostToolCoordinator {
       : this.serviceUnavailable('媒体生成服务尚未配置')
   }
   async mediaStart(runId: string, input: { kind: 'speech' | 'video' | 'music'; prompt: string; durationSeconds?: number; language?: string;
+    voice?: string; format?: 'mp3' | 'wav'; engine?: 'local' | 'remote'; instructions?: string; speed?: number;
     referenceResources?: readonly string[] }, signal?: AbortSignal): Promise<ToolResult> {
     this.writableRun(runId)
     return this.services.media ? { kind: 'read', data: await this.services.media.start(runId, input, { signal }) }
@@ -870,6 +884,10 @@ export class HostToolCoordinator {
   }
   /** Existing resource owners validate the source; application still registers bytes in its one canonical transaction. */
   private async readResourceSource(runId: string, source: string): Promise<HostMediaInput | null> {
+    if (source.startsWith('media:')) {
+      if (!this.services.media?.readResource) throw new Error('此媒体资源的读取服务尚未接通')
+      return this.services.media.readResource(runId, source.slice(6))
+    }
     if (source.startsWith('workspace-image:')) {
       if (!this.services.images?.readWorkspaceResource) throw new Error('独立图片资源读取服务尚未配置')
       const image = await this.services.images.readWorkspaceResource(this.workspaceImageScope(runId), source)

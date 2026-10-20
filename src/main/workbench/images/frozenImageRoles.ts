@@ -9,7 +9,16 @@ type FrozenImageRole = { selection: ImageModelSelection } | { error: string }
 export function frozenImageRoles(snapshot: (role: ExecutionRole) => Promise<ExecutionSelectionSnapshot>) {
   const runs = new Map<string, Map<'generate' | 'edit', FrozenImageRole>>()
   return {
-    async beginRun(runId: string, disclosedSettings?: DisclosedExecutionSettings) {
+    async beginRun(runId: string, disclosedSettings?: DisclosedExecutionSettings, parentRunId?: string) {
+      if (parentRunId) {
+        const inherited = runs.get(parentRunId)
+        // A native child inherits the parent's already frozen route, including
+        // unavailable facts. A missing old scope is not permission to charge a
+        // newly selected connection after a restart or user continuation.
+        runs.set(runId, inherited ? structuredClone(inherited) : new Map((['generate', 'edit'] as const).map(operation =>
+          [operation, { error: '原父任务冻结的图片连接未保留，此续接无法恢复该图片通道；请在新主任务中配置并生成图片。' }])))
+        return
+      }
       const roles = new Map<'generate' | 'edit', FrozenImageRole>()
       await Promise.all((['generate', 'edit'] as const).map(async operation => {
         const roleName = operation === 'generate' ? 'imageGenerate' : 'imageEdit'

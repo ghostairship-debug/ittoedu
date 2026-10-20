@@ -6,6 +6,7 @@ import type { ExecutionPermissionMode } from './executionPermission'
 import type { ConversationHome, ExecutionAdvancementMode } from './conversations'
 import type { EditTarget } from './editSession'
 import type { SavedCourseIdentity } from './documentSave'
+import type { SpeechSelectionSnapshot } from './speechSettings'
 
 /** Explicit host-bound authoring output. This is task metadata, never model-authored tool arguments. */
 export interface ExecutionContentOutput {
@@ -22,6 +23,10 @@ export interface ExecutionStart {
   /** Conversation preference copied when this task was accepted; later changes are ordered steering. */
   advancementMode?: ExecutionAdvancementMode
   selection: ModelSelection
+  /** New-root setting, fixed for this root and all descendant tasks. */
+  nativeConcurrencyLimit?: number
+  /** Explicit speech route frozen when Main accepted this task, independent of text/image roles. */
+  speechSelection?: SpeechSelectionSnapshot
   /** Optional visual fallback fixed when this task was accepted. */
   visionSelection?: ModelSelection
   /** Optional user-selected no-tool compression route; absent uses the frozen main model. */
@@ -89,7 +94,11 @@ export interface ExecutionModelRecord {
   /** Exact message appended from this completed conversation request; auxiliary requests have none. */
   assistantMessageIndex?: number
   failure?: ModelFailure
-  payload?: { phase: 'initial' | 'dynamic'; digest: string; serializedBytes: number }
+  payload?: { phase: 'initial' | 'dynamic'; digest: string; serializedBytes: number;
+    prefix?: { previousRequestId: string; stableBytes: number; previousBytes: number;
+      firstDifference: 'instructions' | 'tools' | 'messages' | 'parameters' | 'identical' } }
+  firstEventWaitMs?: number
+  firstContentWaitMs?: number
   /** Local unfinished content only; never calls, model messages, effects or replay inputs. */
   argumentDrafts?: Array<{ state: 'incomplete-prefix'; providerCallId?: string; toolName?: string; argumentsText: string }>
   /** Latest cumulative provider report for this request; never summed across stream events. */
@@ -126,6 +135,8 @@ export interface ExecutionRunRecord {
   createdAt: number
   updatedAt: number
   messages: ModelChatMessage[]
+  /** Provenance of host-created data messages; originals remain at these journal positions. */
+  hostDataMessageIndexes?: number[]
   initialMessageCount: number
   /** Stable original-message position. The initial payload manifest describes the actual sent projection. */
   initialUserMessageIndex?: number

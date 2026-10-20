@@ -95,6 +95,8 @@ export function unrecoveredReconcileRuntimeFailure(record: ExecutionRunRecord): 
 
 /** Main's current settlement view; never changes or replaces the original receipt. */
 export type SettledExecutionTool = ExecutionToolRecord & {
+  /** A terminated ancestor's read will never finish; this is not a successful read. */
+  retiredReadAttempt?: { verificationRequired: boolean }
   currentContentVerification?: { sourceDocumentId: string;
     observation: Awaited<ReturnType<DocumentToolGateway['verifyContentDiagnostics']>> }
 }
@@ -212,6 +214,8 @@ const delivered = (tool: ExecutionToolRecord) => !failedTool(tool)
  * are unfinished operations. Definite rejections remain in the audit history. */
 function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord[] {
   return record.tools.filter((tool,index)=>{
+    const retired = (tool as SettledExecutionTool).retiredReadAttempt
+    if (retired) return retired.verificationRequired && !record.tools.slice(index+1).some(later=>sameObservedTarget(tool,later))
     if(tool.call.name===USER_QUESTION_TOOL||tool.call.name==='task.note'||tool.call.name==='task.finish') return false
     if(tool.notInvokedReason==='steering')return false
     if(tool.state!=='returned'||unknownToolOutcome(tool))return true
@@ -234,6 +238,16 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
 
 interface NewFileDeliveryFact { documentId: string; label: string; path?: string; revision: number | null; savedRevision: number | null }
 const pathKey = (value: string) => value.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase()
+/** Explicitly adopting the compared disk version withdraws the former local draft.
+ * This is a current owner fact, not evidence that the withdrawn draft was saved. */
+function adoptedDiskFact(tool: ExecutionToolRecord): { documentId: string; epoch: string; revision: number; path: string } | null {
+  if (tool.call.name !== 'file.reconcile' || tool.state !== 'returned' || tool.result?.kind !== 'read') return null
+  const data = tool.result.data as Record<string, unknown> | null
+  return data?.status === 'reconciled' && data.choice === 'disk' && data.dirty === false
+    && typeof data.documentId === 'string' && typeof data.epoch === 'string' && typeof data.path === 'string'
+    && typeof data.revision === 'number' && Number.isSafeInteger(data.revision)
+    ? data as { documentId: string; epoch: string; revision: number; path: string } : null
+}
 function matchesSaveBinding(record: ExecutionRunRecord, saved: NonNullable<ReturnType<typeof saveFact>>, createdPath?: string): boolean {
   const binding = record.documentBindings?.[deliveryDocumentId(record, saved.documentId)]
   if (binding) {
@@ -249,6 +263,11 @@ function matchesSaveBinding(record: ExecutionRunRecord, saved: NonNullable<Retur
 export function newFileDeliveryFacts(record: ExecutionRunRecord): NewFileDeliveryFact[] {
   const facts = new Map<string, NewFileDeliveryFact>()
   for (const tool of record.tools) {
+    const adopted = adoptedDiskFact(tool)
+    if (adopted) {
+      const fact = facts.get(deliveryDocumentId(record, adopted.documentId))
+      if (fact) { fact.revision = adopted.revision; fact.savedRevision = adopted.revision }
+    }
     const data = tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
       ? tool.result.data as Record<string, unknown> : null
     if (fileCreated(tool.call.name, tool.result) && typeof data?.documentId === 'string') {
@@ -381,6 +400,10 @@ function deliveryCompletionIssues(record:ExecutionRunRecord):ExecutionCompletion
     const actual=saves.slice().reverse().find(fact=>documentId!==undefined&&deliveryDocumentId(record,fact.documentId)===documentId
       &&(!target||typeof fact.path==='string'&&deliveryPath(record,fact.path)===target))
     const current=documentId?(record as SettledExecutionRun).currentDocuments?.[documentId]:undefined
+    if (['file.save', 'project.save'].includes(request.call.name) && record.tools.slice(record.tools.indexOf(request) + 1).some(tool => {
+      const adopted = adoptedDiskFact(tool)
+      return adopted && deliveryDocumentId(record, adopted.documentId) === documentId
+    })) continue
     if(actual&&currentSave(actual)&&matchesSaveBinding(record,actual)
       &&actual.savedRevision!>=currentRevision(record,actual.documentId,actual.epoch)
       &&(!current||current.epoch===actual.epoch&&current.dirty===false))continue
@@ -436,6 +459,10 @@ export function executionAuditWarnings(record:ExecutionRunRecord):ExecutionCompl
       name:tool.call.name,status:'failed',callId:tool.callId,requestId:tool.requestId,receiptCallId:tool.callId,
       message:tool.observationFailure?.message??(tool.result?.kind==='error'?tool.result.message:serviceToolOutcome(tool.call.name,tool.result)?.message??'中间操作未成功；原回执保留')
     }))
+  for (const tool of record.tools) if (serviceToolOutcome(tool.call.name, tool.result)?.status === 'applied-with-diagnostics'
+    && !currentContentRepaired(tool)) warnings.push({ name: tool.call.name, status: 'unverified', callId: tool.callId,
+      requestId: tool.requestId, receiptCallId: tool.callId,
+      message: serviceToolOutcome(tool.call.name, tool.result)!.message })
   const latestVisual=new Map<string,NonNullable<ExecutionRunRecord['visualAnalyses']>[number]>()
   for(const analysis of record.visualAnalyses??[])latestVisual.set(analysis.source,analysis)
   for(const analysis of latestVisual.values())if(analysis.status==='vision-unavailable')
@@ -475,12 +502,17 @@ const knownJobFailure = (tool: ExecutionToolRecord, data: NonNullable<ReturnType
 /** Ending the loop is distinct from proving complete delivery. These are derived
  * from the original receipts; a terminal failed job never becomes a successful one. */
 export function executionCompletionIssues(record: ExecutionRunRecord): ExecutionCompletionIssue[] {
+  const currentJobs = new Set<string>()
   const issues = unresolvedToolFailures(record).map((tool): ExecutionCompletionIssue => {
     let receipt = tool
     let status: ExecutionCompletionIssue['status'] = unknownToolOutcome(tool) ? 'unknown'
       : tool.state !== 'returned' ? 'pending' : tool.observationFailure ? 'unverified' : 'failed'
     let message = tool.observationFailure?.message ?? (tool.result?.kind === 'error' ? tool.result.message
       : serviceToolOutcome(tool.call.name, tool.result)?.message ?? '工具操作尚未确认完成')
+    if ((tool as SettledExecutionTool).retiredReadAttempt) {
+      status = 'unverified'
+      message = '旧运行的纯读等待已退役；原验收目的尚未由等价当前观察证明。保存和导出以各自回执为准。'
+    }
     const pending = pendingJob(tool)
     if (pending && status !== 'unknown') {
       status = 'pending'
@@ -509,10 +541,21 @@ export function executionCompletionIssues(record: ExecutionRunRecord): Execution
     }
     return { callId: tool.callId, name: tool.call.name, status, message,
       requestId: receipt.requestId, receiptCallId: receipt.callId, ...(pending ? { job: pending.id, kind: pending.kind } : {}) }
+  }).filter(issue => {
+    if (!issue.job || !issue.kind) return true
+    // Creation and repeated status/wait receipts describe one current owner
+    // job. Keep its original producer and latest observation, not one pending
+    // obligation per historical poll. Separate unknown effects remain separate.
+    const key = JSON.stringify([issue.kind, issue.job, issue.status === 'unknown' ? issue.receiptCallId : null])
+    if (currentJobs.has(key)) return false
+    currentJobs.add(key)
+    return true
   })
   const attemptedOutput=record.tools.some(tool=>tool.notInvokedReason!=='steering'
+    &&tool.call.name!=='programmatic.execute'
     &&['write','save'].includes(toolRegistration(tool.call.name)?.capability??''))
   const attemptedResource=record.tools.some(tool=>tool.notInvokedReason!=='steering'
+    &&tool.call.name!=='programmatic.execute'
     &&toolRegistration(tool.call.name)?.capability==='resource')
   if((attemptedOutput||attemptedResource)&&!hasConfirmedOutput(record))
     issues.push({name:'交付',status:'unverified',message:'尚未取得正式内容应用、文件创建、保存或写出的成果回执；中间诊断已保留'})

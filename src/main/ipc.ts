@@ -31,6 +31,7 @@ import { randomUUID } from 'node:crypto'
 import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { app, dialog, ipcMain, shell } from 'electron'
 import { documentHost } from './workbench/documentHost'
+import { uiDocumentEvent, uiDocumentResult } from './workbench/uiDocumentSnapshot'
 import { componentCompilationInputSchema } from '../shared/workbench/componentCompilation'
 import { documentHostRequestSchema } from '../shared/workbench/desktop'
 import { spatialViewportCaptureSchema } from '../shared/workbench/spatialViewport'
@@ -508,7 +509,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   documents.setEventSink(event => {
     if (event.type === 'changed') preview.releaseChangedBinding(event.snapshot)
     const window = context.getMainWindow()
-    if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.documentEvent, event)
+    if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.documentEvent, uiDocumentEvent(event))
   })
   registerSafeHandler(IPC_CHANNELS.workspaceFiles, context, {
     code: 'WORKSPACE_FILE_OPERATION_FAILED', title: '文件操作未完成',
@@ -554,8 +555,10 @@ export function registerIpcHandlers(context: IpcContext): void {
       return
     }
     if (input.type === 'close-dialog') return closeDocumentWithDialog(requireWindow(context), documents, input.documentId, input.suggestedDirectory, input.discardOnly)
-    if (input.type !== 'save-dialog') return documents.operate(input)
-    return saveDocumentWithDialog(requireWindow(context), documents, input.documentId, input.saveAs, input.suggestedDirectory)
+    const result = input.type === 'save-dialog'
+      ? await saveDocumentWithDialog(requireWindow(context), documents, input.documentId, input.saveAs, input.suggestedDirectory)
+      : await documents.operate(input)
+    return uiDocumentResult(input, result)
   })
   registerSafeHandler(IPC_CHANNELS.componentCompilation, context, {
     code: 'COMPONENT_COMPILE_FAILED', title: '组件源码未能编译',

@@ -46,6 +46,9 @@ type Sink = {
   domElements: Map<string, Usage>
   moduleAliases: Map<string, string>
   localReferences: Set<string>
+  resourceReferences?: ExtractHtmlResourcesInput['resourceReferences']
+  closedDirectories?: ReadonlySet<string>
+  javascriptSerial?: number
 }
 type Flags = { url: boolean; remote: boolean }
 type DataHit = {
@@ -292,6 +295,17 @@ function rewriteSingleUrl(rawUrl: string, context: Context, baseDir: string, sin
     return { value: lead + normalized + trail, changed: true }
   }
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(core)) {
+    if (core.startsWith('cw-resource:')) {
+      const resource = sink.resourceReferences?.get(core)
+      if (resource) {
+        // Existing project references already carry author asset identity. Byte
+        // deduplication may share storage, but must not merge two such sources.
+        addResource(sink, resource.bytes, resource.mediaType, { kind: 'relative', context, reference: core })
+        return { value: rawUrl, changed: false }
+      }
+      addDiagnostic(sink, 'warning', 'unresolved-project-resource', '当前工程没有此资源引用；原引用已保留，可从当前工程选择资源后继续修改', core)
+      return { value: rawUrl, changed: false }
+    }
     if (/^https?:/i.test(core)) { sink.remoteReferences.push({ url: core, context, usage }); return { value: rawUrl, changed: false } }
     if (/^data:/i.test(core)) {
       const hit = parseDataUri(core, 0, allowWhitespace)
@@ -719,6 +733,9 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     }
   }
   const declarations = new Map<string, number>(), ambiguous = new Set<string>()
+  const identifiers = new Set<string>(), dynamicUrls = new Map<string, string>()
+  sink.javascriptSerial = (sink.javascriptSerial ?? 0) + 1
+  let dynamicResolver = `__cwLocalMedia${sink.javascriptSerial}_0`
   const patternNames = (pattern: Node | undefined): string[] => {
     if (!pattern) return []
     if (pattern.type === 'Identifier') return [String(pattern.name)]
@@ -730,6 +747,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     return []
   }
   const scanBindings = (node: Node): void => {
+    if (node.type === 'Identifier') identifiers.add(String(node.name))
     if (node.type === 'VariableDeclarator') for (const name of patternNames(node.id as Node))
       declarations.set(name, (declarations.get(name) ?? 0) + 1)
     if (node.type === 'AssignmentExpression') for (const name of patternNames(node.left as Node)) ambiguous.add(name)
@@ -744,6 +762,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     }
   }
   scanBindings(root)
+  for (let index = 1; identifiers.has(dynamicResolver); index++) dynamicResolver = `__cwLocalMedia${sink.javascriptSerial}_${index}`
   const isDocumentCreateElement = (call: Node): boolean => {
     if (call.type !== 'CallExpression') return false
     const callee = call.callee as Node
@@ -801,6 +820,41 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
   for (const name of constants.keys()) if (declarations.get(name) !== 1 || ambiguous.has(name)) constants.delete(name)
   const visit = (node: Node, ancestors: Node[] = []) => {
     if (handled.has(node)) return
+    // An authored HTML image template can name an actual local directory while
+    // its filename comes from a callback or dataset. Capture only that explicit
+    // media directory; do not infer arbitrary strings or execute the program.
+    if (node.type === 'TemplateLiteral') {
+      const expressions = node.expressions as Node[], quasis = node.quasis as Array<Node & { value: { cooked: string | null } }>
+      const template = quasis.map((part, index) => (part.value.cooked ?? '') + (index < expressions.length ? `__cw_media_${index}__` : '')).join('')
+      if (template.includes('<img')) {
+        const inspectTemplate = (element: DefaultTreeAdapterTypes.Node): void => {
+          if ('tagName' in element && element.tagName === 'img') {
+            const src = element.attrs.find(attribute => attribute.name === 'src')?.value
+            const match = src && /^__cw_media_(\d+)__([^"'<>]*)$/.exec(src)
+            if (match) {
+              const index = Number(match[1]), expression = expressions[index]!, suffix = match[2]!, prefix = closureProof.localUrlPrefix(expression)
+              const directory = prefix && resolveRelative(baseDir, prefix)
+              if (directory && code.slice(quasis[index + 1]!.start, quasis[index + 1]!.start + suffix.length) === suffix) {
+                const media = [...siblings].filter(([name]) => name.startsWith(`${directory}/`) && !name.slice(directory.length + 1).includes('/') && mediaTypeForPath(name).startsWith('image/'))
+                if (!media.length || sink.closedDirectories && !sink.closedDirectories.has(directory))
+                  addDiagnostic(sink, 'warning', 'missing-relative-directory', '动态图片引用的本地目录尚未闭合；原程序保留', directory)
+                for (const [name, bytes] of media) {
+                  siblingResource(sink, siblings, name)
+                  dynamicUrls.set(prefix + name.slice(directory.length + 1), placeholder(addResource(sink, bytes, mediaTypeForPath(name),
+                    { kind: 'relative', context: 'js-string', reference: prefix + name.slice(directory.length + 1) })))
+                }
+                if (media.length) {
+                  addEdit({ start: expression.start, end: expression.end, value: `${dynamicResolver}(${code.slice(expression.start, expression.end)}${suffix ? `+${JSON.stringify(suffix)}` : ''})` })
+                  if (suffix) addEdit({ start: quasis[index + 1]!.start, end: quasis[index + 1]!.start + suffix.length, value: '' })
+                }
+              }
+            }
+          }
+          if ('childNodes' in element) for (const child of element.childNodes) inspectTemplate(child)
+        }
+        inspectTemplate(parseHtml(template))
+      }
+    }
     if (['ImportDeclaration', 'ExportAllDeclaration', 'ImportExpression'].includes(node.type) || (node.type === 'ExportNamedDeclaration' && node.source)) {
       const source = node.source as Node | undefined
       const reference = source && staticString(source)
@@ -872,7 +926,25 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     }
     const urlSink = (value: Node, name: string, usage: Usage = 'unknown') => {
       const url = literalValue(value) ?? (value.type === 'Identifier' ? constants.get(String(value.name)) ?? null : null)
-      if (url === null) { addDiagnostic(sink, 'warning', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的资源地址`); return }
+      if (url === null) {
+        const proof = closureProof.urlInput(value)
+        if (proof.kind === 'proven-resource') {
+          const replacements = new Map<string, string>()
+          for (const literal of proof.literals) {
+            const before = literalValue(literal)!
+            const after = rewriteUrl(before, name, usage)
+            if (before !== after) replacements.set(before, after)
+          }
+          if (replacements.size) {
+            const branches = [...replacements].map(([before, after]) => `__cwUrl===${jsString(before)}?${jsString(after)}:`).join('')
+            addEdit({ start: value.start, end: value.end,
+              value: `(__cwUrl=>${branches}__cwUrl)(${code.slice(value.start, value.end)})` })
+            handled.add(value)
+          }
+          return
+        }
+        addDiagnostic(sink, 'warning', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的资源地址`); return
+      }
       writeString(value, rewriteUrl(url, name, usage))
     }
     if (node === root) {
@@ -980,6 +1052,11 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     }
   }
   visit(root)
+  if (dynamicUrls.size) {
+    const insertion = (root.body as Node[]).find(statement => !statement.directive)?.start ?? code.length
+    addEdit({ start: insertion, end: insertion, value: `function ${dynamicResolver}(__cwUrl){switch(__cwUrl){${[...dynamicUrls]
+      .map(([before, after]) => `case ${jsString(before)}:return ${jsString(after)};`).join('')}default:return __cwUrl;}}\n` })
+  }
   if (edits.size === 0 || conflictingEdits) return code
   const ordered = [...edits.values()].sort((a, b) => b.start - a.start)
   if (ordered.some((edit, index) => index > 0 && edit.end > ordered[index - 1].start)) {
@@ -1411,6 +1488,8 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
 /** 把 HTML 中的内嵌资源和同级文件抽成按内容去重的受管资源，不访问网络或磁盘。 */
 export function extractHtmlResources(input: ExtractHtmlResourcesInput): ExtractHtmlResourcesResult {
   const sink = createSink()
+  sink.resourceReferences = input.resourceReferences
+  sink.closedDirectories = input.closedDirectories
   const siblings = siblingMap(input.siblingFiles)
   const html = transformHtml(input.html, sink, siblings)
   return { html, ...(sink.modules.size ? { modules: Object.fromEntries(sink.modules) } : {}), resources: [...sink.resources.values()],

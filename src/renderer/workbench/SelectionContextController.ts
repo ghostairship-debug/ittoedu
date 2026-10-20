@@ -95,8 +95,8 @@ export class SelectionContextController {
   private tickets = new Map<string, number>()
   private listeners = new Set<() => void>()
   private requestHandler?: (request: ContextualEditRequest) => void
-  private preparers = new Map<string, () => Promise<DocumentSnapshot>>()
-  private fallback?: (documentId: string) => Promise<DocumentSnapshot>
+  private preparers = new Map<string, { prepare(): Promise<DocumentSnapshot>; flushInput?(): Promise<void> }>()
+  private fallback?: { prepare(documentId: string): Promise<DocumentSnapshot>; flushInput?(documentId: string): Promise<void> }
   private clearers = new Map<string, Set<(targets?: readonly ExecutionSelectionTarget[]) => void>>()
   private removed = new Map<string, string>()
   private targetViews = new Map<string, { rect(target: ExecutionSelectionTarget): DOMRect | null; select(target: ExecutionSelectionTarget): boolean; root(): HTMLElement | null }>()
@@ -148,9 +148,21 @@ export class SelectionContextController {
       this.setManual(id, value, false)
     } catch { if (this.tickets.get(id) === ticket && active()) this.setManual(id, null) }
   }
-  register(id: string, prepare: () => Promise<DocumentSnapshot>) { this.preparers.set(id, prepare); return () => { if (this.preparers.get(id) === prepare) this.preparers.delete(id) } }
-  setFallback(prepare: (id: string) => Promise<DocumentSnapshot>) { this.fallback = prepare; return () => { if (this.fallback === prepare) this.fallback = undefined } }
-  async prepare(id: string) { return this.preparers.get(id)?.() ?? this.fallback?.(id) ?? this.readDocument(id) }
+  register(id: string, prepare: () => Promise<DocumentSnapshot>, flushInput?: () => Promise<void>) {
+    const owner = { prepare, flushInput }; this.preparers.set(id, owner)
+    return () => { if (this.preparers.get(id) === owner) this.preparers.delete(id) }
+  }
+  setFallback(prepare: (id: string) => Promise<DocumentSnapshot>, flushInput?: (id: string) => Promise<void>) {
+    const owner = { prepare, flushInput }; this.fallback = owner
+    return () => { if (this.fallback === owner) this.fallback = undefined }
+  }
+  async prepare(id: string) { return this.preparers.get(id)?.prepare() ?? this.fallback?.prepare(id) ?? this.readDocument(id) }
+  async flushInput(id: string): Promise<void> {
+    const owner = this.preparers.get(id)
+    if (owner) { await (owner.flushInput?.() ?? owner.prepare()); return }
+    if (this.fallback) { await (this.fallback.flushInput?.(id) ?? this.fallback.prepare(id)); return }
+    await this.readDocument(id)
+  }
   async prepareQuestion(question: UserQuestionView) {
     const references = question.currentDraft ?? []
     const ids = [...new Set(references.map(reference => reference.documentId))]

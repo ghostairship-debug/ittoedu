@@ -23,7 +23,7 @@
 
 上表路径只是形状示例，名称和序号由软件从当前工程生成，不手工登记或推算。
 
-长文本分页规则不同：`file.read` 将回执 `nextCursor` 传给 `cursor`；`project.read` 将回执 `nextOffset` 传给 `offset`，可设 `limit`。工程续页读取固定来源；省略offset新读当前稿，`refresh:true`可在指定offset局部刷新当前稿，按回执basis/revision/currentRevision区分。`project.read {path,query:"字面内容"}`直接搜索当前未保存文件，返回命中附近、行列、offset和版本；此时limit为命中数。需要整份来源时用`full:true`，不必逐层读取目录。不要混用游标和偏移。
+长文本分页规则不同：`file.read` 将回执 `nextCursor` 传给 `cursor`；`project.read` 将回执 `nextOffset` 传给 `offset`，可设 `limit`。工程续页读取固定来源；省略offset新读当前稿，`refresh:true`可在指定offset局部刷新当前稿，按回执basis/revision/currentRevision区分。`project.read {path,query:"字面内容"}`直接搜索当前未保存文件，返回命中附近、行列、offset和版本；此时limit为命中数。`full:true`请求完整来源，超过实际交付容量仍返回 `complete:false/nextOffset`，可续读全部，不表示文件受大小限制或模型已读完整内容。不要混用游标和偏移。写结果只给最小提交/目标/版本事实，已提交 Source 正文不默认回显；`complete:true`才表示所附短入口全文实际交付，元数据不升级未读人工值。内置大结果按 context/programmatic 原引用续读；外部 MCP 大结果可用回执的 `operation.read {ticket,path,offset,limit}` 读取同连接当前授权范围的冻结原值，不重放原调用。
 
 修改先读目标，再调用 `project.apply {path,content}`；`content` 是该文件的完整新文本，软件只提交实际改变的正式字段。也可用 `project.apply {path,from}` 读取已授权源文件或本任务成果来源及实际相对资源闭包。当前打开的Source是当前稿，尚未保存或原磁盘文件移动/删除时仍可沿其已绑定来源采用；单独导入新文件以实际文件为准。计算/委派回执的 `source` 可直接用作 `from`，软件采用入口和同组相对依赖，无需先逐文件落盘。读取后若人工修改与本次改动冲突，保留输入并重新读取目标，不覆盖教师的新改。
 

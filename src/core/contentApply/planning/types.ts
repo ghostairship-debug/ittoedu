@@ -26,6 +26,9 @@ export interface ContentObjectDraft {
 
 export type ContentApplySource =
   | { kind: 'html'; html: string; scope?: 'target' | 'projection'; themeCss?: string; siblingFiles?: ReadonlyMap<string, Uint8Array>;
+      /** Software-projected HTML uses canonical asset IDs, outside an instance's private alias namespace. */
+      resourceNamespace?: 'project';
+      resourceReferences?: ReadonlyMap<string, { bytes: Uint8Array; mediaType: string }>;
       original?: { bytes: Uint8Array; filename: string; mimeType?: string } }
   | { kind: 'objects'; objects: ContentObjectDraft[]; definitions?: ComponentDefinition[];
       /** Source owners are admitted with their instances, never in a second transaction. */

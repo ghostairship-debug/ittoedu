@@ -23,6 +23,9 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
   pendingPath?: string
   records?(): Record<string, ComponentAuthorRecord>
   resources?(): Record<string, string>
+  runtimeResources?(resources: Record<string, string>): Record<string, string>
+  resolveResource?(reference: string, bindings: Readonly<Record<string, string>>): string | undefined
+  matchesResource?(reference: string, liveUrl: string, bindings: Readonly<Record<string, string>>): boolean
   bindings?(): Readonly<Record<string, string>>
   activity?(): { active: boolean; visible: boolean; playing: boolean } | undefined
   refreshResources?(root: Document, resources: Record<string, string>, bindings: Readonly<Record<string, string>>): void
@@ -35,6 +38,7 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
   type State = { records: Record<string, ComponentAuthorRecord>; resources: Record<string, string>; bindings: Readonly<Record<string, string>>; observe: boolean }
   type Child = { reports: OwnedAuthorReport[]; width: number; height: number }
   let state: State = { records: {}, resources: {}, bindings: {}, observe: false }
+  const resourceUrls = () => options.runtimeResources?.(state.resources) ?? state.resources
   let ended = false, queued = false, consumer: ReturnType<typeof factory> | undefined, sequence = 0
   const initialPendingPath = options.pendingPath ?? (documentPath.includes('pending:') ? documentPath : undefined)
   const scope = documentPath ? { 'document:path': documentPath } : undefined
@@ -138,7 +142,7 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
         || record.scope?.['document:path']?.startsWith(anchoredPath + '/')) ? anchoredPath : initialPendingPath
       if (scope) scope['document:path'] = documentPath
     }
-    if (documentPath) options.refreshResources?.(document, state.resources, state.bindings)
+    if (documentPath) options.refreshResources?.(document, resourceUrls(), state.bindings)
     consumer?.refresh()
     for (const frame of frames()) sendState(frame)
     enqueue()
@@ -210,8 +214,10 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
     if (ended) return
     if (documentPath) consumer = factory(document.documentElement, { records: localRecords, scope,
       originalText: node => pageText()?.originalText(node), claimText: (node, text) => pageText()?.setLocalText(node, text),
-      resolveResource: reference => state.resources[state.bindings[reference] ?? reference] ?? reference,
-      resourceReference: url => Object.entries(state.bindings).find(([, id]) => state.resources[id] === url)?.[0],
+      resolveResource: reference => options.resolveResource?.(reference, state.bindings) ?? resourceUrls()[state.bindings[reference] ?? reference] ?? reference,
+      matchesResource: (reference, liveUrl) => options.matchesResource?.(reference, liveUrl, state.bindings) ?? false,
+      resourceReference: url => Object.entries(state.bindings).find(([, id]) => resourceUrls()[id] === url)?.[0]
+        ?? Object.entries(resourceUrls()).find(([, value]) => value === url)?.[0],
       onChange: enqueue, report: (authorKey, status) => parent.postMessage({ type: 'guoling.authoring.status', token, authorKey, status }, '*') })
     observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true })
     resize.observe(document.documentElement)

@@ -72,9 +72,11 @@ it.each(['content', 'from'] as const)('fills an observed empty page through %s, 
     await call('project.read', { path: page.path })
     await fs.writeFile(path.join(root, 'author.html'), html)
     const inserted = await apply({ path: page.path, intent: 'content', ...(source === 'content' ? { content: html } : { from: 'author.html' }) })
-    expect(inserted).toMatchObject({ commit: 'committed', usability: 'unverified', receipt: { status: 'applied' },
-      input: { intent: 'content', source: { kind: 'html', html } } })
-    expect(inserted.diagnostics).toEqual([expect.objectContaining({ level: 'info', code: 'html-source-program' })])
+    expect(inserted).toMatchObject({ commit: 'committed', usability: 'unverified', receipt: { status: 'applied' } })
+    expect(inserted).not.toHaveProperty('input')
+    expect(inserted.receipt).not.toHaveProperty('appliedChanges.changes.0.value')
+    expect(inserted.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ level: 'info', code: 'html-source-program' })]))
+    expect(inserted.diagnostics.every(item => item.level === 'info')).toBe(true)
     const current = await host.internalAPI.read(initial.documentId), model = course(current)
     expect(current.undoDepth).toBe(1)
     expect(model.project.surfaces[0]!.childIds).toEqual(inserted.insertedIds)
@@ -113,6 +115,29 @@ it.each(['content', 'from'] as const)('fills an observed empty page through %s, 
     expect(course(undone).project.instances).toEqual(course(initial).project.instances)
     expect(course(undone).project.assets).toEqual(course(initial).project.assets)
     expect(course(undone).resources).toEqual(course(initial).resources)
+  } finally { await context.dispose() }
+})
+
+it('reads current resource tokens back, changes the source text, and saves the same project assets for cold reopen', async () => {
+  const context = await fixture(), { root, host, initial, page, call, apply } = context
+  try {
+    await call('project.read', { path: page.path })
+    await apply({ path: page.path, content: html, intent: 'content' })
+    const before = await host.internalAPI.read(initial.documentId), original = course(before)
+    const object = componentProjectFiles(original.project, original.resources).find(file => file.kind === 'html' && file.target?.kind === 'instance')!
+    await call('project.read', { path: object.path })
+    const result = await apply({ path: object.path, content: object.content!.replace('<h1>Observe</h1>', '<h1>Current lesson</h1>'), intent: 'content' })
+    expect(result.commit).toBe('committed')
+    expect(result.diagnostics.some(item => item.code === 'unsupported-url-scheme' || item.code === 'unresolved-project-resource')).toBe(false)
+    const edited = course(await host.internalAPI.read(initial.documentId))
+    expect(Object.keys(edited.project.assets).sort()).toEqual(Object.keys(original.project.assets).sort())
+    const filename = path.join(root, 'current.glx')
+    await host.saveToPath(initial.documentId, filename)
+    const cold = course(await new DocumentHostService(path.join(root, 'cold-recovery')).open(filename))
+    const instance = Object.values(cold.project.instances).find(instance => (instance.data as { html?: string }).html?.includes('Current lesson'))!
+    const data = instance.data as { html: string; resourceBindings: Record<string, string> }
+    const reference = new JSDOM(data.html).window.document.querySelector('img')!.getAttribute('src')!
+    expect(cold.resources.assets[data.resourceBindings[reference]!]!.byteLength).toBeGreaterThan(0)
   } finally { await context.dispose() }
 })
 

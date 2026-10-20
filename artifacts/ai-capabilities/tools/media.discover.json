@@ -1,5 +1,5 @@
 {
-  "description": "列出语音、视频、音乐的真实已配置能力；未配置时明确返回，不模拟生成。",
+  "description": "列出语音、视频、音乐的可用状态。语音分别披露本机与语音 API 的配置依据、语言/声音、格式、费用类型和表演参数；配置可调用不等于已完成供应商实调。由 AI 结合实际状态与场景选择，不从文本或图片登录推断语音可用。不可用时明确返回，不模拟生成。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,

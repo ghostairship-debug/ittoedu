@@ -8,6 +8,28 @@ afterEach(cleanup)
 const item = (index: number, type: ExecutionItem['type'] = 'text', data: ExecutionItem['data'] = {}): ExecutionItem => ({ taskId: 'task', runId: 'run', itemId: `item-${index}`, source: 'builtin', type, time: index, sequence: index + 1, data, content: [] })
 function expand(card: HTMLElement) { const details = card.querySelector('details')!; act(() => { details.open = true; fireEvent(details, new Event('toggle')) }); return details }
 
+it('keeps reply text free of terminal badges and retains the run result in expandable process details', () => {
+  const reply = { ...item(0, 'text', { status: 'completed' }), content: [{ kind: 'text' as const, text: '文件已经保存。' }] }
+  render(<ExecutionTimeline projection={{ conversationId: 'plain-reply', cursor: 2, items: [reply, item(1, 'run.end', { status: 'partial' })] }} />)
+  const card = screen.getByRole('article', { name: '回复' })
+  expect(card).toHaveTextContent('文件已经保存。')
+  expect(card).not.toHaveTextContent('已完成')
+  expect(screen.queryByRole('article', { name: '任务结果' })).toBeNull()
+  const process = screen.getByText('执行记录').closest('details')!
+  act(() => { process.open = true; fireEvent(process, new Event('toggle')) })
+  expect(screen.getByRole('article', { name: '任务结果' }).querySelector('details')).not.toHaveAttribute('open')
+})
+
+it('places current activity after the latest reply and removes it when the run ends', () => {
+  const reply = { ...item(1, 'text', { status: 'completed' }), content: [{ kind: 'text' as const, text: '正在处理当前文件。' }] }
+  const projection = { conversationId: 'latest-activity', cursor: 2, items: [item(0, 'run.state', { status: 'running' }), reply] }
+  const { rerender } = render(<ExecutionTimeline projection={projection} />)
+  const activity = screen.getByRole('status')
+  expect(screen.getByRole('article', { name: '回复' }).compareDocumentPosition(activity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  rerender(<ExecutionTimeline projection={{ ...projection, cursor: 3, items: [...projection.items, item(2, 'run.end', { status: 'completed' })] }} />)
+  expect(screen.queryByRole('status')).toBeNull()
+})
+
 it('does not query image results until the new conversation has a valid identity', () => {
   const list = vi.fn().mockResolvedValue([])
   const imageResults = { list } as unknown as ImageResultsDesktopAPI

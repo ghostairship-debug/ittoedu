@@ -118,6 +118,34 @@ export function htmlActionPageOperation(input: HtmlPageOperation): HtmlPageState
   }
   const stableIdentity = (element: Element): string => JSON.stringify([element.localName, element.id, element.getAttribute('name'),
     element.getAttribute('role'), element.getAttribute('type'), element.getAttribute('aria-label'), element.getAttribute('title'), element.getAttribute('placeholder')])
+  // Root overflow clips the viewport. In HTML, a visible root propagates the
+  // body's overflow to that same viewport, even when absolute children leave
+  // the body's own box empty. Ordinary overflow containers still clip normally.
+  const rootStyle = getComputedStyle(document.documentElement)
+  const bodyOverflowAtViewport = (!rootStyle.overflowX || rootStyle.overflowX === 'visible')
+    && (!rootStyle.overflowY || rootStyle.overflowY === 'visible')
+    && !/(?:paint|layout|strict|content)/.test(rootStyle.contain)
+    && (!document.body || !/(?:paint|layout|strict|content)/.test(getComputedStyle(document.body).contain))
+  const bodyOverflowClips = (element: Element) => {
+    // Absolutely positioned descendants whose containing block is outside body
+    // escape its box clip, even when root overflow itself is hidden.
+    for (let node: Element | null = element; node && node !== document.body; node = node.parentElement) {
+      const position = getComputedStyle(node).position
+      if (position !== 'absolute' && position !== 'fixed') continue
+      let contained = false
+      for (let parent = node.parentElement; parent && parent !== document.documentElement; parent = parent.parentElement) {
+        const style = getComputedStyle(parent)
+        if (position === 'absolute' && style.position && style.position !== 'static'
+          || style.transform && style.transform !== 'none' || style.perspective && style.perspective !== 'none'
+          || style.filter && style.filter !== 'none' || /(?:paint|layout|strict|content)/.test(style.contain)) { contained = true; break }
+      }
+      if (!contained) return false
+    }
+    return true
+  }
+  const overflowRect = (element: Element, descendant: Element) => element === document.documentElement
+    || element === document.body && (bodyOverflowAtViewport || !bodyOverflowClips(descendant))
+      ? { left: 0, top: 0, right: innerWidth, bottom: innerHeight } : element.getBoundingClientRect()
   const visibleRectOf = (element: Element) => {
     const rect = element.getBoundingClientRect()
     let left = Math.max(0, rect.left), top = Math.max(0, rect.top)
@@ -130,7 +158,7 @@ export function htmlActionPageOperation(input: HtmlPageOperation): HtmlPageState
       const style = getComputedStyle(parent)
       if (style.visibility === 'hidden' || style.display === 'none') return null
       if (parent === element) continue
-      const clip = parent.getBoundingClientRect()
+      const clip = overflowRect(parent, element)
       if (/(hidden|clip|scroll|auto)/.test(style.overflowX)) { left = Math.max(left, clip.left); right = Math.min(right, clip.right) }
       if (/(hidden|clip|scroll|auto)/.test(style.overflowY)) { top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom) }
     }
@@ -213,7 +241,7 @@ export function htmlActionPageOperation(input: HtmlPageOperation): HtmlPageState
     for (let parent: Element | null = element; parent; parent = parent.parentElement) {
       const style = getComputedStyle(parent)
       if (style.display === 'none' || style.opacity === '0' || style.contentVisibility === 'hidden') return null
-      const clip = parent.getBoundingClientRect()
+      const clip = overflowRect(parent, element)
       if (/(hidden|clip|scroll|auto)/.test(style.overflowX)) { left = Math.max(left, clip.left); right = Math.min(right, clip.right) }
       if (/(hidden|clip|scroll|auto)/.test(style.overflowY)) { top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom) }
     }
@@ -311,6 +339,19 @@ export function htmlActionPageOperation(input: HtmlPageOperation): HtmlPageState
   if (document.readyState !== 'complete') diagnostics.push(`页面仍在加载：${document.readyState}`)
   for (const image of Array.from(document.images).slice(0, 24)) {
     if (image.complete && image.naturalWidth === 0 && image.getAttribute('src')) diagnostics.push(`图片加载失败：${image.getAttribute('src')!.slice(0, 180)}`)
+  }
+  const layoutRoots: ParentNode[] = [document]
+  for (let index = 0; index < layoutRoots.length; index++) for (const element of layoutRoots[index]!.querySelectorAll('*'))
+    if (element.shadowRoot) layoutRoots.push(element.shadowRoot)
+  const observedStages = layoutRoots.flatMap(root => Array.from(root.querySelectorAll('[data-gl-runtime-layout]')))
+  for (const stage of observedStages.slice(0, 12)) {
+    try {
+      const fact = JSON.parse(stage.getAttribute('data-gl-runtime-layout') ?? '{}')
+      if (!fact.viewport || !Array.isArray(fact.issues)) continue
+      diagnostics.push(`局部布局 ${String(fact.target).slice(0, 120)}：${JSON.stringify({ viewport: fact.viewport,
+        contentBox: fact.contentBox, status: fact.status, variant: fact.variant, tried: fact.tried, issues: fact.issues.slice(0, 8),
+        needsContentDecision: fact.needsContentDecision }).slice(0, 1800)}`)
+    } catch { /* Derived observations do not affect authored content or action facts. */ }
   }
   return { url: location.href, title: document.title.slice(0, 240), readyState: document.readyState,
     pageIndex: courseScenes.length ? Math.max(0, courseIndex) : visibleIndex < 0 ? 0 : visibleIndex,

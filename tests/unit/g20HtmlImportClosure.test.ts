@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { extractHtmlResources } from '../../src/main/workbench/htmlImport/extractHtmlResources'
-import { readHtmlClosure } from '../../src/main/workbench/htmlImport/readHtmlClosure'
+import { captureHtmlClosure, readHtmlClosure } from '../../src/main/workbench/htmlImport/readHtmlClosure'
 import { validateHtmlImport } from '../../src/main/workbench/htmlImport/validateHtmlImport'
 import { createHtmlDocumentRuntimeSource } from '../../src/shared/runtime/htmlDocumentSource'
 
@@ -12,6 +12,79 @@ const png = Uint8Array.of(137, 80, 78, 71, 1, 2, 3, 4)
 const uri = `data:image/png;base64,${Buffer.from(png).toString('base64')}`
 
 describe('HTML import closure', () => {
+  it('completes a named dynamic directory even when an older snapshot already holds one of its images', async () => {
+    const files = new Map([['pictures/one.png', png], ['pictures/two.png', Uint8Array.of(...png, 9)]])
+    let reads = 0
+    const result = await captureHtmlClosure({ html: '<script>const P="pictures/";target.innerHTML=`<img src="${P+file}">`;</script>',
+      siblingFiles: new Map([['pictures/one.png', png]]), readRelativeDirectory: async () => { reads++; return files } })
+    expect(reads).toBe(1)
+    expect([...result.siblingFiles.keys()].sort()).toEqual([...files.keys()])
+  })
+
+  it('keeps the delayed dynamic image callbacks of different ordinary scripts independent', () => {
+    const files = new Map([['a/one.png', png], ['b/two.png', Uint8Array.of(...png, 9)]])
+    const result = extractHtmlResources({ html: '<script>{const P="a/";window.first=()=>`<img src="${P+name}">`;}</script>'
+      + '<script>{const P="b/";window.second=()=>`<img src="${P+name}">`;}</script>', siblingFiles: files })
+    const state = { first: () => '', second: () => '' }, doc = new DOMParser().parseFromString(result.html, 'text/html')
+    // Each parser script shares the same global realm, including declarations.
+    const source = [...doc.querySelectorAll('script')].map(script => script.textContent).join('\n')
+    const functions = new Function('window', 'name', `${source};return [window.first,window.second]`)(state, 'one.png')
+    expect(functions[0]()).toContain('cw-resource:')
+    const second = new Function('window', 'name', `${source};return window.second`)(state, 'two.png')
+    expect(second()).toContain('cw-resource:')
+  })
+
+  it('closes the baseline P + filename and P + dataset.file image templates from their real local directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'html-template-media-'))
+    await mkdir(join(root, 'unit1', 'pictures'), { recursive: true })
+    await writeFile(join(root, 'unit1', 'pictures', 'Peter Brown.png'), png)
+    await writeFile(join(root, 'unit1', 'pictures', '2a.png'), Uint8Array.of(...png, 7))
+    await writeFile(join(root, 'unit1', 'pictures', 'unrelated.js'), 'throw new Error("must not run")')
+    const code = '(function(){const P="unit1/pictures/";function person(file){return `<img src="${P+file}.png">`;}function zoom(b){return `<img src="${P+b.dataset.file}">`;}target.innerHTML=person("Peter Brown")+zoom({dataset:{file:"2a.png"}});})();'
+    await writeFile(join(root, 'index.html'), `<script>${code}</script>`)
+    const result = await readHtmlClosure({ htmlPath: join(root, 'index.html') })
+    expect(result.resources).toHaveLength(2)
+    expect([...result.siblingFiles.keys()].sort()).toEqual(['unit1/pictures/2a.png', 'unit1/pictures/Peter Brown.png'])
+    const target = { innerHTML: '' }, source = result.html.match(/<script>([\s\S]*?)<\/script>/)![1]
+    new Function('target', source)(target)
+    const doc = new DOMParser().parseFromString(target.innerHTML, 'text/html')
+    expect([...doc.querySelectorAll('img')].map(image => image.getAttribute('src'))).toEqual(['Peter Brown.png', '2a.png'].map(name =>
+      `cw-resource:${result.resources.find(resource => resource.origins.some(origin => origin.reference === `unit1/pictures/${name}`))!.key}`))
+    expect(result.diagnostics.some(item => item.code === 'missing-relative-directory')).toBe(false)
+  })
+
+  it('closes a finite dynamic image table at its URL consumer without changing the table or visible text', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'html-dynamic-media-'))
+    await mkdir(join(root, 'pictures'))
+    await writeFile(join(root, 'pictures', 'one.png'), png)
+    await writeFile(join(root, 'pictures', 'two.png'), Uint8Array.of(...png, 5))
+    const code = `const pictures=['pictures/one.png','pictures/two.png']; image.src=pictures[index]; label.textContent=pictures[index];`
+    await writeFile(join(root, 'index.html'), `<script>${code}</script>`)
+    const result = await readHtmlClosure({ htmlPath: join(root, 'index.html') })
+    expect(result.localReferences.sort()).toEqual(['pictures/one.png', 'pictures/two.png'])
+    expect(result.resources).toHaveLength(2)
+    const source = result.html.match(/<script>([\s\S]*?)<\/script>/)![1]
+    for (const index of [0, 1]) {
+      const image = { src: '' }, label = { textContent: '' }
+      new Function('image', 'label', 'index', source)(image, label, index)
+      expect(image.src).toMatch(/^cw-resource:/)
+      expect(label.textContent).toBe(`pictures/${index ? 'two' : 'one'}.png`)
+    }
+  })
+
+  it('admits a current project resource only from the supplied project bytes and preserves dollar literals in local scripts', () => {
+    const script = `const $$='$$'; const dollar=${JSON.stringify("$& $` $'")}; image.src='cw-resource:hero'; window.result=[$$,dollar];`
+    const result = extractHtmlResources({ html: '<script src="app.js"></script>', siblingFiles: new Map([['app.js', new TextEncoder().encode(script)]]),
+      resourceReferences: new Map([['cw-resource:hero', { bytes: png, mediaType: 'image/png' }]]) })
+    expect(result.resources).toHaveLength(1)
+    expect(result.diagnostics.some(item => item.code === 'unsupported-url-scheme')).toBe(false)
+    const body = result.html.match(/<script[^>]*>([\s\S]*?)<\/script>/)![1], state: Record<string, unknown> = {}
+    new Function('image', 'window', body)({}, state)
+    expect(state.result).toEqual(['$$', "$& $` $'"])
+    const foreign = extractHtmlResources({ html: '<img src="cw-resource:other-project">' })
+    expect(foreign.resources).toEqual([])
+    expect(foreign.diagnostics).toContainEqual(expect.objectContaining({ code: 'unresolved-project-resource' }))
+  })
   it('decodes JavaScript literals and safely re-encodes their runtime values', () => {
     const escaped = uri.replace('data:', '\\x64ata:')
     const result = extractHtmlResources({ html: `<script>const x = ''; image.src = '${escaped}'; image.poster = \`${uri}\`; const c = \`prefix\${x}${uri}\`;</script>` })

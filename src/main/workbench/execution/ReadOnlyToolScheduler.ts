@@ -1,3 +1,5 @@
+import { waitForReadOnly, type ReadOnlyWaitOutcome } from './ReadOnlyToolWait'
+
 /**
  * A deliberately small allowlist. A tool is not parallel merely because its name
  * contains `read`: external GET/MCP calls, material extraction, observation
@@ -26,6 +28,9 @@ export interface OrderedToolRoundOptions<T extends { call: { name: string } }, R
   /** The initial ceiling is four; callers may lower but cannot raise it. */
   maxParallel?: number
   signal?: AbortSignal
+  readTimeoutMs?: number
+  isCurrent?(tool: T, index: number): boolean
+  onLateRead?(tool: T, outcome: ReadOnlyWaitOutcome<R>, index: number): void | Promise<void>
 }
 
 function stopped(): Error {
@@ -66,9 +71,18 @@ export async function runToolRoundInOrder<T extends { call: { name: string } }, 
     const from = index
     while (index < tools.length && index - from < width && eligible(index)) index += 1
     const started = tools.slice(from, index).map((tool, offset) =>
-      settle(() => options.execute(tool, from + offset, options.signal)))
+      settle(() => waitForReadOnly(signal => options.execute(tool, from + offset, signal), {
+        signal: options.signal, timeoutMs: options.readTimeoutMs,
+        isCurrent: options.isCurrent ? () => options.isCurrent!(tool, from + offset) : undefined,
+        onLate: outcome => options.onLateRead?.(tool, outcome, from + offset),
+      })))
     const outcomes = await Promise.all(started)
-    for (let offset = 0; offset < outcomes.length; offset++)
-      await options.commit(tools[from + offset], outcomes[offset], from + offset)
+    let commitFailure: { reason: unknown } | undefined
+    for (let offset = 0; offset < outcomes.length; offset++) {
+      try { await options.commit(tools[from + offset], outcomes[offset], from + offset) }
+      catch (reason) { commitFailure ??= { reason } }
+    }
+    if (commitFailure) throw commitFailure.reason
+    if (options.signal?.aborted) throw stopped()
   }
 }

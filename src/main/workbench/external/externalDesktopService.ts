@@ -19,8 +19,10 @@ export function configureHeadlessExternalMcp(): void { headless = true }
 
 async function confirmExternalChange(request: ExternalApproval): Promise<boolean> {
   if (headless) throw new Error('后台宿主无法显示交互授权；请使用已授权工作空间内路径，或连接图形宿主完成批准。')
-  const options: MessageBoxOptions = { type: 'question', title: '外部 AI 请求修改', message: `外部 AI · ${request.clientName} 请求「${request.label}」`,
-    detail: [request.reason === 'ask' ? '此外部会话的权限为「修改前询问」。' : '修改目标位于当前工作空间之外。',
+  const options: MessageBoxOptions = { type: 'question', title: request.local ? '外部 AI 请求运行本地命令' : '外部 AI 请求修改', message: `外部 AI · ${request.clientName} 请求「${request.label}」`,
+    detail: [request.local ? '本地命令需要批准以下已准备的实际程序和输入；工作空间文件权限不包含运行命令的授权。'
+      : request.reason === 'ask' ? '此外部会话的权限为「修改前询问」。' : '修改目标位于当前工作空间之外。',
+      ...(request.local ? [JSON.stringify(request.local, null, 2)] : []),
       ...(request.paths?.length ? ['涉及：', ...request.paths] : [])].join('\n'),
     buttons: ['允许', '拒绝'], defaultId: 1, cancelId: 1, noLink: true }
   const window = mainWindow?.()

@@ -6,13 +6,14 @@ import { promises as fs } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { MarkdownDriver } from '../../src/core/drivers/MarkdownDriver'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { createDocumentJournal } from '../../src/main/workbench/documentJournal'
 import { estimateSerializedTokens, modelContextBudget } from '../../src/core/execution/modelContextBudget'
-import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
+import { ExecutionEngine, type ExecutionEngineOptions } from '../../src/main/workbench/execution/ExecutionEngine'
+import { ProgrammaticToolRunner } from '../../src/main/workbench/execution/ProgrammaticToolRunner'
 import { ComputeJobService } from '../../src/main/workbench/compute/ComputeJobService'
 import { HostJobService } from '../../src/main/workbench/jobs/HostJobService'
 import { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
@@ -25,6 +26,7 @@ import { EditSessionService } from '../../src/main/workbench/execution/EditSessi
 import { ChatGPTResponsesProvider, CHATGPT_RESPONSES_BASE_URL, serializeChatGPTResponsesRequest } from '../../src/main/workbench/providers/ChatGPTResponsesProvider'
 import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { OpenAIChatProvider, serializeModelRequest } from '../../src/main/workbench/providers/OpenAIChatProvider'
+import { serializeModelPayload } from '../../src/main/workbench/providers/ModelProviderRouter'
 import type { ExecutionStart } from '../../src/shared/workbench/execution'
 import type { ModelChatMessage, ModelEvent, ModelJsonObject, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
 
@@ -34,7 +36,8 @@ function deferred() { let resolve!: () => void; const promise = new Promise<void
 const selection: ModelSelection = { model: 'fixture-model', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
   baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture-account', auth: { kind: 'api-key', credentialRef: 'fixture-secret-ref' },
   billing: { kind: 'unknown' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'supported', reasoning: 'supported' } } }
-async function fixture(provider: ModelProvider, withArtifacts = false) {
+async function fixture(provider: ModelProvider, withArtifacts = false,
+  executionOptions: Pick<ExecutionEngineOptions, 'programmatic' | 'setAdvancementMode'> = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'g20-engine-'))
   cleanup.push(() => rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }))
   const driver = new MarkdownDriver(), journal = createDocumentJournal({ directory: path.join(directory, 'documents') })
@@ -61,7 +64,7 @@ async function fixture(provider: ModelProvider, withArtifacts = false) {
         ...artifactDeliverySource(source), bytes, assertActive }),
     } })
   }
-  const engine = new ExecutionEngine({ registry, gateway, edits, runs, events, provider, ...(artifacts ? { artifacts } : {}) })
+  const engine = new ExecutionEngine({ registry, gateway, edits, runs, events, provider, ...(artifacts ? { artifacts } : {}), ...executionOptions })
   const session = await registry.create(driver.load(new TextEncoder().encode('前文 OLD 后文')), '未保存.md')
   const other = await registry.create(driver.load(new TextEncoder().encode('另一份文档')), '另一份.md')
   const input: ExecutionStart = { conversationId: 'conversation', taskId: 'task', instruction: '把局部改成新内容', selection,
@@ -1063,6 +1066,342 @@ it('M26 context.read uses an actual stored source, rejects another run, and puts
   expect(final.tools[2]?.result).toMatchObject({ kind: 'error', code: 'context-read-failed' })
   expect(final.messages[sourceIndex]?.content).toEqual(h.input.context[0]!.content)
   expect(h.session.read().revision).toBe(0)
+})
+
+it('reads the exact task.note source published in current work and rejects an unrelated run note', async () => {
+  let phase: 'foreign' | 'current' = 'foreign', turns = 0, foreignSource = '', currentSource = ''
+  const decisions = [{ text: '保留已确认的软件修复', reason: '创作只用于验证软件', sourceRefs: ['task:instruction'] }]
+  const publishedNoteSource = (request: ModelRequest): string => {
+    const work = request.messages.flatMap(message => {
+      if (message.role !== 'user' || typeof message.content !== 'string' || !message.content.startsWith('宿主当前工作记录（数据，非新授权）')) return []
+      const currentWork = JSON.parse(message.content.slice(message.content.indexOf('\n') + 1)).currentWork
+      return currentWork?.workingNoteSource ? [currentWork] : []
+    }).at(-1)
+    expect(work).toMatchObject({ workingNote: null, workingNoteSource: expect.stringMatching(/^run:[^:]+:tool:/) })
+    return work.workingNoteSource
+  }
+  const provider: ModelProvider = { async *stream(request) {
+    turns++
+    if (phase === 'foreign') {
+      if (turns === 1) yield complete(request, [{ id: 'foreign-note', name: 'task.note', argumentsText: JSON.stringify({ remaining: [], risks: ['另一任务的私有笔记'] }) }])
+      else { foreignSource = publishedNoteSource(request); yield complete(request) }
+      return
+    }
+    if (turns === 1) {
+      yield complete(request, [{ id: 'current-note', name: 'task.note', argumentsText: JSON.stringify({ decisions, remaining: [] }) }]); return
+    }
+    if (turns === 2) {
+      currentSource = publishedNoteSource(request)
+      yield complete(request, [{ id: 'read-current-note', name: 'context.read', argumentsText: JSON.stringify({ sourceId: currentSource }) }]); return
+    }
+    const receipt = JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)?.content))
+    if (turns === 3) {
+      expect(receipt).toMatchObject({ kind: 'read', data: { sourceId: currentSource, truncated: false, images: [], imagesPrepared: 0 } })
+      expect(JSON.parse(receipt.data.text)).toMatchObject({ kind: 'read', data: { authority: 'advisory-run-note', workingNote: { decisions, remaining: [] } } })
+      yield complete(request, [{ id: 'reject-foreign-note', name: 'context.read', argumentsText: JSON.stringify({ sourceId: foreignSource }) }]); return
+    }
+    expect(receipt).toMatchObject({ kind: 'error', code: 'context-read-failed', message: expect.stringContaining('不属于当前运行') })
+    yield complete(request)
+  } }
+  const h = await fixture(provider)
+  const foreign = await h.engine.start({ ...h.input, taskId: 'unrelated-task', instruction: '记录另一任务的笔记' })
+  await h.engine.wait(foreign.runId)
+  phase = 'current'; turns = 0
+  const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(currentSource).toContain(`run:${started.runId}:tool:`)
+  expect(foreignSource).toContain(`run:${foreign.runId}:tool:`)
+  expect(final.tools.map(tool => tool.call.name)).toEqual(['task.note', 'context.read', 'context.read'])
+  const noteRead = final.tools[1]!.result as { kind: 'read'; data: { text: string } }
+  expect(JSON.parse(noteRead.data.text).data.workingNote).toEqual(final.workingNote)
+  expect(final.tools[2]?.result).toMatchObject({ kind: 'error', code: 'context-read-failed' })
+  expect(h.session.read().revision).toBe(0)
+})
+
+describe('collaboration safe-boundary scheduling', () => {
+  async function withSender(stream: ModelProvider['stream'], executionOptions: Pick<ExecutionEngineOptions, 'programmatic' | 'setAdvancementMode'> = {}) {
+    const senderRelease = deferred(), senderInstruction = 'fixture collaboration sender stays active'
+    const h = await fixture({ async *stream(request, options) {
+      if (request.messages.some(message => message.role === 'user' && message.content === senderInstruction)) {
+        await senderRelease.promise; yield complete(request); return
+      }
+      yield* stream(request, options)
+    } }, false, executionOptions)
+    cleanup.push(async () => { senderRelease.resolve(); await h.engine.shutdown() })
+    const sender = await h.engine.start({ ...h.input, conversationId: 'sender-conversation', taskId: 'sender-task',
+      instruction: senderInstruction, documents: [] })
+    return { ...h, senderRunId: sender.runId }
+  }
+  const notices = (request: ModelRequest) => request.messages.filter(message => message.role === 'user'
+    && typeof message.content === 'string' && message.content.startsWith('协作消息（'))
+
+  it.each(['message', 'steer'] as const)('distinguishes %s before the adapter produces its original tool round', async action => {
+    const entered = deferred(), release = deferred()
+    let turns = 0, pausedBeforeDispatch = false
+    const h = await withSender(async function* (request) {
+      if (++turns === 1) {
+        const target = refsOf(request)[0]!.writable[0]!.target, args = JSON.stringify({ target, content: 'NEW' })
+        if (action === 'message') {
+          yield { type: 'tool.delta', requestId: request.requestId, sequence: 1, index: 0, id: 'original-write', name: 'text.replace', argumentsDelta: args.slice(0, -3) }
+          entered.resolve(); await release.promise
+        }
+        yield complete(request, [
+          { id: 'original-write', name: 'text.replace', argumentsText: args },
+          { id: 'original-read', name: 'read', argumentsText: JSON.stringify({ target: refsOf(request)[0]!.target }) },
+        ]); return
+      }
+      expect(h.session.read().revision).toBe(action === 'message' ? 1 : 0)
+      expect(notices(request)).toHaveLength(action === 'message' ? 2 : 0)
+      if (action === 'steer') expect(request.messages).toContainEqual({ role: 'user', content: '只报告，不改原文' })
+      yield complete(request)
+    })
+    cleanup.push(async () => { release.resolve() })
+    const abortPreview = vi.spyOn(h.edits, 'abort'), execute = vi.spyOn(h.gateway, 'execute')
+    // Pause after the prepared request is durable, before dispatch. A human adjustment
+    // here has not entered its payload, so it must still invalidate the old calls.
+    if (action === 'steer') {
+      const save = h.runs.save.bind(h.runs)
+      vi.spyOn(h.runs, 'save').mockImplementation(async record => {
+        await save(record)
+        if (!pausedBeforeDispatch && record.input.taskId === h.input.taskId && record.requests.length === 1 && record.requests[0]!.state === 'sending') {
+          pausedBeforeDispatch = true; entered.resolve(); await release.promise
+        }
+      })
+    }
+    const started = await h.engine.start(h.input)
+    await entered.promise
+    if (action === 'message') {
+      expect(h.edits.list(h.session.documentId)).toHaveLength(1)
+      await h.engine.message(started.runId, 'notice-1', { senderRunId: h.senderRunId, text: '另一场景已准备好' })
+      await h.engine.message(started.runId, 'notice-2', { senderRunId: h.senderRunId, text: '素材回执已返回' })
+      expect(abortPreview).not.toHaveBeenCalled()
+    } else {
+      expect(turns).toBe(0)
+      const accepted = await h.engine.steer(started.runId, 'human-before-dispatch', '只报告，不改原文')
+      expect(accepted.steering?.at(-1)?.messageIndex).toBeUndefined()
+    }
+    release.resolve()
+    const final = await h.engine.wait(started.runId)
+    expect(final.status).toBe('completed'); expect(final.failure).toBeUndefined()
+    expect(final.requests).toHaveLength(2); expect(turns).toBe(2)
+    expect(final.tools.map(tool => tool.call.name)).toEqual(['text.replace', 'read'])
+    expect(final.tools.every(tool => tool.notInvokedReason === (action === 'steer' ? 'steering' : undefined))).toBe(true)
+    expect(execute.mock.calls.map(call => call[2].name)).toEqual(action === 'message' ? ['text.replace', 'read'] : [])
+    expect(h.session.read()).toMatchObject({ revision: action === 'message' ? 1 : 0,
+      model: { source: action === 'message' ? '前文 NEW 后文' : '前文 OLD 后文' } })
+    const applied = final.steering?.filter(value => value.senderRunId) ?? []
+    expect(applied).toHaveLength(action === 'message' ? 2 : 0)
+    expect(applied.every(value => value.messageIndex! > final.messages.findIndex(message => message.role === 'tool' && message.tool_call_id === 'original-read'))).toBe(true)
+  })
+
+  it.each(['message', 'steer'] as const)('distinguishes %s between real programmatic child calls', async action => {
+    const entered = deferred(), release = deferred()
+    let turns = 0, target = '', scripts = 0
+    const h = await withSender(async function* (request) {
+      if (++turns === 1) {
+        target = refsOf(request)[0]!.writable[0]!.target
+        yield complete(request, [{ id: 'one-script', name: 'programmatic.execute', argumentsText: '{"code":"read then edit through the canonical writer"}' }]); return
+      }
+      expect(notices(request)).toHaveLength(action === 'message' ? 1 : 0)
+      expect(request.messages.some(message => message.role === 'tool' && String(message.tool_call_id).includes(':ptc:'))).toBe(false)
+      expect(h.session.read().revision).toBe(action === 'message' ? 1 : 0)
+      yield complete(request)
+    }, { programmatic: new ProgrammaticToolRunner({ execute: async input => {
+      scripts++
+      await input.call('read', { target })
+      entered.resolve(); await release.promise
+      await input.call('text.replace', { target, content: 'NEW' })
+      return { status: 'completed', value: 'one original script' }
+    } }) })
+    cleanup.push(async () => { release.resolve() })
+    const execute = vi.spyOn(h.gateway, 'execute'), started = await h.engine.start(h.input)
+    await entered.promise
+    expect((await h.engine.read(started.runId))?.tools.find(tool => tool.call.name === 'read')?.state).toBe('returned')
+    if (action === 'message') await h.engine.message(started.runId, 'child-boundary-notice', { senderRunId: h.senderRunId, text: '独立素材已准备好' })
+    else await h.engine.steer(started.runId, 'child-boundary-human', '只报告，不改原文')
+    expect((await h.engine.read(started.runId))?.steering?.at(-1)?.messageIndex).toBeUndefined()
+    release.resolve()
+    const final = await h.engine.wait(started.runId)
+    expect(final.status).toBe(action === 'steer' ? 'partial' : 'completed'); expect(final.failure).toBeUndefined()
+    expect(final.requests).toHaveLength(2); expect(turns).toBe(2); expect(scripts).toBe(1)
+    expect(final.tools.map(tool => tool.call.name)).toEqual(['programmatic.execute', 'read', 'text.replace'])
+    expect(final.tools.at(-1)).toMatchObject({ origin: 'host', state: 'returned',
+      ...(action === 'steer' ? { notInvokedReason: 'steering', result: { kind: 'read', data: { status: 'not-started' } } }
+        : { result: { kind: 'document-operation', result: { status: 'applied' } } }) })
+    expect(execute.mock.calls.map(call => call[2].name)).toEqual(action === 'message' ? ['read', 'text.replace'] : ['read'])
+    expect(h.session.read()).toMatchObject({ revision: action === 'message' ? 1 : 0,
+      model: { source: action === 'message' ? '前文 NEW 后文' : '前文 OLD 后文' } })
+  })
+
+  it('keeps a real question open when collaboration arrives before and after it is established', async () => {
+    const preparing = deferred(), release = deferred(), waiting = deferred()
+    let turns = 0, questionId = ''
+    const h = await withSender(async function* (request) {
+      if (++turns === 1) {
+        yield complete(request, [{ id: 'real-question', name: 'ask_user', argumentsText: JSON.stringify({ question: '保留当前稿吗？', responseKind: 'confirm',
+          options: [{ label: '保留' }], currentDraft: [{ target: refsOf(request)[0]!.writable[0]!.target }] }) }]); return
+      }
+      expect(notices(request)).toHaveLength(2)
+      const receipt = JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)?.content))
+      expect(receipt).toMatchObject({ kind: 'read', data: { status: 'answered', selected: [{ index: 0, label: '保留' }] } })
+      yield complete(request)
+    })
+    cleanup.push(async () => { release.resolve() })
+    const prepare = h.gateway.prepareQuestionDraft.bind(h.gateway)
+    vi.spyOn(h.gateway, 'prepareQuestionDraft').mockImplementationOnce(async (...args) => {
+      const draft = await prepare(...args)
+      preparing.resolve(); await release.promise
+      return draft
+    })
+    h.engine.subscribe(event => { if (event.type === 'tool' && event.data.status === 'waiting') { questionId = event.itemId; waiting.resolve() } })
+    const started = await h.engine.start(h.input)
+    await preparing.promise
+    await h.engine.message(started.runId, 'before-question', { senderRunId: h.senderRunId, text: '素材已备好，等待真实选择' })
+    release.resolve(); await waiting.promise
+    await h.engine.message(started.runId, 'during-question', { senderRunId: h.senderRunId, text: '另一个素材也已备好' })
+    expect(turns).toBe(1)
+    const current = await h.engine.read(started.runId)
+    expect(current?.tools.find(tool => tool.call.name === 'ask_user')).toMatchObject({ state: 'executing' })
+    expect(current?.steering?.every(value => value.messageIndex === undefined)).toBe(true)
+    const snapshot = h.session.read()
+    await h.engine.answer({ runId: started.runId, callId: questionId, answer: { choices: [0] },
+      currentDraft: [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision }] })
+    const final = await h.engine.wait(started.runId)
+    expect(final.status).toBe('completed'); expect(final.requests).toHaveLength(2)
+    expect(h.session.read().revision).toBe(0)
+  })
+
+  it('retains the human mode preference CAS when collaboration arrives during its persistence', async () => {
+    const persisting = deferred(), release = deferred()
+    let turns = 0, accepted = false
+    const h = await withSender(async function* (request) {
+      if (++turns === 1) {
+        yield complete(request, [{ id: 'human-mode', name: 'task.setMode', argumentsText: '{"advancementMode":"automatic","sourceRef":"task:instruction"}' }]); return
+      }
+      expect(notices(request)).toHaveLength(1)
+      expect(JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)?.content)))
+        .toMatchObject({ kind: 'read', data: { status: 'accepted', advancementMode: 'automatic' } })
+      yield complete(request)
+    }, { setAdvancementMode: async (_conversationId, mode, isCurrent) => {
+      expect(mode).toBe('automatic'); expect(isCurrent?.()).toBe(true)
+      persisting.resolve(); await release.promise
+      accepted = isCurrent?.() === true
+    } })
+    cleanup.push(async () => { release.resolve() })
+    const started = await h.engine.start({ ...h.input, instruction: '按自动方式完成本次任务' })
+    await persisting.promise
+    await h.engine.message(started.runId, 'during-mode-persistence', { senderRunId: h.senderRunId, text: '素材已备好，不改变用户推进偏好' })
+    release.resolve()
+    const final = await h.engine.wait(started.runId)
+    expect(accepted).toBe(true)
+    expect(final.status).toBe('completed'); expect(final.requests).toHaveLength(2)
+    expect(final.steering?.filter(value => !value.senderRunId).at(-1)?.advancementMode).toBe('automatic')
+    expect(h.session.read().revision).toBe(0)
+  })
+})
+
+describe('PTC model value handoff', () => {
+  it('publishes a large value source through the real Engine and reads it in the current run and same-task continuation', async () => {
+    const body = '0123456789abcdef'.repeat(65536)
+    let phase = 0, turns = 0, source: { runId: string; callId: string; path: string[] } | undefined
+    const provider: ModelProvider = { async *stream(request) {
+      turns++
+      if (phase === 0 && turns === 1) {
+        yield complete(request, [{ id: 'large-value', name: 'programmatic.execute', argumentsText: '{"code":"fixture returns the original large value"}' }]); return
+      }
+      if (phase === 0 && turns === 2) {
+        const receipt = JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)?.content))
+        expect(receipt.data).not.toHaveProperty('value')
+        source = receipt.data.valueRead.input
+      }
+      if (phase === 1 && turns === 1 || phase === 0 && turns === 2) {
+        yield complete(request, [{ id: 'exact-value-page', name: 'programmatic.read', argumentsText: JSON.stringify({ ...source,
+          path: [...source!.path, 'body'], offset: 101, limit: 73 }) }]); return
+      }
+      const receipt = JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)?.content))
+      expect(receipt).toMatchObject({ kind: 'read', data: { runId: source!.runId, callId: source!.callId,
+        value: body.slice(101, 174), offset: 101, total: body.length, nextOffset: 174 } })
+      yield complete(request)
+    } }
+    const h = await fixture(provider, false, { programmatic: new ProgrammaticToolRunner({ execute: async () => ({ status: 'completed', value: { body } }) }) })
+    h.input.selection = { ...selection, contextWindow: 128000 }; h.input.workspaceRoot = h.directory
+    const first = await h.engine.start(h.input), original = await h.engine.wait(first.runId)
+    expect(original.failure).toBeUndefined(); expect(turns).toBe(3)
+    expect((original.tools[0]!.result as any).data.value.body).toBe(body)
+    phase = 1; turns = 0
+    const next = await h.engine.resume(first.runId, { ...h.input, taskId: 'exact-old-value' }), continued = await h.engine.wait(next.runId)
+    expect(continued.failure).toBeUndefined(); expect(turns).toBe(2)
+    expect(continued.taskContinuedFrom).toBe(first.runId)
+    expect(continued.tools.map(tool => tool.call.name)).toEqual(['programmatic.read'])
+    expect(h.session.read().revision).toBe(0)
+  })
+
+  it('prepares the frozen partial continuation within its model window and authorizes an exact old-run value page without replay', async () => {
+    let turns = 0, preparedBytes = 0, preparedTokens = 0
+    let archived: any, parent: any, body: string
+    const provider: ModelProvider = { async *stream(request) {
+      turns++
+      const serialized = serializeModelPayload(request)
+      preparedBytes = Math.max(preparedBytes, Buffer.byteLength(serialized))
+      preparedTokens = Math.max(preparedTokens, estimateSerializedTokens(serialized))
+      expect(estimateSerializedTokens(serialized)).toBeLessThan(modelContextBudget(request.selection).inputTokens)
+      if (turns === 1) {
+        expect(JSON.stringify(request.messages)).toContain('显式继续先前运行')
+        const applied = archived.tools.findLast((tool: any) => tool.call.name === 'project.apply')
+        if (applied) {
+          const continuation = request.messages.find(message => message.role === 'system'
+            && typeof message.content === 'string' && message.content.startsWith('显式继续先前运行'))!
+          const facts = JSON.parse(String(continuation.content).split('不是权限：')[1]!)
+          expect(facts.completed.find((fact: any) => fact.callId === applied.callId)).toMatchObject({ name: 'project.apply', result: {
+            kind: 'content-apply', commit: 'committed', status: 'applied', revision: 10,
+            operationId: applied.result.data.receipt.operationId, diagnostics: applied.result.data.diagnostics,
+          } })
+        }
+        yield complete(request, [{ id: 'read-original-value', name: 'programmatic.read', argumentsText: JSON.stringify({ runId: archived.runId,
+          callId: parent.callId, path: ['data', 'value', 'data', 'operations', 0, 'data', 'input', 'source', 'html'], offset: 211, limit: 61 }) }]); return
+      }
+      const read = request.messages.filter(message => message.role === 'tool' && message.tool_call_id === 'read-original-value').at(-1)
+      expect(JSON.parse(String(read?.content))).toMatchObject({ kind: 'read', data: { value: body.slice(211, 272), offset: 211, total: body.length } })
+      yield complete(request)
+    } }
+    const h = await fixture(provider)
+    const frozen = process.env.PTC_FROZEN_RUN_PATH
+    const lineage = new Map<string, any>()
+    if (frozen) {
+      archived = JSON.parse(await fs.readFile(frozen, 'utf8'))
+      let current = archived
+      while (current) {
+        lineage.set(current.runId, current)
+        const prior = current.continuedFrom
+        current = prior ? JSON.parse(await fs.readFile(path.join(path.dirname(frozen), `${createHash('sha256').update(prior).digest('hex')}.json`), 'utf8')) : null
+      }
+      parent = archived.tools.findLast((tool: any) => tool.call.name === 'programmatic.execute')
+      expect(JSON.stringify(parent.result).length).toBeGreaterThan(30_000_000)
+      expect(archived.status).toBe('partial')
+    } else {
+      body = 'source audio data '.repeat(1000)
+      const operation = { kind: 'read', data: { input: { source: { html: body } } } }
+      parent = { callId: 'archived-parent', providerCallId: 'archived-parent', requestId: 'old-request', state: 'returned',
+        call: { name: 'programmatic.execute', input: {} }, result: { kind: 'read', data: { status: 'completed', atomic: false,
+          read: { runId: 'archived-run', callId: 'archived-parent' }, children: [], failures: [], value: { kind: 'read', data: { operations: [operation] } } } } }
+      archived = { schemaVersion: 1, runId: 'archived-run', version: 1, status: 'partial', createdAt: 1, updatedAt: 2,
+        input: { ...h.input, taskId: 'old-task', workspaceRoot: h.directory, selection: { ...selection, contextWindow: 128000 } },
+        messages: [{ role: 'user', content: '原调用尚未发起；继续前重新观察' }], initialMessageCount: 1, requests: [], tools: [parent] }
+      lineage.set(archived.runId, archived)
+    }
+    body = parent.result.data.value.data.operations[0].data.input.source.html
+    const stored = h.runs.read.bind(h.runs)
+    vi.spyOn(h.runs, 'read').mockImplementation(async runId => lineage.has(runId) ? structuredClone(lineage.get(runId)) : stored(runId))
+    const execute = vi.spyOn(h.gateway, 'execute')
+    const continued = await h.engine.resume(archived.runId, { ...archived.input, taskId: randomUUID() })
+    const ended = await h.engine.wait(continued.runId)
+    expect(ended.taskContinuedFrom).toBe(archived.runId)
+    expect(ended.failure?.message ?? '').not.toContain('超过模型可用窗口')
+    expect(ended.tools.map(tool => tool.call.name), JSON.stringify({ status: ended.status, failure: ended.failure, turns, preparedBytes, preparedTokens })).toEqual(['programmatic.read'])
+    expect(execute.mock.calls.some(call => call[2].name === 'project.apply' || call[2].name === 'view.click')).toBe(false)
+    expect(JSON.stringify(parent.result).length).toBeGreaterThan(8000)
+    if (frozen) console.info('PTC_FROZEN_CONTINUATION', JSON.stringify({ sourceRunId: archived.runId, sameTask: ended.taskContinuedFrom === archived.runId,
+      preparedBytes, preparedTokens, inputLimit: modelContextBudget(archived.input.selection).inputTokens, exactReadChars: 61, originalRawRetained: true }))
+  }, 30000)
 })
 
 

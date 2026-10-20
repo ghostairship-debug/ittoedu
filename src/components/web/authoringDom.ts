@@ -20,6 +20,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
   /** Parser document identity, shared by observation and record rebinding. */
   scope?: ComponentAuthorScope
   resolveResource?(reference: string): string | undefined
+  matchesResource?(reference: string, liveUrl: string): boolean
   resourceReference?(url: string): string | undefined
   originalText?(node: Text): string | undefined
   claimText?(node: Text, text: string | null): void
@@ -220,6 +221,9 @@ export function createDomAuthoring(root: HTMLElement, options: {
       const resolvedOverride = record.kind === 'image' && override ? options.resolveResource?.(override) ?? override : override
       const baseline = record.kind === 'image' ? options.resolveResource?.(record.binding.baseline) ?? record.binding.baseline : record.binding.baseline
       const nodes = new Set([...(values.get(baseline) ?? []), ...(resolvedOverride !== undefined ? values.get(resolvedOverride) ?? [] : [])])
+      if (record.kind === 'image' && options.matchesResource) for (const [value, candidates] of values)
+        if (options.matchesResource(record.binding.baseline, value) || override !== undefined && options.matchesResource(override, value))
+          for (const node of candidates) nodes.add(node)
       if (previous && lookup.nodeIndexes.get(previous.node)?.has(values) && valueOf(previous.node) === previous.content?.applied) nodes.add(previous.node)
       if (record.binding.context?.some(context => { const anchors = elementsAt(context.path); return anchors.length !== 1 || contextValueOf(anchors[0]!) !== context.value })) return { status: 'unresolved' }
       return nodes.size === 1 ? { node: [...nodes][0], status: 'bound' } : { status: 'unresolved' }
@@ -234,6 +238,8 @@ export function createDomAuthoring(root: HTMLElement, options: {
       const resolvedOverride = record.kind === 'image' && override ? options.resolveResource?.(override) ?? override : override
       const baseline = record.kind === 'image' ? options.resolveResource?.(record.binding.baseline) ?? record.binding.baseline : record.binding.baseline
       if (value !== baseline && value !== resolvedOverride
+        && !(record.kind === 'image' && (options.matchesResource?.(record.binding.baseline, value)
+          || override !== undefined && options.matchesResource?.(override, value)))
         && !(previous?.node === node && value === previous.content?.applied)) return []
       if (record.binding.context?.some(context => {
         const anchors = elementsAt(context.path)

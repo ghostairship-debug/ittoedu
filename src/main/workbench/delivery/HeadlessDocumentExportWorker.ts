@@ -5,6 +5,7 @@ import { componentCompilationInputSchema } from '../../../shared/workbench/compo
 import type { ExportBuildReply, ExportBuildRequest } from '../../../shared/workbench/toolPorts'
 import type { InMemoryComponentCompilation } from '../../../core/components/compilation/InMemoryComponentCompilation'
 import { DocumentExportPort } from './DocumentExportPort'
+import { uiExportBuildRequest } from '../uiDocumentSnapshot'
 import { z } from 'zod'
 import { publishedCourseV3Schema } from '../../../shared/contracts/component-platform/published'
 import { ViewObservationDesktopService } from '../observation/ViewObservationDesktopService'
@@ -61,7 +62,7 @@ export class HeadlessDocumentExportWorker {
     const controller = new AbortController()
     this.active.set(worker, { request, controller })
     const port = new DocumentExportPort(worker.webContents.id,
-      input => worker.webContents.send(IPC_CHANNELS.documentExportBuildRequest, input),
+      input => worker.webContents.send(IPC_CHANNELS.documentExportBuildRequest, uiExportBuildRequest(input)),
       input => { if (!worker.isDestroyed()) worker.webContents.send('document-export:build-cancel', input) })
     const receive = (event: Electron.IpcMainEvent, reply: unknown) => { port.accept(reply, event.sender.id) }
     const progress = (event: Electron.IpcMainEvent, value: unknown) => {

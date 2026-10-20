@@ -43,7 +43,7 @@ const data = (request: ModelRequest) => request.messages.filter(message => messa
   catch { return undefined }
 }).filter((value): value is Record<string, unknown> => !!value)
 
-async function fixture(provider: ModelProvider) {
+async function fixture(provider: ModelProvider, resolveSelection?: ConstructorParameters<typeof NativeTaskRunner>[0]['resolveSelection']) {
   const root = await fs.mkdtemp(path.join(tmpdir(), 'native-delegation-')), workspaceRoot = path.join(root, 'workspace')
   await fs.mkdir(workspaceRoot)
   await fs.writeFile(path.join(workspaceRoot, 'input.txt'), 'source = 7')
@@ -51,7 +51,7 @@ async function fixture(provider: ModelProvider) {
   const runs = new ExecutionRunStore(path.join(root, 'runs')), grants = new Map<string, ToolRunGrant>()
   let engine!: ExecutionEngine
   const delegation = new DelegationJobService({ directory: path.join(root, 'jobs'), copyRootBase: path.join(root, 'copies'),
-    nativeRunner: new NativeTaskRunner({ engine: () => engine }) })
+    nativeRunner: new NativeTaskRunner({ engine: () => engine, resolveSelection }) })
   const jobs = new HostJobService({ delegation, images: {} as ImageGenerationService })
   host.tools.configureHostServices({ jobs,
     beginRun: async grant => { grants.set(grant.runId, grant) }, stopRun: runId => { grants.delete(runId) },
@@ -328,3 +328,37 @@ it('projects child questions and approvals into the parent timeline and accepts 
   expect(Buffer.from((await h.delegation.readArtifact(parent.runId, job, 'candidate.md')).bytes).toString()).toContain('用户选择：活泼')
   await h.engine.stop(parent.runId)
 }, 30_000)
+
+it('sends an explicit child model to the existing Provider and preserves it when resumed without a new selection', async () => {
+  const chosen: ModelSelection = { ...structuredClone(selection), model: 'lightweight-child', parameters: { reasoning_effort: 'low' } }
+  const childSelections: ModelSelection[] = []
+  const provider: ModelProvider = { async *stream(request, options) {
+    if (!childRequest(request)) {
+      await new Promise<void>(resolve => {
+        if (options?.signal?.aborted) resolve()
+        else options?.signal?.addEventListener('abort', () => resolve(), { once: true })
+      })
+      return
+    }
+    childSelections.push(structuredClone(request.selection))
+    if (body(request).includes('来自父智能体')) { yield completed(request, [], 'Keep the original candidate'); return }
+    const saved = data(request).some(value => value.saved === true)
+    if (saved) yield completed(request, [], 'Child candidate saved')
+    else yield completed(request, [{ name: 'file.write', input: { mode: 'create', path: 'candidate.md', content: 'lightweight candidate' } }])
+  } }
+  const resolveSelection = vi.fn(async (model, inherited: ModelSelection) => model ? structuredClone(chosen) : structuredClone(inherited))
+  const h = await fixture(provider, resolveSelection), parent = await h.start()
+  const first = await h.delegation.startNative({ runId: parent.runId, jobId: 'model-selected', taskId: 'explicit-model',
+    permission: 'workspace', intent: { goal: 'Produce the candidate', outputs: ['candidate.md'], model: { connectionId: selection.connection.id, model: chosen.model } }, sources: [] })
+  const done = await h.delegation.wait(parent.runId, first.jobId, 3000)
+  expect(done).toMatchObject({ status: 'ready', configuredModel: chosen.model, connectionId: selection.connection.id })
+  // The new continuation has its own copied workspace and original selected model.
+  const resume = await h.delegation.resumeNative({ runId: parent.runId, jobId: 'model-resumed', taskId: 'resume-model',
+    sourceRunId: parent.runId, sourceJobId: first.jobId, permission: 'workspace',
+    intent: { goal: 'Keep the saved candidate', outputs: ['candidate.md'] }, sources: [] })
+  const resumed = await h.delegation.wait(parent.runId, resume.jobId, 3000)
+  expect(resumed).toMatchObject({ status: 'ready', configuredModel: chosen.model })
+  expect(childSelections.length).toBeGreaterThanOrEqual(3)
+  expect(childSelections.every(value => JSON.stringify(value) === JSON.stringify(chosen))).toBe(true)
+  expect(resolveSelection.mock.calls.at(-1)?.[1]).toEqual(chosen)
+})

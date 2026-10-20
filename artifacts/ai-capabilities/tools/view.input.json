@@ -1,5 +1,5 @@
 {
-  "description": "向最近一次 view.observe 或页面动作返回的控件 handle 输入 value，返回实际值、运行结果、新句柄和截图。沿同一隔离播放器真实输入，可操作文本和滑块；不可输入密码或文件控件。不修改作者工程；源码变化后重新观察。",
+  "description": "向最近一次 view/html 观察返回的控件 handle 输入 value；沿同一载体会话返回实际值、新句柄和截图，可操作文本和滑块。actionReceipt保留已发生的输入和实际值不匹配事实；观察失败不撤销应用确认，先重新观察再决定纠正动作。不可输入密码或文件控件，不改作者工程；源码变化后重新观察。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,

@@ -80,8 +80,9 @@ it('sends a narrow Markdown catalog on every real HTTP turn and commits one cano
   expect(bodies).toHaveLength(3)
   const wireNames = bodies[0].data.tools.map((tool: any) => tool.function.name)
   // Services and engine controls are independent of the scoped document editing catalog.
-  const serviceAndControlNames = new Set([...workbenchServiceToolCatalog.map(tool => modelToolWireName(tool.name)), modelToolWireName('context.read'), modelToolWireName('task.note'), modelToolWireName('ask_user'), modelToolWireName('tools.load')])
-  expect(wireNames.filter((name: string) => !serviceAndControlNames.has(name)).sort()).toEqual(['read', 'inspect', 'listChildren', modelToolWireName('text.replace'), modelToolWireName('text.format'), modelToolWireName('file.save'), 'batch'].sort())
+  const serviceAndControlNames = new Set([...workbenchServiceToolCatalog.map(tool => modelToolWireName(tool.name)),
+    ...['context.read', 'task.note', 'ask_user', 'tools.load', 'task.setMode', 'programmatic.execute', 'programmatic.read'].map(modelToolWireName)])
+  expect(wireNames.filter((name: string) => !serviceAndControlNames.has(name)).sort()).toEqual(['read', 'inspect', 'listChildren', modelToolWireName('text.replace'), modelToolWireName('text.format'), 'batch'].sort())
   expect(bodies.map(body => body.data.tools.map((tool: any) => tool.function.name))).toEqual(Array(3).fill(wireNames))
   const batch = bodies[0].data.tools.find((tool: any) => tool.function.name === 'batch')
   expect(JSON.stringify(batch.function.parameters)).toContain('text.replace')
@@ -113,7 +114,7 @@ it('projects current V10 grants without widening a frozen range or a deleted con
   await host.tools.loadToolFamilies('range', toolFamilies)
   const expanded = await host.tools.describeRun('range')
   expect(expanded.map(tool => tool.name)).toContain('course.recipes')
-  expect(expanded.map(tool => tool.name)).not.toContain('course.configure')
+  expect(expanded.map(tool => tool.name)).toContain('course.configure') // Disclosure is broader than actual target authority.
   expect(expanded.length).toBeGreaterThan(first.length)
   const text = await host.tools.issueTarget('range', initial.documentId, range)
   const outside = await host.tools.issueTarget('range', initial.documentId, { kind: 'course-surface', surfaceId: 'flow' })
@@ -160,7 +161,7 @@ it('discovers a deferred tool, sends its real schema on the next turn and execut
     const index = observed.length
     observed.push({ names: request.tools?.map(tool => tool.name) ?? [], bytes: Buffer.byteLength(JSON.stringify(request.tools)), payloadBytes: Buffer.byteLength(serializeModelRequest(request)) })
     const reference = JSON.parse(String(request.messages[1].content).split('：')[1])[0]
-    yield complete(request, index, index < 2 ? { name: 'tools.load', input: { families: ['layout'] } }
+    yield complete(request, index, index < 2 ? { name: 'tools.load', input: { families: ['layout'], names: ['course.configure', 'not.a.tool'] } }
       : index === 2 ? { name: 'course.configure', input: { target: reference.target, settings: { title: '已发现并调用' } } } : undefined)
   } }
   const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider,
@@ -182,6 +183,12 @@ it('discovers a deferred tool, sends its real schema on the next turn and execut
   expect(observed[1].bytes).toBeGreaterThan(observed[0].bytes)
   expect(observed.slice(1).map(value => value.bytes)).toEqual(Array(3).fill(observed[1].bytes))
   expect(result.requests.map((request, index) => request.payload?.serializedBytes === observed[index]?.payloadBytes)).toEqual([true, true, true, true])
+  expect(result.tools.filter(tool => tool.call.name === 'tools.load').map(tool => tool.result)).toEqual(Array(2).fill(expect.objectContaining({ kind: 'read', data: expect.objectContaining({
+    unavailable: [{ name: 'not.a.tool', code: 'unknown-tool', message: expect.any(String) }],
+  }) })))
+  expect(result.messages.filter(message => String(message.content).startsWith('宿主当前工作记录'))).toHaveLength(2)
+  expect(result.requests.slice(1).every(request => request.payload?.prefix?.stableBytes !== undefined)).toBe(true)
+  expect(result.requests.every(request => request.firstEventWaitMs !== undefined && request.firstContentWaitMs !== undefined)).toBe(true)
   expect(await host.internalAPI.read(session.documentId)).toMatchObject({ revision: 1, undoDepth: 1, model: { project: { title: '已发现并调用' } } })
 })
 
@@ -196,7 +203,7 @@ it('retains requested families through project creation and directly exposes sup
     fileAccess: { workspaceRoot: directory, permission: 'workspace' } })
   expect((await host.tools.describeRun('creation')).map(tool => tool.name)).not.toContain('document.export')
   const available = await host.tools.loadToolFamilies('creation', ['layout', 'navigation', 'build'])
-  expect(available.some(item => item.family === 'build')).toBe(false)
+  expect(available.some(item => item.family === 'build')).toBe(true)
   const project = await host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('新作品'), resources: { assets: {}, components: {} } }, 'new.glx')
   await host.tools.attachRunDocument('creation', project.documentId, true, 'initialize')
   expect((await host.tools.describeRun('creation')).map(tool => tool.name)).toEqual(expect.arrayContaining(['file.save', 'document.export', 'course.configure', 'surface.configure']))
@@ -207,7 +214,9 @@ it('retains requested families through project creation and directly exposes sup
   expect(direct).not.toContain('course.configure')
   await host.tools.beginRun({ runId: 'readonly-delivery', actor: 'agent', documents: [{ documentId: project.documentId, writable: [] }] })
   await host.tools.loadToolFamilies('readonly-delivery', ['build', 'layout'])
-  expect((await host.tools.describeRun('readonly-delivery')).map(tool => tool.name)).not.toContain('document.export')
+  expect((await host.tools.describeRun('readonly-delivery')).map(tool => tool.name)).toContain('document.export')
+  const readonly = await host.tools.issueTarget('readonly-delivery', project.documentId, { kind: 'document' })
+  expect(await host.tools.execute('readonly-delivery', 'no-export-grant', { name: 'document.export', input: { target: readonly, format: 'html' } })).toMatchObject({ kind: 'error' })
 })
 
 it('keeps creation available for an empty formal project while hiding unrelated long-tail schemas until discovery', async () => {

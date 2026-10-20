@@ -176,11 +176,30 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
       instanceId: input.instanceId, spatialFrameId: input.spatialFrameId, staticExport: input.staticExport, interactive: input.interactive }
     const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')
     const isolatedSession = session.fromPartition(`observation-${randomUUID()}`)
-    installEditorProtocol(isolatedSession, url => {
+    const entry = new URL('observation.html', this.options.rendererEntryUrl).toString()
+    const entryUrl = new URL(entry), entryOrigin = entryUrl.origin === 'null' ? `${entryUrl.protocol}//${entryUrl.host}` : entryUrl.origin
+    let closed = false
+    installEditorProtocol(isolatedSession, async (url, request) => {
       if (url.hostname === 'app' && url.pathname.startsWith(bootstrapPath)) {
-        const html = url.searchParams.get('html')
-        return html === null ? new Response('Missing bootstrap', { status: 404 })
-          : htmlPreviewResponse(html, { contentType: 'text/html; charset=utf-8', connectOrigins: project.logic?.network?.connectOrigins ?? [] })
+        const headers = { 'Access-Control-Allow-Origin': entryOrigin, 'Access-Control-Allow-Methods': 'POST, DELETE, OPTIONS', 'Vary': 'Origin' }
+        const reply = (status: number, message?: string) => new Response(message ?? null, { status, headers })
+        if (closed) return reply(410, 'Observation closed')
+        if (url.search) return reply(400, 'Bootstrap content belongs in the request body')
+        const method = request.method.toUpperCase()
+        if (method === 'POST' || method === 'DELETE' || method === 'OPTIONS') {
+          const origin = request.headers.get('Origin')
+          if (origin && origin !== entryOrigin) return reply(403, 'Invalid observation origin')
+          if (method === 'OPTIONS') return reply(204)
+          if (method === 'DELETE') { binarySources.delete(url.pathname); return reply(204) }
+          const html = await request.text()
+          if (closed) return reply(410, 'Observation closed')
+          binarySources.set(url.pathname, { bytes: new TextEncoder().encode(html), mime: 'text/html; charset=utf-8' })
+          return reply(204)
+        }
+        if (method !== 'GET' && method !== 'HEAD') return reply(405, 'Method not allowed')
+        const source = binarySources.get(url.pathname)
+        return source ? htmlPreviewResponse(source.bytes, { contentType: source.mime, method,
+          connectOrigins: project.logic?.network?.connectOrigins ?? [] }) : reply(404, 'Missing bootstrap')
       }
       const entry = url.hostname === 'app' ? binarySources.get(url.pathname) : undefined
       return entry ? new Response(Uint8Array.from(entry.bytes), { headers: { 'Content-Type': entry.mime, 'Cache-Control': 'no-store' } }) : undefined
@@ -198,14 +217,15 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
         nodeIntegration: false, webSecurity: true, backgroundThrottling: false, offscreen: input.interactive !== true } })
     const contents = worker.webContents
     contents.setWindowOpenHandler(() => ({ action: 'deny' }))
-    const entry = new URL('observation.html', this.options.rendererEntryUrl).toString()
     contents.on('will-navigate', (event, url) => { if (url !== entry) event.preventDefault() })
     let rejectStop!: (error: Error) => void
     const stopped = new Promise<never>((_, reject) => { rejectStop = reject })
-    let closed = false, closing: Promise<void> | undefined
-    const close = (): Promise<void> => {
+    void stopped.catch(() => undefined)
+    let closing: Promise<void> | undefined
+    const close = (reason = new Error('观察宿主已关闭')): Promise<void> => {
       if (closing) return closing
       closed = true
+      rejectStop(reason)
       input.signal?.removeEventListener('abort', onAbort)
       worker.removeListener('closed', onClosed)
       contents.removeListener('render-process-gone', onGone)
@@ -215,16 +235,21 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
       closing = isolatedSession.clearStorageData()
       return closing
     }
-    const fail = (message: string) => { rejectStop(new Error(message)); void close() }
+    const fail = (message: string) => { void close(new Error(message)) }
     const onAbort = () => fail('观察已取消')
     const onGone = () => fail('观察宿主异常退出')
     const onClosed = () => fail('观察宿主已关闭')
     input.signal?.addEventListener('abort', onAbort, { once: true })
     contents.once('render-process-gone', onGone); worker.once('closed', onClosed)
     if (input.signal?.aborted) onAbort()
-    const faultWait = setTimeout(() => fail('观察宿主准备无响应'), 20_000)
+    const withFaultWait = async <T>(work: () => Promise<T>, message: string): Promise<T> => {
+      if (closed || input.signal?.aborted) throw new Error('观察宿主已关闭')
+      const faultWait = setTimeout(() => fail(message), 20_000)
+      try { return await Promise.race([stopped, work()]) }
+      finally { clearTimeout(faultWait) }
+    }
     try {
-      const initial = await Promise.race([stopped, (async () => {
+      const initial = await withFaultWait(async () => {
         await worker.loadURL(entry)
         const outcome = await contents.executeJavaScript(`window.__COURSEWARE_OBSERVATION_RUN__(${JSON.stringify(encoded)})`) as ObservationWorkerResult
         if (input.signal?.aborted || closed) throw new Error('观察已取消')
@@ -232,24 +257,18 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
           throw new Error('观察宿主加载了错误页面或状态')
         await waitForCaptureFramePaint(contents.mainFrame, token)
         return outcome
-      })()])
-      clearTimeout(faultWait)
-      const read = async () => {
-        if (closed || input.signal?.aborted) throw new Error('观察宿主已关闭')
-        return contents.executeJavaScript('window.__COURSEWARE_OBSERVATION_READ__()') as Promise<ObservationWorkerResult>
-      }
+      }, '观察宿主准备或截图无响应')
+      const read = () => withFaultWait(() => contents.executeJavaScript('window.__COURSEWARE_OBSERVATION_READ__()') as Promise<ObservationWorkerResult>, '观察宿主读取无响应')
       return { token, worker, initial, close, read,
-        select: (locationId, stateId) => contents.executeJavaScript(`window.__COURSEWARE_OBSERVATION_SELECT__(${JSON.stringify(locationId)},${JSON.stringify(stateId)})`) as Promise<ObservationWorkerResult>,
-        capture: async () => {
-          if (closed || input.signal?.aborted) throw new Error('观察宿主已关闭')
+        select: (locationId, stateId) => withFaultWait(() => contents.executeJavaScript(`window.__COURSEWARE_OBSERVATION_SELECT__(${JSON.stringify(locationId)},${JSON.stringify(stateId)})`) as Promise<ObservationWorkerResult>, '观察宿主切换无响应'),
+        capture: () => withFaultWait(async () => {
           await waitForCaptureFramePaint(contents.mainFrame, randomUUID())
           const current = input.interactive ? await read() : initial, rect = current.rect
           const bitmap = await contents.capturePage(rect ? { x: Math.floor(rect.x), y: Math.floor(rect.y), width: Math.ceil(rect.width), height: Math.ceil(rect.height) } : undefined)
           const size = bitmap.getSize()
           if (size.width < 1 || size.height < 1 || bitmap.isEmpty()) throw new Error('观察宿主未生成真实画面')
           return { png: new Uint8Array(bitmap.toPNG()), width: size.width, height: size.height, structure: current.structure, diagnostics: current.diagnostics }
-        } }
+        }, '观察宿主准备或截图无响应') }
     } catch (error) { await close(); throw error }
-    finally { clearTimeout(faultWait) }
   }
 }

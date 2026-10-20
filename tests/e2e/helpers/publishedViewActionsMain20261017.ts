@@ -72,10 +72,10 @@ export default { document: 'web', mount({ root }) {
   const green = (color: number[]) => color[0] === 0 && color[1] === 255 && color[2] === 0
   try {
     const first = await actions.observePublished('fixture-run', target())
-    const hostBootstrapWithHtml = BrowserWindow.getAllWindows().some(window =>
+    const hostBootstrapShortUrl = BrowserWindow.getAllWindows().some(window =>
       window.webContents.mainFrame.framesInSubtree.some(frame => {
         const url = new URL(frame.url)
-        return url.pathname.includes('/bootstrap/') && url.searchParams.has('html')
+        return url.pathname.includes('/bootstrap/') && url.search === ''
       }))
     const firstViewport = await viewport(first)
     const beforeImage = await save('before.png', first)
@@ -121,7 +121,7 @@ export default { document: 'web', mount({ root }) {
       viewports: { first: firstViewport, second: secondViewport, returned: returnedViewport },
       repeatedOnlyOnce: repeat.generation === clicked.generation, newWorkerAfterClose: reopened.identity.viewGeneration !== first.identity.viewGeneration,
       nestedFrames: adjusted.observationScope?.frames.filter(frame => frame.status === 'observed').length,
-      hostBootstrapWithHtml,
+      hostBootstrapShortUrl,
       reportedFrameUrls: [first, clicked, filled, adjusted, second, returned, reopened, empty]
         .flatMap(observation => observation.observationScope?.frames.map(frame => frame.url) ?? []),
       closedTargetRejected, spentRejected, stopRejected, emptyFrameSkipped, windowsRestored: BrowserWindow.getAllWindows().length === baselineWindows,

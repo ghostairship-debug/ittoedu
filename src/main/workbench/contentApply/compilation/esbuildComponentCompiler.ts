@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { browserCompatibilityTarget } from '../../../../shared/browser/browserCompatibility'
 import { compileHtmlModules, retainedNativeModuleSyntaxSupport } from './compileHtmlModules'
 import type { Loader, Message, Plugin } from 'esbuild'
 import { loadRuntimeEsbuild, runtimeEsbuildVersion } from '../../componentCompilerRuntime'
@@ -35,8 +36,22 @@ function diagnostics(messages: readonly Message[], severity: 'error' | 'warning'
 /** esbuild reads only supplied virtual files and returns bytes; it never runs candidate code. */
 export function createEsbuildComponentCompiler(): ComponentCompiler {
   return {
-    identity: `esbuild:${runtimeEsbuildVersion}:component-memory-esm-12`,
+    identity: `esbuild:${runtimeEsbuildVersion}:component-memory-esm-13:${browserCompatibilityTarget}`,
     async compile(input: ComponentCompilationInput) {
+      if (input.options?.preserveScript) {
+        const { transform } = await loadRuntimeEsbuild()
+        try {
+          const result = await transform(input.files[input.entry] ?? '', { loader: 'js', sourcefile: input.entry,
+            target: input.options.target ?? browserCompatibilityTarget, minify: input.options.minify ?? false,
+            sourcemap: input.options.sourceMap ? 'inline' : false })
+          return { status: 'ready', artifact: { format: 'esm', code: result.code, css: '',
+            diagnostics: diagnostics(result.warnings, 'warning', new Map()) } }
+        } catch (error) {
+          const errors = (error as { errors?: Message[] }).errors
+          return { status: 'failed', diagnostics: errors ? diagnostics(errors, 'error', new Map())
+            : [{ stage: 'compile', severity: 'error', file: input.entry, message: error instanceof Error ? error.message : String(error) }] }
+        }
+      }
       if (input.options?.preserveModules) {
         const { transform } = await loadRuntimeEsbuild()
         return compileHtmlModules(input, transform)
@@ -124,7 +139,7 @@ export function createEsbuildComponentCompiler(): ComponentCompiler {
         const result = await build({
           entryPoints: [input.entry], plugins: [plugin], bundle: true, write: false,
           outfile: 'component.js', format: 'esm', platform: 'browser',
-          target: input.options?.target ?? 'es2022', supported: retainedNativeModuleSyntaxSupport, jsx: input.options?.jsx ?? 'automatic',
+          target: input.options?.target ?? browserCompatibilityTarget, supported: retainedNativeModuleSyntaxSupport, jsx: input.options?.jsx ?? 'automatic',
           jsxImportSource: input.options?.jsxImportSource ?? 'react', minify: input.options?.minify ?? false,
           sourcemap: (input.options?.sourceMap ?? true) ? 'inline' : false,
           logLevel: 'silent', metafile: false,

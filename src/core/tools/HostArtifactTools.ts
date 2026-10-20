@@ -11,10 +11,12 @@ export const hostArtifactSaveSchema = z.object({ source: id, destination }).stri
 export type HostArtifactSaveInput = z.infer<typeof hostArtifactSaveSchema>
 export type HostArtifactResolvedSource = ({ kind: 'image'; job: string; resourceId: string }
   | { kind: 'image-resource'; resource: string }
+  | { kind: 'media-resource'; resource: string }
   | { kind: 'compute' | 'delegation'; job: string; name: string }) & { destination: string }
 /** Delivery retains the owner's source identity; temporary image handles are not job references. */
-export function artifactDeliverySource(source: HostArtifactResolvedSource): { sourceKind: 'image' | 'compute' | 'delegation'; sourceId: string } {
+export function artifactDeliverySource(source: HostArtifactResolvedSource): { sourceKind: 'image' | 'media' | 'compute' | 'delegation'; sourceId: string } {
   if (source.kind === 'image-resource') return { sourceKind: 'image', sourceId: source.resource }
+  if (source.kind === 'media-resource') return { sourceKind: 'media', sourceId: source.resource }
   return { sourceKind: source.kind, sourceId: source.kind === 'image'
     ? `${source.job}@${source.resourceId}` : `${source.job}@${source.name}` }
 }
@@ -26,6 +28,7 @@ export function resolveJobArtifactSource(source: string): { kind: 'compute' | 'd
   return match ? { kind: match[2] === 'compute' ? 'compute' : 'delegation', job: match[1]!, name: decodeURIComponent(match[3]!) } : null
 }
 export function resolveArtifactSource(input: HostArtifactSaveInput): HostArtifactResolvedSource {
+  if (input.source.startsWith('media:')) return { kind: 'media-resource', resource: input.source, destination: input.destination }
   const image = parseGeneratedImageReference(input.source)
   if (image) return { kind: 'image', job: image.jobId, resourceId: image.resourceId, destination: input.destination }
   const job = resolveJobArtifactSource(input.source)
@@ -38,7 +41,7 @@ export function resolveArtifactSource(input: HostArtifactSaveInput): HostArtifac
 }
 export const hostArtifactSaveTool: ModelToolDefinition = {
   name: 'artifact.save',
-  description: '把创建、状态或等待返回的 source，或 image.fetch 返回的 resource 原样传入，保存当前任务已获授权且 ready 的图片或计算成果为工作空间新文件。仅指定来源和目的地，不拼接身份或选择 kind；目标已存在时拒绝覆盖。ready 与已保存分别有回执。',
+  description: '把创建、状态或等待返回的 source，或 image.fetch 返回的 resource 原样传入，保存当前任务已获授权且 ready 的图片、生成媒体或计算/委派成果为工作空间新文件。语音使用 media.start 返回的 job.resources[].source。仅指定来源和目的地，不拼接身份或选择 kind；目标已存在时拒绝覆盖。ready 与已保存分别有回执。',
   inputSchema: z.toJSONSchema(hostArtifactSaveSchema) as ModelJsonObject,
 }
 /** Both agent entry points use the same source and file owners. */

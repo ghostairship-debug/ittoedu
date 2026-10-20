@@ -68,7 +68,7 @@ export function executionTimelineEntries(projection: ExecutionProjection, messag
     const interaction = item.data.question || item.data.approval
     const failedEnd = ['partial', 'failed', 'interrupted'].includes(ends.get(item.runId)?.data.status ?? '')
     const groupable = !interaction && !(failedEnd && item.data.status === 'failed')
-      && ['tool', 'edit', 'build', 'usage', 'document.commit', 'document.save', 'run.state'].includes(item.type)
+      && ['tool', 'edit', 'build', 'usage', 'document.commit', 'document.save', 'run.state', 'run.end'].includes(item.type)
     if (!groupable) { result.push(entry); continue }
     const previous = result.at(-1)
     if (previous?.kind === 'tools' && previous.items[0]!.runId === item.runId && previous.items[0]!.source === item.source) previous.items.push(item)

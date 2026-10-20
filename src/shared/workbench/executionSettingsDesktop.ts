@@ -1,14 +1,17 @@
 import { z } from 'zod'
 import { searchSettingsSchema } from './searchSettings'
+import { speechGenerationSelectionSchema } from './speechSettings'
 import type { ModelJson } from './modelProvider'
 import type { ModelKnowledgeEntry } from './modelKnowledge'
-import type { ExecutionConnectionConfiguration, ExecutionConnectionView, ExecutionModelFavorite, ExecutionProfile, ExecutionSettingsView, SaveExecutionConnection, SaveExecutionProfile } from './executionSettings'
+import { MAX_NATIVE_CONCURRENCY_LIMIT, type ExecutionConnectionConfiguration, type ExecutionConnectionView, type ExecutionModelFavorite, type ExecutionProfile, type ExecutionSettingsView, type SaveExecutionConnection, type SaveExecutionProfile } from './executionSettings'
 import { probedModelCapabilities, type ModelCapabilityRecord, type ProbedModelCapability } from './modelCapabilities'
 
 const identity = z.string().trim().min(1).max(512)
 const json: z.ZodType<ModelJson> = z.lazy(() => z.union([z.null(), z.boolean(), z.number().finite(), z.string(), z.array(json), z.record(z.string(), json)]))
 const parameters = z.record(z.string(), json).refine(value => JSON.stringify(value).length <= 65536)
 const role = z.object({ connectionId: identity, model: identity, parameters: parameters.optional(), capabilityModel: identity.optional() }).strict().nullable()
+export const executionNativeConcurrencySchema = z.number().int().min(1).max(MAX_NATIVE_CONCURRENCY_LIMIT)
+export const executionDelegationModelSchema = role.unwrap()
 export const executionSettingsRolesSchema = z.object({ conversation: role, vision: role, imageGenerate: role, imageEdit: role,
   compression: role.optional() }).strict()
 /** Capability facts are main-owned. A settings form cannot claim a successful probe. */
@@ -25,7 +28,7 @@ export const executionSettingsRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('read') }).strict(),
   z.object({ type: z.literal('test-search'), query: z.string().trim().min(1) }).strict(),
   z.object({ type: z.literal('save-connection'), input: executionSettingsConnectionSchema }).strict(),
-  z.object({ type: z.literal('save-profile'), input: z.object({ expectedRevision: z.number().int().nonnegative().optional(), roles: executionSettingsRolesSchema, search: searchSettingsSchema.optional() }).strict() }).strict(),
+  z.object({ type: z.literal('save-profile'), input: z.object({ expectedRevision: z.number().int().nonnegative().optional(), roles: executionSettingsRolesSchema, search: searchSettingsSchema.optional(), speech: speechGenerationSelectionSchema.nullable().optional(), nativeConcurrencyLimit: executionNativeConcurrencySchema.optional() }).strict() }).strict(),
   z.object({ type: z.literal('set-model-favorite'), input: z.object({ connectionId: identity, model: identity, favorite: z.boolean() }).strict() }).strict(),
   z.object({ type: z.literal('revoke-connection'), id: identity }).strict(),
   z.object({ type: z.literal('discover-models'), id: identity, revision: z.number().int().positive() }).strict(),

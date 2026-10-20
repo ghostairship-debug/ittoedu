@@ -318,7 +318,7 @@ export default function App() {
   }
   useEffect(() => {
     const api = window.desktopAPI
-    const prepareSource = api?.onRequestPrepareDocumentInput?.(async documentId => { await workbenchSelection.prepare(documentId) })
+    const prepareSource = api?.onRequestPrepareDocumentInput?.(documentId => workbenchSelection.flushInput(documentId))
     const captureSpatialViewport = api?.onRequestCaptureSpatialViewport?.(async input => {
       await workbenchSelection.prepare(input.documentId)
       if (activeWorkspaceKind.current !== 'course') throw new Error('当前空间视口尚未运行，请打开原空间视口后重试。')
@@ -863,7 +863,7 @@ export default function App() {
         close: async id => {
           return useEditorStore.getState().closeCourseDocument(id)
         } }}
-      prepareCourseDocuments={async ids => { await useEditorStore.getState().drainAllCourseDocuments(ids) }}
+      prepareCourseDocuments={ids => useEditorStore.getState().flushAllCourseDocuments(ids)}
       captureCourseDocument={async (writable, prepare = true) => {
         const state = useEditorStore.getState(), { activeDocumentId, surfaceId } = state.courseView
         if (!activeDocumentId) throw new Error('当前没有打开的课件。')

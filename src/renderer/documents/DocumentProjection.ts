@@ -552,15 +552,23 @@ export class DocumentProjection {
     while (this.precommitGate) await this.precommitGate
     return this.drainForPrecommit()
   }
+  /** Main reads its own fresh canonical snapshot after this input-only acknowledgement. */
+  async flushInput(): Promise<void> {
+    while (this.precommitGate) await this.precommitGate
+    await this.flushInputForPrecommit()
+  }
+  private async flushInputForPrecommit(): Promise<void> {
+    if (this.closeSuspended) throw new Error('正在关闭文档，输入已保留')
+    if (this.previewTail) await this.previewTail
+    if (this.composition && !this.composition.active && !this.state.error) await this.endComposition()
+    while (this.worker) await this.worker
+    if (this.state.error || this.queue.length || this.composition || !this.state.committed || !this.state.connected)
+      throw new Error(this.state.error?.message ?? (this.composition ? '文本组合输入尚未确认' : '文档输入尚未确认'))
+  }
   /** The precommit owner reads the same authority while its own gate is held. */
   async drainForPrecommit(): Promise<DocumentSnapshot> {
     for (;;) {
-      if (this.closeSuspended) throw new Error('正在关闭文档，输入已保留')
-      if (this.previewTail) await this.previewTail
-      if (this.composition && !this.composition.active && !this.state.error) await this.endComposition()
-      while (this.worker) await this.worker
-      if (this.state.error || this.queue.length || this.composition || !this.state.committed || !this.state.connected)
-        throw new Error(this.state.error?.message ?? (this.composition ? '文本组合输入尚未确认' : '文档输入尚未确认'))
+      await this.flushInputForPrecommit()
       try { this.accept(await this.api.read(this.documentId)) }
       catch (error) {
         this.problem({ kind: 'disconnected', code: 'snapshot-unavailable', message: '无法读取当前权威文档；未确认输入已保留。' })

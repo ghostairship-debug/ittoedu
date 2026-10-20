@@ -56,6 +56,13 @@ it.each(['unavailable', 'program'] as const)('keeps a raw %s source usable witho
   const plan = await service.plan({ intent: 'redo', target: { kind: 'container', container: { kind: 'surface', surfaceId: project.surfaces[0]!.id } },
     source: { kind: 'html', html: '<main class="panel">Retained source</main><script>console.log("retained")</script>' } })
   expect(plan.command.expected.some(value => ['theme', 'designTokens'].includes(value.path[0]!))).toBe(false)
+  if (kind === 'unavailable') {
+    expect(plan.usability).toBe('partial')
+    expect(plan.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'html-measurement-source-retained', level: 'warning', repairable: true })]))
+    const inserted = plan.command.edits.flatMap(edit => edit.type === 'instance.insert' ? edit.instances : [])
+    expect(inserted.some(instance => JSON.stringify(instance.data).includes('Retained source'))).toBe(true)
+    expect(inserted[0]!.definitionId).toBe('guoling.html-program')
+  }
 })
 
 it('declares a bound remote theme image only to the restricted measurement resource context', async () => {

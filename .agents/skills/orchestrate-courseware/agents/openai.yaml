@@ -1,4 +1,4 @@
 interface:
   display_name: "创作互动演示"
-  short_description: "从内容主线与关键体验出发，在正式工程创作、扩展和精修可编辑演示"
-  default_prompt: "Use $orchestrate-courseware to create an editable interactive presentation from my materials, implementing the key experience in the current project before expanding and refining the work."
+  short_description: "设计可直接创作的场景，补齐必要媒体并合理协作，在同一正式工程交付完整可编辑首版"
+  default_prompt: "Use $orchestrate-courseware to create an editable interactive presentation from my materials. Plan the whole work and actionable scenes, supply the required media, use suitable parallel tasks, and complete the first version in the same formal project."

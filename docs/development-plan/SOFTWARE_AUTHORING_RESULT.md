@@ -1,8 +1,195 @@
 # 果铃软件与创作修复结果
 
-更新：2026-10-17。原两份方案及启动提示词已于2026-10-13按原目标完成规定实施、Skill/协议/分发同步和最小验收，原goal已标记complete，现作为[已执行历史依据](../archive/README.md#已执行软件与创作方案)归档；本文件是结果/后续跟踪记录，不是待执行方案。2026-10-12—17详细实施、失败、勘误、费用及具体输入边界见[阶段全文](../archive/20261017-软件与创作修复阶段记录.md)。
+更新：2026-10-20。原两份方案及启动提示词已于2026-10-13按原目标完成规定实施、Skill/协议/分发同步和最小验收，原goal已标记complete，现作为[已执行历史依据](../archive/README.md#已执行软件与创作方案)归档；本文件是结果/后续跟踪记录，不是待执行方案。2026-10-12—17详细实施、失败、勘误、费用及具体输入边界见[阶段全文](../archive/20261017-软件与创作修复阶段记录.md)。
 
-**背景/归属/原生装配及唯一同题验证已完成；几分钟首版、普遍质量、Owner接受及发行尚未签收。** 保存、冷开、实际互动、公开HTML、模型采用分别按已有证据判断，旧局部PASS不扩大为完整产品通过。当前主树含有效未提交成果，不能只用HEAD或旧包代表。
+**此前10月20日 A—G 可实施软件项及修后真实副本验收通过；“质量不低于基线且作者耗时下降”未通过，原goal 未完成。** 保存、冷开、实际互动、公开HTML、模型采用分别按已有证据判断，旧局部PASS不扩大为完整产品通过。当前主树含有效未提交成果，不能只用HEAD或旧包代表。Owner整体接受及发行仍未签收。
+
+<a id="result-creation-boundary-20261020"></a>
+## 创作边界修复实施与能力交接
+
+Owner 随后授权的独立软件包 A—F 已实施：生产端公开回执、统一查询／最终请求预算、动作事实／只读取消与未知写保护、普通内容与局部程序混合装配、资源身份、局部空间策略、成果承接及生命周期清理。独立复核所发现的5项核心问题已修复并复核；必要 Main／Renderer／Player 构建、类型及能力分发完成。
+
+隔离小工程已实际局改／Undo／Redo／另存，新进程＋新 profile UI 冷开，同一冻结GLX经公共导出后断网真实反馈、音频ended、图片decode和正式Next均通过。冻结第08页只读提取后在副本试点，1040×570/590机械通过，620×570正文溢出38px明确需内容决定，compact图片裁剪另列。首次收口时最大16×5MB协调器默认4GB OOM未通过，原失败保留。
+
+**随后Owner授权继续定位的内存点已修复。** 生产ACK中的HTML投影和摘要保留parse5逐字符字符串链，安全小反例约32—34倍；原夹具反而省略部分生产流程。沿现TreeAdapter复制精确文本值解除链保留，摘要保parse5语义且最多收集180字，未改事务／Source／ACK／History。默认堆16×5MiB最大协调器＋实际Undo/Redo通过；真实Gateway同尺寸16次plan／candidate／ACK／Session及Undo通过（固定data.set planner，未跑完整Renderer／磁盘80MiB保存）。三套类型、必要Main构建及独审通过；3个旧a08断言在只恢复旧projection的反事实仍同错，未洗绿。见[后续根因与证据](20261020-creation-boundary-repair/IMPLEMENTATION_RESULT.md#batch-memory-followup)。窄屏内容取舍不动，历史失败／原作／dirty保持，无创作／付费／提交发行。
+
+完整范围、证据与限制见[实施结果](20261020-creation-boundary-repair/IMPLEMENTATION_RESULT.md)，下一轮真实入口见[能力交接](20261020-creation-boundary-repair/CAPABILITY_HANDOFF.md)。本轮0新作者／付费创作与素材请求，未改原作品／真实profile、未提交推送发行；不改写此前整作质量／效率结论，不自动启动下一轮参考创作。
+
+<a id="result-closeout-20261020"></a>
+## Owner 指定收口：完成最后性能修复，停止创作并交付报告
+
+Owner最新要求完成修复后收口并生成报告，不再跑创作。已完成UI资源backing放大窄修：统一Main→Renderer快照交付复用现资源clone，覆盖文档返回/changed/两个导出发送入口，保canonical/Session/History/CAS及捕获目标冻结。3项聚焦、最终独审GO、相关Electron类型和必要Main构建通过。新空白无账号profile正式App（`experiment:original`、没有fixture替换）实际prepare 268.727ms/ready=true；26个独立buffer总量23,253,817B等于有效字节，原文档/epoch/rev11/内容保持，0apply/模型请求/page error，自有进程已关闭。修前单prepare7.535秒、另采内存元数据1.237GB、因果B0.357秒分别保留时刻边界，不签严格百分比或整课提速。[生产证据](../../output/creation-quality-execution-20261020/project-apply-performance/formal-app-vUQRJg/facts.json)。
+
+**本次软件修复及报告已收口；原整作质量/总效率目标未达事实保留，不再启动创作、补改作品或扩性能调查。** [面向Owner的收口报告](../../output/creation-quality-execution-20261020/REPAIR_CLOSEOUT_REPORT.md)汇总范围、修复、验证及原质量/计时结论；无commit/push/Portable/部署/发行。
+
+<a id="result-third-observation-recovery-20261020"></a>
+## 第三作者的观察挂起修复与同任务恢复
+
+本轮后续又发现并处理三类软件问题，均保留原失败而不修改作品内容：
+
+- **输入准备重复搬运快照**：实际连续`project.read`约32秒（前置约10.8秒、工具内约21.5秒，期间无模型生成）；每次3次prepare，Renderer为最终void ACK取6次整快照并accept/clone。完整资源离线Gateway读取仅131ms，隔离真实Renderer/Main同样本修前13.127秒、修后3.077秒/下降76.56%，wholeSnapshot6→0，三次准备、canonical fresh读、contentRead/CAS保持。6个Renderer文件沿原Selection/Projection owner提取flush-only，保人工draft/IME/队列/错误；真正snapshot消费者仍fresh read，无cache。3项聚焦及独审通过，Root汇合构建通过；不声称live32秒已实测降到3秒。见[实际前后证据](../../output/creation-quality-execution-20261020/project-read-performance/renderer-fixture/run-1aWjaK/result.json)。
+- **观察音频协议消费**：原1,171,418B PCM WAV、资产绑定与MIME完整，真实隔离GET200仍audio error4；Root第一次默认session的GET404是诊断scope错误，保留而不作根因。独立同原WAV/同service/CSP仅切stream，error4→ready4，确定是`courseware-editor`协议缺媒体stream。仅补该privilege，生产函数可信点击后播放26.470748秒至ended/error=null/diagnostics=[]；初始无限duration随后收敛，不新增Range/seek/CSP放宽。单行独审GO，必要Main构建通过。见[生产路径证据](../../output/creation-chain-20261020/audio-observation-fixture/production-play-qjmC0v/result.json)。
+- **PTC写回执超窗**：`19ad560e`四页修改已committed/applied/recoverable、rev9→10；17请求完成、48工具返回，但最后`return await tools.call('project.apply', ...)`把34.38MB完整回执（含重复input/receipt/appliedChanges正文）带入模型，最新轮必要输入超窗，运行partial。四个file.read仅在PTC内机械拼装，不是子结果误进nativehistory。现仅模型出口将大value外置到既有精确分页引用，raw/脚本/读取合同保持；已知子写事实按本parent实际children→journal→原modelToolResult摘要，不从任意JSON猜receipt，不回灌read全文。4项聚焦及最终独审通过，实际34MB原像模型投影小于32KB；正式旧partial续接准备52,357B/估算21,410tokens，原raw/61字符精确旧run分页可读，rev10 applied/原operationId/诊断保留且无写/click重放。`context-window-stop`保留原partial/文档journal/workspace，不改RunStore或重放这四页事务。见[直接验证](../../output/creation-quality-execution-20261020/methods-final/ptc-model-projection/focused-results.json)。
+
+上述三项汇合Root/Electron/E2E类型、必要Renderer与Main构建全部通过，未改变工具输入schema或Skill能力，未重跑未变Player。正式续接已终态冻结：最终`ed01ab57-aab8-4d5d-b01a-76be134be687`为partial、failure=null，作者自行保存主工程rev13/dirty=false（13场景、40实例）并导出同版`YOU & ME—离线互动.html`（9,670,682B、written、warnings=[]）。GLX为18,910,115B；Root没有代保存、导出或补写内容。[冻结事实](../../output/creation-quality-execution-20261020/verification-prep/author-run-third/author-final/logical-freeze-facts.json)及整个实际workspace已保留；独立冷开质量和partial原因另据直接证据判断。
+
+本次是一个逻辑任务的两次维护续接，不是未干预的从零对照：原初提示/角色保持，但Root按Luna范围守护建议正式发送一次收口调整，停止可选排版/控件精修、要求作者保存现稿和导出；已经发起的操作允许正常settle。该调整及两次故障均计入总时间。原任务创建至最终工具回执**1:54:19.098**（至终态1:54:43.299），包括挂起、修复、构建、停机和续接，**没有达到旧26:49.895的提速目标**，不能用局部读取下降或扣除维修时间替换该结论。
+
+终态`partial`精确来自原run的未知`view.click`和未返回`view.observe`；最终续接25个请求均completed、61条工具记录均returned，不代表每项成功：其中第一次保存因steering为not-started，第二次才正式saved。保存、导出和新epoch不能被当作旧点击的成功收据；旧纯读是已中断进程遗留而非现在仍活跃，不篡改历史或重放动作来换completed。Root收集器的`authorSaveOrExport:false`只描述收集动作没有代作者保存，不能否认作者正式收据。见[终态字段与合同分析](../../output/creation-quality-execution-20261020/methods-final/terminal-analysis/terminal-analysis.md)。
+
+主系69请求/220工具，全树135请求/304工具；129份成功usage已知输入6,309,602、输出47,178、缓存535,424（8.4859%），6次传输失败无usage，费用未知。包装与子调用按原记录分别呈现，不将PTC时间和其子调用重复累加。见[完整计量](../../output/creation-quality-execution-20261020/delivery-benchmark/run-metrics-third/summary.json)。
+
+**第三稿核心可用，但整作质量不低于旧基线未签收。** 独立无账号profile冷开作者原GLX保持rev13/dirty=false，正式Published实际点击03音频至ended/error=null，资源闭包成立；实际作者HTML三段音频可信点击至ended/error=null，分别26.561723、19.627619、24.086848秒，关键正误反馈、姓名分类/拼写、纠错、私密卡与采访核对、自填介绍、迁移场景、出口条及返回保留通过。GLX载体03实播26.470748秒，分别记录，不混作同一媒体元数据。旧基线Classmate Detective的四人互补线索与问句确认更完整；第三稿09的Mia资料前页已公开、09采访后10仍默认Sam，削弱真实信息增益和任务承接。两处属于作者设计取舍，Root没有补写、补图或改作品以刷质量。没有人工听感、全分支、全设备结论；旧Source局改/Undo证据实现未变继续有效。[独立质量及冷开证据](../../output/creation-quality-execution-20261020/third-quality/quality-leaf.json)已冻结，自有验证进程已关闭。
+
+不启动第四整作刷指标。已有[事件分布](../../output/creation-quality-execution-20261020/delivery-benchmark/run-metrics-third/timing-distribution.json)给出具体软件后续：最终三次`project.apply`分别147.983秒、39.726秒、145.511秒；`document.applied`是在完整服务返回后才记录，距结束仅0.311–0.459秒，不能当作内部commit时刻或据此归咎PTC。随后仅沿正式apply入口至完整回执的前段定位，先源码/既有events，再按分段新证据以冻结副本定向剖析；没有启动新作者。晚更新的`updatedAt`产生负的跨段差值，不作为间隔或修复时间。
+
+进一步的[纯Main定向样本](../../output/creation-quality-execution-20261020/project-apply-performance/title-fLDnyw/result.json)精确恢复rev11修改前态，以原84B改名输入真实提交rev11→12，总1.476秒（plan1.63ms、Session含子阶段416ms、journal182ms）；4次prepare被明确替换为NOOP，因此只能缩小排查范围，不能宣称39.726→1.476秒已修。轻量Renderer fixture在初始化snapshot clone时内存不足，尚未prepare或apply，不是有效性能样本或live产品故障证据。随后正式App单prepare7.535秒、CPU captureTarget约7.082秒，另次只读确认26个独立backing合计1,236,746,706B而有效23,253,817B；因果B只紧凑UI字节视图，字节一致、单prepare0.357秒。该根因已按顶部收口节实施，最终生产无factor为0.269秒，不改heap/删资源/循环重跑失败fixture。Root首次准备误用系统Node无法解码Electron V8日志，改用项目Electron内置Node/V8后原日志恢复成功；该失败不分类为数据损坏，原日志未改。
+
+第三作者`02c84d33-9c9c-4e36-8c00-dfae51c46500`已正式装配13场景并直接保存三份本机语音制品；第三项软件根因修后没有再观察到协作通知撤下调用。随后真实翻页出现未知点击结果，紧接的`view.observe`停在executing。现场显示外层已到NAME LAB，但新子frame仍about:blank、ready Promise未结束；其bootstrap URL为2,025,175字符、含1,561,914字符音频data。仅据此确认当前正文进URL的传输边界失效，不杜撰Chromium统一硬上限。
+
+沿现观察owner修复3个生产文件：隔离protocol可await原回调，保留undefined静态回退；正文POST到本session短租约，iframe只取短GET地址，保原CSP/sandbox/资源闭包及固定源；worker等待登记成功，失败明确诊断。初建及复用read/select/capture统一参与现20秒fault/stopped，关闭先结束旧等待、finally清理timer，避免renderer永等锁住作者。没有新IPC、全局任务预算、第二writer或自动重放点击。
+
+4项针对性反例及独审通过。[实际Electron证据](../../output/creation-chain-20261020/observation-body-fixture/run-FSDLdn/result.json)证明2,605,127B请求正文经POST→短GET后真实ready、导航往返；固定503在3.34秒返回明确diagnostic（不是声称整个observe reject），pending READ在关闭后4ms拒绝。Root/Electron/E2E类型、必要Renderer/Main构建均通过；未重跑未变Player或作者矩阵。
+
+唯一旧观察target关闭后原read仍未返回，故原场景与回执保全后，仅维护重启本轮隔离进程。主工程dirty journal为document `06349964-fb3d-4e42-825e-3df4a62ce124`、rev9；资源、Undo/history、运行和整个workspace另行复制，不含settings/Local State/登录凭据。原点击unknown及原无回执读取保持，不改RunStore或伪造ready。既有`retryOfRunId`一次接受同任务续接`19ad560e-b8cf-451a-a93f-8caf89c7df53`，正式恢复同document/rev9/dirty=true，新epoch为`7fccad43-9e88-418d-b3df-15581b477ad0`；23资源闭包及原project保持，未打开旧磁盘GLX覆盖恢复稿。续接先重新观察，再取新句柄操作，最初的正式观察与两次点击均已返回。提示/角色未改，没有新的从零作者，Root没有替作者保存或导出。最终保存/导出已冻结如上，独立质量另核。第三逻辑任务总耗时自原createdAt计至续接最终回执，**包含挂起、修复与停机，不扣除；已不能签提速，goal仍未完成**。
+
+<a id="result-second-author-software-20261020"></a>
+## 第二次真实作者与三处软件根因修复
+
+Owner明确无阻断则继续原goal。语音供应商延后不再阻断，本轮没有新供应商、凭据、安装或收费路径。第二作者在独立工作空间从零策划和取得素材，保持第一轮的`gpt-6.1-sol/high`、flare图片和Luna/max压缩；仅在第一提示后补充可用本机文件语音说明，未预供MD、图片或作品。原稿与失败计时全部保留，Root没有补写内容或替作者保存/导出。
+
+| 同口径：创建至最后工具回执 | 耗时 | 结论 |
+|---|---:|---|
+| 旧YOU & ME成熟材料基线 | 26:49.895 | 已有878行MD和16图，不与从零输入混为严格同条件。 |
+| 第一作者 | 27:11.577 | partial，三段必要听力缺口；原结果不回算。 |
+| 第二作者 | 28:46.121 | 比旧多1:56.226（7.22%），比第一多1:34.544（5.79%）；尚未提速。 |
+
+第二作者`fc58887d-fadb-4dc5-afb5-8a7266986a75`正式保存13场景、75实例、rev21/dirty=false，并导出同版离线HTML。主70请求（68成功有usage、2次transport失败无usage），主子合计123请求、已知输入7,842,547/输出49,050，成功usage配对缓存9.1056%；不能据token下降40.04%宣称墙钟或金额下降。三份本机WAV共60.427秒，合成环节0模型/供应商请求；图片实际模型及金额未知。完整[冻结事实](../../output/creation-quality-execution-20261020/verification-prep/author-run-second/author-final/freeze-facts.json)、[计量](../../output/creation-quality-execution-20261020/delivery-benchmark/run-metrics-second/summary.json)和[原始事件](../../output/creation-quality-execution-20261020/delivery-benchmark/run-metrics-second/incidents.json)均保留。
+
+**第二稿代表核心课堂质量不低于旧基线，但整体goal因耗时未达标。** 独立验收实际操作听力错改、五轮会话、A/B信息互补、真人交流与出口条；三段离线音频均可信点击播到ended/error=null。正文Source一处局改、Undo、Root副本另存和全新profile冷开、正式Published反馈通过，frame/global/hierarchy保持；不是声称全正文都可用原生富文本UI，也不冒充人工听审、课堂实教或全设备签收。计时器早先疑点已证实为自动化点击裁剪外控件，保留原观察并撤回软件故障判断。见[质量证据](../../output/creation-quality-execution-20261020/second-quality/quality-leaf.json)、[生命周期证据](../../output/creation-quality-execution-20261020/verification-prep/author-run-second/root-core/lifecycle-L2RQar/facts.json)。
+
+真实创作又暴露三项软件根因，均已修复并独审：
+
+- **源码资源交接**：原实例私有`cw-resource`别名与投影相对图片路径被复制后失去上下文。每实例有效绑定内将已知资源位规范为工程资产引用，未知原样；内部project资源语义贯穿字节准备与身份复用，防同名私有别名把规范引用重新解释成另一资产。外来raw HTML保持原局部语义，无新registry、权限或writer。实际Gateway的原3例及新增collision身份反例通过；额外raw无warning期待被撤除，原生产warning及严格最终身份断言保留。
+- **语音制品保存**：三次ready语音source按指南交`artifact.save`却被拒。沿现Media读取和唯一ArtifactDelivery文件owner补接media来源，聚焦真实Gateway固定WAV保存证明来源、原字节与未知/跨run/Stop边界。ready说明明确无需`job.status/wait`，不扩媒体异步平台。[聚焦回执](../../output/creation-quality-execution-20261020/speech-artifact-save-focused.json)。
+- **协作通知调度**：5次普通协作消息误撤尚未发起调用，部分相同输入随后原样重发。仅真实用户调整推进旧调用失效，协作沿原记录在完整工具轮末统一注入；PTC、preview、mode、问题/批准等待采用同一语义，Stop/权限/未知副作用不重放保持。6项真实Engine/Gateway固定adapter反例通过，不将固定adapter视为模型提速实测。[原始诊断](../../output/creation-quality-execution-20261020/collaboration-scheduling-diagnostic/diagnostic.json)。
+
+三片汇合Root/Electron类型检查和必要Main构建通过，工具能力生成/托管Skill已同步；不重建无新consumer的Player/Renderer。实际冻结主GLX副本中Listening B源文正式read不改rev21，原样insert新页无missing/unresolved、无新资产，保存rev23→空profile冷开→正式离线HTML→真实点击播放15.293秒至ended/error=null，旧实例/frame/global/hierarchy保持，0模型/供应商。旧动态HTML静态依赖通用warning保留。见[真实资源接力](../../output/creation-quality-execution-20261020/verification-prep/author-run-second/root-core/resource-handoff-RAJOOn/facts.json)。
+
+修复后的一次完整续验`02c84d33-9c9c-4e36-8c00-dfae51c46500`使用独立`author-run-third`，初始提示原样复制第二冻结稿、角色不变、初始0文档/附件/素材。后续两次维护续接、一次范围收口调整、最终保存/导出与总计时见上节；原失败及计时保持，不自动第四轮刷指标。**第三逻辑任务已结束；整体提速未通过，goal未完成。**
+
+<a id="result-creation-quality-execution-20261020"></a>
+## 创作质量与执行链路：软件落地，真实对照未达标
+
+Owner 本轮 `/goal` 授权执行[更新方案 A—G](创作质量与执行链路修复方案-2026-10-19.md)。核查后可直接实施；D3 已明确缺少语音提供方时先完成适配与资源链，不将其余实施阻塞。以下软件已集成，真实创作及暴露问题均已保全；首轮收口后用户复核又揭示本机已有英语语音未接入媒体通道，按后述更正继续修软件。GPT-6-Luna/medium 子智能体持续监督范围，开发与验证未转为替作者补写、补图或补音频。
+
+### 软件结果与直接消费者
+
+| 范围 | 已实施结果与证据边界 |
+|---|---|
+| A 工具 | `batch` 模型侧定义从59,069降为973字符，另精简 `object.author`／`interaction.update`，执行仍经过原参数解析。工具披露与授权执行分开，混合加载保有效项，无当前工程也可取得相应工具；直接调用、PTC、当前目标、委派模型与等待身份沿共同入口接通。字符缩减不冒充 token 或耗时收益。 |
+| B 当前事实、保存、资源与聊天 | 采纳磁盘稿后退役旧失败保存义务，保新保存及真实未知结果；已提交的局部诊断不再被包装成未执行。保存HTML使用当前JS会话；当前工程资源读回、动态资源闭包和含 `$` 的脚本替换已修。普通回复去完成分类标签，活动跟随最新回复，保历史和运行控制。 |
+| C 正式页、导航与观察 | 全局定制导航通过 `window.courseNavigationReady` 使用正式页序和动作，一次插入正式全局层。零高body、overflow与可见绝对定位后代按真实浏览器处理。全局HTML导航的真实绘制裁剪贯穿iframe及外层容器，透明区域可点击原下层按钮，保可见遮挡、效果和动画。未另建导航状态或命中引擎。 |
+| D 委派与媒体 | 原生任务树共享容量默认10、可配置1—32，排队、取消、启动失败及祖先等待释放/重获容量；子模型选择、恢复与冻结媒体设置接通。speech适配器沿既有媒体作业和资源服务实现。首轮只验固定HTTP/WAV，未接真实供应方；随后用户复核发现本机Zira本来可用，已修复媒体入口并完成真实生成、保存冷开及离线播放（见下文）。新增供应方并非当前必要前提。 |
+| E 导出 | 正式资源使用短运行地址与realm作用域Blob，关闭释放，保存恢复正式身份；旧data URL来源、同字节不同asset和跨realm更新保持。共享easing退出通用Phaser依赖；Canvas q0.9只生成静态PNG/JPEG/无损VP8L WebP派生图，原件、像素和透明通道保留，动画图不转静态。实际编译目标及运行下限落实Chrome113。 |
+| F 方法与分发 | 更新11份方法源及场景策划参考，强调具体内容/承接、所需素材、合理协作、正式分页和既有作品直接续改。走现有能力生成及Skill安装分发；未修改需Owner确认的AGENTS。分发与真实采用分别记录。 |
+| G 上下文 | 稳定工具顺序/历史观察表示，当前工作事实与 `task.note` 去重复，保存请求前缀及首响应诊断；不加入未公开OAuth缓存参数。真实请求审计证明相邻前缀诊断与wire一致，仍有稳定追加而零命中的请求，不能将缓存全部归为软件错误。 |
+
+实施中实际消费者另外暴露并修复了：全局导航iframe正确裁剪但外层透明容器仍拦点击；16张旧成品图为VP8L而原编码器没有覆盖；编译IPC严格schema遗漏 `preserveScript` 导致泛化警告及经典脚本未转译。以上均沿原owner接通，保留首次失败。真实作者又暴露以下软件问题，修复后未重跑作者：
+
+- Windows委派状态读没有加入同文件队列，与原子替换出现EPERM。所有相关读取加入现队列，对已关闭/flush的同一tmp有限重试发布；不重放模型、工具或业务。持续失败保旧状态和完整tmp。新反例2项及直接相关11项通过，独审通过。
+- 同一作业的旧producer和11次历史等待被反复列为12项当前义务。按同作业/同类/当前已知状态收敛为1项，保其他作业、保存及真正未知结果。原47项组通过，实际冻结投射12→1项、6,102→502字节；不推算节省时间或token。
+- 原生标题frame宽442.53125在静态导出内部序列化为442.531px，重新布局后变442.515625而新增一行、压住导语。修在静态捕获：等待字体后实际ResizeObserver内容盒，固定轴跟随正式frame，保grow-height测量。未修改正文、字号或原frame。实际缩窄再还原及横/竖排检查通过；最终原前像副本重导保持442.53125×51，标题单行且位于导语上方。
+
+重要结构均有非作者独审。三套类型、所需Player/Renderer/Electron生产构建及受影响聚焦检查通过；最后G改动后Main类型与构建也通过。聊天新增行为检查通过；另6个旧UI例在HEAD前像同样失败，保留 [旧例结果](../../output/creation-quality-execution-20261020/ui-head-baseline.json)，未改测试洗绿、未扩跑全矩阵。
+
+### 软件真实验收
+
+[三页正式工程及最终副本验收索引](../../output/creation-quality-execution-20261020/verification-prep/SUMMARY.json)保留各段有效证据：原位置透明区真实点击、共享状态跨页/返页、原生文字局部编辑和图片替换、正式保存dirty=false、另进程空profile冷开、无preload/禁HTTP的同文件离线播放。固定0.4秒WAV实际可信点击播放到ended，仅证明媒体资源与播放器，不证明真实语音提供方或语言质量。
+
+最后在冻结作者副本上实际改 `friendly→kind`、Undo、另存、空profile冷开及正式Published互动通过，所有frame/global/hierarchy保持。真 `desktopAPI.compileComponent` IPC携preserveScript/target113返回ready、诊断空，官方Chrome113.0.5672.63实际点击2→3；新导出及未改标题前像重导的通用编译警告均为0，代表互动无page error。见 [最后真实事实](../../output/creation-quality-execution-20261020/software-integration/author-copy-7HanE5/facts.json)及[原标题重导画面](../../output/creation-quality-execution-20261020/software-integration/author-copy-7HanE5/preimage-reexport-scene02.png)。没有以副本补存冒充作者原本保存，所有自有验证进程已关闭。
+
+### 同源旧成品的机械交付收益
+
+[同源交付实测](../../output/creation-quality-execution-20261020/delivery-benchmark/RESULT.json)从冻结旧HTML恢复其原生作者程序及原16张VP8L图，经当前正式导入/保存/导出；原内联脚本/CSS保持，工程保原图。不是用后来的GLX rev4冒充原HTML同源，也没有将旧外层播放器嵌进新播放器比较。
+
+| 同一旧成品 | 原值 | 当前值 |
+|---|---:|---:|
+| HTML | 25,577,746 B | 4,356,940 B（减少82.97%） |
+| 图片位流 | 17,275,944 B | 2,400,776 B（减少86.10%） |
+| Chromium149入口首次可见（RAF观察） | 11.130秒 | 0.516秒 |
+| 官方Chrome113入口首次可见（同口径） | 22.145秒 | 0.564秒 |
+
+两个浏览器各一组原/新file://样本，禁HTTP、无产品preload；进入、翻卡、下一页、返页保状态、16图解码均通过，画面实际查看无明显媒体劣化。未清OS缓存，不能推广为稳定倍率或旧故障机根因。原测量含后来定位的编译IPC警告，保留原记录；上述独立最终副本验收已证明修后真实IPC及新导出为0通用警告，不重复跑未变的四份性能样本。以上属于交付改善，不等于作者耗时降低。
+
+### 唯一真实新作：保留partial，整体NO-GO
+
+主run `524dabe8-16c3-4a88-bbe9-f4b44ae6d00a` 从零策划、协作和生成素材，冻结为13正式页、74实例、GLX revision25/dirty=false，作者状态 **partial**。采用3个原生子任务，生成3图并复用裁切人物；模型真实返回均为gpt-6.1-sol，requested high，不能签产品轻量子模型已产生收益。图片沿既有OAuth，三作业各一次ready、请求gpt-image-2.5-flare，供应方未回独立实际模型证明。GPT-6-Luna监督的是仓库修复范围，不计作作品作者子模型采用。
+
+[冻结原工程](../../output/creation-quality-execution-20261020/verification-prep/author-run/author-final/Unit1-YOU-ME.glx)、[作者原离线HTML](../../output/creation-quality-execution-20261020/verification-prep/author-run/author-final/workspace/YOU-ME/Unit1-YOU-ME-offline.html)、[统计](../../output/creation-quality-execution-20261020/delivery-benchmark/run-metrics/summary.json)和[独立质量结论/19幅画面索引](../../output/creation-quality-execution-20261020/quality-independent/quality-leaf.json)均保留。Root没有补写、补音频或更改作者原件；作者自己做过的排版返工包含在总计时中，软件后修和副本验收没有倒算进作者成功率或耗时。
+
+| 比较项 | 10月19日基线 | 本轮 |
+|---|---:|---:|
+| 主run创建→最后工具回执 | 26:49.895（1,609,895ms） | 27:11.577（1,631,577ms），慢21.682秒/1.35% |
+| 作者上游输入 | 878行成熟MD及16图 | 自行策划、协作、生成素材 |
+| 请求 | 57（54有成功usage、3传输故障） | 主86；含三子run共169，169有usage |
+| 输入/缓存输入 | 3,926,049 / 41,856（1.0661%） | 共13,080,393 / 1,756,288（13.43%）；主run缓存17.01% |
+
+子任务生命周期重叠在主墙钟内，不相加；本轮主run终态为27:25.891，不能与旧最后工具口径混比。工具404条含180外层与224宿主子项；PTC63外层/209子项已在其中，不重复计数。八条失败回执不等于八个独立软件故障。不由token、缓存或null计费推算货币费用；输入条件不同，不作并发、模型或软件的单因速度结论。
+
+独立质量审查确认完整主线、具体正文、统一可读视觉和实际任务反馈，代表分支、采访记录、邀请理由及离堂改进均真实操作，未见足以判普遍视觉退化的证据。但04/05/08核心听力没有可用A/B/C音频，教师朗读替代流程不能算实际声音交付，故**完整质量/必要媒体及耗时下降均未通过，不能签整体不低于基线**。旧作自身也没有完备落盘录音，不能将此表述成新作质量全面下降。第10页信息差弱、第11页英语支架薄属于作者内容取舍，没有软件故障依据，本轮不代改作品。
+
+真实语音尝试的首次native任务在进入子run前因EPERM失败，后续local任务确实运行但System.Speech SelectVoice/Speak抛InvalidOperationException，三个WAV均0字节、无有效成果；日志列有Microsoft Zira Desktop/en-US，因此不能说机器没有英文voice。当前文本TeamoRouter及Codex OAuth不等于已验证speech文件生成。适配/保存/离线软件路径已就绪；这些事实只证明本次文件生成尝试失败，不能据此认定必须由Owner新增供应方后才可继续。最新补丁的真实作者采用/质量与速度仍待后续证据，当前goal不标complete。
+
+**随后用户复核更正：** 用户指出上一版由GPT实现了声音。只读核实原 `Unit1-Interactive.js:93–98`／`Unit1-Live.html:97–102` 为 `speechSynthesis.getVoices` 选英语声音，再用 `SpeechSynthesisUtterance`／`speak` 实时朗读；素材目录无音频文件，另有用户本次会话载入录音的分支。它是GPT编写的浏览器发声代码，不是GPT音频API预生成的文件。旧说明也保留了设备依赖及未验扬声器边界。**因此撤回“新增speech供应方/落盘录音是本轮整体goal必要前提”的判断。** D3要求录音文件只适用于明确需要稳定录音交付的任务；比较“不低于旧基线”应首先验证相同的可听形式。新作三处 `AUDIO_SRC=''`、没有 `speechSynthesis` 实现、实际仅教师朗读替代的缺口仍成立，不能因撤回更强的文件门就改记声音通过。首轮指令的“真实音频”及方法说明现已澄清为实际可听输出与文件交付分开，不删除失败记录、不改冻结作品、不回算计时；后续是否需独立音频渠道由实际任务决定。当前GPT音频接口与旧浏览器路线也分开核实，不能笼统说GPT不能生成语音。
+
+当前[实际浏览器探针](../../output/creation-quality-execution-20261020/speech-route-probe-Lejj7L/CONCLUSION.json)证明正式Published与独立系统Chrome都暴露原Web Speech API，真实点击可信，但只枚举到3个中文声音，因此未调用英文speak、未宣称听见声音。该结果不能推广为整机没有英语声库：Root在正常Windows PowerShell桌面进程，用已安装的Microsoft Zira Desktop/en-US成功Speak并关闭生成148,846B WAV，无新凭据/收费/安装，见[本机事实](../../output/creation-quality-execution-20261020/speech-local-desktop-probe/facts.json)。原受限delegate失败与正常宿主成功是不同环境的实测，不能以一次前者否定后者。
+
+按此新证据已完成**既有本机语音→正式媒体作业/资源owner**修复：`WindowsSpeechSynthesizer`只执行固定程序，文本与声音名经JSON stdin，`shell:false`且窗口隐藏；本机来源明确为 `windows-local / Windows.SystemSpeech / billing:local`，没有伪造Provider连接。与HTTP路线共用一个speech资源保存/read owner；按真实声库披露voice/culture/格式，失败不自动切收费HTTP，不扩大组件宿主API或开放任意OS命令。MediaCapabilityService继续持有写授权、Stop和run归属；Root在异步声库发现返回后检查取消，再开始媒体run。工具说明明确speech prompt只填台词原文，避免把朗读指令也读出来。方法源、生成能力与本机托管Skill已同步“可听输出与录音文件分别判断”。
+
+相关三文件9/9聚焦通过，覆盖实际桌面Zira WAV、同资源owner新reader/归属、真正helper取消close、只读/语言/格式及原HTTP路线；主/Electron类型、必要Main构建及非作者独审通过，未扩跑全矩阵。独审确认固定命令/结构化输入、单owner、授权/Stop/迟到结果隔离及不重放，无必要阻断。
+
+[正式生产验收](../../output/creation-quality-execution-20261020/local-speech-production-rr6Kwp/CONCLUSION.json)证明：真实Gateway自动发现Zira/en-US，`media.start`生成179,048B、4.059秒WAV；`media.apply`保同实例/frame，GLX rev2/dirty=false；Stop后新生成返回run-stopped；新进程空profile冷开正式音频及资源保持，HTML离线导出warnings为空。同一HTML后续实际鼠标点原生音频控件，从paused/time0/autoplay=false到play→ended，currentTime=duration、无媒体或page error；没有调用DOM play/click或用模拟事件代替。首段额外要求UA内部click冒泡的错误验收条件及失败原记录保留，仅修脚本后补采同一已导出HTML，不重新生成/重跑前半。声音硬件与人工听感不是这组动作记录的证明范围。
+
+可试听[既有生成结果的直接副本](../../output/creation-quality-execution-20261020/local-speech-production-rr6Kwp/speech-demo.wav)，台词为“Hello, my friend. Nice to meet you.”。本次0模型/付费提供方请求、无安装/新凭据/作者原件写入；第二作者只准备、未启动。**此前外部语音条件导致的整体阻断判断已撤回；这次软件链通过不回填首轮新作的声音，不签修后整作质量或耗时已经达标。**
+
+**Owner 随后明确通用性与双语音要求：** 正式新作默认生成并打包音频文件，浏览器实时朗读不再承担通用性交付。浏览器本次只能枚举三个中文声音，而正常桌面 System.Speech 已能使用英语 Zira；问题是接口暴露的声音集合不同，不能推断整机缺英语。WAV／MP3 的生成端需要声库或 API，但保存后的观看端不依赖生成机声库；这一区分取代前段临时允许设备 TTS 的新作方法，历史结果保留。
+
+软件已补齐本机普通文件与 GPT 表现性文件的双引擎接线：`media.discover` 分别返回 `engine:local/gpt`；省略引擎仅选本机，GPT 必须显式选择，失败不自动切换或重试。GPT 的台词与表演 `instructions` 分离，并透传 `speed`；两路共用已有持久资源 owner、正式绑定、写授权、Stop 和 run 归属。新增独立语音设置，默认关闭，使用既有 API 连接安全存储，选择模型／声音／MP3或WAV；保存配置不发生成请求，不把文本、图片或 Codex OAuth 登录当作语音接口。接受任务时冻结连接版本、模型、声音与格式，排队、子任务和续接沿同一快照；旧记录缺快照时不采用后来新设的收费路由。方法源、生成能力和本机托管 Skill 已同步正式音频文件默认。
+
+聚焦媒体双引擎4例、设置/UI四组42例、接受排队与父子续接2例及Root快照2例通过；汇合主/Electron类型、Renderer/Main开发构建及非作者结构独审通过。未重复本机已通过的声音全链或全矩阵。
+
+[唯一真实软件集成](../../output/creation-quality-execution-20261020/gpt-speech-stub-RuXpQf/facts.json)使用隔离profile与127.0.0.1 Speech API stub：实际设置UI保存并[截图](../../output/creation-quality-execution-20261020/gpt-speech-stub-RuXpQf/speech-settings-saved.png)，正式Gateway同时发现两个引擎；接受后将连接改为rev2，唯一POST仍使用原rev1地址与原fixture凭据，模型、台词、coral/WAV、instructions和speed=0.9均精确透传，持久receipt保留rev1。资源经一次正式media.apply保持原实例/frame；新进程读回语音设置及当前连接rev2。自有进程均已关闭。仅1个本地模拟POST、0真实GPT/作者/收费请求，无用户凭据读取。这只证明实际软件入口、请求与资源接线，不证明GPT模型、声音表现或真实供应方成功。
+
+当前无 `OPENAI_API_KEY`；既有 Codex OAuth 未接 Speech API；获授权的 TeamoRouter `/models` 一次只读请求返回55项，无 speech/audio 模型，不能据此把其文本凭据当作已接通语音。尚无兼容语音 API 凭据供真实 GPT 合成与同稿听感比较，未向未知接口发送付费 POST。该局部实调条件不撤销本机实际可用结果，不将整个创作任务重新表述为必须采购新渠道。
+
+本机合成本身无语音模型 token／供应方请求，但创作稿与工具调用仍计入作者模型。当前真实本机样例为22,050Hz／单声道／16bit WAV，4.059秒179,048B，连续PCM约2.65MB/分钟；体积差异取决于编码，不能由“本机或GPT”直接推断。OpenAI [模型页](https://developers.openai.com/api/docs/models/gpt-4o-mini-tts)本次查询列文本输入$0.60/百万token、音频输出$12/百万token，同时标有Deprecated；[语音指南](https://developers.openai.com/api/docs/guides/text-to-speech)仍描述该系列的情绪、口音、语调、速度等表演控制。这里只记录文档价格与能力，不能代替所选供应方实际可用性、token/时延账单或听感实测。Windows缺声库时可通过语言组件安装解决，但受权限、下载源和具体System.Speech可见性影响；本机已有可用英语声音，无安装必要，本轮未安装环境或修改注册表。
+
+**Owner 新授权 GPT OAuth 语音接入后的实际复核：** 已沿现有账号做[一次真实目录与唯一候选语音探测](../../output/creation-quality-execution-20261020/oauth-speech-capability-tCLcgA/CONCLUSION.json)，未将缺 API Key 当作提前拒绝理由。同源已关闭隔离profile的匹配 Local State／设置副本经 safeStorage 解密、账号与revision核对全真，原profile未改。正式 `executionSettings.discoverModels` 实际 GET `/backend-api/codex/models` 返回200及9个模型，无语音候选；附加models.dev资料不是服务端音频能力声明，目录缺项也不能证明服务端永不支持语音。
+
+随后只对固定ChatGPT host的 `/backend-api/codex/audio/speech` 发一次短Hello、`gpt-4o-mini-tts`／coral／MP3请求。此路径是待证实候选，并非已查得的OAuth Speech合同；结果为HTTP403、`text/html`、10,355B、无x-request-id，未得到或保存音频。保存的前2,000字符片段被样式／SVG占满，未取得可读错误，完整body未留存，因此不能分类为OAuth权限拒绝、端点不存在或网络拦截。GET1／POST1／refresh0，未重试或换端点／模型，应用已关闭，隔离副本保留。原有OAuth Responses／Images成功不替代Speech证据，不能只移除api-key校验就宣称接通。当前具体剩余是可用OAuth语音协议及实际音频，尚不能选出真实可用的“最高性价比OAuth语音模型”或启用该默认。
+
+AI场景选路的共同工具说明已补齐并同步生成能力、必要Main构建：读取每引擎可用状态、语言／声音、格式、费用类型及表演能力；普通朗读优先本机文件，剧情／角色／情绪需要且GPT可用才选GPT，不把普通朗读冒充角色表演。判断意图仍由AI负责，软件不猜剧情或暗中切换。原本机实调及双引擎资源接线证据继续有效，无相关逻辑变化，不重跑声音或整课矩阵。OAuth真实通道仍未接通，不冒充两路均已可用。
+
+模型资料复核另发现[2026-10-01停用公告](https://developers.openai.com/api/docs/deprecations#2026-10-01-text-to-speech-models)：`tts-1`／`tts-1-hd`／两个mini-tts快照将在2027-01-06下线，推荐 `gpt-realtime-2.1-mini`；旧Speech指南仍介绍mini-tts。这不是同一接口直接换model字段：替代模型用Realtime，且没有OAuth价格／可用性证明，故未将它设为当前已验证默认，未借此扩建Realtime平台。
+
+<a id="result-infrastructure-seam-20261020"></a>
+### Owner 暂缓语音供应商后的基础设施收口
+
+Owner 最新决定语音先留接口，供应商、OAuth、套餐及实际表现性配音延后；未来可能考虑MiniMax M plan不构成本轮接入授权。按此范围已完成通用语音接口及A/G三个实际消费者遗漏，未重新展开A—G整批或新建媒体平台：
+
+- 语音设置／冻结／工具／媒体链统一为本机 `local` 和配置接口 `remote`，退出GPT型号正则、13声音枚举及隐含表演能力。模型／声音由配置提供，表演指令和语速需显式声明，默认关闭；接口只承诺当前实现的OpenAI兼容Speech协议，不宣称支持其他原生协议或M plan。`availabilityBasis`区分本机声库枚举与用户配置，可派发配置不等于已验证供应商成功。原任务接受／父子／续接冻结、精确凭据版本、Stop、单资源owner及保存／导出保持。
+- 外部MCP `tools.load`复用内置Engine同源schema，支持names／families混合调用，有效工具展开、无效工具逐项诊断，修复说明与实际调用不一致。
+- 外部MCP `local.run`接回同操作的prepare／权限确认／authorize／execute。full沿原授权，workspace／ask经既有确认框展示真实命令与冻结输入；read-only保持不可用，停止及未知回执不重放，未删除底层授权门。
+- `context.read`接通软件自己发布的 `task.note` 精确来源，只准已返回的read回执；沿原续接／历史／会话边界，独立run的笔记仍不能读取，没有第二份笔记存储。
+
+Root快照2例、设置两组5例、媒体三文件11例（新增发现依据后只补相关5例）、Engine精确来源1例、[外部MCP七项属性](../../output/creation-quality-execution-20261020/external-mcp-focused-proof.json)均通过。MCP证据分段保留，最初测试误猜操作ID／停止错误封装的失败原报告未删；最终改为核正式operationIdentity和SDK真实拒绝，原同操作准备／授权／执行一次及未知不重放断言保持，独审已确认等价。主/Electron类型、必要Renderer/Main构建与非作者结构独审通过；未重跑无变化Player／本机声音／整课矩阵。共同工具说明、方法源、生成能力及本机托管Skill已同步。
+
+[唯一隔离软件集成](../../output/creation-quality-execution-20261020/infra-speech-seam-CTkAtl/facts.json)首轮通过：[实际设置画面](../../output/creation-quality-execution-20261020/infra-speech-seam-CTkAtl/speech-settings-saved.png)验证默认关闭、模型／声音为空、支持项默认false，再填非GPT的 `custom/model-42`／`story-narrator`及两支持项；真实Gateway发现依据正确，唯一localhost模拟请求精确传台词、表演指令和speed=0.9。连接已改rev2时，原run仍使用冻结rev1凭据及receipt；音频资源一次正式应用保实例/frame，设置经新进程冷读保持。自有应用／服务均已关闭。该结果只证明配置、协议封装、冻结与资源链，不证明任何供应商音质／费用／时延；本机既有真实声音保存冷开离线证据继续复用。
+
+**本轮基础设施范围已完成；语音供应商实调不再作为当前阻断。** 没有访问真实用户凭据／配置、发供应商请求、安装模型或启动第二作者，未修改原作品、回算原计时或签原质量／效率目标已达标。
+
+本轮保全原dirty、原作、失败账本和隔离凭据；没有commit、push、Portable、部署或发行。整体余项目标及发行暂停继续保留；第二作者仍只准备、未启动。
 
 <a id="result-editability-background-snapshot-20261017"></a>
 ## 文字与格式 P0 接续：软件根因及真实冷开闭环

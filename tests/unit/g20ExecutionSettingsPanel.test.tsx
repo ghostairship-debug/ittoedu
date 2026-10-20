@@ -51,6 +51,30 @@ function setup() {
   return { api, state }
 }
 
+it('D1 exposes default child capacity and saves a bounded new-task setting independently of model drafts', async () => {
+  const { api, state } = setup()
+  state.connections = [connected('connection')]
+  vi.mocked(api.saveProfile).mockImplementation(async input => {
+    state.profile = { ...state.profile, revision: state.profile.revision + 1, roles: input.roles, nativeConcurrencyLimit: input.nativeConcurrencyLimit }
+    return structuredClone(state.profile)
+  })
+  render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
+  const capacity = await screen.findByLabelText('子任务并发上限')
+  await waitFor(() => expect(capacity).toBeEnabled())
+  expect(capacity).toHaveValue(10)
+  fireEvent.change(screen.getByLabelText('主力模型连接'), { target: { value: 'connection' } })
+  fireEvent.change(capacity, { target: { value: '33' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存子任务设置' }))
+  await screen.findByRole('alert')
+  expect(api.saveProfile).not.toHaveBeenCalled()
+  fireEvent.change(capacity, { target: { value: '16' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存子任务设置' }))
+  await waitFor(() => expect(api.saveProfile).toHaveBeenCalledWith({ expectedRevision: 0,
+    nativeConcurrencyLimit: 16, roles: { conversation: null, vision: null, imageGenerate: null, imageEdit: null } }))
+  expect(screen.getByRole('status')).toHaveTextContent('新任务生效')
+  expect(screen.getByLabelText('主力模型连接')).toHaveValue('connection')
+})
+
 it('R01 model routing converts output cap keys without deleting the selected cap or unrelated parameters', async () => {
   const { api, state } = setup(), entry = connected('relay')
   entry.connection.baseURL = 'https://api.teamorouter.com/v1'

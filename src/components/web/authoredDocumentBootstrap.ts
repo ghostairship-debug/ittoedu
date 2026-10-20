@@ -11,6 +11,8 @@ import { createDomAuthoring } from './authoringDom'
 import { installOwnedDocumentAuthoring } from './ownedDocumentAuthoring'
 import { ownedDocumentKeyAttribute } from './ownedDocumentIdentity'
 import { createBrowserUuid } from '../../shared/browser/createBrowserUuid'
+import { createWebResourceUrlLease, webRuntimeResourceAddress } from './resourceUrlLease'
+import { createLocalStageLayout } from './localStageLayout'
 
 export interface AuthoredDocumentPrograms {
   graph?: WebModuleGraph
@@ -27,7 +29,7 @@ export interface AuthoredDocumentPrograms {
 
 /** Explicit function inputs keep the serialized parser bootstrap self-contained. */
 export function authoredDocumentProgramsSource(input: AuthoredDocumentPrograms): string {
-  return `(${installAuthoredDocumentPrograms.toString()})(${JSON.stringify(input)},${input.published ? `{options:(${createPreparedJavaScriptImportOptionsValidator.toString()}),resolver:(${webModuleResolverSource()}),nativeImport:function(url,options){${preparedJavaScriptNativeImportBody}}}` : 'undefined'})`
+  return `(${installAuthoredDocumentPrograms.toString()})(${JSON.stringify(input)},${input.published ? `{options:(${createPreparedJavaScriptImportOptionsValidator.toString()}),resolver:(${webModuleResolverSource()}),nativeImport:function(url,options){${preparedJavaScriptNativeImportBody}}}` : 'undefined'},${createWebResourceUrlLease.toString()},${createLocalStageLayout.toString()})`
 }
 
 /** Runs synchronously in the child's parser, before any authored script. */
@@ -35,10 +37,18 @@ export function installAuthoredDocumentPrograms(input: AuthoredDocumentPrograms,
   options: typeof createPreparedJavaScriptImportOptionsValidator
   resolver: (native: { URL: typeof URL; decodeURI: typeof decodeURI }) => (specifier: string, importer: string, dynamic?: boolean, context?: WebModuleResolutionContext) => string | undefined
   nativeImport(url: string, options: unknown): Promise<unknown>
-}) {
+}, resourceFactory = createWebResourceUrlLease, layoutFactory = createLocalStageLayout) {
   const native = window, originalDocument = document, NativePromise = native.Promise, NativeTypeError = native.TypeError
+  const resourceLease = resourceFactory(native)
+  resourceLease.update(input.resources)
   const createUrl = native.URL.createObjectURL.bind(native.URL), revokeUrl = native.URL.revokeObjectURL.bind(native.URL), NativeBlob = native.Blob
   const urls: string[] = []
+  let stageLayout: ReturnType<typeof createLocalStageLayout> | undefined
+  const installLayout = () => {
+    if (!ended && native.document === originalDocument && originalDocument.body)
+      stageLayout = layoutFactory(originalDocument.body, { active: () => !ended && native.document === originalDocument })
+  }
+  originalDocument.addEventListener('DOMContentLoaded', installLayout, { once: true })
   const blob = (source: string) => {
     const url = createUrl(new NativeBlob([source], { type: 'text/javascript' }))
     urls.push(url); return url
@@ -48,13 +58,9 @@ export function installAuthoredDocumentPrograms(input: AuthoredDocumentPrograms,
     let source = module.code
     for (const reference of [...module.imports].sort((a, b) => b.start - a.start))
       source = source.slice(0, reference.start) + JSON.stringify(input.prefix + reference.path) + source.slice(reference.end)
-    imports[input.prefix + path] = blob(source)
+    imports[input.prefix + path] = blob(resourceLease.project(source))
   }
-  if (Object.keys(imports).length) {
-    const map = document.createElement('script'); map.type = 'importmap'
-    map.textContent = JSON.stringify({ imports }); document.head.append(map)
-  }
-  const classic = Object.fromEntries(Object.entries(input.classic).map(([index, source]) => [index, blob(source)]))
+  const classic = Object.fromEntries(Object.entries(input.classic).map(([index, source]) => [index, blob(resourceLease.project(source))]))
   const moduleUrls = Object.fromEntries(Object.keys(input.graph?.modules ?? {}).map(path => [path, imports[input.prefix + path]]))
   let ended = false, diagnostic: ((message: string) => void) | undefined
   const pendingDiagnostics: string[] = []
@@ -74,22 +80,28 @@ export function installAuthoredDocumentPrograms(input: AuthoredDocumentPrograms,
       report(error); return NativePromise.reject(error)
     } }
     Object.defineProperty(native, input.published.helper, { configurable: true, value: runtime })
-    publishedUrl = blob(input.published.code)
+    publishedUrl = blob(resourceLease.project(input.published.code))
     imports[input.prefix + '__published__'] = publishedUrl
+  }
+  // Chrome 94 accepts one import map per document. The graph and its published
+  // initialization entry share that map before any module is requested.
+  if (Object.keys(imports).length) {
     const map = document.createElement('script'); map.type = 'importmap'
-    map.textContent = JSON.stringify({ imports: { [input.prefix + '__published__']: publishedUrl } }); document.head.append(map)
+    map.textContent = JSON.stringify({ imports }); document.head.append(map)
   }
   if (input.moduleProperty) Object.defineProperty(window, input.moduleProperty, { configurable: true, value: moduleUrls })
-  Object.defineProperty(window, input.property, { configurable: true, value: { ...classic, moduleUrls, publishedUrl } })
+  Object.defineProperty(window, input.property, { configurable: true, value: { ...classic, moduleUrls, publishedUrl, project: resourceLease.project, resourceLease } })
   const release = () => {
     ended = true; validator?.dispose()
+    stageLayout?.dispose(); originalDocument.removeEventListener('DOMContentLoaded', installLayout)
+    resourceLease.release()
     for (const url of urls.splice(0)) revokeUrl(url)
     if (input.published) Reflect.deleteProperty(native, input.published.helper)
     if (input.moduleProperty && (window as unknown as Record<string, unknown>)[input.moduleProperty] === moduleUrls) Reflect.deleteProperty(window, input.moduleProperty)
     Reflect.deleteProperty(window, input.property); window.removeEventListener('pagehide', release)
   }
   window.addEventListener('pagehide', release, { once: true })
-  return { release, transportFragment: input.transportFragment,
+  return { release, resourceLease, transportFragment: input.transportFragment,
     setActivity(value: { active: boolean; visible: boolean; playing: boolean }) {
       if (!ended) window.dispatchEvent(new CustomEvent('__runtime.activity', { detail: { ...value } }))
     }, onDiagnostic(listener: (message: string) => void) {
@@ -166,7 +178,9 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
           ...options, nestedOnly: false, documentPath: childPath, authoringPath: childAuthoringPath, authoringPendingPath: childPendingPath, resourceCss: undefined,
           bridge: authoredDocumentProgramsSource,
         })
-        edits.push({ start: location.startOffset, end: location.endOffset, value: `srcdoc="${quote(child)}"` })
+        // The outer parser decodes this attribute before the child's parser
+        // starts. Its resource addresses must stay unprojected until then.
+        edits.push({ start: location.startOffset, end: location.endOffset, value: `srcdoc="${quote(child).replace(/guoling-resource:/g, 'guoling&#45;resource:')}"` })
       }
     }
     if ('tagName' in node && node.tagName === 'script' && !options.nestedOnly) {
@@ -174,6 +188,10 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
       if (location?.startTag) {
         const attrs = Object.fromEntries(node.attrs.map(attribute => [attribute.name, attribute.value]))
         const type = (attrs.type ?? (attrs.language ? `text/${attrs.language}` : 'text/javascript')).trim().toLowerCase()
+        if (type === 'importmap' && (programs.published || programs.graph)) {
+          edits.push({ start: location.startOffset, end: location.endOffset, value: '' })
+          return
+        }
         const classic = type === '' || /^(?:(?:application|text)\/(?:x-)?(?:java|ecma)script|text\/(?:javascript1\.[0-5]|jscript|livescript))$/.test(type)
         const entry = data.moduleGraph?.entries[documentPath ? `${documentPath}:${current}` : String(current)]
         const start = location.startTag.endOffset, end = location.endTag?.startOffset ?? location.endOffset
@@ -198,7 +216,10 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
     if ('childNodes' in node) node.childNodes.forEach(visit)
   }
   visit(parsed)
-  const resolve = (reference: string) => options.resources[data.resourceBindings?.[reference] ?? reference]
+  const resolve = (reference: string) => {
+    const id = data.resourceBindings?.[reference] ?? reference
+    return options.resources[id] ? webRuntimeResourceAddress(id) : undefined
+  }
   for (const [index, source] of Object.entries(programs.classic)) programs.classic[index] = resolveWebJavaScriptResources(source, resolve)
   if (programs.graph) programs.graph = { ...programs.graph, modules: Object.fromEntries(Object.entries(programs.graph.modules).map(([path, module]) => {
     let code = module.code
@@ -214,16 +235,24 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
   const insertion = head?.sourceCodeLocation?.startTag?.endOffset
     ?? html?.sourceCodeLocation?.startTag?.endOffset
     ?? doctype?.sourceCodeLocation?.endOffset ?? 0
-  const marker = webResourceReferenceMarker({ $text: options.resourceCss ?? data.css ?? '' }, data.resourceBindings ?? {}, id => options.resources[id])
+  const marker = webResourceReferenceMarker({ $text: options.resourceCss ?? data.css ?? '' }, data.resourceBindings ?? {}, id => options.resources[id] ? webRuntimeResourceAddress(id) : undefined)
   const fonts = splitInstalledBundledFontFaceCss(options.themeCss ?? '')
   const style = [fonts.faces ? `<style data-component-bundled-faces>${fonts.faces.replace(/<\/style/gi, '<\\/style')}</style>` : '',
     fonts.theme ? `<style data-component-initial-theme>${fonts.theme.replace(/<\/style/gi, '<\\/style')}</style>` : '', data.css ? `<style${marker ? ` data-component-resource-bindings="${quote(marker)}"` : ''}>${data.css.replace(/<\/style/gi, '<\\/style')}</style>` : ''].join('')
-  const textBootstrap = `${domTextOverrideRealmSource()}(${installParsedPageTextOverrides.toString()})(${JSON.stringify(programs.textOverrides ?? [])},${JSON.stringify(property)},createPageTextOverrides);(${installOwnedDocumentBridge.toString()})(${JSON.stringify(property)},${Boolean(documentPath)},${refreshWebResourceReferences.toString()});${documentPath ? `(${installOwnedDocumentAuthoring.toString()})(${JSON.stringify(property)},${JSON.stringify(authoringPath)},${createDomAuthoring.toString()},{pendingPath:${JSON.stringify(authoringPath.includes('ambiguous:') ? undefined : authoringPendingPath)},refreshResources:${refreshWebResourceReferences.toString()}});` : ''}`
-  const bootstrap = `<meta charset="utf-8"><script>${(textBootstrap + options.bridge(programs)).replace(/<\/script/gi, '<\\/script')}</script>${style}`
-  if (!options.nestedOnly) edits.push({ start: insertion, end: insertion, value: bootstrap })
+  const textBootstrap = `${domTextOverrideRealmSource()}(${installParsedPageTextOverrides.toString()})(${JSON.stringify(programs.textOverrides ?? [])},${JSON.stringify(property)},createPageTextOverrides);(${installOwnedDocumentBridge.toString()})(${JSON.stringify(property)},${Boolean(documentPath)},${refreshWebResourceReferences.toString()});${documentPath ? `(${installOwnedDocumentAuthoring.toString()})(${JSON.stringify(property)},${JSON.stringify(authoringPath)},${createDomAuthoring.toString()},{pendingPath:${JSON.stringify(authoringPath.includes('ambiguous:') ? undefined : authoringPendingPath)},refreshResources:${refreshWebResourceReferences.toString()},resolveResource:(reference,bindings)=>window[${JSON.stringify(property)}]?.resourceLease?.resolve(reference,bindings),matchesResource:(reference,liveUrl,bindings)=>window[${JSON.stringify(property)}]?.resourceLease?.matches(reference,liveUrl,bindings)??false,runtimeResources:resources=>{const lease=window[${JSON.stringify(property)}]?.resourceLease;return lease?(Object.keys(resources).length?lease.update(resources):lease.urls):resources}});` : ''}`
+  const bootstrap = `<meta charset="utf-8"><script>${(textBootstrap + options.bridge(programs)
+    + `;document.write(window[${JSON.stringify(property)}].project(${JSON.stringify(style)}));`).replace(/<\/script/gi, '<\\/script')}</script>`
+  // The opaque document first obtains its own short URLs, then the native
+  // parser consumes the original remaining markup in the same script order.
+  // No base64 image payload is copied into attributes, markers or programs.
+  const boundary = `<!--guoling-parser-${options.nonce}-${documentPath}-->`
+  if (!options.nestedOnly) edits.push({ start: insertion, end: insertion, value: bootstrap + boundary })
   let result = source
   for (const edit of edits.sort((a, b) => b.start - a.start)) result = result.slice(0, edit.start) + edit.value + result.slice(edit.end)
-  return result
+  if (options.nestedOnly) return result
+  const at = result.indexOf(boundary), tail = result.slice(at + boundary.length)
+  const write = `document.write(window[${JSON.stringify(property)}].project(${JSON.stringify(tail)}))`
+  return result.slice(0, at) + `<script>${write.replace(/<\/script/gi, '<\\/script')}</script>`
 }
 
 /** Messages remain between owned srcdoc realms; authors keep their parser and state. */
@@ -248,7 +277,8 @@ export function installOwnedDocumentBridge(token: string, nested: boolean, refre
     if (event.source === parent && data?.type === 'guoling.runtime.activity' && data.token === token) {
       window.dispatchEvent(new CustomEvent('__runtime.activity', { detail: data.value }))
     } else if (event.source === parent && data?.type === 'guoling.resources.refresh' && data.token === token && data.resources) {
-      refresh(document, data.resources)
+      const lease = (window as unknown as Record<string, { resourceLease?: ReturnType<typeof createWebResourceUrlLease> }>)[token]?.resourceLease
+      refresh(document, lease?.update(data.resources) ?? data.resources)
       for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]')) frame.contentWindow?.postMessage(data, '*')
     } else if (nested && data?.type === 'guoling.owned-document.click' && data.token === token
       && [...document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]')].some(frame => frame.contentWindow === event.source)) parent.postMessage(data, '*')

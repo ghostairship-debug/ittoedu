@@ -58,11 +58,13 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
   }), [api])
   const documents = props.documents ?? api?.documents
   const port = useMemo(() => api?.lessonFiles && documents ? createDesktopDocumentPort(api.lessonFiles, documents) : null, [api?.lessonFiles, documents])
-  useEffect(() => workbenchSelection.setFallback(async id => {
-    if (props.courseDocuments?.documents.some(document => document.documentId === id)) await props.prepareCourseDocuments?.([id])
-    if (!api?.documents) throw new Error('文档服务尚未就绪')
-    return api.documents.read(id)
-  }), [api?.documents, props.courseDocuments?.documents, props.prepareCourseDocuments])
+  useEffect(() => {
+    const flushInput = async (id: string) => {
+      if (props.courseDocuments?.documents.some(document => document.documentId === id)) await props.prepareCourseDocuments?.([id])
+      if (!api?.documents) throw new Error('文档服务尚未就绪')
+    }
+    return workbenchSelection.setFallback(async id => { await flushInput(id); return api!.documents!.read(id) }, flushInput)
+  }, [api?.documents, props.courseDocuments?.documents, props.prepareCourseDocuments])
   if (!api?.lesson || !api.workspaceFiles || !port) return <><p role="alert">工作台服务不可用，请重新打开应用。</p>{props.children}</>
   const material = (sourcePath: string | undefined, lesson: LessonWorkspace | null) => {
     const service = api.lessonMaterials

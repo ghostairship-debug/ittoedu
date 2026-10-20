@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createElement } from 'react'
 import { render } from '@testing-library/react'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform'
-import { resolveComponentOuterPresentation } from '../../src/shared/componentPresentation'
+import { resolveComponentOuterPresentation, isGlobalFramedWebDocument } from '../../src/shared/componentPresentation'
 import { resolveFlowPaperBackground } from '../../src/shared/flowBodyPresentation'
 import { InstanceView } from '../../src/renderer/documents/CourseV10DocumentView'
 import { createComponentModelProjection } from '../../src/player/componentPlatform/modelProjection'
@@ -23,6 +23,17 @@ function fixture(): CourseProjectV10 {
 }
 
 describe('shared component outer presentation', () => {
+  it('keeps the native global Web input owner distinct from page Web and professional Source identity', () => {
+    const project = fixture(), instance = project.instances.group
+    expect(isGlobalFramedWebDocument(project, instance)).toBe(false)
+    project.surfaces[0].childIds = ['section']
+    project.global.overlay = [instance.id]
+    expect(isGlobalFramedWebDocument(project, instance)).toBe(true)
+    expect(resolveComponentOuterPresentation(project, instance, { placement: 'free', purpose: 'playback', inlineSize: 600 }).outerStyle.pointerEvents).toBe('none')
+    instance.implementationOverride = { kind: 'source', language: 'javascript', source: 'custom.js' }
+    expect(isGlobalFramedWebDocument(project, instance)).toBe(false)
+    expect(resolveComponentOuterPresentation(project, instance, { placement: 'free', purpose: 'playback', inlineSize: 600 }).outerStyle.pointerEvents).toBe('auto')
+  })
   it('scales real framed media in the wrapped lane while preserving its crop coordinate space', () => {
     const project = fixture(), image = project.instances.image
     const layout = resolveComponentOuterPresentation(project, image, { placement: 'flow', purpose: 'author', inlineSize: 300 })

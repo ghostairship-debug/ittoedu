@@ -80,6 +80,40 @@ function fixture() {
 }
 
 describe('M28 HTML action sessions', () => {
+  it('preserves an applied ACK when the follow-up observation fails and never dispatches it again', async () => {
+    const f = fixture(), observe = f.frames.observe
+    await f.service.beginDocumentRun('ack', { documentId: 'doc', epoch: 'epoch', revision: 2 })
+    const first = await f.service.observe('ack')
+    f.frames.observe = async () => { throw new Error('capture unavailable') }
+    const input = { operationId: 'applied-click', handle: first.elements[0]!.handle }
+    const expected = { code: 'html-action-observation-failed', actionReceipt: {
+      operationId: 'applied-click', dispatch: 'dispatched', application: 'applied', goal: 'unverified', observation: 'failed',
+    } }
+    await expect(f.service.click('ack', input)).rejects.toMatchObject(expected)
+    await expect(f.service.click('ack', input)).rejects.toMatchObject(expected)
+    expect(f.clicks()).toBe(1)
+    f.frames.observe = observe
+    expect((await f.service.observe('ack')).structure).toContain('clicked 1; input ')
+    f.service.stopRun('ack')
+  })
+
+  it('preserves a completed navigation when its follow-up observation fails', async () => {
+    const f = fixture()
+    await f.service.beginDocumentRun('nav', { documentId: 'doc', epoch: 'epoch', revision: 2 })
+    let navigations = 0
+    f.frames.navigate = async () => { navigations++ }
+    f.frames.observe = async () => { throw new Error('capture unavailable') }
+    const expected = {
+      code: 'html-action-observation-failed', actionReceipt: {
+        operationId: 'nav-op', dispatch: 'dispatched', application: 'applied', goal: 'unverified', observation: 'failed',
+      },
+    }
+    await expect(f.service.navigate('nav', 1, 'nav-op')).rejects.toMatchObject(expected)
+    await expect(f.service.navigate('nav', 1, 'nav-op')).rejects.toMatchObject(expected)
+    expect(navigations).toBe(1)
+    f.service.stopRun('nav')
+  })
+
   it('reports a measured input mismatch without calling it unknown or replaying the trusted input', async () => {
     const f = fixture(), act = f.frames.act
     let inputs = 0
@@ -93,7 +127,9 @@ describe('M28 HTML action sessions', () => {
     await f.service.beginDocumentRun('run', { documentId: 'doc', epoch: 'epoch', revision: 2 })
     const first = await f.service.observe('run')
     const input = { operationId: 'mismatch', handle: first.elements[1]!.handle, value: '40' }
-    await expect(f.service.input('run', input)).rejects.toMatchObject({ code: 'html-input-value-mismatch' })
+    await expect(f.service.input('run', input)).rejects.toMatchObject({ code: 'html-input-value-mismatch', actionReceipt: {
+      operationId: 'mismatch', dispatch: 'dispatched', application: 'applied', goal: 'mismatch', observation: 'not_requested',
+    } })
     await expect(f.service.input('run', input)).rejects.toMatchObject({ code: 'html-input-value-mismatch' })
     expect(inputs).toBe(1)
     const current = await f.service.observe('run')
@@ -434,7 +470,9 @@ describe('stops pending browser transport without replaying actions', () => {
     f.frames.act = async (...args) => { const result = await act(...args); entered(); await new Promise<void>(resolve => { release = resolve }); return result }
     const input = { operationId: 'one-click', handle: first.elements[0]!.handle }
     const pending = f.service.click('issued', input)
-    const rejected = expect(pending).rejects.toMatchObject({ code: 'html-action-outcome-unknown' })
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'html-action-outcome-unknown', actionReceipt: {
+      operationId: 'one-click', dispatch: 'dispatched', application: 'unknown', goal: 'unverified', observation: 'not_requested',
+    } })
     await issued
     expect(f.clicks()).toBe(1)
     f.service.stopRun('issued')

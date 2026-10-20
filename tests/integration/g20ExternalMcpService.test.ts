@@ -17,6 +17,11 @@ import { callTool, residentMcpFixture, type ResidentToolReply } from '../helpers
 import { OpenImageService } from '../../src/main/workbench/assetSources/OpenImageService'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { artifactDeliverySource } from '../../src/core/tools/HostArtifactTools'
+import { loadToolsDefinition } from '../../src/main/workbench/execution/ExecutionEngine'
+import { DelegationJobService } from '../../src/main/workbench/delegation/DelegationJobService'
+import type { LocalToolRunner } from '../../src/main/workbench/delegation/LocalToolRunner'
+import { HostJobService } from '../../src/main/workbench/jobs/HostJobService'
+import type { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
 
 const cleanups: (() => Promise<unknown>)[] = []
 
@@ -53,6 +58,76 @@ async function fixture(options: { confirm?: (request: ExternalApproval) => boole
   return { directory, workspace, second, host, events, ...mcp }
 }
 const data = (reply: { structuredContent: { result: any } }) => reply.structuredContent.result.data
+
+it('loads exact names and families together over real MCP while diagnosing unavailable names individually', async () => {
+  const f = await fixture(), client = await f.connect('exact-tool-discovery')
+  const document = await f.host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('Discovery'), resources: { assets: {}, components: {} } }, 'discovery.h5lesson')
+  await f.host.internalAPI.save(document.documentId, path.join(f.workspace, 'discovery.h5lesson'))
+  expect((await callTool(client, 'file.open', { path: 'discovery.h5lesson' })).isError).toBe(false)
+  const initial = (await client.listTools()).tools
+  expect(initial.find(tool => tool.name === 'tools.load')!.inputSchema).toEqual(loadToolsDefinition.inputSchema)
+  expect(initial.some(tool => tool.name === 'object.author')).toBe(false)
+  const named = await callTool(client, 'tools.load', { names: ['object.author', 'not.registered', 'local.run'] })
+  expect(named.isError, JSON.stringify(named.structuredContent.result)).toBe(false)
+  expect(data(named)).toMatchObject({ tools: [expect.objectContaining({ name: 'object.author' })], unavailable: [
+    { name: 'not.registered', code: 'unknown-tool' }, { name: 'local.run', code: 'service-unavailable' },
+  ] })
+  expect((await client.listTools()).tools.some(tool => tool.name === 'object.author')).toBe(true)
+  const combined = await callTool(client, 'tools.load', { families: ['interaction'], names: ['object.place', 'another.unknown'] })
+  expect(combined.isError, JSON.stringify(combined.structuredContent.result)).toBe(false)
+  expect(data(combined)).toMatchObject({ loaded: ['interaction'], tools: [expect.objectContaining({ name: 'object.place' })],
+    unavailable: [{ name: 'another.unknown', code: 'unknown-tool' }] })
+  expect((await client.listTools()).tools.some(tool => tool.name === 'interaction.update')).toBe(true)
+})
+
+it.each(['full', 'workspace', 'ask', 'read-only', 'stop', 'unknown'] as const)('prepares local MCP commands with the original ticket and preserves %s authority and receipts', async scenario => {
+  const f = await fixture({ permission: scenario === 'stop' ? 'workspace' : scenario === 'unknown' ? 'full' : scenario, confirm: async () => {
+    if (scenario === 'stop') await f.service.stopSession((await f.service.status()).sessions[0]!.sessionId)
+    return scenario === 'stop'
+  } })
+  const prepare = vi.fn<LocalToolRunner['prepare']>(async (cwd, intent) => ({ executable: process.execPath,
+    sandboxExecutable: process.execPath, cwd, args: intent.args ?? [], stdin: intent.stdin }))
+  const run = vi.fn<LocalToolRunner['run']>(async taskId => ({ taskId, status: scenario === 'unknown' ? 'unknown' : 'verified',
+    artifacts: [], reason: 'local fixture only', externalChangesPossible: false }))
+  const delegation = new DelegationJobService({ directory: path.join(f.directory, 'jobs'), copyRootBase: path.join(f.directory, 'copies'),
+    localRunner: { prepare, run } as unknown as LocalToolRunner })
+  const prepared = vi.spyOn(delegation, 'prepareLocal'), authorized = vi.spyOn(delegation, 'authorizeLocal'), started = vi.spyOn(delegation, 'startLocal')
+  f.host.tools.configureHostServices({ jobs: new HostJobService({ delegation, images: {} as ImageGenerationService }), delegation: {
+    availability: () => ({ ready: true, reason: '' }), prepareLocal: input => delegation.prepareLocal(input),
+    authorizeLocal: input => delegation.authorizeLocal(input), startLocal: input => delegation.startLocal(input),
+    startManaged: input => delegation.startManaged(input),
+    cancel: (runId, jobId) => delegation.cancel(runId, jobId), cancelRun: runId => delegation.cancelRun(runId),
+    readArtifact: (runId, jobId, name) => delegation.readArtifact(runId, jobId, name),
+  } })
+  const client = await f.connect(`local-${scenario}`), intent = { command: 'fixture.exe', args: ['--fixture'], stdin: 'fixed input', outputs: [] }
+  const submitted = await callTool(client, 'local.run', intent, 'same-command')
+  if (scenario === 'full' || scenario === 'unknown') {
+    expect(submitted.isError, JSON.stringify(submitted.structuredContent.result)).toBe(false)
+    expect(f.approvals).toHaveLength(0)
+    expect(authorized).toHaveBeenCalledOnce(); expect(started).toHaveBeenCalledOnce()
+    expect(prepared.mock.calls[0]![0]).toMatchObject({ taskId: f.host.tools.operationIdentity(submitted.structuredContent.operationScope!.runId, 'same-command'), intent })
+    expect(prepared.mock.calls[0]![0]).toMatchObject(authorized.mock.calls[0]![0])
+    expect(authorized.mock.calls[0]![0]).toMatchObject(started.mock.calls[0]![0])
+    const waited = await callTool(client, 'job.wait', { job: data(submitted).job, milliseconds: 5000 })
+    expect(data(waited)).toMatchObject({ terminal: true, status: scenario === 'unknown' ? 'unknown' : 'ready' })
+    const replayed = await callTool(client, 'local.run', intent, 'same-command')
+    expect(replayed.structuredContent).toMatchObject({ replayed: true, ticket: 'same-command' })
+    expect(prepared).toHaveBeenCalledOnce(); expect(authorized).toHaveBeenCalledOnce(); expect(started).toHaveBeenCalledOnce(); expect(run).toHaveBeenCalledOnce()
+    await f.service.stopSession((await f.service.status()).sessions[0]!.sessionId)
+    await expect(callTool(client, 'local.run', intent, 'after-stop')).rejects.toMatchObject({ code: -32000 })
+    expect(run).toHaveBeenCalledOnce()
+  } else {
+    expect(submitted.isError).toBe(true)
+    expect(authorized).not.toHaveBeenCalled(); expect(started).not.toHaveBeenCalled(); expect(run).not.toHaveBeenCalled()
+    if (scenario === 'read-only') { expect(prepare).not.toHaveBeenCalled(); expect(f.approvals).toHaveLength(0) }
+    else {
+      expect(prepared).toHaveBeenCalledOnce()
+      expect(f.approvals).toEqual([expect.objectContaining({ reason: 'ask', local: expect.objectContaining({ executable: process.execPath,
+        args: intent.args, stdin: intent.stdin, stdinByteLength: Buffer.byteLength(intent.stdin), outputs: [] }) })])
+      if (scenario !== 'stop') expect(submitted.structuredContent.result).toMatchObject({ kind: 'error', code: 'approval-denied' })
+    }
+  }
+})
 
 it.each(['ask', 'outside-workspace', 'denied', 'stop-approved'] as const)('binds artifact %s approval to the actual MCP operation path and frozen resource owner', async scenario => {
   let artifactPhase = false

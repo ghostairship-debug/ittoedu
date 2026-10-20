@@ -223,7 +223,8 @@ export class AgentFileService implements AgentFilePort {
     context.assertActive?.()
     const reconciled = await this.host.reconcileFile({ ...compared, choice: input.choice }, context.assertActive)
     this.fileObservations.get(context.runId)?.delete(this.officeKey(filename))
-    return { data: { path: filename, choice: input.choice, status: 'reconciled', saved: false, dirty: reconciled.dirty,
+    return { data: { path: filename, documentId: reconciled.documentId, epoch: reconciled.epoch,
+      choice: input.choice, status: 'reconciled', saved: !reconciled.dirty, dirty: reconciled.dirty,
       revision: reconciled.revision, undoDepth: reconciled.undoDepth, persistence: 'recoverable',
       diskVersion: reconciled.binding.kind === 'file' ? reconciled.binding.version : null },
       opened: this.openedFile(context, filename, reconciled) }

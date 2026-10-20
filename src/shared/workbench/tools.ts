@@ -5,6 +5,7 @@ import type { ExecutionPermissionMode } from './executionPermission'
 import type { ConversationHome } from './conversations'
 import type { ComponentAuthorRecord, ComponentAuthorField } from '../contracts/component-platform/runtime'
 import type { ModelSelection } from './modelProvider'
+import type { SpeechSelectionSnapshot } from './speechSettings'
 
 /** Host-only addresses. A model sees opaque handles, never these coordinates. */
 export type ToolTarget =
@@ -35,12 +36,16 @@ export type TextFragmentTarget = Extract<ToolTarget, { kind: 'markdown-range' }>
   | (Extract<ToolTarget, { kind: 'course-instance' }> & { dataPath: string[]; from: number; to: number })
 
 export interface ToolRunGrant {
+  /** Host-owned native task lineage; reuses the parent's frozen services. */
+  delegatedBy?: { runId: string; jobId: string }
   runId: string
   actor: DocumentOperation['actor']
   documents: readonly { documentId: string; writable: readonly ToolTarget[]; selection?: readonly ToolTarget[] }[]
   disclosedSettings?: DisclosedExecutionSettings
   /** Host-frozen selection for native search; external MCP can omit it. */
   searchSelection?: ModelSelection
+  /** The accepted task's speech route; missing historical configuration stays unavailable. */
+  speechSelection?: SpeechSelectionSnapshot
   /** Main-frozen file scope for built-in task delivery tools; external MCP grants use their bound documents. */
   fileAccess?: { permission: ExecutionPermissionMode; workspaceRoot?: string; conversationHomeRoot?: string; conversationHome?: ConversationHome; boundPaths?: Record<string, string> }
   /** Explicit user result authorization, frozen by Main; methods and observations cannot extend it. */

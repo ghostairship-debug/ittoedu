@@ -9,7 +9,7 @@ import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseP
 import { TEXT_DEFINITION, textDataEdit } from '../../src/components/text/adapters'
 import { createTextComponentData } from '../../src/components/text/data'
 import { htmlImportReceiptResult } from '../../src/core/tools/HtmlImportTools'
-import { executionExitDecision, hasUnresolvedToolFailure, newFileDeliveryFacts, persistedToolWork, runEndSummary, serviceToolOutcome, toolFailed, unrecoveredReconcileRuntimeFailure } from '../../src/main/workbench/execution/executionOutcome'
+import { executionCompletionIssues, executionExitDecision, hasUnresolvedToolFailure, newFileDeliveryFacts, persistedToolWork, runEndSummary, serviceToolOutcome, toolFailed, unrecoveredReconcileRuntimeFailure } from '../../src/main/workbench/execution/executionOutcome'
 import { applicationEventFacts, committedFact } from '../../src/main/workbench/execution/executionToolFacts'
 import type { ContentApplyResult } from '../../src/core/contentApply/planning/types'
 import type { ExecutionRunRecord, ExecutionToolRecord } from '../../src/shared/workbench/execution'
@@ -191,6 +191,24 @@ describe('M26 R7 receipt-based settlement', () => {
     } }, 2)
     expect(hasUnresolvedToolFailure(run(pending, unrelated, ready))).toBe(false)
   })
+  it('describes repeated waits as one current job gap without merging other jobs, saves or unknown effects', () => {
+    const created = tool('delegate.agent', {}, { kind: 'read', data: { job: 'delegate-one', status: 'running' } }, 0)
+    const waits = Array.from({ length: 11 }, (_, index) => tool('job.wait', { job: 'delegate-one' }, { kind: 'read', data: {
+      kind: 'delegation', jobId: 'delegate-one', status: 'running', terminal: false, snapshot: {},
+    } }, index + 1))
+    const other = tool('compute.run', {}, { kind: 'read', data: { job: 'compute-other', status: 'running' } }, 12)
+    const unknown = tool('delegate.agent', {}, error('tool-outcome-unknown'), 13)
+    const save = tool('project.save', { target: 'saved-target' }, error('save-rejected'), 14)
+    const record = run(created, ...waits, other, unknown, save), original = structuredClone(record)
+    const issues = executionCompletionIssues(record)
+    expect(issues.filter(issue => issue.job === 'delegate-one')).toEqual([expect.objectContaining({
+      callId: created.callId, kind: 'delegation', status: 'pending', receiptCallId: waits.at(-1)!.callId,
+    })])
+    expect(issues.some(issue => issue.job === 'compute-other' && issue.callId === other.callId)).toBe(true)
+    expect(issues.some(issue => issue.callId === unknown.callId && issue.status === 'unknown')).toBe(true)
+    expect(issues.some(issue => issue.name === 'project.save' && issue.status === 'unsaved')).toBe(true)
+    expect(record).toEqual(original)
+  })
   it('keeps running compute partial until the same restricted job returns ready', () => {
     const pending = tool('compute.run', { code: 'print(1)' }, { kind: 'read', data: { job: 'compute-one', status: 'preparing' } }, 0)
     expect(hasUnresolvedToolFailure(run(pending))).toBe(true)
@@ -342,6 +360,10 @@ it('distinguishes a cancelled import from failure and still reports a committed 
   if (applied.kind !== 'document-operation' || applied.result.status !== 'applied') throw new Error('fixture')
   expect(htmlImportReceiptResult({ operationId: 'done', status: 'applied', revision: 1, pages: [], commit: applied.result }))
     .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  const parent = { kind: 'read' as const, data: { status: 'imported', saved: false, import: applied, saveError: '目标路径暂不可写' } }
+  expect(committedFact('course.createFromHtml', parent)).toMatchObject({ documentId: 'lesson', status: 'applied' })
+  expect(persistedToolWork('course.createFromHtml', parent)).toBe(true)
+  expect(serviceToolOutcome('course.createFromHtml', parent)).toMatchObject({ status: 'failed', message: '目标路径暂不可写' })
 })
 
 it('settles a renewed save reference for the same document, not a different successful save', () => {
@@ -391,16 +413,16 @@ it('keeps the real MCP committed SVG warning receipt successful while retaining 
   expect(projected).toMatchObject({ data: { usability: 'partial', diagnostics: [diagnostic] } })
   const failed = (patch: Partial<ContentApplyResult>) => ({ kind: 'read' as const, data: { ...data, ...patch } })
   expect(serviceToolOutcome('project.apply', failed({ diagnostics: [{ ...diagnostic, level: 'error', message: '交互模块不能运行' }] })))
-    .toEqual({ status: 'failed', message: '交互模块不能运行' })
-  expect(serviceToolOutcome('project.apply', failed({ usability: 'unusable' }))?.status).toBe('failed')
+    .toEqual({ status: 'applied-with-diagnostics', message: '交互模块不能运行' })
+  expect(serviceToolOutcome('project.apply', failed({ usability: 'unusable' }))?.status).toBe('applied-with-diagnostics')
   expect(serviceToolOutcome('project.apply', failed({ commit: 'not_committed' }))?.status).toBe('failed')
   expect(serviceToolOutcome('project.apply', failed({ commit: 'unknown' }))?.status).toBe('unknown')
   expect(toolFailed('project.apply', error('explicit-failure'))).toBe(true)
   expect(toolFailed('image.generate', { kind: 'read', data: { status: 'running' } })).toBe(true)
 })
 it.each([
-  ['committed', 'usable', false, true], ['committed', 'unverified', false, true], ['committed', 'unusable', true, true],
-  ['unchanged', 'usable', false, true], ['unchanged', 'unverified', false, true], ['unchanged', 'unusable', true, true],
+  ['committed', 'usable', false, true], ['committed', 'unverified', false, true], ['committed', 'unusable', false, true],
+  ['unchanged', 'usable', false, true], ['unchanged', 'unverified', false, true], ['unchanged', 'unusable', false, true],
   ['not_committed', 'usable', true, false], ['not_committed', 'unverified', true, false], ['unknown', 'unverified', true, false],
 ] as const)('settles nested %s/%s without conflating commit and usability', (commit, usability, failed, kept) => {
   const result = applyResult(commit, usability), operation = tool('project.apply', { path: 'theme.css', content: 'A' }, result, 1)
@@ -411,10 +433,29 @@ it.each([
   else if (commit === 'not_committed') expectMissingResultWithWarnings(run(operation), operation)
   else expectCompletedWithWarnings(run(operation), ...(failed ? [operation] : []))
   expect(persistedToolWork(operation.call.name, result)).toBe(kept)
+  if (kept && usability === 'unusable') expect(serviceToolOutcome(operation.call.name, result)).toMatchObject({ status: 'applied-with-diagnostics' })
   expect(!!committedFact(operation.call.name, result)).toBe(kept)
   if (kept) expect(applicationEventFacts(operation.call.name, result)).toMatchObject({ documentId: 'lesson' })
   const record = run(operation); record.status = 'partial'
   if (commit === 'committed') expect(runEndSummary(record)).toContain('已保留 1 项正式文档修改')
+})
+
+it('retires a withdrawn process draft save while retaining an unsaved final course and unknown operations', () => {
+  const draft = tool('file.create', {}, { kind: 'read', data: { documentId: 'draft', path: 'C:/fixture/draft.html',
+    operation: { status: 'success' } } }, 0)
+  const edit = tool('file.patch', {}, { kind: 'read', data: { documentResult: { status: 'applied', documentId: 'draft', revision: 1 } } }, 1)
+  const failed = { ...tool('file.save', {}, error('target-conflict'), 2), effectTargets: [{ documentId: 'draft', target: { kind: 'document' as const } }] }
+  const adopted = tool('file.reconcile', { choice: 'disk' }, { kind: 'read', data: { status: 'reconciled', choice: 'disk',
+    documentId: 'draft', epoch: 'draft-epoch', path: 'C:/fixture/draft.html', dirty: false, revision: 2 } }, 6)
+  expect(hasUnresolvedToolFailure(run(draft, edit, failed, createdLesson(), appliedLesson(), projectSaved(), adopted))).toBe(false)
+  expect(hasUnresolvedToolFailure(run(draft, edit, failed, createdLesson(), appliedLesson(), adopted))).toBe(true)
+  expect(hasUnresolvedToolFailure(run(draft, edit, { ...failed, result: error('tool-outcome-unknown') }, adopted))).toBe(true)
+  const continued = tool('file.patch', {}, { kind: 'read', data: { documentResult: { status: 'applied', documentId: 'draft', revision: 3 } } }, 7)
+  expect(hasUnresolvedToolFailure(run(draft, edit, failed, adopted, continued))).toBe(true)
+  // A withdrawn save on an existing input does not turn later ordinary editing
+  // into an implicit final save request.
+  expect(hasUnresolvedToolFailure(run(appliedLesson(), failed, adopted, continued))).toBe(false)
+  expect(hasUnresolvedToolFailure(run(appliedLesson(), failed, adopted, continued, { ...failed, callId: 'new-save' }))).toBe(true)
 })
 it('preserves equivalent content without fabricating an operation or document revision', () => {
   const result = applyResult('unchanged', 'unverified', false)

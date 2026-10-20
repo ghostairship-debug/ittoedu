@@ -27,6 +27,8 @@ import { owningContainer, componentDefinitionBuiltinKey, isComponentVisibleAtSur
 import { textComponentDataSchema } from '../../../components/text/data'
 import { plainDocumentText } from '../../../shared/document/content'
 import { parseFragment, type DefaultTreeAdapterTypes } from 'parse5'
+import { publicContentApplyReceipt, publicOperationReceipt } from '../../tools/publicWriteReceipt'
+import { MODEL_DELIVERY_BYTES, modelTextEnd, modelJsonBytes } from '../../tools/modelDeliveryBudget'
 
 export type ComponentProjectSnapshot = DocumentSnapshot & { model: Extract<DocumentSnapshot['model'], { kind: 'course-v10' }> }
 export interface ComponentProjectFileInput {
@@ -39,7 +41,9 @@ export interface ComponentProjectFileInput {
   /** Source admission's logical entry within the same captured owner file set. */
   sourceEntry?: string
   /** Captured project bytes used only by Main's existing resource preparation. */
-  assetContext?: { assets: CourseProjectV10['assets']; bytes: ComponentProjectSnapshot['model']['resources']['assets'] }
+  assetContext?: { assets: CourseProjectV10['assets']; bytes: ComponentProjectSnapshot['model']['resources']['assets']; references?: Record<string, string> }
+  /** Set by the virtual HTML source owner, never inferred from incoming resource strings. */
+  resourceNamespace?: 'project'
   resourceEdits?: Extract<ComponentEdit, { type: 'asset.add' }>[]
   resourceBindings?: Record<string, ComponentAsset>
   preparedHtml?: string
@@ -108,6 +112,14 @@ const layoutContext = (file: ComponentProjectFile | undefined) => ({
   ...(file?.frame ? { frame: structuredClone(file.frame) } : {}),
   ...(file?.programViewport ? { viewport: { ...file.programViewport } } : {}),
 })
+function projectAssetContext(snapshot: ComponentProjectSnapshot, file: ComponentProjectFile): NonNullable<ComponentProjectFileInput['assetContext']> {
+  const project = snapshot.model.project
+  const data = file.target?.kind === 'instance' ? project.instances[file.target.instanceId]?.data : undefined
+  const bindings = data && typeof data === 'object' && !Array.isArray(data) ? data.resourceBindings : undefined
+  const references = bindings && typeof bindings === 'object' && !Array.isArray(bindings)
+    ? Object.fromEntries(Object.entries(bindings).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : undefined
+  return { assets: project.assets, bytes: snapshot.model.resources.assets, ...(references ? { references } : {}) }
+}
 const listedFiles = (files: ComponentProjectFile[]) => files.map(file => ({ path: file.path, type: file.kind,
   ...layoutContext(file), ...(file.summary ? { summary: file.summary } : {}), ...(file.references ? { references: file.references } : {}), ...(file.note ? { note: file.note } : {}) }))
 
@@ -277,7 +289,8 @@ function dataFields(before: unknown, next: z.infer<typeof jsonValueSchema>, path
 }
 export function componentFileContentSource(file: ComponentProjectFile, content: string, input?: ComponentProjectFileInput): ContentApplySource {
   if (file.kind === 'page' || file.kind === 'html' || file.kind === 'structure') return { kind: 'html', html: content,
-    scope: 'target', ...(input?.siblingFiles ? { siblingFiles: input.siblingFiles } : {}) }
+    scope: 'target', ...(input?.siblingFiles ? { siblingFiles: input.siblingFiles } : {}),
+    ...(input?.resourceNamespace ? { resourceNamespace: input.resourceNamespace } : {}) }
   if (file.kind === 'data') return { kind: 'data', fields: dataFields(JSON.parse(file.content!), jsonValueSchema.parse(JSON.parse(content))) }
   if (file.kind === 'style') {
     const style = z.record(z.string(), jsonValueSchema).parse(JSON.parse(content))
@@ -511,15 +524,14 @@ export class ComponentProjectFileCoordinator {
       visit(parseFragment(data.html))
       return { ...(title ? { title } : {}), ...(found.length ? { text: found.join(' · ').slice(0, 240) } : {}) }
     }
-    // Sibling frames share the target's parent coordinates. Global navigation is
-    // identified separately; no neighbor Source or additional write target is exposed.
+    // Sibling and global frames describe the existing composition, including
+    // custom HTML navigation. No neighbor Source or extra write target is exposed.
     const siblingIds = !surface ? [] : container?.kind === 'instance' ? project.instances[container.instanceId]?.childIds ?? [] : surface.childIds
-    const navigationIds = !surface ? [] : [...project.global.underlay, ...project.global.overlay].filter(id => {
+    const globalIds = !surface ? [] : [...project.global.underlay, ...project.global.overlay].filter(id => {
       const instance = project.instances[id]
       return instance && isComponentVisibleAtSurface(instance, surface.id)
-        && componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.navigation'
     })
-    const neighbors = [...new Set([...siblingIds, ...navigationIds])].filter(id => id !== instanceId).flatMap(id => {
+    const neighbors = [...new Set([...siblingIds, ...globalIds])].filter(id => id !== instanceId).flatMap(id => {
       const instance = project.instances[id]
       if (!instance || instance.visible === false || !instance.frame) return []
       const parent = owningContainer(project, id)
@@ -541,7 +553,7 @@ export class ComponentProjectFileCoordinator {
   private async contentReceipt(runId: string, selector: string | undefined, inputPath: string,
     baseline: ComponentProjectSnapshot, original: ComponentProjectFile, result: ContentApplyResult,
     scope: ComponentProjectFileScope = { kind: 'document' }, enhancementId?: string): Promise<ToolResult> {
-    const data = { path: inputPath, ...result }
+    const data = { path: inputPath, ...publicContentApplyReceipt(result) }
     if (result.commit !== 'committed' && result.commit !== 'unchanged') {
       let repair = this.repairDetails(runId, baseline, original, inputPath, selector)
       try { repair = this.repairDetails(runId, await this.host.document(runId, selector, 'read'), original, inputPath, selector) } catch { /* captured paths remain readable repair context */ }
@@ -554,11 +566,24 @@ export class ComponentProjectFileCoordinator {
       return { kind: 'read', data }
     try {
       const after = await this.host.document(runId, selector, 'read')
-      const currentFiles = authoringFiles(after, scope.state)
       if (!resolvesPaths) {
-        const current = currentFiles.find(file => sameFile(original, file))
-        return { kind: 'read', data: { ...data, ...layoutContext(current) } }
+        // Content writes preserve identity. Read geometry from its owner instead
+        // of materializing every source/project file once per batch child.
+        const state = scope.state
+        if (state && !after.model.project.surfaces.find(value => value.id === state.surfaceId)
+          ?.presentation?.states.some(value => value.id === state.stateId)) throw new Error('展示状态已不存在，请读取当前目标。')
+        const project = state ? resolveComponentPresentation(after.model.project, state.surfaceId, state.stateId) : after.model.project
+        const layouts = componentProjectLayoutViewports(project), target = original.target
+        const instanceId = target?.kind === 'instance' ? target.instanceId
+          : target?.kind === 'container' && target.container.kind === 'instance' ? target.container.instanceId : undefined
+        const instance = instanceId ? project.instances[instanceId] : undefined
+        const viewport = instanceId ? layouts.instances.get(instanceId)
+          : target?.kind === 'container' ? target.container.kind === 'surface' ? layouts.surfaces.get(target.container.surfaceId)
+            : target.container.kind === 'global' ? layouts.fallback : undefined : undefined
+        return { kind: 'read', data: { ...data, ...(instance?.frame ? { frame: structuredClone(instance.frame) } : {}),
+          ...(viewport ? { viewport } : {}) } }
       }
+      const currentFiles = authoringFiles(after, scope.state)
       const resolved = componentProjectApplyReceiptFiles(baseline, original, result, after, scope)
       const prefix = fileKey(baseline.documentId, '', scope), reads = this.reads.get(runId)
       const observations = [...(reads?.entries() ?? [])].filter(([savedKey, seen]) => savedKey.startsWith(prefix)
@@ -566,7 +591,8 @@ export class ComponentProjectFileCoordinator {
       const explained = [...new Set(observations.map(seen => seen.snapshot))].map(snapshot => ({ snapshot,
         files: authoringFiles(snapshot, scope.state) }))
       const collisions: string[] = [], unread: string[] = [], available = new Set<string>()
-      const sourceFacts = new Map<string, { content: string; revision: number; currentRevision: number; staleSnapshot?: true } & ReturnType<typeof layoutContext>>()
+      let entryBytesRemaining = Math.floor(MODEL_DELIVERY_BYTES / 3)
+      const sourceFacts = new Map<string, { content?: string; complete: boolean; revision: number; currentRevision: number; staleSnapshot?: true } & ReturnType<typeof layoutContext>>()
       for (const file of resolved.files) {
         const writtenEnhancement = enhancementId !== undefined && file.authorSource?.dependencyId === enhancementId
         const occupied = reads?.get(fileKey(baseline.documentId, file.path, scope))
@@ -599,8 +625,16 @@ export class ComponentProjectFileCoordinator {
         const captured = after.revision === committedRevision
         const source = captured ? { snapshot: after, file } : known
         if (committedRevision !== undefined && source.snapshot.revision < committedRevision || source.file.content === undefined) continue
-        this.remember(runId, source.snapshot, [{ ...source.file, path: file.path }], captured, scope)
-        sourceFacts.set(file.path, { content: source.file.content, ...layoutContext(source.file), revision: source.snapshot.revision,
+        // Submitted bodies are already known through the command ACK. Only a useful,
+        // actually delivered generated entry can introduce a new read baseline.
+        const entryBytes = new TextEncoder().encode(source.file.content).byteLength
+        const complete = !!generatedProgramEntry && !writtenSource && !writtenEnhancement && entryBytes <= entryBytesRemaining
+        if (complete) {
+          entryBytesRemaining -= entryBytes
+          this.remember(runId, source.snapshot, [{ ...source.file, path: file.path }], captured, scope)
+        }
+        sourceFacts.set(file.path, { ...(complete ? { content: source.file.content } : {}), complete,
+          ...layoutContext(source.file), revision: source.snapshot.revision,
           currentRevision: after.revision, ...(source.snapshot.revision !== after.revision ? { staleSnapshot: true } : {}) })
       }
       const currentPath = resolved.primary?.path
@@ -667,10 +701,14 @@ export class ComponentProjectFileCoordinator {
     const results = await this.host.applyBatch(runId, operationId, requestDigest, items)
     for (const [index, item] of prepared.entries()) {
       const scope = this.host.scope?.(runId, input.project, item.baseline)
-      outcomes[positions[index]!] = await this.contentReceipt(runId, input.project, item.path, item.baseline, item.file, results[index]!, scope)
+      const outcome = await this.contentReceipt(runId, input.project, item.path, item.baseline, item.file, results[index]!, scope)
+      if (outcome.kind === 'read' && outcome.data && typeof outcome.data === 'object') {
+        const { receipt: _commonReceipt, ...local } = outcome.data as Record<string, unknown>
+        outcomes[positions[index]!] = { ...outcome, data: { ...local, operationIndex: positions[index] } }
+      } else outcomes[positions[index]!] = outcome
     }
     const first = results.find(result => result.receipt || result.commit === 'unknown') ?? results[0]!
-    return { kind: 'read', data: { commit: first.commit, receipt: first.receipt, delivery: 'not_requested',
+    return { kind: 'read', data: { commit: first.commit, ...(first.receipt ? { receipt: publicOperationReceipt(first.receipt) } : {}), delivery: 'not_requested',
       usability: outcomes.some(result => result.kind === 'error') || results.some(result => result.usability === 'partial' || result.usability === 'unusable')
         ? 'partial' : results.some(result => result.usability === 'unverified') ? 'unverified' : 'usable',
       diagnostics: [...preparationDiagnostics, ...results.flatMap(result => result.diagnostics)],
@@ -695,7 +733,7 @@ export class ComponentProjectFileCoordinator {
           const preparationFile = draft.region ? { ...file, programViewport: { width: draft.region.width, height: draft.region.height } } : file
           const actual = draft.from !== undefined ? await this.host.source(runId, draft.from, candidate, draft.content)
             : { filename: file.path.replace(/\.json$/, '.html'), bytes: new TextEncoder().encode(draft.content ?? ''), text: draft.content ?? '' }
-          actual.assetContext = { assets: candidate.model.project.assets, bytes: candidate.model.resources.assets }
+          actual.assetContext = projectAssetContext(candidate, file)
           let source = this.host.prepareSource ? await this.host.prepareSource(actual, preparationFile, 'insert', runId)
             : actual.text !== undefined ? componentFileContentSource(file, actual.text, actual)
               : (() => { throw new Error('新页首稿需要可读取的内容源文。') })()
@@ -756,14 +794,19 @@ export class ComponentProjectFileCoordinator {
           ...(file.summary ? { summary: file.summary } : {}), ...(file.references ? { references: file.references } : {}) }
         if (file.content === undefined) return { kind: 'read', data: { ...metadata, mimeType: file.mimeType, byteLength: file.bytes?.byteLength ?? 0 } }
         if (input.query) {
-          const found = literalTextMatches(file.content, input.query, { offset, limit: input.limit ?? 20 })
+          const found = literalTextMatches(file.content, input.query, { offset,
+            limit: Math.min(input.limit ?? 20, Math.max(1, Math.floor(MODEL_DELIVERY_BYTES / 512))) })
           return { kind: 'read', data: { ...metadata, query: input.query, matches: found.matches, offset, total: file.content.length,
             ...(found.truncated ? { nextOffset: found.offset } : {}) } }
         }
-        let end = Math.min(file.content.length, offset + (input.full ? file.content.length : input.limit ?? 100_000))
+        const requestedEnd = Math.min(file.content.length, offset + (input.limit ?? file.content.length))
+        let end = modelTextEnd(file.content, offset, requestedEnd, Math.max(1024, MODEL_DELIVERY_BYTES - modelJsonBytes(metadata) - 1024))
         if (end < file.content.length && /[\uD800-\uDBFF]/u.test(file.content[end - 1] ?? '') && /[\uDC00-\uDFFF]/u.test(file.content[end] ?? '')) end--
         if (end === offset && offset < file.content.length) end = Math.min(offset + 2, file.content.length)
         return { kind: 'read', data: { ...metadata, content: file.content.slice(offset, end),
+          complete: offset === 0 && end === file.content.length,
+          ...(input.full && end < file.content.length ? { requestedFull: true,
+            next: '本次容量内仅交付此页；nextOffset继续同一固定版本，完整内容仍在原工程文件。' } : {}),
           ...(file.note ? { note: file.note } : {}), ...(offset || end < file.content.length ? { offset, total: file.content.length } : {}),
           ...(end < file.content.length ? { nextOffset: end } : {}) } }
       }
@@ -849,7 +892,7 @@ export class ComponentProjectFileCoordinator {
         const result = request.intent === 'surface.add' && drafts.some(draft => draft.content !== undefined || draft.from !== undefined)
           ? await this.addSurfaceDrafts(runId, operationId, requestDigest, baseline, request, drafts)
           : await apply(runId, operationId, requestDigest, baseline, request)
-        if (result.commit !== 'committed' && result.commit !== 'unchanged') return { kind: 'read', data: { path: input.path, ...result } }
+        if (result.commit !== 'committed' && result.commit !== 'unchanged') return { kind: 'read', data: { path: input.path, ...publicContentApplyReceipt(result) } }
         try {
           const after = await this.host.document(runId, input.project, 'read')
           const files = componentProjectFiles(after.model.project, after.model.resources)
@@ -868,7 +911,7 @@ export class ComponentProjectFileCoordinator {
               return { surfaceId, path: resolvedPath, kind: surface.kind, title: surface.title,
                 order: after.model.project.surfaces.indexOf(surface) }
             })
-            return { kind: 'read', data: { path: targets[0]?.path ?? input.path, ...result, targets } }
+            return { kind: 'read', data: { path: targets[0]?.path ?? input.path, ...publicContentApplyReceipt(result), targets } }
           }
           const surfaceId = request.intent === 'surface.remove' ? undefined : request.surfaceId
           const nextFile = files.find(value => value.kind === 'structure' && surfaceIdOf(value) === surfaceId)
@@ -889,12 +932,12 @@ export class ComponentProjectFileCoordinator {
               introduced = true
             }
           }
-          return { kind: 'read', data: { path: introduced && nextFile ? nextFile.path : input.path, ...result,
+          return { kind: 'read', data: { path: introduced && nextFile ? nextFile.path : input.path, ...publicContentApplyReceipt(result),
             ...(collision ? { next: '页面路径与此前观察重名；调用 project.list 读取当前目录。' }
               : nextFile && !introduced ? { next: '页面已提交；调用 project.list 读取当前目录。' } : {}) } }
         } catch (error) {
           // A subsequent observation failure cannot erase the canonical commit receipt.
-          return { kind: 'read', data: { path: input.path, ...result, diagnostics: [...result.diagnostics,
+          return { kind: 'read', data: { path: input.path, ...publicContentApplyReceipt(result), diagnostics: [...result.diagnostics,
             { level: 'warning', code: 'framework-paths-unavailable', message: error instanceof Error ? error.message : String(error) }] } }
         }
       }
@@ -925,7 +968,7 @@ export class ComponentProjectFileCoordinator {
         let source: ContentApplySource | undefined
         if (file.binding.kind === 'flow' || file.binding.kind === 'theme') {
           actual ??= { filename: file.path, bytes: new TextEncoder().encode(content ?? ''), text: content }
-          actual.assetContext = { assets: baseline.model.project.assets, bytes: baseline.model.resources.assets }
+          actual.assetContext = projectAssetContext(baseline, file)
           if (this.host.prepareSource) {
             source = await this.host.prepareSource(actual, file, intent, runId)
             if (source.kind === 'html') content = source.html
@@ -959,9 +1002,9 @@ export class ComponentProjectFileCoordinator {
       const intent = input.intent === 'style' && file.kind === 'html' && file.path.endsWith('.content.html')
         ? 'content' : input.intent ?? (file.kind === 'style' ? 'style' : 'content')
       if (file.kind === 'structure' && intent === 'content') return failure('content-target-required', '这是工程结构观察；请修改同名目录中的对象内容，或明确插入/重做意图。',
-        { commit: 'not_committed', input: raw, ...this.repairDetails(runId, current, file, input.path, input.project) })
+        { commit: 'not_committed', ...this.repairDetails(runId, current, file, input.path, input.project) })
       if (file.kind === 'html' && file.note && !file.projection && intent === 'content') return failure('professional-target-required', file.note,
-        { commit: 'not_committed', input: raw, ...this.repairDetails(runId, current, file, input.path, input.project) })
+        { commit: 'not_committed', ...this.repairDetails(runId, current, file, input.path, input.project) })
       const actual = 'from' in input ? await this.host.source(runId, input.from, baseline, input.content) : undefined
       const effectiveRegion = input.region ?? taskTargetRegion(actual?.metadata?.targetContext, {
         documentId: baseline.documentId, epoch: baseline.epoch, target: file.target, editingContext: file.editingContext })
@@ -970,15 +1013,17 @@ export class ComponentProjectFileCoordinator {
       let source: ContentApplySource
       let sourceDiagnostics: ContentApplyDiagnostic[] | undefined
       if (actual) {
-        actual.assetContext = { assets: baseline.model.project.assets, bytes: baseline.model.resources.assets }
+        actual.assetContext = projectAssetContext(baseline, file)
         source = this.host.prepareSource ? await this.host.prepareSource(actual, preparationFile, intent, runId)
           : actual.text !== undefined ? componentFileContentSource(file, actual.text, actual) : (() => { throw new Error('当前文件需要专业资源适配；原始字节已保留。') })()
         sourceDiagnostics = actual.diagnostics
       } else {
         source = componentFileContentSource(file, input.content!)
+        const resourceNamespace = file.kind === 'html' || file.kind === 'page' ? 'project' as const : undefined
+        if (source.kind === 'html' && resourceNamespace) source = { ...source, resourceNamespace }
         if (this.host.prepareSource && source.kind === 'html') {
           const actual: ComponentProjectFileInput = { filename: file.path, bytes: new TextEncoder().encode(input.content!), text: input.content!,
-            assetContext: { assets: baseline.model.project.assets, bytes: baseline.model.resources.assets } }
+            assetContext: projectAssetContext(baseline, file), ...(resourceNamespace ? { resourceNamespace } : {}) }
           const prepared = await this.host.prepareSource(actual, preparationFile, intent, runId)
           sourceDiagnostics = actual.diagnostics
           // Literal tool content is already journaled; only a supplied file has an original file asset.
@@ -1014,7 +1059,7 @@ export class ComponentProjectFileCoordinator {
           ...(repairContext ? this.repairDetails(runId, repairContext.snapshot, repairContext.file, repairContext.path, repairContext.project) : {}) } }
       }
       return failure('project-file-unresolved', error instanceof Error ? error.message : String(error),
-        { commit: 'not_committed', input: raw, ...(repairContext ? this.repairDetails(runId, repairContext.snapshot, repairContext.file, repairContext.path, repairContext.project) : {}) })
+        { commit: 'not_committed', ...(repairContext ? this.repairDetails(runId, repairContext.snapshot, repairContext.file, repairContext.path, repairContext.project) : {}) })
     }
   }
 }

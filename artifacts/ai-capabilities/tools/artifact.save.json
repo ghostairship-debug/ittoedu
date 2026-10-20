@@ -1,5 +1,5 @@
 {
-  "description": "把创建、状态或等待返回的 source，或 image.fetch 返回的 resource 原样传入，保存当前任务已获授权且 ready 的图片或计算成果为工作空间新文件。仅指定来源和目的地，不拼接身份或选择 kind；目标已存在时拒绝覆盖。ready 与已保存分别有回执。",
+  "description": "把创建、状态或等待返回的 source，或 image.fetch 返回的 resource 原样传入，保存当前任务已获授权且 ready 的图片、生成媒体或计算/委派成果为工作空间新文件。语音使用 media.start 返回的 job.resources[].source。仅指定来源和目的地，不拼接身份或选择 kind；目标已存在时拒绝覆盖。ready 与已保存分别有回执。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,

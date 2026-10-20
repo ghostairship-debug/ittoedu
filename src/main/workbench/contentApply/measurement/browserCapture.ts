@@ -315,6 +315,9 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
   for (const node of nodes) {
     const style = styles.get(node)!, measured = elements[indices.get(node)!]!
     if (style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)) continue
+    // Declared local adaptation needs its live subtree and CSS in one Web
+    // document. This is a layout owner, not executable-program evidence.
+    if (node.getAttribute('data-gl-layout') === 'stage') retain([node], 'declared-stage-layout')
     if (style.position === 'fixed') retain([body], 'viewport-layout')
     if (style.display === 'list-item' && (style.listStyleType !== 'none' || style.listStyleImage !== 'none')) {
       retain([node.closest('ol,ul') ?? node.parentElement ?? body], 'list-marker')
@@ -524,6 +527,8 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
     ? { sourcePath: pathOf(stage), x: stageBox.x, y: stageBox.y, width: stageBox.width, height: stageBox.height,
       ...(localPlacement ? { localPlacement: true as const } : {}),
       ...(mediaQueries.size ? { media: [...mediaQueries].map(query => ({ query, matches: matchMedia(query).matches })) } : {}) } : undefined
-  return { viewport: { width: innerWidth, height: innerHeight }, contentBounds, viewportDependent, ...(programRoot ? { programRoot } : {}),
+  const documentData = Array.from(document.head.querySelectorAll('script[type]'))
+    .filter(node => /^application\/(?:ld\+)?json(?:\s*;|\s*$)/i.test(node.getAttribute('type') ?? '')).map(node => node.outerHTML)
+  return { viewport: { width: innerWidth, height: innerHeight }, contentBounds, viewportDependent, ...(programRoot ? { programRoot } : {}), documentData,
     body: 0, pageStyle, sourceCss:sourceRules.join('\n'), supportCss: supportRules.join('\n'), sourceScopes, elements, diagnostics }
 }

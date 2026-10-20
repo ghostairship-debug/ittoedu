@@ -1,6 +1,6 @@
 # 不可降级产品行为矩阵
 
-本文固定 1.1→2.0 路线必须持续保留的当前产品行为。它与[当前开发总纲](../../../COURSEWARE_DEVELOPMENT_PLAN.md)、[架构合同](../ARCHITECTURE_CONTRACT.md)和[工作协议](../WORKING_PROTOCOL.md)共同使用；路线任务必须在规格中引用受影响的 `PM-*` 行。
+本文固定 1.1→2.0 路线必须持续保留的当前产品行为。它与[当前开发总纲](../README.md)、[架构合同](../ARCHITECTURE_CONTRACT.md)和[工作协议](../WORKING_PROTOCOL.md)共同使用；路线任务必须在规格中引用受影响的 `PM-*` 行。
 
 ## 使用规则
 

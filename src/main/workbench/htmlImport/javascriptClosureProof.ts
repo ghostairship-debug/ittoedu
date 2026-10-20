@@ -10,6 +10,8 @@ export interface JavaScriptClosureProof {
   internalSink(node: JsNode): ClosureProof
   /** Reuse the same finite CSS value proof for ordinary DOM setters and React props. */
   cssInput(node: JsNode): ClosureProof
+  urlInput(node: JsNode): ClosureProof
+  localUrlPrefix(node: JsNode): string | undefined
   auditedNode(node: JsNode): boolean
   styleReceiver(node: JsNode): boolean
   dataReceiver(node: JsNode): boolean
@@ -58,7 +60,10 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
       scope = { parent: scope, functionScope: true, bindings: new Map() }
       for (const param of node.params as JsNode[]) bind(param, param, scope)
       if (node.type === 'FunctionExpression' && node.id) bind(node.id as JsNode, node, scope)
-    } else if (node.type === 'BlockStatement') scope = { parent: scope, functionScope: false, bindings: new Map() }
+    } else if (node.type === 'BlockStatement' || node.type === 'CatchClause') {
+      scope = { parent: scope, functionScope: false, bindings: new Map() }
+      if (node.type === 'CatchClause' && node.param) bind(node.param as JsNode, node, scope)
+    }
     scopes.set(node, scope)
     if (node.type === 'VariableDeclarator') {
       let owner = scope
@@ -240,6 +245,14 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
         const key = property.type === 'Property' && !property.computed && property.kind === 'init' ? keyOf(property.key as JsNode) : undefined
         if (key === undefined) return UNKNOWN
         fields.set(key, evaluate(property.value as JsNode, seen, budget - 1))
+      }
+      return { kind: 'object', fields }
+    }
+    if (node.type === 'ArrayExpression') {
+      const fields = new Map<string, Value>()
+      for (const [index, element] of (node.elements as Array<JsNode | null>).entries()) {
+        if (!element || element.type === 'SpreadElement') return UNKNOWN
+        fields.set(String(index), evaluate(element, seen, budget - 1))
       }
       return { kind: 'object', fields }
     }
@@ -682,6 +695,14 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     dataReceiver,
     memberName,
     cssInput: node => cssProof(evaluate(node)),
+    urlInput: node => resourceProof(evaluate(node)),
+    localUrlPrefix(node) {
+      const prefix = node.type === 'BinaryExpression' && node.operator === '+' ? evaluate(node.left as JsNode) : evaluate(node)
+      if (prefix.kind !== 'string') return undefined
+      const text = prefix.node.type === 'Literal' ? String(prefix.node.value)
+        : (prefix.node.quasis as Array<{ value: { cooked: string } }>)[0]!.value.cooked
+      return text.endsWith('/') && !/^(?:[a-z][a-z\d+.-]*:|\/|\\)/i.test(text) ? text : undefined
+    },
     auditedNode: node => !!audited && !frameworkError && inLibrary(node),
     internalSink(node) {
       if (!audited || frameworkError) return UNKNOWN_PROOF

@@ -122,7 +122,7 @@ export function createComponentModelProjection(context: {
 
   function placeNode(node: NodeView, instance: ComponentInstance, project: CourseProjectV10, inlineSize: number) {
     const presentation = resolveComponentOuterPresentation(project, instance, { placement: node.flow ? 'flow' : 'free', purpose: 'playback', inlineSize, flowLayout: node.flowLayout })
-    Object.assign(node.outer.style, presentation.outerStyle, { pointerEvents: instance.style?.pointerEvents === 'none' ? 'none' : 'auto' })
+    Object.assign(node.outer.style, presentation.outerStyle)
     Object.assign(node.stage.style, presentation.stageStyle)
     Object.assign(node.content.style, presentation.contentStyle)
     Object.assign(node.children.style, presentation.childrenStyle)
@@ -157,7 +157,7 @@ export function createComponentModelProjection(context: {
       node.outer.id = id
       node.flow = flow; node.flowLayout = flowLayout
       node.outer.dataset.componentPlacement = flow ? 'flow' : 'free'
-      Object.assign(node.outer.style, presentation.outerStyle, { pointerEvents: instance.style?.pointerEvents === 'none' ? 'none' : 'auto' })
+      Object.assign(node.outer.style, presentation.outerStyle)
       Object.assign(node.stage.style, presentation.stageStyle)
       Object.assign(node.content.style, presentation.contentStyle)
       Object.assign(node.children.style, presentation.childrenStyle)

@@ -94,6 +94,22 @@ describe('current source capture and exact publication', () => {
     expect((await f.host.internalAPI.read(stylesheet.documentId)).dirty).toBe(true)
   })
 
+  it('refreshes an already captured JavaScript dependency from its current Session before saving HTML', async () => {
+    const f = await fixture('<script src="app.js"></script><p>first</p>', { 'app.js': 'window.value="old";' })
+    const script = await f.host.open(path.join(f.original, 'app.js'))
+    const source = 'window.value="current $$ $& $` $\'";'
+    await f.host.internalAPI.dispatch({ documentId: script.documentId, epoch: script.epoch, baseRevision: script.revision,
+      operationId: 'edit-script', actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source } } })
+    await f.host.saveToPath(script.documentId)
+    await edit(f, '<script src="app.js"></script><p>revised</p>')
+    await f.host.saveToPath(f.documentId)
+    const copied = await f.host.saveWithFact(f.documentId, f.target)
+    expect(copied.snapshot.dirty).toBe(false)
+    expect(await fs.readFile(path.join(f.destination, 'app.js'), 'utf8')).toBe(source)
+    const cold = await new DocumentHostService(path.join(f.root, 'cold')).open(f.target)
+    expect(new TextDecoder().decode(cold.model.resources.assets['app.js'])).toBe(source)
+  })
+
   it('preserves original dangling and remote references while reporting the unresolved local dependency', async () => {
     const source = '<img src="missing.png"><img src="https://example.invalid/remote.png"><p>kept source</p>'
     const f = await fixture(source)

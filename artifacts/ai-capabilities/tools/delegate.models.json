@@ -1,0 +1,17 @@
+{
+  "description": "查看已配置连接、可选子模型和已有费用授权范围，再用 delegate.agent/resume 的 model 选择。返回配置事实，不含凭据；未确认目录或费用边界由宿主如实标明。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "delegate.models",
+    "targetKinds": []
+  },
+  "name": "delegate.models",
+  "version": 1
+}
